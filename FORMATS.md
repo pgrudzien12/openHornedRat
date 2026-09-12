@@ -28,7 +28,7 @@ from game data; they are not part of the repository.
 | Script names → files | tables in `WHSHR.EXE`/`GAMEF.DLL` | ✅ | Name tables | `notes/sprite_names.md` |
 | Battle and army scripts | `SCRIPT/*.BTS/.MRC` | ✅ syntax, 🟡 semantics | `.BTS`/`.MRC` | — |
 | Mission objectives | `Objective:L,a,b` | ✅ letters, 🟡 numbers | Mission objectives | `notes/pe_resources.md` |
-| UI bitmaps, texts, campaign glue scripts | `DLL/*.DLL` resources | ✅ extraction, 🟡 glue semantics | PE resources | `notes/pe_resources.md` |
+| UI bitmaps, texts, campaign glue scripts | `DLL/*.DLL` resources | ✅ extraction, ✅ campaign flow graph | PE resources, Campaign glue | `notes/pe_resources.md`, `notes/scene_scripts.md` |
 | Fonts, front-end palettes | `*.FON`, `GLUE/*.PAL` | ✅ | Front-end fonts and palettes | `notes/fonts_glue.md` |
 | Music | `MUSIC/*.MID`, `SOUND/WARINTR3.SBK` | ✅ formats and full renders | Music | `notes/music.md` |
 | Sound effects, speech | `SOUND/**/*.SFX/.WAV`, `GLUE/SPEECH/*.WAV` | ✅ formats, 🟡 not listened to | Sound effects | `notes/sfx.md` |

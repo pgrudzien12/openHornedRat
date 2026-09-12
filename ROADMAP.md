@@ -58,7 +58,7 @@ about 30 standalone scripts, each with its own `--check`; they now need to be co
 | 1.6 | `.FON` and `GLUE` palettes | ✅ | S | menu text rendered; open: font → UI element, `GAME`/`OPT`/`REND` palettes |
 | 1.7 | `SPRITE3.BTP` and sprite leftovers | ✅ | S | not a LUT; legacy `.FOL` layouts; `SPELLS` map index rule |
 | 1.8 | Script field semantics | 🟡 | M | objective letters solved, `A`/`Z` numbers mostly; open: other letters' numbers, `set:map`, `whoami`, `,N` |
-| 1.9 | **Glue script parser and campaign flow graph** (`WND.DLL`: `FLOWSCRIPT*` → `MISSION*WINDOW` → `*BRIEF*` → `*MISSION*` → `BFxxx`, movies, cash) | ⬜ | M | new: the campaign flow is readable text, which lowers the risk of 4.2/4.4 and M6 |
+| 1.9 | **Glue script parser and campaign flow graph** (`WND.DLL`: `FLOWSCRIPT*` → `MISSION*WINDOW` → `*BRIEF*` → `*MISSION*` → `BFxxx`, movies, cash) | ✅ | M | full parser and graph builder in `whshr.campaign`, JSON/DOT/Markdown export, verified against all 33 mission windows and 17 flow scripts |
 | 1.10 | Listening checks for music, effects (with `pitch`) and speech | 🟡 | S | tools installed; SBK stems confirmed; open: review of the full music renders, effects with `pitch` applied, speech |
 
 **Milestone M1: asset browser.** The data side is ready (sprites with animations, maps, UI bitmaps,

@@ -1,11 +1,12 @@
 """Unified command-line interface for the reverse-engineering tools."""
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from . import legacy
-from . import audio, pbx, si
+from . import audio, campaign, pbx, si
 from .paths import Installation
 
 
@@ -38,6 +39,7 @@ def check(installation):
         ("SoundFont", lambda: audio.parse_sf2(
             game.binary_file("SOUND", "WARINTR3.SBK")
         )),
+        ("campaign flow", lambda: bool(campaign.build_campaign_graph(str(game.root)))),
     )
     failed = sum(not _check(name, callback) for name, callback in checks)
     print(f"\n{len(checks) - failed}/{len(checks)} check groups passed")
@@ -57,6 +59,16 @@ def extract(installation, cache):
     audio.sfx_main([str(game.root), "--json", str(cache / "sfx" / "sfx.json")])
     audio.extract_sfx_effects(str(game.root), str(cache / "sfx"))
     audio.extract_speech(str(game.root), str(cache / "speech"))
+
+    camp_data = campaign.build_campaign_graph(str(game.root))
+    camp_dir = cache / "campaign"
+    camp_dir.mkdir(parents=True, exist_ok=True)
+    with open(camp_dir / "campaign.json", "w", encoding="utf-8") as f:
+        json.dump(camp_data, f, indent=2)
+    with open(camp_dir / "campaign.dot", "w", encoding="utf-8") as f:
+        f.write(campaign.export_graph_dot(camp_data))
+    with open(camp_dir / "campaign.md", "w", encoding="utf-8") as f:
+        f.write(campaign.export_campaign_markdown(camp_data))
 
 
 def main(argv=None):
