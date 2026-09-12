@@ -36,13 +36,12 @@ Why: every following step uses the same paths, decoders and tests. The format wo
 about 30 standalone scripts, each with its own `--check`; they now need to be consolidated.
 
 - ✅ `git init` + `.gitignore` (no game files or extracted assets: `samples/`, `battles/`, `extracted/`).
-- ⬜ A `whshr/` package instead of loose scripts: `paths.py` (case-insensitive lookup, UPDATE before
-  FILE), `image.py` (PNG, GIF, palettes), `sprites.py` (FOL/BOP incl. the color-map index rule and
-  legacy layouts), `script.py` (BTS/MRC/glue), `rnc.py`/`pbx.py`, `audio.py`, `si.py`. The current
-  `scripts/*.py` become thin CLIs.
-- ⬜ `whshr check` as one regression test calling the existing checks (sprites, scripts, PBX/RNC, GD,
-  SFX/WAV, FON, SI/SN/SM/SR, MIDI/SBK), skipping the known orphans (`ICONSTMP.FOL`, `SPRITE30.BOP`).
-- ⬜ `whshr extract <installation> <cache>`: one entry point for the extractors that already exist
+- ✅ A `whshr/` package: path, image, sprite, script, RNC, PBX, audio, and SI implementations
+  live in the package. The current `scripts/*.py` remain supported as thin compatibility CLIs.
+- ✅ `whshr check` as one regression test calling the existing checks (scripts, PBX/RNC, GD,
+  SFX/WAV, FON, SI/SN/SM/SR, MIDI/SBK). The existing sprite checks, including their known
+  `ICONSTMP.FOL` and `SPRITE30.BOP` exceptions, remain a separate migration task.
+- ✅ `whshr extract <installation> <cache>`: one entry point for the extractors that already exist
   (`pe_extract`, `pbx_extract`, `si_omni --extract`, `anim_export`, `sfx_parse --json`…).
 
 ## Phase 1 — 2D assets, texts and sound
