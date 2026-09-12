@@ -30,7 +30,7 @@ from game data; they are not part of the repository.
 | Mission objectives | `Objective:L,a,b` | ✅ letters, 🟡 numbers | Mission objectives | `notes/pe_resources.md` |
 | UI bitmaps, texts, campaign glue scripts | `DLL/*.DLL` resources | ✅ extraction, 🟡 glue semantics | PE resources | `notes/pe_resources.md` |
 | Fonts, front-end palettes | `*.FON`, `GLUE/*.PAL` | ✅ | Front-end fonts and palettes | `notes/fonts_glue.md` |
-| Music | `MUSIC/*.MID`, `SOUND/WARINTR3.SBK` | ✅ formats, 🟡 not listened to | Music | `notes/music.md` |
+| Music | `MUSIC/*.MID`, `SOUND/WARINTR3.SBK` | ✅ formats and full renders | Music | `notes/music.md` |
 | Sound effects, speech | `SOUND/**/*.SFX/.WAV`, `GLUE/SPEECH/*.WAV` | ✅ formats, 🟡 not listened to | Sound effects | `notes/sfx.md` |
 | Battle 3D resources | `MESH/*/*.PBX`, `GRND.GD` | ✅ | Battle 3D resources | `notes/pbx_rnc.md`, `notes/terrain_gd.md` |
 | Cutscenes | `ANIM/*.SI/.SN/.SM/.SR` | ✅ containers, 🟡 event semantics | Cutscenes | `notes/si_omni.md`, `notes/scene_scripts.md` |
@@ -684,7 +684,8 @@ garbled colours.
 
 ## Music — `MUSIC/*.MID` and `SOUND/WARINTR3.SBK`
 
-**Formats ✅; no full render has been listened to yet.** Report: `notes/music.md`. Scripts:
+**Formats ✅; all 21 tracks rendered with FluidSynth (GM soundfont + the converted bank, one uniform
+gain of 0.26 to avoid clipping); the bank parts were listened to and confirmed.** Report: `notes/music.md`. Scripts:
 `scripts/music_midi.py`, `scripts/music_sf2.py`, `scripts/music_sbk2sf2.py`, `scripts/music_render.py`.
 
 - The music is **standard MIDI** (SMF format 1): 21 compositions, each as a General MIDI file

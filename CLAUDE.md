@@ -53,7 +53,7 @@ unknown formats. In short:
 | `.BTS` (battle), `.MRC` (army) | ✅ INI-style text scripts, parser works on 87/87 files, layout verified on the plan map. Objective letters solved; some fields (`set:map`, `whoami`, part of `setstats`) still unknown |
 | `DLL/*.DLL` resources | ✅ bitmaps, texts, dialogs, cursors; `WND.DLL` = campaign "glue" scripts as text (🟡 semantics) |
 | `.FON`, `GLUE/*.PAL` | ✅ standard Windows NE/FNT fonts; front-end palette pairs |
-| Music `.MID` + `.SBK` | ✅ MIDI GM/FM pairs + SoundFont 1.0 bank (3 presets); 🟡 not listened to |
+| Music `.MID` + `.SBK` | ✅ MIDI GM/FM pairs + SoundFont 1.0 bank (3 presets); all 21 tracks rendered with FluidSynth |
 | `.SFX` + WAV | ✅ `MSNDDS.DLL` effect packages; 🟡 not listened to |
 | `MESH/*/*.PBX`, `GRND.GD` | ✅ RNC ProPack + container (Reality Lab textures and meshes, sprite bundles); terrain height field |
 | Cutscenes `.SI/.SN/.SM/.SR` | ✅ Omni 1.0 container, Smacker films, WAV, MIDS, event tracks; 🟡 event semantics |
@@ -112,7 +112,7 @@ Almost every data format is now reverse-engineered (see the overview table in `F
 What is left is listed in `ROADMAP.md` ("Proposed order of the next steps"); in short:
 
 1. Phase 0: consolidate the ~30 scripts into a `whshr/` package with one `check` and one `extract`.
-2. Listening checks for music/effects/speech (needs fluidsynth, a GM soundfont and ffmpeg).
+2. Listening checks: the full music renders (`extracted/music/full/`), effects with `pitch`, speech.
 3. A static 3D battle viewer (terrain, textured scenery meshes, unit sprites) — milestone M2.
 4. A parser and flow graph for the campaign glue scripts in `WND.DLL`.
 5. Open questions that need the running game under Wine (`dir` mapping, frame timing, cutscene
