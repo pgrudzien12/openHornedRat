@@ -51,10 +51,10 @@ unknown formats. In short:
 | Unit animation layout | ✅ groups × phases × 8 directions (move/dead/attack/stand/shoot); 🟡 `dir` mapping, anchor y, timing |
 | Script names → files | ✅ sprite and furniture tables in `WHSHR.EXE`/`GAMEF.DLL` |
 | `.BTS` (battle), `.MRC` (army) | ✅ INI-style text scripts, parser works on 87/87 files, layout verified on the plan map. Objective letters solved; some fields (`set:map`, `whoami`, part of `setstats`) still unknown |
-| `DLL/*.DLL` resources | ✅ bitmaps, texts, dialogs, cursors; `WND.DLL` = campaign "glue" scripts as text (🟡 semantics) |
+| `DLL/*.DLL` resources | ✅ bitmaps, texts, dialogs, cursors; `WND.DLL` campaign glue scripts parsed into a verified flow graph |
 | `.FON`, `GLUE/*.PAL` | ✅ standard Windows NE/FNT fonts; front-end palette pairs |
-| Music `.MID` + `.SBK` | ✅ MIDI GM/FM pairs + SoundFont 1.0 bank (3 presets); all 21 tracks rendered with FluidSynth |
-| `.SFX` + WAV | ✅ `MSNDDS.DLL` effect packages; 🟡 not listened to |
+| Music `.MID` + `.SBK` | ✅ MIDI GM/FM pairs + SoundFont 1.0 bank (3 presets); all 21 tracks rendered and reviewed |
+| `.SFX` + WAV | ✅ `MSNDDS.DLL` effect packages; effects with pitch and speech reviewed |
 | `MESH/*/*.PBX`, `GRND.GD` | ✅ RNC ProPack + container (Reality Lab textures and meshes, sprite bundles); terrain height field |
 | Cutscenes `.SI/.SN/.SM/.SR` | ✅ Omni 1.0 container, Smacker films, WAV, MIDS, event tracks; 🟡 event semantics |
 | `SCRIPT/*.DLL` (mission logic) | ⬜ Real Win32 DLLs (MSVC), exporting `DLLGetScriptPointer`/`DLLReturnInstCount`. Require disassembly |
@@ -71,7 +71,7 @@ CLAUDE.md          - this file
 FORMATS.md         - format reference: overview table, structures, hypotheses, open questions
 ROADMAP.md         - work plan: game file inventory, phases 0-5 with status, milestones, order of steps
 notes/             - full per-format reports (how each claim was verified, per-file tables, open questions)
-  animations.md, btp_sprite_leftovers.md, fonts_glue.md, music.md, pbx_rnc.md, pe_resources.md,
+  animations.md, battle_viewer.md, btp_sprite_leftovers.md, fonts_glue.md, music.md, pbx_rnc.md, pe_resources.md,
   scene_scripts.md, sfx.md, si_omni.md, sprite_names.md, terrain_gd.md
 scripts/           - parsers/renderers/extractors (Python 3 stdlib only); most have a --check mode
   parse_pal.py     - parses a .PAL, checks that indices are sequential
@@ -111,13 +111,10 @@ samples/           - [local only, not in git] renders from the game files, DO NO
 Almost every data format is now reverse-engineered (see the overview table in `FORMATS.md`).
 What is left is listed in `ROADMAP.md` ("Proposed order of the next steps"); in short:
 
-1. Phase 0: consolidate the ~30 scripts into a `whshr/` package with one `check` and one `extract`.
-2. Listening checks: the full music renders (`extracted/music/full/`), effects with `pitch`, speech.
-3. A static 3D battle viewer (terrain, textured scenery meshes, unit sprites) — milestone M2.
-4. A parser and flow graph for the campaign glue scripts in `WND.DLL`.
-5. Open questions that need the running game under Wine (`dir` mapping, frame timing, cutscene
+1. Camera, lighting, and terrain-render validation through the static 3D battle viewer — milestone M2.
+2. Open questions that need the running game under Wine (`dir` mapping, frame timing, cutscene
    events, which leftover files are loaded).
-6. Mission logic in `SCRIPT/BFxxx.DLL` and the game rules (disassembly) — deliberately last.
+3. Mission logic in `SCRIPT/BFxxx.DLL` and the game rules (disassembly) — deliberately last.
 
 When a new format task is done, write the full report to `notes/<topic>.md` and add a condensed
 section plus a row in the overview table of `FORMATS.md`.

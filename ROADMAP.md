@@ -17,7 +17,7 @@ Legend: **S** = hours, **M** = 1–3 evenings, **L** = weeks.
 | Mission logic | `SCRIPT/BFxxx.DLL` (45) | 1.1 MB | ⬜ | x86 code, disassembly |
 | Battle terrain and 3D resources | `MESH/*/GRND.GD`, `*.PBX` | 25 MB | ✅ | RNC ProPack container, Reality Lab textures/meshes, height field |
 | Music | `MUSIC/*.MID` + `SOUND/WARINTR3.SBK` | 1.5 MB | ✅ formats, all 21 tracks rendered | **standard** MIDI + SoundFont **1.0** bank (3 presets) on top of the AWE32 GM ROM |
-| Effects and speech | `SOUND/**/*.WAV` (96), `GLUE/SPEECH/*.WAV` (567), `*.SFX` (18) | 128 MB | ✅ formats / 🟡 not listened to | standard WAV; `.SFX` = `MSNDDS.DLL` effect packages |
+| Effects and speech | `SOUND/**/*.WAV` (96), `GLUE/SPEECH/*.WAV` (567), `*.SFX` (18) | 128 MB | ✅ formats and listening review | standard WAV; `.SFX` = `MSNDDS.DLL` effect packages |
 | Videos/cutscenes | `REMOTE/BINARY/ANIM/*.SI/.SR/.SM/.SN` (4×30) | 135 MB | ✅ containers / 🟡 event semantics | Mindscape Omni 1.0 + Smacker 640×272 at 8 fps + WAV + MIDS + event tracks |
 | UI bitmaps, texts, cursors | `DLL/BITMAP.DLL`, `*TXT.DLL`, `DLGGMTXT.DLL`, `GMCUR.DLL` | 11 MB | ✅ | **standard** PE resources |
 | Fonts, UI palettes | `*.FON`, `GLUE/*.PAL` | 0.6 MB | ✅ | standard NE/FNT fonts; `GLUE` 10–105 + `WIND` 106–245 palette halves |
@@ -50,7 +50,7 @@ about 30 standalone scripts, each with its own `--check`; they now need to be co
 |---|---|---|---|---|
 | 1.1 | PE resources from `DLL/*.DLL` (bitmaps, strings, dialogs, cursors, glue scripts) | ✅ | S | 1669 resources extracted; bitmaps viewed |
 | 1.2 | Music: `.MID` + `WARINTR3.SBK` | ✅ | S | formats and bank mapping done; SBK stems listened to and confirmed; all 21 tracks rendered with FluidSynth (uniform gain, no clipping) |
-| 1.3 | `.SFX` effect packages ↔ WAV | ✅ | M | all 18 packages and 663 WAVs checked structurally; listening pending |
+| 1.3 | `.SFX` effect packages ↔ WAV | ✅ | M | all 18 packages and 663 WAVs checked structurally; listening review complete under 1.10 |
 | 1.4 | Script names → sprite files and 3D objects | ✅ | M | name tables decoded; all campaign names resolve; `,N` meaning open |
 | 1.5 | Animation layout of directional sprites | ✅ | M | groups × phases × 8 directions, standard move/dead/attack/stand/shoot; sheets and GIFs |
 | 1.5a | `dir` 0..511 → direction index, frame timing, anchor y | ⬜ | S–M | compare with the running game under Wine |
@@ -59,7 +59,7 @@ about 30 standalone scripts, each with its own `--check`; they now need to be co
 | 1.7 | `SPRITE3.BTP` and sprite leftovers | ✅ | S | not a LUT; legacy `.FOL` layouts; `SPELLS` map index rule |
 | 1.8 | Script field semantics | 🟡 | M | objective letters solved, `A`/`Z` numbers mostly; open: other letters' numbers, `set:map`, `whoami`, `,N` |
 | 1.9 | **Glue script parser and campaign flow graph** (`WND.DLL`: `FLOWSCRIPT*` → `MISSION*WINDOW` → `*BRIEF*` → `*MISSION*` → `BFxxx`, movies, cash) | ✅ | M | full parser and graph builder in `whshr.campaign`, JSON/DOT/Markdown export, verified against all 33 mission windows and 17 flow scripts |
-| 1.10 | Listening checks for music, effects (with `pitch`) and speech | 🟡 | S | tools installed; SBK stems confirmed; open: review of the full music renders, effects with `pitch` applied, speech |
+| 1.10 | Listening checks for music, effects (with `pitch`) and speech | ✅ | S | project owner reviewed the full music renders, effects with `pitch` applied, and speech |
 
 **Milestone M1: asset browser.** The data side is ready (sprites with animations, maps, UI bitmaps,
 texts, fonts, music, sounds); what is missing is one tool that shows it all.
@@ -70,7 +70,7 @@ texts, fonts, music, sounds); what is missing is one tool that shows it all.
 |---|---|---|---|---|
 | 2.1 | RNC ProPack method 2 + `.PBX` container | ✅ | M | 133/133 files, CRCs, textures and meshes rendered |
 | 2.2 | `GRND.GD` terrain height field | ✅ | M | 45 files; relief matches the plan maps; open: height scale |
-| 2.3 | Static battle scene: textured terrain (`grnd.xof`), scenery meshes from `placefurniture` (furniture table), unit sprites at their positions, heights from `GRND.GD` | ⬜ | M | **unblocked**; open inputs: `dir` of scenery, mesh pivots, texture transparency |
+| 2.3 | Static battle scene: textured terrain (`grnd.xof`), scenery meshes from `placefurniture` (furniture table), unit sprites at their positions, heights from `GRND.GD` | ✅ | M | `whshr viewer` renders a static isometric PNG; scenery rotation and texture transparency remain provisional |
 | 2.4 | Camera and lighting (`Camera`, `CameraEdge`, `Bank angle`) | ⬜ | M | framing as in the game; also verifies the height scale |
 | 2.5 | Relation of `GRND.GD` to `grnd.xof` (logic height field vs render mesh?) | ⬜ | S | |
 
@@ -123,21 +123,20 @@ Milestones:
 
 ## Proposed order of the next steps
 
-1. **Phase 0**: consolidate the ~30 scripts into the `whshr/` package with one `check` and one `extract`.
-2. **1.10 listening check**: review the full music renders (`extracted/music/full/*.ogg`), then
-   effects with `pitch` applied and speech.
-3. **2.3 static 3D battle viewer (M2)**: every input format is decoded now.
-4. **1.9 glue scripts → campaign flow graph**, the data side of M6.
-5. **Wine instrumentation session** for 1.5a, 3.3 and the smaller open questions (`dir`, frame timing,
+1. **2.4 and 2.5**: camera, lighting, and the relation between `GRND.GD` and `grnd.xof`, using the
+   viewer to validate the terrain height scale.
+2. **Wine instrumentation session** for 1.5a, 3.3 and the smaller open questions (`dir`, frame timing,
    event semantics, which files are loaded).
-6. Phase 4 only before M4/M5, at first targeted at specific questions.
+3. **1.5b and 1.8**: resolve effect-sprite layouts and the remaining battle-script semantics as needed
+   by the viewer and future engine.
+4. Phase 4 only before M4/M5, at first targeted at specific questions.
 
 ## Risks and rules
 
 - **Legal**: the repo contains only code and descriptions. Extracted files stay local:
   `samples/`, `battles/` and `extracted/` are in `.gitignore`.
 - **Visual/audible verification** of every hypothesis, rather than "the byte count matches".
-  Of the audio, only the music has been listened to so far.
+  Music, pitched effects, and speech have received a listening review.
 - **Speech and videos** are the largest volume of data (263 MB), but the least important for
   gameplay.
 - **Logic in native DLLs** is the main risk of the project. Without it we will have a "viewer", not a

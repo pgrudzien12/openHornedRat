@@ -9,6 +9,7 @@
 | Record fields `param_a/param_b` (+36/+38) | 🟡 copied to the runtime SFX and overwritten by `SoundPlace`; exact meaning unknown |
 | `loadsfx:` name → `.SFX` file → WAV | ✅ table in `GAMEF.DLL`, all 15 names used by `.BTS` resolve |
 | WAV files (663) | ✅ all valid PCM, statistics below |
+| Listening review | ✅ project owner reviewed effects with their `pitch` applied and the speech files |
 | When the game plays which effect (unit events, spells) | ❌ game code (`GAMEF.DLL`), not investigated |
 
 ## Where the knowledge comes from

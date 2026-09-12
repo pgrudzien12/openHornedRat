@@ -31,7 +31,7 @@ from game data; they are not part of the repository.
 | UI bitmaps, texts, campaign glue scripts | `DLL/*.DLL` resources | ✅ extraction, ✅ campaign flow graph | PE resources, Campaign glue | `notes/pe_resources.md`, `notes/scene_scripts.md` |
 | Fonts, front-end palettes | `*.FON`, `GLUE/*.PAL` | ✅ | Front-end fonts and palettes | `notes/fonts_glue.md` |
 | Music | `MUSIC/*.MID`, `SOUND/WARINTR3.SBK` | ✅ formats and full renders | Music | `notes/music.md` |
-| Sound effects, speech | `SOUND/**/*.SFX/.WAV`, `GLUE/SPEECH/*.WAV` | ✅ formats, 🟡 not listened to | Sound effects | `notes/sfx.md` |
+| Sound effects, speech | `SOUND/**/*.SFX/.WAV`, `GLUE/SPEECH/*.WAV` | ✅ formats and listening review | Sound effects | `notes/sfx.md` |
 | Battle 3D resources | `MESH/*/*.PBX`, `GRND.GD` | ✅ | Battle 3D resources | `notes/pbx_rnc.md`, `notes/terrain_gd.md` |
 | Cutscenes | `ANIM/*.SI/.SN/.SM/.SR` | ✅ containers, 🟡 event semantics | Cutscenes | `notes/si_omni.md`, `notes/scene_scripts.md` |
 | Mission logic | `SCRIPT/BFxxx.DLL` | ⬜ needs disassembly | Mission logic | — |
@@ -706,7 +706,8 @@ gain of 0.26 to avoid clipping); the bank parts were listened to and confirmed.*
 
 ## Sound effects — `.SFX` and WAV
 
-**Fully reverse-engineered, confirmed against the reader/writer in `MSNDDS.DLL`; not listened to.**
+**Fully reverse-engineered, confirmed against the reader/writer in `MSNDDS.DLL`; the project owner
+reviewed the effects with their stored `pitch` applied and the speech files.**
 Report: `notes/sfx.md`. Scripts: `scripts/sfx_parse.py`, `scripts/sfx_wavstats.py`.
 
 A `.SFX` file is a package of named effects that refer to external WAV files; it contains no audio.

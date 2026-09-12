@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from . import legacy
-from . import audio, campaign, pbx, si
+from . import audio, battle3d, campaign, pbx, si
 from .paths import Installation
 
 
@@ -82,10 +82,23 @@ def main(argv=None):
     extract_parser = commands.add_parser("extract", help="extract decoded assets to a local cache")
     extract_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     extract_parser.add_argument("cache", type=Path, help="output directory; do not commit game assets")
+    viewer_parser = commands.add_parser("viewer", help="render a static 3D battle scene to PNG")
+    viewer_parser.add_argument("installation", type=Path, help="WARFB installation directory")
+    viewer_parser.add_argument("battle", help="BTS filename or path")
+    viewer_parser.add_argument("output", type=Path, help="output PNG; do not commit game assets")
+    viewer_parser.add_argument("--width", type=int, default=1280)
+    viewer_parser.add_argument("--height", type=int, default=900)
     args = parser.parse_args(argv)
 
     if args.command == "check":
         return 0 if check(args.installation) else 1
+    if args.command == "viewer":
+        result = battle3d.render(args.installation, args.battle, args.output, args.width, args.height)
+        print(f"{result['output']}: {result['battle']}; scenery {result['scenery']} "
+              f"({len(result['missing_scenery'])} unresolved), units {result['drawn_units']}/{result['units']}")
+        if result["missing_scenery"]:
+            print("Unresolved scenery: " + ", ".join(result["missing_scenery"]))
+        return 0
     extract(args.installation, args.cache)
     return 0
 

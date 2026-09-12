@@ -14,7 +14,7 @@ GOG installation; nothing from the game is in the repo (`extracted/music/` is gi
 | Which presets come from the SBK and which from the AWE32 ROM | ✅ bank MSB 1 = SBK (every bank-1 program exists in the SBK); everything else = 1 MB GM ROM |
 | GM vs FM variants (`XXXXXXFM.MID`) | ✅ naming rule verified on all files; selection by `MIDI.DLL` (strings) |
 | Where each track is used | 🟡 16/21 tracks located (glue scripts, cutscenes, EXE); `BATTLE`, `FOREST`, `LOOKIN2`, `TENSE`, `VICTORY` not located |
-| Full audio render with original sound | ✅ all 21 GM tracks rendered with FluidSynth (FluidR3_GM + the converted SBK in bank 1) at one uniform gain, no clipped samples; the SBK stems were listened to and confirmed by the project owner, the full renders still await a listening review |
+| Full audio render with original sound | ✅ all 21 GM tracks rendered with FluidSynth (FluidR3_GM + the converted SBK in bank 1) at one uniform gain, no clipped samples; the project owner listened to and confirmed both the SBK stems and the full renders |
 
 ## Summary (ready to paste into `FORMATS.md`)
 
