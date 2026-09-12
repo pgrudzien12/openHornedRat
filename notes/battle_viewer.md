@@ -10,6 +10,14 @@ their PBX palettes; black texels in scenery textures are treated as transparent.
 the first idle frame when available, falling back from the per-battle sprite bundle to `BINARY/`
 for armies not bundled in `SPRITES.PBX`.
 
+`--diagnostic` writes a JSON sidecar beside the PNG and draws magenta crosses at scripted scenery
+pivots, green crosses at unit origins inside the terrain mesh, and red crosses for unit origins
+outside it. `whshr terrain-check <WARFB> [BFxxx]` compares every `grnd.xof` vertex with
+`GRND.GD.height(x,z)`. All 44 version-2 terrain meshes use the direct mapping, with a worst
+maximum error of 0.02123 mesh units (`BF004_5`); axis flips yield errors many orders of magnitude
+larger. This confirms that PBX X/Z and GD X/Z share orientation and scale, while PBX Y equals
+the GD plane height.
+
 The result verifies the complete static asset path for `BF001` and `BF015`: terrain and every
 scripted scenery placement resolve, as do all units with a sprite resource. `BF015`'s NPC
 Ceridan deliberately uses `VoidType`, so it has no sprite to render. It is a diagnostic viewer

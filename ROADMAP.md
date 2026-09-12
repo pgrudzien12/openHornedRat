@@ -72,7 +72,7 @@ texts, fonts, music, sounds); what is missing is one tool that shows it all.
 | 2.2 | `GRND.GD` terrain height field | ✅ | M | 45 files; relief matches the plan maps; open: height scale |
 | 2.3 | Static battle scene: textured terrain (`grnd.xof`), scenery meshes from `placefurniture` (furniture table), unit sprites at their positions, heights from `GRND.GD` | ✅ | M | `whshr viewer` renders a static isometric PNG; scenery rotation and texture transparency remain provisional |
 | 2.4 | Camera and lighting (`Camera`, `CameraEdge`, `Bank angle`) | ⬜ | M | framing as in the game; also verifies the height scale |
-| 2.5 | Relation of `GRND.GD` to `grnd.xof` (logic height field vs render mesh?) | ⬜ | S | |
+| 2.5 | Relation of `GRND.GD` to `grnd.xof` (logic height field vs render mesh?) | ✅ | S | all 44 modern terrain meshes match direct `GRND.GD(x,z)` heights (maximum error 0.02123 mesh units) |
 
 **Milestone M2: static 3D battle viewer.** Any `BFxxx`: terrain, scenery, units at their starting positions.
 
@@ -123,8 +123,7 @@ Milestones:
 
 ## Proposed order of the next steps
 
-1. **2.4 and 2.5**: camera, lighting, and the relation between `GRND.GD` and `grnd.xof`, using the
-   viewer to validate the terrain height scale.
+1. **2.4**: camera and lighting, using the viewer to match terrain framing and validate the height scale.
 2. **Wine instrumentation session** for 1.5a, 3.3 and the smaller open questions (`dir`, frame timing,
    event semantics, which files are loaded).
 3. **1.5b and 1.8**: resolve effect-sprite layouts and the remaining battle-script semantics as needed

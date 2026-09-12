@@ -45,6 +45,8 @@ package. The package provides the common entry points:
 python3 -m whshr check /path/to/WARFB
 python3 -m whshr extract /path/to/WARFB extracted
 python3 -m whshr viewer /path/to/WARFB BF001.BTS battle.png
+python3 -m whshr viewer /path/to/WARFB BF001.BTS battle-debug.png --diagnostic
+python3 -m whshr terrain-check /path/to/WARFB
 ```
 
 Both commands take the `WARFB/` directory of the GOG installation. Extraction output, such as
@@ -52,7 +54,9 @@ sprites, maps, and the battle atlas, must remain local. The directories holding 
 (`samples/`, `battles/`, `extracted/`) are in
 `.gitignore`. They contain data extracted from the game, so they must not be committed or
 distributed. `viewer` writes a static, textured isometric PNG from a battle's terrain, scenery,
-and initial units; its output must also remain local.
+and initial units; its output must also remain local. `--diagnostic` adds scenery-pivot and unit
+origin markers and writes a JSON sidecar. `terrain-check` verifies that each `GRND.PBX` vertex
+height agrees with `GRND.GD`.
 
 ## License and rights
 

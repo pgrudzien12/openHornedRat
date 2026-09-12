@@ -88,17 +88,29 @@ def main(argv=None):
     viewer_parser.add_argument("output", type=Path, help="output PNG; do not commit game assets")
     viewer_parser.add_argument("--width", type=int, default=1280)
     viewer_parser.add_argument("--height", type=int, default=900)
+    viewer_parser.add_argument("--diagnostic", action="store_true",
+                               help="mark scenery pivots and unit origins; write a JSON sidecar")
+    terrain_parser = commands.add_parser("terrain-check", help="compare GRND.PBX mesh heights with GRND.GD")
+    terrain_parser.add_argument("installation", type=Path, help="WARFB installation directory")
+    terrain_parser.add_argument("battle", nargs="?", help="optional MESH directory, e.g. BF001")
     args = parser.parse_args(argv)
 
     if args.command == "check":
         return 0 if check(args.installation) else 1
     if args.command == "viewer":
-        result = battle3d.render(args.installation, args.battle, args.output, args.width, args.height)
+        result = battle3d.render(args.installation, args.battle, args.output, args.width, args.height,
+                                 args.diagnostic)
         print(f"{result['output']}: {result['battle']}; scenery {result['scenery']} "
               f"({len(result['missing_scenery'])} unresolved), units {result['drawn_units']}/{result['units']}")
         if result["missing_scenery"]:
             print("Unresolved scenery: " + ", ".join(result["missing_scenery"]))
         return 0
+    if args.command == "terrain-check":
+        results = battle3d.check_terrain(args.installation, args.battle)
+        for result in results:
+            print("{mesh}: {compared}/{vertices} vertices, RMSE {rmse:.6f}, max {max_error:.6f}, "
+                  "outside GD {outside_gd}".format(**result))
+        return 0 if results and all(result["max_error"] < 0.025 for result in results) else 1
     extract(args.installation, args.cache)
     return 0
 

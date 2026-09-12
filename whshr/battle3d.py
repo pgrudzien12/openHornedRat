@@ -3,6 +3,7 @@
 import math
 import os
 import struct
+import json
 from pathlib import Path
 
 from . import legacy, pbx
@@ -95,6 +96,13 @@ class Renderer:
                         index = (py * self.width + px) * 3
                         self.pixels[index:index + 3] = bytes(rgb[value])
 
+    def cross(self, x, y, color, radius=4):
+        for delta in range(-radius, radius + 1):
+            for px, py in ((int(x + delta), int(y)), (int(x), int(y + delta))):
+                if 0 <= px < self.width and 0 <= py < self.height:
+                    index = (py * self.width + px) * 3
+                    self.pixels[index:index + 3] = bytes(color)
+
 
 def _textures(container):
     return [(item["w"], item["h"], item["pixels"], item["palette"]) for item in container["textures"]]
@@ -135,7 +143,46 @@ def _sprite_frame(files, name, palette):
     return decoded, palette, record[2], record[3], fol[frame * 16 + 3]
 
 
-def render(installation, battle_file, output, width=1280, height=900):
+def terrain_comparison(mesh, terrain):
+    """Compare each GRND.PBX vertex with the plane height at its X/Z coordinates."""
+    vertices = mesh["verts"]
+    differences, outside = [], 0
+    for x, y, z in zip(vertices[::3], vertices[1::3], vertices[2::3]):
+        ground = terrain.height(x, z)
+        if ground is None:
+            outside += 1
+        else:
+            differences.append(y - ground)
+    return {
+        "vertices": len(vertices) // 3, "compared": len(differences), "outside_gd": outside,
+        "rmse": math.sqrt(sum(value * value for value in differences) / len(differences)),
+        "max_error": max(map(abs, differences)),
+    }
+
+
+def check_terrain(installation, battle=None):
+    """Check that GRND.PBX mesh heights agree with GRND.GD for one or all mesh directories."""
+    game = Installation(installation)
+    mesh_root = game.file_dir("MESH")
+    names = [battle] if battle else sorted(path.name for path in mesh_root.iterdir() if path.is_dir())
+    results = []
+    for name in names:
+        directory = game.find("FILE", "MESH", name)
+        if directory is None:
+            raise FileNotFoundError(f"MESH/{name} not found")
+        gd, packed = directory / "GRND.GD", directory / "GRND.PBX"
+        if not gd.is_file() or not packed.is_file():
+            continue
+        container = _container(packed)
+        if not container["meshes"]:  # BF004 uses the legacy container layout.
+            continue
+        comparison = terrain_comparison(container["meshes"][0], legacy.module("gd_render").Terrain(gd))
+        comparison["mesh"] = directory.name
+        results.append(comparison)
+    return results
+
+
+def render(installation, battle_file, output, width=1280, height=900, diagnostic=False):
     """Render ``battle_file`` (a name or path) to ``output`` and return scene statistics."""
     game = Installation(installation)
     battle_path = Path(battle_file)
@@ -191,6 +238,18 @@ def render(installation, battle_file, output, width=1280, height=900):
             except FileNotFoundError:
                 pass
     drawn_units = 0
+    diagnostics = {"battle": battle["file"], "terrain": terrain_comparison(ground["meshes"][0], terrain),
+                   "scenery": [], "units": []}
+    mesh_x = ground["meshes"][0]["verts"][::3]
+    mesh_z = ground["meshes"][0]["verts"][2::3]
+    terrain_bounds = (min(mesh_x), max(mesh_x), min(mesh_z), max(mesh_z))
+    if diagnostic:
+        for item in battle["scenery"]:
+            x, z = item["x"] / WORLD_PER_MESH, item["y"] / WORLD_PER_MESH
+            sx, sy = projection.point(x, terrain.height(x, z) or 0, z)
+            renderer.cross(sx, sy, (255, 0, 255))
+            diagnostics["scenery"].append({**item, "mesh": furniture.get(item["name"].casefold()),
+                                           "ground_height": terrain.height(x, z)})
     for unit in sorted(units, key=lambda item: item["set"].get("x", 0) + item["set"].get("y", 0), reverse=True):
         base = sprite_names.get((unit["sprites"] or "").split(",", 1)[0].casefold())
         frame = base and _sprite_frame(sprite_files, base, palette)
@@ -200,7 +259,15 @@ def render(installation, battle_file, output, width=1280, height=900):
         x, z = unit["set"]["x"] / WORLD_PER_MESH, unit["set"]["y"] / WORLD_PER_MESH
         sx, sy = projection.point(x, terrain.height(x, z) or 0, z)
         renderer.sprite(pixels, rgb, sprite_width, sprite_height, anchor_x, sx, sy, projection.scale / 6)
+        inside = terrain_bounds[0] <= x <= terrain_bounds[1] and terrain_bounds[2] <= z <= terrain_bounds[3]
+        if diagnostic:
+            renderer.cross(sx, sy, (50, 230, 70) if inside else (255, 45, 45), 3)
+        diagnostics["units"].append({"name": unit["name"], "sprite": unit["sprites"],
+                                     "x": unit["set"]["x"], "y": unit["set"]["y"],
+                                     "ground_height": terrain.height(x, z), "inside_mesh": inside})
         drawn_units += 1
     write_png(output, width, height, renderer.pixels)
+    if diagnostic:
+        Path(output).with_suffix(".json").write_text(json.dumps(diagnostics, indent=2), encoding="utf-8")
     return {"battle": battle["file"], "output": str(output), "scenery": len(battle["scenery"]),
             "missing_scenery": sorted(set(missing_scenery)), "units": len(units), "drawn_units": drawn_units}
