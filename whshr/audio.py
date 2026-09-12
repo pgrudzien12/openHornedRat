@@ -827,6 +827,81 @@ def sfx_main(argv):
         print('wrote %s' % out)
 
 
+def extract_sfx_effects(root, out_dir):
+    """Extract sound effects with pitch applied into out_dir/effects, raw WAVs into out_dir/raw."""
+    out_dir_path = os.path.abspath(str(out_dir))
+    raw_dir = os.path.join(out_dir_path, "raw")
+    eff_dir = os.path.join(out_dir_path, "effects")
+    os.makedirs(raw_dir, exist_ok=True)
+    os.makedirs(eff_dir, exist_ok=True)
+
+    install_analysis = analyse_install(str(root))
+    sound_dir = resolve(str(root), 'file\\binary\\sound') or resolve(str(root), 'binary\\sound')
+    if sound_dir and os.path.exists(sound_dir):
+        for wpath in glob.glob(os.path.join(sound_dir, '**', '*'), recursive=True):
+            if wpath.upper().endswith('.WAV'):
+                rel = os.path.relpath(wpath, sound_dir)
+                dest = os.path.join(raw_dir, rel)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(wpath, 'rb') as f_in, open(dest, 'wb') as f_out:
+                    f_out.write(f_in.read())
+
+    for pk in install_analysis.get('packets', []):
+        pname = pk.get('name')
+        if not pname or not pk.get('effects'):
+            continue
+        pk_dir = os.path.join(eff_dir, pname)
+        os.makedirs(pk_dir, exist_ok=True)
+        for eff in pk['effects']:
+            sample_idx = eff.get('sample', 0)
+            samples = pk.get('samples', [])
+            if sample_idx >= len(samples):
+                continue
+            s_info = samples[sample_idx]
+            wfile = s_info.get('file')
+            if not wfile:
+                continue
+            wpath = os.path.join(str(root), wfile)
+            if not os.path.exists(wpath):
+                wpath = resolve(str(root), wfile)
+            if not wpath or not os.path.exists(wpath):
+                continue
+            try:
+                with wave.open(wpath, 'rb') as r:
+                    nch = r.getnchannels()
+                    sw = r.getsampwidth()
+                    frames = r.readframes(r.getnframes())
+                pitch = eff.get('pitch', 11025)
+                eff_name = eff.get('name', 'sfx_%d' % eff['index'])
+                safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in eff_name)
+                out_name = "%02d_%s_%dHz.wav" % (eff['index'], safe_name, pitch)
+                out_path = os.path.join(pk_dir, out_name)
+                with wave.open(out_path, 'wb') as w:
+                    w.setnchannels(nch)
+                    w.setsampwidth(sw)
+                    w.setframerate(pitch)
+                    w.writeframes(frames)
+            except Exception:
+                pass
+
+
+def extract_speech(root, out_dir):
+    """Extract speech WAV files from REMOTE/BINARY/GLUE/SPEECH/ to out_dir."""
+    out_dir_path = os.path.abspath(str(out_dir))
+    os.makedirs(out_dir_path, exist_ok=True)
+    speech_dir = resolve(str(root), 'remote\\binary\\glue\\speech')
+    if not speech_dir:
+        speech_dir = find_path_ci(str(root), 'REMOTE/BINARY/GLUE/SPEECH')
+    if speech_dir and os.path.exists(speech_dir):
+        for fname in os.listdir(speech_dir):
+            if fname.upper().endswith('.WAV'):
+                src = os.path.join(speech_dir, fname)
+                dest = os.path.join(out_dir_path, fname)
+                with open(src, 'rb') as f_in, open(dest, 'wb') as f_out:
+                    f_out.write(f_in.read())
+
+
+
 
 """Statistics and validity checks for the game's WAV files (sound effects and speech).
 

@@ -55,6 +55,8 @@ def extract(installation, cache):
     si.cmd_extract(str(game.remote_dir("BINARY", "ANIM")), str(cache / "si"))
     legacy.module("anim_export").main([str(game.root), f"--out={cache / 'animations'}"])
     audio.sfx_main([str(game.root), "--json", str(cache / "sfx" / "sfx.json")])
+    audio.extract_sfx_effects(str(game.root), str(cache / "sfx"))
+    audio.extract_speech(str(game.root), str(cache / "speech"))
 
 
 def main(argv=None):
