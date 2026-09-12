@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+
+# Dane wyciagniete z plikow gry (rendery, atlas bitew) - tylko lokalnie, nie dystrybuowac
+samples/
+battles/
