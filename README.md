@@ -36,11 +36,19 @@ You can buy the game, for example, here:
 
 The original 1995 CD-ROM release should also work, but it has not been tested.
 
-## Using the scripts
+## Using the tools
 
-The scripts take the path to the installed game as an argument, i.e. the `WARFB/` directory
-of the GOG installation. Their output, e.g. renders of sprites, maps or the battle atlas, is
-written locally. The directories holding such output (`samples/`, `battles/`) are in
+The individual scripts in `scripts/` remain available while they are migrated into the `whshr`
+package. The package provides the common entry points:
+
+```sh
+python3 -m whshr check /path/to/WARFB
+python3 -m whshr extract /path/to/WARFB extracted
+```
+
+Both commands take the `WARFB/` directory of the GOG installation. Extraction output, such as
+sprites, maps, and the battle atlas, must remain local. The directories holding such output
+(`samples/`, `battles/`, `extracted/`) are in
 `.gitignore`. They contain data extracted from the game, so they must not be committed or
 distributed.
 

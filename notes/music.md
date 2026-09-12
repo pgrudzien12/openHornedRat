@@ -14,7 +14,7 @@ GOG installation; nothing from the game is in the repo (`extracted/music/` is gi
 | Which presets come from the SBK and which from the AWE32 ROM | ✅ bank MSB 1 = SBK (every bank-1 program exists in the SBK); everything else = 1 MB GM ROM |
 | GM vs FM variants (`XXXXXXFM.MID`) | ✅ naming rule verified on all files; selection by `MIDI.DLL` (strings) |
 | Where each track is used | 🟡 16/21 tracks located (glue scripts, cutscenes, EXE); `BATTLE`, `FOREST`, `LOOKIN2`, `TENSE`, `VICTORY` not located |
-| Full audio render with original sound | 🟡 no fluidsynth/ffmpeg/timidity/sox and no GM soundfont on this machine; SBK parts rendered with a pure-Python sampler, full-render commands below |
+| Full audio render with original sound | ✅ all 21 GM tracks rendered with FluidSynth (FluidR3_GM + the converted SBK in bank 1) at one uniform gain, no clipped samples; the SBK stems were listened to and confirmed by the project owner, the full renders still await a listening review |
 
 ## Summary (ready to paste into `FORMATS.md`)
 
@@ -167,8 +167,8 @@ instrument answered there, which fits the AWE32 selecting banks by CC0 only.
      | `TITLE_sbk_stem.wav` | 642 | −1.0 / −22.9 | 282.2 s | 279.2 s | 192.4 s (SBK parts end there) |
      | `SCRIBE_sbk_stem.wav` | 120 | −1.0 / −24.5 | 167.2 s | 164.2 s | 60.5 s (quiet: raw peak 0.03) |
 
-   **Not verified by ear.** The stems still need a listening check, and so does a full render
-   (next section).
+   **Listened to and confirmed by the project owner (2026-09-12).** The full renders of all
+   21 tracks followed (next section).
 
 ## Scripts
 
@@ -190,7 +190,7 @@ volume envelope (SF2 timecents, **hypothesis**). It **drops** the filter, modula
 LFO generators, whose SF1 units are unknown. The timbre is therefore approximate: no filter sweep
 on `WarBrass`.
 
-### Full render (needs tools that are not installed here)
+### Full render
 
 The original sound is AWE32 = 1 MB GM ROM + this bank. No free copy of the ROM exists, so use a GM
 soundfont as a stand-in and load the converted bank **after** it, so it takes priority for bank 1:
@@ -199,13 +199,26 @@ soundfont as a stand-in and load the converted bank **after** it, so it takes pr
 sudo apt install fluidsynth fluid-soundfont-gm ffmpeg
 W=".../GOG Games/Warhammer - Shadow of the Horned Rat/WARFB"
 python3 scripts/music_sbk2sf2.py "$W/FILE/BINARY/SOUND/WARINTR3.SBK" extracted/music/WARINTR3_bank1.sf2 --bank 1
-for S in INTRO3 TITLE SCRIBE; do
-  fluidsynth -ni -g 0.8 -r 44100 -o synth.midi-bank-select=gs -F extracted/music/$S.wav \
+mkdir -p extracted/music/full
+for S in BATTLE COMBAT DEAD DWARF FOREST GENERIC IMPERIAL INTRO3 LOOKIN2 LOOKING LOSE ORC SCRIBE \
+         SIGHTED SKAVEN TACTICAL TENSE TITLE VICTORY WIN WINTIT; do
+  fluidsynth -ni -q -g 0.26 -r 44100 -o synth.midi-bank-select=gs -F extracted/music/full/$S.wav \
     /usr/share/sounds/sf2/FluidR3_GM.sf2 extracted/music/WARINTR3_bank1.sf2 "$W/FILE/BINARY/MUSIC/$S.MID"
-  ffmpeg -y -loglevel error -i extracted/music/$S.wav -c:a libvorbis -q:a 6 extracted/music/$S.ogg
-  python3 scripts/music_render.py verify extracted/music/$S.wav "$W/FILE/BINARY/MUSIC/$S.MID"
+  python3 scripts/music_render.py verify extracted/music/full/$S.wav "$W/FILE/BINARY/MUSIC/$S.MID"
+  ffmpeg -y -loglevel error -i extracted/music/full/$S.wav -c:a libvorbis -q:a 6 extracted/music/full/$S.ogg
 done
 ```
+
+`python3 scripts/music_render.py commands <WARFB> extracted/music/full --run` runs the same steps.
+
+**Gain.** The first renders used `-g 0.8`, which clipped 10 of the 21 tracks (up to 0.4 % of the
+samples in `COMBAT`). A float render (`-O float`) at 0.8 gave the true peaks: `INTRO3` 2.65
+(+8.5 dBFS), `BATTLE`/`TITLE` 2.14, `COMBAT` 2.10 … `DEAD` 0.16. To keep the relative loudness of
+the tracks (the game played them at one volume), all tracks use **one gain, 0.26**, which puts the
+loudest track at −1.3 dBFS. Result (FluidSynth 2.4.8, FluidR3_GM, 44.1 kHz stereo, 0 clipped samples
+in all 21 files): peaks from −1.3 dBFS (`INTRO3`) to −25.5 dBFS (`DEAD`); `SKAVEN`, `SCRIBE` and
+`LOOKING` are quiet compositions (RMS below −38 dBFS). Lengths match the MIDI files plus the release
+tail. 64 MB of OGG in `extracted/music/full/`.
 
 `synth.midi-bank-select=gs` (FluidSynth's default) uses only CC0 for the bank number, which
 matches the AWE32 behaviour inferred above. FluidSynth does not read SoundFont 1 files, hence

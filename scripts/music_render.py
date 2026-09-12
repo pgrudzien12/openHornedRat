@@ -261,6 +261,15 @@ def selftest(install):
                 p['program'], p['name'], key, f or 0, exp, 1200 * math.log2(f / exp) if f else float('nan')))
 
 
+# the 21 General MIDI tracks (every one except VICTORY also has an FM arrangement)
+GM_SONGS = ('BATTLE', 'COMBAT', 'DEAD', 'DWARF', 'FOREST', 'GENERIC', 'IMPERIAL', 'INTRO3', 'LOOKIN2',
+            'LOOKING', 'LOSE', 'ORC', 'SCRIBE', 'SIGHTED', 'SKAVEN', 'TACTICAL', 'TENSE', 'TITLE',
+            'VICTORY', 'WIN', 'WINTIT')
+# one gain for all tracks, keeping their relative loudness: at 0.8 the loudest track (INTRO3)
+# peaks at +8.5 dBFS and 10 tracks clip; 0.26 puts it at -1.3 dBFS (FluidSynth 2.4.8, FluidR3_GM)
+RENDER_GAIN = '0.26'
+
+
 def commands(install, outdir, run=False):
     sbk = game_file(install, *SBK_REL)
     music = os.path.dirname(song_path(install, 'INTRO3'))
@@ -268,13 +277,13 @@ def commands(install, outdir, run=False):
     gm = next((p for p in GM_SOUNDFONT_CANDIDATES if os.path.exists(p)), '/usr/share/sounds/sf2/FluidR3_GM.sf2')
     here = os.path.dirname(os.path.abspath(__file__))
     cmds = [['python3', os.path.join(here, 'music_sbk2sf2.py'), sbk, sf2, '--bank', str(USER_BANK)]]
-    for song in ('INTRO3', 'TITLE', 'SCRIBE'):
+    for song in GM_SONGS:
         wav = os.path.join(outdir, song + '.wav')
-        cmds.append(['fluidsynth', '-ni', '-g', '0.8', '-r', '44100', '-o', 'synth.midi-bank-select=gs',
+        cmds.append(['fluidsynth', '-ni', '-q', '-g', RENDER_GAIN, '-r', '44100', '-o', 'synth.midi-bank-select=gs',
                      '-F', wav, gm, sf2, song_path(install, song)])
+        cmds.append(['python3', os.path.abspath(__file__), 'verify', wav, song_path(install, song)])
         cmds.append(['ffmpeg', '-y', '-loglevel', 'error', '-i', wav, '-c:a', 'libvorbis', '-q:a', '6',
                      os.path.join(outdir, song + '.ogg')])
-        cmds.append(['python3', os.path.abspath(__file__), 'verify', wav, song_path(install, song)])
     tools = {t: shutil.which(t) for t in ('fluidsynth', 'ffmpeg', 'timidity', 'sox')}
     print('# tools: ' + ', '.join('%s=%s' % (k, v or 'missing') for k, v in tools.items()))
     print('# GM soundfont: %s (%s)' % (gm, 'found' if os.path.exists(gm) else 'missing - install e.g. fluid-soundfont-gm'))

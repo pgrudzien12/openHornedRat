@@ -1,7 +1,7 @@
 __pycache__/
 *.pyc
 
-# Dane wyciagniete z plikow gry (rendery, atlas bitew) - tylko lokalnie, nie dystrybuowac
+# Data extracted from game files (renders and battle atlas) - local only, do not distribute.
 samples/
 battles/
 extracted/
