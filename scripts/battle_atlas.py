@@ -1,10 +1,10 @@
-"""Generuje folder z mapami bitew (PNG) i ich opisami (Markdown) dla losowych bitew kampanii.
+"""Generates a folder with battle maps (PNG) and their descriptions (Markdown) for random campaign battles.
 
-Uzycie: battle_atlas.py <katalog SCRIPT> <folder wyjsciowy> [liczba=20] [ziarno=1995]
+Usage: battle_atlas.py <SCRIPT dir> <output dir> [count=20] [seed=1995]
 
-Bitwy kampanii = pliki BFxxx.BTS / BFxxx_N.BTS (pomija pliki testowe tworcow).
-W folderze powstaja: README.md (legenda i spis), <BITWA>.png i <BITWA>.md dla kazdej bitwy.
-Numery jednostek na obrazkach odpowiadaja kolumnie "Nr" w opisach.
+Campaign battles = BFxxx.BTS / BFxxx_N.BTS files (developer test files are skipped).
+The output folder gets README.md (legend and index), plus <BATTLE>.png and <BATTLE>.md for each battle.
+Unit numbers in the images match the "No." column in the descriptions.
 """
 import collections, math, os, random, re, sys
 
@@ -13,17 +13,8 @@ from render_battle import BOUNDARY_KINDS, SIDE_STYLE, collect_units, render   # 
 from whscript import load_battle                                              # noqa: E402
 
 
-def plural(n, one, few, many):
-    """Polska liczba mnoga: 1 oddzial, 2-4 oddzialy, 5+ oddzialow (12-14 tez 'many')."""
-    if n == 1:
-        return f"{n} {one}"
-    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
-        return f"{n} {few}"
-    return f"{n} {many}"
-
-
-def oddzialy(n):
-    return plural(n, 'oddział', 'oddziały', 'oddziałów')
+def units_count(n):
+    return f"{n} unit" if n == 1 else f"{n} units"
 
 
 def end_nodes(battle):
@@ -31,7 +22,7 @@ def end_nodes(battle):
 
 
 def on_node(entry, nodes):
-    """Czy jednostka stoi na ktoryms z wezlow (w promieniu wezla, min. 8 jednostek swiata)."""
+    """Whether the unit stands on one of the nodes (within the node radius, at least 8 world units)."""
     s = entry['unit']['set']
     x, y = s.get('x'), s.get('y')
     if not (isinstance(x, (int, float)) and isinstance(y, (int, float))):
@@ -40,7 +31,7 @@ def on_node(entry, nodes):
 
 
 def campaign_stats(script_dir):
-    """Zbiorcze statystyki po wszystkich bitwach kampanii, do legendy w README."""
+    """Aggregate statistics over all campaign battles, for the legend in README."""
     st = collections.Counter()
     for fname in campaign_battles(script_dir):
         b = load_battle(os.path.join(script_dir, fname))
@@ -53,9 +44,10 @@ def campaign_stats(script_dir):
         st['hidden_player'] += sum(1 for e in player if e['unit']['hidden'])
     return st
 
-SIDE_NAME = {'enemy': 'wróg', 'npc': 'NPC', 'player': 'gracz'}
+SIDE_NAME = {'enemy': 'enemy', 'npc': 'NPC', 'player': 'player'}
 KIND_EMOJI = {'battle': '⬜', 'deploy': '🟩', 'nav': '🟨', 'camera': '🟪', 'view': '🟦', 'sight': '🩷', 'terrain': '🟧'}
 SIDE_EMOJI = {'enemy': '🔴', 'npc': '🟠', 'player': '🔵'}
+OUTSIDE = 'outside the battlefield boundary'
 
 
 def campaign_battles(script_dir):
@@ -77,20 +69,20 @@ def battle_bbox(boundaries):
 def unit_notes(entry, bbox):
     u, s, notes = entry['unit'], entry['unit']['set'], []
     if u['hidden']:
-        notes.append('ukryta na starcie (`hidden`)')
+        notes.append('hidden at start (`hidden`)')
     x, y = s.get('x'), s.get('y')
     if bbox and isinstance(x, (int, float)) and isinstance(y, (int, float)):
         if not (bbox[0] <= x <= bbox[2] and bbox[1] <= y <= bbox[3]):
-            notes.append('poza granicą pola')
+            notes.append(OUTSIDE)
     script = s.get('script')
     if script == 'PLAYER_SCRIPT':
-        notes.append('steruje gracz')
+        notes.append('controlled by the player')
     elif script not in (None, ''):
-        notes.append(f'skrypt AI nr {script}')
+        notes.append(f'AI script no. {script}')
     if u['spells']:
-        notes.append('zaklęcia: ' + ', '.join(u['spells']))
+        notes.append('spells: ' + ', '.join(u['spells']))
     if u['items']:
-        notes.append('przedmioty: ' + ', '.join(u['items']))
+        notes.append('items: ' + ', '.join(u['items']))
     return '; '.join(notes)
 
 
@@ -102,57 +94,58 @@ def battle_md(name, info):
     types = lambda side: ', '.join(f"{t} ×{n}" for t, n in collections.Counter(
         (e['type'] or {}).get('type', '?') for e in units if e['side'] == side).most_common())
 
-    L = [f"# {name}", "", f"![Mapa bitwy {name}]({name}.png)", "",
-         "Legenda kolorów i symboli: [README.md](README.md). Numery na mapie = kolumna **Nr** w tabeli jednostek.", ""]
+    L = [f"# {name}", "", f"![Battle map {name}]({name}.png)", "",
+         "Color and symbol legend: [README.md](README.md). Numbers on the map = **No.** column in the unit table.", ""]
 
-    L += ["## W skrócie", ""]
-    L.append(f"- **Wróg:** {oddzialy(by_side['enemy'])} ({types('enemy') or 'brak'})")
+    L += ["## At a glance", ""]
+    L.append(f"- **Enemy:** {units_count(by_side['enemy'])} ({types('enemy') or 'none'})")
     if by_side['npc']:
-        L.append(f"- **NPC:** {oddzialy(by_side['npc'])} ({types('npc')})")
+        L.append(f"- **NPC:** {units_count(by_side['npc'])} ({types('npc')})")
     merc_name = os.path.splitext(os.path.basename((f['merc'] or '').replace('\\', '/')))[0].upper()
-    other = (f" To armia z pliku innej bitwy ({merc_name}), czyli kontynuacja kampanii; pozycje x/y z tego pliku "
-             "mogą nie pasować do tej mapy.") if merc_name and merc_name != name else ''
-    L.append(f"- **Gracz:** {oddzialy(by_side['player'])} z pliku `{f['merc']}` ({types('player') or 'brak'}).{other}")
+    other = (f" This is the army from another battle's file ({merc_name}), i.e. a campaign continuation; "
+             "the x/y positions from that file may not fit this map.") if merc_name and merc_name != name else ''
+    L.append(f"- **Player:** {units_count(by_side['player'])} from `{f['merc']}` ({types('player') or 'none'}).{other}")
     for side in ('player', 'enemy', 'npc'):
         hidden = [str(e['nr']) for e in units if e['side'] == side and e['unit']['hidden']]
         if hidden:
-            L.append(f"- **Ukryte na starcie ({SIDE_NAME[side]}):** {len(hidden)} z {by_side[side]}, nr {', '.join(hidden)}")
+            L.append(f"- **Hidden at start ({SIDE_NAME[side]}):** {len(hidden)} of {by_side[side]}, no. {', '.join(hidden)}")
     ends = end_nodes(b)
     player = [e for e in units if e['side'] == 'player']
     on = sum(1 for e in player if on_node(e, ends))
-    L.append(f"- **Węzły `NS_END` a armia gracza:** węzłów `NS_END`: {len(ends)}, oddziałów gracza: {len(player)} "
-             f"({'zgadza się' if len(ends) == len(player) else 'nie zgadza się'}); na węzłach `NS_END` stoi "
-             f"{on} z {len(player)} oddziałów gracza")
-    outside = [str(e['nr']) for e in units if 'poza granicą' in unit_notes(e, bbox)]
+    L.append(f"- **`NS_END` nodes vs. the player army:** `NS_END` nodes: {len(ends)}, player units: {len(player)} "
+             f"({'match' if len(ends) == len(player) else 'no match'}); "
+             f"{on} of {len(player)} player units stand on `NS_END` nodes")
+    outside = [str(e['nr']) for e in units if OUTSIDE in unit_notes(e, bbox)]
     if outside:
-        L.append(f"- **Poza granicą pola:** nr {', '.join(outside)} (hipoteza: posiłki albo jednostki wchodzące później)")
+        L.append(f"- **Outside the battlefield boundary:** no. {', '.join(outside)} "
+                 "(hypothesis: reinforcements or units entering later)")
     deploy = [bd['name'] for bd in bounds if bd['kind'] == 'deploy']
-    L.append(f"- **Strefa rozstawienia:** {', '.join(deploy) if deploy else 'brak'}; "
-             f"`DeployTroops`: {'tak' if b['mission'] and b['mission']['deploy_troops'] else 'nie'}")
-    L.append(f"- **Mapa planu w tle:** {'tak' if info['has_map'] else 'nie znaleziono'}")
+    L.append(f"- **Deployment zone:** {', '.join(deploy) if deploy else 'none'}; "
+             f"`DeployTroops`: {'yes' if b['mission'] and b['mission']['deploy_troops'] else 'no'}")
+    L.append(f"- **Plan map in the background:** {'yes' if info['has_map'] else 'not found'}")
     L.append("")
 
-    L += ["## Pole bitwy (`[FIELD]`)", "", "| Pole | Wartość | Znaczenie |", "|---|---|---|",
-          f"| rozmiar | {f['width']} × {f['height']} | jednostki świata; oś Y rośnie w górę mapy |",
-          f"| mapa planu | `{cell(f['planmap'])}` | tło obrazka |",
-          f"| teren 3D | `MESH/{cell(f['mesh'])}/` | siatka terenu i spakowane tekstury (niezbadane) |",
-          f"| paleta | `{cell(f['palette'])}` | paleta RGB bitwy |",
-          f"| skrypt misji | `SCRIPT/{cell(f['script'])}.DLL` | logika misji (kod x86) |",
-          f"| armia gracza | `{cell(f['merc'])}` | plik .MRC |",
-          f"| tło portretów | `{cell(f['portrait_bg'])}` | |",
-          f"| kamera | {cell(f['camera'])} | zapewne początkowy obrót kamery |",
-          f"| set:map | {cell(f['map'])} | znaczenie nieznane |", ""]
+    L += ["## Battlefield (`[FIELD]`)", "", "| Field | Value | Meaning |", "|---|---|---|",
+          f"| size | {f['width']} × {f['height']} | world units; the Y axis grows up the map |",
+          f"| plan map | `{cell(f['planmap'])}` | image background |",
+          f"| 3D terrain | `MESH/{cell(f['mesh'])}/` | terrain mesh and packed textures (unexplored) |",
+          f"| palette | `{cell(f['palette'])}` | battle RGB palette |",
+          f"| mission script | `SCRIPT/{cell(f['script'])}.DLL` | mission logic (x86 code) |",
+          f"| player army | `{cell(f['merc'])}` | .MRC file |",
+          f"| portrait background | `{cell(f['portrait_bg'])}` | |",
+          f"| camera | {cell(f['camera'])} | presumably the initial camera rotation |",
+          f"| set:map | {cell(f['map'])} | meaning unknown |", ""]
 
-    L += ["## Cele misji (`Objective`)", ""]
+    L += ["## Mission objectives (`Objective`)", ""]
     if b['mission'] and b['mission']['objectives']:
-        L.append("Surowe wartości `litera, a, b`, **znaczenie nieznane**: " +
+        L.append("Raw `letter, a, b` values, **meaning unknown**: " +
                  ", ".join(f"`{','.join(map(str, o))}`" for o in b['mission']['objectives']))
     else:
-        L.append("Brak.")
+        L.append("None.")
     L.append("")
 
-    L += ["## Jednostki", "",
-          "| Nr | Strona | Nazwa | Typ (kod `s_side`) | Liczebność | Sprite / sztandar | Dowódca | Profil M WS BS S T W I A Ld | Psychologia | Pozycja (x, y) / dir | Uwagi |",
+    L += ["## Units", "",
+          "| No. | Side | Name | Type (`s_side` code) | Strength | Sprite / banner | Leader | Profile M WS BS S T W I A Ld | Psychology | Position (x, y) / dir | Notes |",
           "|---|---|---|---|---|---|---|---|---|---|---|"]
     for e in units:
         u, s, t = e['unit'], e['unit']['set'], e['type'] or {}
@@ -166,7 +159,7 @@ def battle_md(name, info):
             f"({s.get('x')}, {s.get('y')}) / {s.get('dir')}", unit_notes(e, bbox))) + " |")
     L.append("")
 
-    L += ["## Granice (`[BOUNDARIES]`)", "", "| Nazwa | Kolor | Znaczenie | Odcinków |", "|---|---|---|---|"]
+    L += ["## Boundaries (`[BOUNDARIES]`)", "", "| Name | Color | Meaning | Segments |", "|---|---|---|---|"]
     for bd in bounds:
         L.append(f"| {cell(bd['name'])} | {KIND_EMOJI[bd['kind']]} {bd['color_name']} | {bd['meaning']} | {bd['segments']} |")
     L.append("")
@@ -174,29 +167,29 @@ def battle_md(name, info):
     objs = b['objects']
     solid = sum(1 for o in objs if 'os_solid' in [x.lower() for x in o['status']])
     rects = sum(1 for o in objs if o['rects'])
-    L += ["## Obiekty kolizji (`[OBJECTS]`)", "",
-          f"Obiekty kolizji: **{len(objs)}**. Blokujące (`os_solid`, czerwone okręgi): {solid}; "
-          f"nieblokujące (jasnoróżowe): {len(objs) - solid}; z dokładniejszym kształtem "
-          f"(`addrectangles`, jasnopomarańczowe prostokąty): {rects}. "
-          "Okręgi pokrywają drzewa, skały i budynki z mapy planu.", ""]
+    L += ["## Collision objects (`[OBJECTS]`)", "",
+          f"Collision objects: **{len(objs)}**. Blocking (`os_solid`, red circles): {solid}; "
+          f"non-blocking (light pink): {len(objs) - solid}; with a more precise shape "
+          f"(`addrectangles`, light orange rectangles): {rects}. "
+          "The circles cover the trees, rocks and buildings of the plan map.", ""]
 
     scen = collections.Counter(s['name'] for s in b['scenery'])
-    L += ["## Sceneria (`[SCENERY]`)", "",
-          f"Elementy scenerii (zielone kropki): **{len(b['scenery'])}**. " +
-          (', '.join(f"`{k}` ×{v}" for k, v in scen.most_common()) or 'Brak.'), ""]
+    L += ["## Scenery (`[SCENERY]`)", "",
+          f"Scenery elements (green dots): **{len(b['scenery'])}**. " +
+          (', '.join(f"`{k}` ×{v}" for k, v in scen.most_common()) or 'None.'), ""]
 
     nodes = b['nodes']
     flags = collections.Counter(fl.lower() for n in nodes for fl in n['status'])
     ids = sorted({n['id'] for n in nodes if n['id'] is not None})
-    L += ["## Węzły skryptu (`[NODES]`)", "",
-          f"Węzły (cyjan): **{len(nodes)}**. Z `ns_startpos` (pełne kwadraty): {flags['ns_startpos']}; "
-          f"z `NS_END` (biała obwódka, zwykle mają też `ns_startpos`): {flags['ns_end']}. "
-          f"Identyfikatory `id`: {', '.join(map(str, ids)) or '—'}.", "",
-          f"Oddziałów gracza: {len(player)}, na węzłach `NS_END` stoi z nich {on}. Hipoteza (patrz README): każdy "
-          "węzeł `NS_END` to docelowa pozycja jednego oddziału gracza, a pozostałe `ns_startpos` wyznaczają "
-          "trasę albo punkty wejścia armii na pole.", ""]
+    L += ["## Script nodes (`[NODES]`)", "",
+          f"Nodes (cyan): **{len(nodes)}**. With `ns_startpos` (filled squares): {flags['ns_startpos']}; "
+          f"with `NS_END` (white outline, usually also `ns_startpos`): {flags['ns_end']}. "
+          f"`id` values: {', '.join(map(str, ids)) or '—'}.", "",
+          f"Player units: {len(player)}, of which {on} stand on `NS_END` nodes. Hypothesis (see README): each "
+          "`NS_END` node is the target position of one player unit, and the remaining `ns_startpos` nodes mark "
+          "the route or the entry points of the army onto the field.", ""]
 
-    L += ["## Dynamicznie wczytywane zasoby (`[DYNAMIC_LOAD]`)", ""]
+    L += ["## Dynamically loaded resources (`[DYNAMIC_LOAD]`)", ""]
     for k, v in b['load'].items():
         if isinstance(v, list):
             L.append(f"- `{k}`: " + ', '.join(f"`{x}`" for x in v))
@@ -207,61 +200,61 @@ def battle_md(name, info):
 
 
 README_LEGEND = """\
-# Atlas bitew — Warhammer: Shadow of the Horned Rat
+# Battle atlas — Warhammer: Shadow of the Horned Rat
 
-Wygenerowane przez `scripts/battle_atlas.py` z plików `.BTS` i `.MRC` legalnie posiadanej
-instalacji gry. **Nie dystrybuować**: tło to mapy planu wyciągnięte z plików gry.
+Generated by `scripts/battle_atlas.py` from the `.BTS` and `.MRC` files of a legally owned
+game installation. **Do not distribute**: the backgrounds are plan maps extracted from the game files.
 
 {selection}
 
-## Jak czytać mapy
+## How to read the maps
 
-Obrazek to widok z góry na całe pole bitwy. Tłem jest przyciemniona **mapa planu** bitwy
-(`loadplanmap`, np. `MAP001`), rozciągnięta na rozmiar pola z `[FIELD]`. Oś Y świata rośnie
-w górę obrazka; zweryfikowane tym, że okręgi kolizji leżą na drzewach i skałach z mapy.
-Wszystko poza tłem jest narysowane z danych skryptu `.BTS` (i armii gracza z `.MRC`).
-Obszar obrazka jest większy od pola, bo niektóre granice i jednostki wychodzą poza nie.
+Each image is a top-down view of the whole battlefield. The background is the battle's dimmed **plan map**
+(`loadplanmap`, e.g. `MAP001`), stretched to the field size from `[FIELD]`. The world Y axis grows
+up the image; verified by the collision circles lying on the trees and rocks of the map.
+Everything except the background is drawn from the `.BTS` script data (and the player army from `.MRC`).
+The image area is larger than the field, because some boundaries and units extend beyond it.
 
-### Granice (`[BOUNDARIES]`): linie
+### Boundaries (`[BOUNDARIES]`): lines
 
-| Kolor | Nazwy w plikach | Znaczenie | Pewność |
+| Color | Names in the files | Meaning | Certainty |
 |---|---|---|---|
 {boundaries}
 
-Pewność: **pewne** = wynika wprost z danych i obrazu; **prawdopodobne** = nazwa i obraz się zgadzają;
-**hipoteza** = głównie z nazwy, niezweryfikowane w grze.
+Certainty: **certain** = follows directly from the data and the image; **probable** = the name and the image agree;
+**hypothesis** = mostly from the name, not verified in the game.
 
-### Jednostki (`[UNITS]` w .BTS i armia z .MRC): koła
+### Units (`[UNITS]` in .BTS and the army from .MRC): discs
 
-| Symbol | Znaczenie |
+| Symbol | Meaning |
 |---|---|
 {sides}
-| koło pełne | jednostka widoczna na starcie |
-| sam pierścień | jednostka z flagą `hidden:`. Ma ją {hidden_player} z {player_units} oddziałów gracza we wszystkich {battles} bitwach kampanii, więc u gracza to raczej „jeszcze nie na polu” (armia wchodzi albo jest rozstawiana). U wroga zapewne posiłki albo zasadzka. Hipoteza |
-| kreska z koła | kierunek `dir`; hipoteza: pełny obrót = 512, 0 = w górę mapy, zgodnie z zegarem |
-| liczba | numer jednostki = kolumna **Nr** w opisie bitwy |
+| filled disc | unit visible at start |
+| ring only | unit with the `hidden:` flag. {hidden_player} of {player_units} player units across all {battles} campaign battles have it, so for the player it most likely means "not on the field yet" (the army enters or is deployed). For the enemy presumably reinforcements or an ambush. Hypothesis |
+| line from the disc | `dir` direction; hypothesis: full turn = 512, 0 = up the map, clockwise |
+| number | unit number = **No.** column in the battle description |
 
-### Pozostałe symbole
+### Other symbols
 
-| Symbol | Z danych | Znaczenie | Pewność |
+| Symbol | From the data | Meaning | Certainty |
 |---|---|---|---|
-| 🔴 czerwony okrąg | `addobject` z `os_solid` | przeszkoda blokująca ruch (drzewa, skały, budynki) | pewne |
-| jasnoróżowy okrąg | `addobject` bez `os_solid` | obiekt aktywny, ale nieblokujący | hipoteza |
-| jasnopomarańczowy prostokąt | `addrectangles` / `rect` w obiekcie | dokładniejszy kształt kolizji, obrócony o `dir` obiektu | prawdopodobne (obrót: hipoteza) |
-| 🟢 mała zielona kropka | `placefurniture` w `[SCENERY]` | element scenerii (drzewo, skała, budynek); typy z `loadfurn` | pewne |
-| cyjan kwadrat pełny | `addnode` z `ns_startpos` | węzeł trasy wejścia albo rozstawienia armii gracza; zwykle jest ich kilka więcej niż oddziałów gracza | prawdopodobne |
-| cyjan kwadrat z białą obwódką | `addnode` z `NS_END` (zwykle razem z `ns_startpos`) | **docelowa pozycja jednego oddziału gracza**. W {ends_eq}/{battles} bitwach kampanii liczba `NS_END` = liczba oddziałów gracza; w {on_ends}/{battles} wszystkie oddziały gracza z `.MRC` stoją dokładnie na tych węzłach | prawdopodobne |
-| cyjan kwadrat pusty | `addnode` bez tych flag | inny węzeł skryptu misji | pewne, że to węzeł; rola nieznana |
+| 🔴 red circle | `addobject` with `os_solid` | obstacle blocking movement (trees, rocks, buildings) | certain |
+| light pink circle | `addobject` without `os_solid` | active but non-blocking object | hypothesis |
+| light orange rectangle | `addrectangles` / `rect` in an object | more precise collision shape, rotated by the object's `dir` | probable (rotation: hypothesis) |
+| 🟢 small green dot | `placefurniture` in `[SCENERY]` | scenery element (tree, rock, building); types from `loadfurn` | certain |
+| filled cyan square | `addnode` with `ns_startpos` | node of the player army's entry or deployment route; usually a few more of them than player units | probable |
+| cyan square with a white outline | `addnode` with `NS_END` (usually together with `ns_startpos`) | **target position of one player unit**. In {ends_eq}/{battles} campaign battles the number of `NS_END` nodes = the number of player units; in {on_ends}/{battles} all player units from `.MRC` stand exactly on these nodes | probable |
+| hollow cyan square | `addnode` without these flags | other mission script node | certain that it is a node; role unknown |
 
-## Bitwy
+## Battles
 
-| Bitwa | Pole | Mapa planu | Wróg | NPC | Gracz | Armia gracza | Granice |
+| Battle | Field | Plan map | Enemy | NPC | Player | Player army | Boundaries |
 |---|---|---|---|---|---|---|---|
 {index}
 """
 
-CERTAINTY = {'battle': 'pewne', 'deploy': 'prawdopodobne', 'nav': 'prawdopodobne', 'camera': 'hipoteza',
-             'view': 'hipoteza', 'sight': 'hipoteza', 'terrain': 'prawdopodobne'}
+CERTAINTY = {'battle': 'certain', 'deploy': 'probable', 'nav': 'probable', 'camera': 'hypothesis',
+             'view': 'hypothesis', 'sight': 'hypothesis', 'terrain': 'probable'}
 KIND_NAMES = {'battle': '`BattleEdge`, `Battlefield edge`', 'deploy': '`DeploymentArea`, `Merc Deployment`',
               'nav': '`Nav1` … `NavN`', 'camera': '`CameraEdge`', 'view': '`ViewEdge`', 'sight': '`SightEdge`',
               'terrain': '`CliffsEdge`, `RiverEdge`, `WallsEdge`, `Hedge`, `LakeEdge`, `RockyRidge`…'}
@@ -284,10 +277,10 @@ def main(script_dir, out_dir, count=20, seed=1995):
         kinds = sorted({bd['kind'] for bd in info['boundaries']}, key=[k[0] for k in BOUNDARY_KINDS].index)
         rows.append(f"| [{name}]({name}.md) | {f['width']}×{f['height']} | `{f['planmap']}` | {side['enemy']} | "
                     f"{side['npc']} | {side['player']} | `{f['merc']}` | {' '.join(KIND_EMOJI[k] for k in kinds)} |")
-        print(f"{name}: {info['size'][0]}x{info['size'][1]} px, jednostek {len(info['units'])}, mapa: {info['has_map']}")
+        print(f"{name}: {info['size'][0]}x{info['size'][1]} px, units {len(info['units'])}, map: {info['has_map']}")
 
-    selection = (f"Wybrano losowo **{len(chosen)}** z {len(battles)} bitew kampanii (`BFxxx.BTS`), "
-                 f"ziarno losowania `{seed}`:\n`python3 scripts/battle_atlas.py <SCRIPT> {out_dir} {count} {seed}`")
+    selection = (f"**{len(chosen)}** of {len(battles)} campaign battles (`BFxxx.BTS`) chosen at random, "
+                 f"seed `{seed}`:\n`python3 scripts/battle_atlas.py <SCRIPT> {out_dir} {count} {seed}`")
     boundaries = '\n'.join(f"| {KIND_EMOJI[k]} {cname} | {KIND_NAMES[k]} | {meaning} | {CERTAINTY[k]} |"
                            for k, _, cname, meaning in BOUNDARY_KINDS)
     sides = '\n'.join(f"| {SIDE_EMOJI[k]} {v[1]} | {v[2]} |" for k, v in SIDE_STYLE.items())
@@ -295,7 +288,7 @@ def main(script_dir, out_dir, count=20, seed=1995):
     with open(os.path.join(out_dir, 'README.md'), 'w', encoding='utf-8') as fh:
         fh.write(README_LEGEND.format(selection=selection, boundaries=boundaries, sides=sides, index='\n'.join(rows),
                                       **{k: st[k] for k in ('battles', 'ends_eq', 'on_ends', 'player_units', 'hidden_player')}))
-    print(f"statystyki kampanii: {dict(st)}")
+    print(f"campaign statistics: {dict(st)}")
 
 
 if __name__ == '__main__':

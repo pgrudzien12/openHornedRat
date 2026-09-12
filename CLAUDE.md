@@ -1,108 +1,135 @@
 # Warhammer: Shadow of the Horned Rat — reverse engineering / open-source engine
 
-## Cel projektu
+## Project goal
 
-Rozgryzienie formatów plików gry **Warhammer: Shadow of the Horned Rat** (Mindscape,
-1995) w celu docelowego napisania własnego, otwartego silnika/viewera zdolnego
-odtworzyć assety (i być może samą grę), na wzór projektów typu OpenMW (Morrowind)
-czy OpenRA (Command & Conquer).
+Reverse-engineer the file formats of **Warhammer: Shadow of the Horned Rat** (Mindscape,
+1995) in order to eventually write our own open engine/viewer able to reproduce the
+assets (and perhaps the game itself), in the spirit of projects such as OpenMW (Morrowind)
+or OpenRA (Command & Conquer).
 
-## Skąd się to wzięło
+## Language
 
-Właściciel gry (kupionej na GOG) próbował uruchomić ją na Linuksie przez Proton/Wine.
-Po serii napraw (kompatybilność Windows XP, wirtualny pulpit zamiast fullscreen,
-brakująca 32-bitowa biblioteka FreeType) gra dochodziła do menu i pierwszej misji,
-ale: **brak dźwięku** (silnik audio gry emuluje sprzętowo starą kartę AWE32/MIDI,
-co nie ma szans zadziałać pod żadnym Wine) oraz **losowe zamykanie się bez błędu**
-po pierwszej misji (znany, udokumentowany na forum GOG, nierozwiązany bug tej wersji
-pod Wine). Próba użycia **BoxedWine** (emulator x86 + własny Wine, działający jako
-WebAssembly w przeglądarce) też utknęła — jego prosty "mounter" zipów jako system
-plików ma jakiś błąd/ograniczenie przy dużej liczbie plików/duplikatach nazw
-różniących się wielkością liter, którego nie udało się obejść.
+**All documentation and all scripts/code are written in English**: Markdown files, code,
+comments, docstrings, identifiers, script output (including generated reports such as the
+battle atlas) and commit messages. The only place where another language (e.g. Polish) may
+be used is the conversation with Claude Code itself. If you come across a file that still
+contains non-English text, translate it.
 
-W tym momencie, mając wolny czas, zamiast dalej łatać Wine, zaczęliśmy zamiast tego
-**rozgryzać własne formaty plików gry** — pierwszy krok w stronę fanowskiego silnika
-open source, tak jak robiły to inne projekty tego typu.
+## Background
 
-Instalacja gry (GOG v1.0) leży w prefiksie Wine:
+The owner of the game (bought on GOG) tried to run it on Linux via Proton/Wine.
+After a series of fixes (Windows XP compatibility, a virtual desktop instead of fullscreen,
+a missing 32-bit FreeType library) the game reached the menu and the first mission,
+but with **no sound** (the game's audio engine emulates an old AWE32/MIDI hardware card,
+which has no chance of working under any Wine) and **random exits without an error**
+after the first mission (a known bug of this version under Wine, documented on the GOG
+forum and unresolved). An attempt with **BoxedWine** (an x86 emulator + its own Wine,
+running as WebAssembly in the browser) also got stuck — its simple zip-as-filesystem
+"mounter" has some bug/limitation with a large number of files / duplicate names
+differing only in case, which we could not work around.
+
+At that point, having some free time, instead of patching Wine any further we started
+**reverse-engineering the game's own file formats** — the first step towards a fan-made
+open-source engine, as other projects of this kind have done.
+
+The game installation (GOG v1.0) lives in a Wine prefix:
 ```
 ~/snap/steam/common/.local/share/Steam/steamapps/compatdata/3605483607/pfx/drive_c/GOG Games/Warhammer - Shadow of the Horned Rat/WARFB/
 ```
-(ten prefiks służy też jako źródło danych do dalszej pracy — pliki `.BOP`/`.FOL`/`.PAL`
-w `FILE/BINARY/`, `UPDATE/BINARY/`, `REMOTE/BINARY/`).
+(this prefix is also the data source for further work — `.BOP`/`.FOL`/`.PAL` files
+in `FILE/BINARY/`, `UPDATE/BINARY/`, `REMOTE/BINARY/`).
 
-## Stan na teraz
+## Current status
 
-Zobacz **`FORMATS.md`** — pełny, szczegółowy opis rozgryzionych i nierozgryzionych
-formatów. W skrócie:
+See **`FORMATS.md`** — a full, detailed description of the reverse-engineered and still
+unknown formats. In short:
 
 | Format | Status |
 |---|---|
-| `.PAL` (paleta kolorów) | ✅ W pełni rozgryzione: 2 warianty, paleta RGB (`STANDARD`) albo mapy kolorów 4→8 bit sprite'ów (po 512 B) |
-| `.FOL` (nagłówki klatek) | ✅ W pełni rozgryzione |
-| `.BOP` nieskompresowane (tła) | ✅ W pełni rozgryzione, zweryfikowane wizualnie |
-| `.BOP` skompresowane (sprite'y) | ✅ 4 bpp + RLE zer, mapa kolorów w `.PAL` sprite'a; zweryfikowane wizualnie na 7279 klatkach |
-| `.BTS` (bitwa), `.MRC` (armia) | ✅ Tekstowe skrypty w stylu INI. Składnia rozgryziona, parser działa na 87/87 plików, układ bitwy zweryfikowany nałożeniem na mapę planu. Część pól (cele misji, `whoami`, część `setstats`) wciąż ma nieznane znaczenie |
-| `SCRIPT/*.DLL` (logika misji) | 🟡 Prawdziwe DLL Win32 (MSVC), eksportują `DLLGetScriptPointer`/`DLLReturnInstCount`. Wymagają dizasemblacji |
-| `MESH/*/*.PBX`, `GRND.GD` | 🟡 PBX = kompresja RNC ProPack (metoda 2) z plikami `.gif`/`.bop` w środku, GD = siatka floatów (teren?). Niezbadane dokładnie |
-| `.sbk`, `.FON` | ❌ Niezbadane |
+| `.PAL` (color palette) | ✅ 2 variants: RGB palette (`STANDARD`, `GLUE`/`WIND` halves) or 4→8-bit sprite color maps (512 B each) |
+| `.FOL` / `.BOP` (sprites, backgrounds) | ✅ 8 bpp, 4 bpp, 4 bpp + zero RLE; color map index rule (modulo 16); legacy layouts; visually verified |
+| Unit animation layout | ✅ groups × phases × 8 directions (move/dead/attack/stand/shoot); 🟡 `dir` mapping, anchor y, timing |
+| Script names → files | ✅ sprite and furniture tables in `WHSHR.EXE`/`GAMEF.DLL` |
+| `.BTS` (battle), `.MRC` (army) | ✅ INI-style text scripts, parser works on 87/87 files, layout verified on the plan map. Objective letters solved; some fields (`set:map`, `whoami`, part of `setstats`) still unknown |
+| `DLL/*.DLL` resources | ✅ bitmaps, texts, dialogs, cursors; `WND.DLL` = campaign "glue" scripts as text (🟡 semantics) |
+| `.FON`, `GLUE/*.PAL` | ✅ standard Windows NE/FNT fonts; front-end palette pairs |
+| Music `.MID` + `.SBK` | ✅ MIDI GM/FM pairs + SoundFont 1.0 bank (3 presets); 🟡 not listened to |
+| `.SFX` + WAV | ✅ `MSNDDS.DLL` effect packages; 🟡 not listened to |
+| `MESH/*/*.PBX`, `GRND.GD` | ✅ RNC ProPack + container (Reality Lab textures and meshes, sprite bundles); terrain height field |
+| Cutscenes `.SI/.SN/.SM/.SR` | ✅ Omni 1.0 container, Smacker films, WAV, MIDS, event tracks; 🟡 event semantics |
+| `SCRIPT/*.DLL` (mission logic) | ⬜ Real Win32 DLLs (MSVC), exporting `DLLGetScriptPointer`/`DLLReturnInstCount`. Require disassembly |
+| Save games `savegame.0/.5` | ⬜ Unexplored |
 
-## Struktura repo
+## Repository layout
 
-Repo na GitHubie: https://github.com/pgrudzien12/openHornedRat (prywatne).
-`samples/` i `battles/` są w `.gitignore`: to dane wyciągnięte z gry, trzymane tylko lokalnie.
+GitHub repository: https://github.com/pgrudzien12/openHornedRat (private).
+`samples/`, `battles/` and `extracted/` are in `.gitignore`: they contain data extracted from the game and are kept locally only.
 
 ```
-README.md          - opis projektu (cel, wymagana oryginalna gra, gdzie ją kupić)
-CLAUDE.md          - ten plik
-FORMATS.md         - szczegółowa dokumentacja formatów, hipotezy, co dalej
-ROADMAP.md         - plan prac: inwentarz plików gry, fazy 0-5, kamienie milowe, kolejność kroków
-scripts/           - parsery/renderery napisane w trakcie analizy
-  parse_pal.py     - parsuje .PAL, weryfikuje sekwencyjność indeksów
-  render_pal.py    - renderuje .PAL jako obrazek PPM (pasek kolorów)
-  render_bop_raw.py- dekoduje i renderuje nieskompresowany .BOP (tła) do PPM, uzywajac .FOL+.PAL
-  render_sprites.py- dekoder wszystkich typow klatek .FOL/.BOP (8bpp, 4bpp, 4bpp+RLE) -> arkusz PNG
-  whscript.py      - parser .BTS/.MRC: drzewo, typowany widok (JSON), walidacja licznikow (--check)
-  render_battle.py - mapa bitwy z gory (granice, obiekty, sceneria, jednostki, wezly) na tle mapy planu
-  battle_atlas.py  - atlas N losowych bitew kampanii: PNG + opis .md kazdej bitwy + README z legenda
-  rle_v2.py        - PRZESTARZALE: stare, bledne proby dekodera RLE (trojki/dwie warstwy)
-battles/           - [lokalnie, poza gitem] wygenerowany atlas 20 bitew (battle_atlas.py, ziarno 1995);
-                     zawiera mapy z plikow gry, NIE dystrybuowac
-samples/           - [lokalnie, poza gitem] rendery z plikow gry, NIE dystrybuowac
-  standard_pal.png - zrenderowana paleta STANDARD.PAL (dowod ze .PAL jest rozgryzione)
-  back1.png        - zrenderowane tlo BACK1.BOP (dowod ze nieskompresowany .BOP jest rozgryziony)
-  eshin.png        - 24 klatki skrytobojcow Eshin (dowod ze skompresowane sprite'y sa rozgryzione)
-  sparkle.png      - SPARKLE: 5 klatek iskierki + 8 klatek balwana (dwie mapy kolorow)
-  bf001_battle.png - uklad bitwy BF001.BTS nalozony na MAP001 (dowod ukladu wspolrzednych, os Y odwrocona)
-  identifiers.txt  - 1006 czytelnych identyfikatorow (CamelCase) wyciagnietych z
-                     WHSHR.EXE i GAMEF.DLL - slownik nazw jednostek/zaklec/budynkow/bannerow
+README.md          - project description (goal, required original game, where to buy it)
+CLAUDE.md          - this file
+FORMATS.md         - format reference: overview table, structures, hypotheses, open questions
+ROADMAP.md         - work plan: game file inventory, phases 0-5 with status, milestones, order of steps
+notes/             - full per-format reports (how each claim was verified, per-file tables, open questions)
+  animations.md, btp_sprite_leftovers.md, fonts_glue.md, music.md, pbx_rnc.md, pe_resources.md,
+  scene_scripts.md, sfx.md, si_omni.md, sprite_names.md, terrain_gd.md
+scripts/           - parsers/renderers/extractors (Python 3 stdlib only); most have a --check mode
+  parse_pal.py     - parses a .PAL, checks that indices are sequential
+  render_pal.py    - renders a .PAL as a PPM image (color strip)
+  render_bop_raw.py- decodes and renders an uncompressed .BOP (backgrounds) to PPM using .FOL+.PAL
+  render_sprites.py- decoder for all .FOL/.BOP frame types (8bpp, 4bpp, 4bpp+RLE) -> PNG sheet
+  anim_*.py        - animation layout: inventory + layout test, labelled sheets, export to sheets/GIFs
+  btp_*.py         - SPRITE3.BTP, legacy .FOL layouts, SPELLS map rule, orphans, odd palettes, UPDATE vs FILE
+  spritemap_*.py   - script name -> file tables from WHSHR.EXE (map.json) and their verification
+  whscript.py      - .BTS/.MRC parser: tree, typed view (JSON), counter validation (--check)
+  render_battle.py - top-down battle map (boundaries, objects, scenery, units, nodes) over the plan map
+  battle_atlas.py  - atlas of N random campaign battles: PNG + .md description per battle + README with legend
+  pe_*.py          - PE resource parser, extraction of DLL resources, missions/objectives table
+  fon_*.py         - .FON parser/renderer, GLUE/WIND palette analysis
+  music_*.py       - MIDI and SBK (SoundFont 1.0) parsers, SBK->SF2 converter, stem renderer
+  sfx_*.py         - .SFX package parser, WAV statistics
+  pbx_*.py         - RNC ProPack decompressor, .PBX container extraction (textures, meshes, sprites)
+  gd_render.py     - GRND.GD terrain: check, relief renders, .obj/.json export, height lookup
+  si_*.py          - Omni .SI container extraction, pure-Python Smacker decoder
+  scene_dump.py    - .SN/.SM/.SR scene side files, speech/text links
+  rle_v2.py        - OBSOLETE: old, wrong RLE decoder attempts (triples/two layers)
+extracted/         - [local only, not in git] output of the extractors, one directory per topic (~250 MB)
+battles/           - [local only, not in git] generated atlas of 20 battles (battle_atlas.py, seed 1995);
+                     contains maps from the game files, DO NOT distribute
+samples/           - [local only, not in git] renders from the game files, DO NOT distribute
+  standard_pal.png - rendered STANDARD.PAL palette (proof that .PAL is reverse-engineered)
+  back1.png        - rendered BACK1.BOP background (proof that uncompressed .BOP is reverse-engineered)
+  eshin.png        - 24 frames of Eshin assassins (proof that compressed sprites are reverse-engineered)
+  sparkle.png      - SPARKLE: 5 sparkle frames + 8 snowman frames (two color maps)
+  bf001_battle.png - BF001.BTS battle layout overlaid on MAP001 (proof of the coordinate system, Y axis flipped)
+  identifiers.txt  - 1006 readable (CamelCase) identifiers extracted from
+                     WHSHR.EXE and GAMEF.DLL - dictionary of unit/spell/building/banner names
 ```
 
-## Jak kontynuować
+## How to continue
 
-1. ~~Dekompresja sprite'ów~~ — zrobione (4 bpp + RLE zer, patrz `FORMATS.md`).
-   Drobne otwarte kwestie opisane są tam w sekcji „Otwarte kwestie” (SPELLS.PAL ma 43 mapy,
-   nietypowe rekordy HALBERD/ICON2/SPRITE3.FOL, układ kierunków animacji).
-2. ~~Składnia `.BTS`/`.MRC`~~: zrobione (`scripts/whscript.py`, opis w `FORMATS.md`).
-   Kolejne kroki, do wyboru:
-   - rozpakować RNC w `MESH/*/*.PBX` (tekstury/sprite'y bitwy) i rozgryźć `GRND.GD` (teren 3D?);
-   - zdizasemblować jeden mały `SCRIPT/BFxxx.DLL` (np. w Ghidrze), żeby zobaczyć, jak
-     skrypt misji korzysta z węzłów (`NODES`) i `set:script=N` jednostek;
-   - powiązać nazwy z `troopsprites`/`banner`/`loadfurn` z plikami `.FOL/.BOP`.
-3. Dawny plan (dla kontekstu): zbadać `.MRC` (prawdopodobnie mapy/misje) i `.BTS`/
-   pliki `script/*.dll` (prawdopodobnie logika bitew/dialogi) — to potrzebne żeby
-   w ogóle wiedzieć, JAK rozstawić sprite'y na mapie, a nie tylko jak je narysować.
-3. Dopiero potem sensowne stałoby się pisanie właściwego "silnika" (np. w Pythonie
-   z pygame na start, jako viewer/prototyp, później ewentualnie coś wydajniejszego).
+Almost every data format is now reverse-engineered (see the overview table in `FORMATS.md`).
+What is left is listed in `ROADMAP.md` ("Proposed order of the next steps"); in short:
 
-## Ważne zasady pracy w tym projekcie
+1. Phase 0: consolidate the ~30 scripts into a `whshr/` package with one `check` and one `extract`.
+2. Listening checks for music/effects/speech (needs fluidsynth, a GM soundfont and ffmpeg).
+3. A static 3D battle viewer (terrain, textured scenery meshes, unit sprites) — milestone M2.
+4. A parser and flow graph for the campaign glue scripts in `WND.DLL`.
+5. Open questions that need the running game under Wine (`dir` mapping, frame timing, cutscene
+   events, which leftover files are loaded).
+6. Mission logic in `SCRIPT/BFxxx.DLL` and the game rules (disassembly) — deliberately last.
 
-- To jest projekt **hobbystyczny/eksploracyjny reverse-engineeringu**, nie klon
-  komercyjny — cel to zrozumienie formatów i (być może kiedyś) fanowski viewer/silnik
-  do własnej, legalnie posiadanej kopii gry. Nie dystrybuować plików gry ani danych
-  z niej wyciągniętych.
-- Weryfikuj hipotezy **wizualnie** gdy się da (renderuj obrazek, porównaj z tym,
-  co sensowne dla gry z 1995) — samo "zgadza się liczba bajtów" bywa mylące
-  (patrz: 3/13 klatek "zgadzało się" przez przypadek przy błędnej hipotezie RLE).
-- Pliki gry (`.BOP`, `.PAL`, itd.) nie są w tym repo (to własność GOG/Games Workshop) —
-  skrypty w `scripts/` przyjmują ścieżkę do zainstalowanej gry jako argument.
+When a new format task is done, write the full report to `notes/<topic>.md` and add a condensed
+section plus a row in the overview table of `FORMATS.md`.
+
+## Important rules for working on this project
+
+- This is a **hobby/exploratory reverse-engineering project**, not a commercial clone —
+  the goal is to understand the formats and (maybe one day) build a fan-made viewer/engine
+  for one's own, legally owned copy of the game. Do not distribute game files or data
+  extracted from them.
+- Verify hypotheses **visually** whenever possible (render an image, compare it with what
+  makes sense for a 1995 game) — "the byte count matches" alone can be misleading
+  (see: 3/13 frames "matched" by accident under a wrong RLE hypothesis).
+- Game files (`.BOP`, `.PAL`, etc.) are not in this repo (they are the property of GOG/Games Workshop) —
+  the scripts in `scripts/` take the path to the installed game as an argument.

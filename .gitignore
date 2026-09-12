@@ -4,3 +4,4 @@ __pycache__/
 # Dane wyciagniete z plikow gry (rendery, atlas bitew) - tylko lokalnie, nie dystrybuowac
 samples/
 battles/
+extracted/

@@ -14,7 +14,7 @@ def main():
     bop = open(bop_path, 'rb').read()
     pal = load_pal(pal_path)
 
-    # pierwszy rekord FOL
+    # first FOL record
     hx, hy, w, h, off, flags = None, None, None, None, None, None
     import struct
     hx, hy, w, h, off = struct.unpack_from('<hhhhI', fol, 0)
@@ -22,13 +22,13 @@ def main():
     print(f"hotspot=({hx},{hy}) w={w} h={h} offset={off} flags={flags.hex()}")
 
     pixels = bop[off:off + w*h]
-    print(f"pixel bytes needed={w*h}, mamy={len(pixels)}")
+    print(f"pixel bytes needed={w*h}, available={len(pixels)}")
 
     with open(out_path, 'wb') as f:
         f.write(f"P6\n{w} {h}\n255\n".encode())
         for p in pixels:
             r, g, b = pal.get(p, (0, 0, 0))
             f.write(bytes([r, g, b]))
-    print("zapisano", out_path)
+    print("saved", out_path)
 
 main()

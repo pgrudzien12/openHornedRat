@@ -1,9 +1,9 @@
-"""Dekoduje klatki .FOL/.BOP (wszystkie 3 typy) i sklada je w arkusz PNG.
+"""Decodes .FOL/.BOP frames (all 3 types) and assembles them into a PNG sheet.
 
-Uzycie: render_sprites.py <katalog BINARY> <NAZWA> [pierwsza_klatka] [liczba] [out.png]
-np.:    render_sprites.py ".../WARFB/FILE/BINARY" ESHIN 0 24 eshin.png
+Usage: render_sprites.py <BINARY dir> <NAME> [first_frame] [count] [out.png]
+e.g.:  render_sprites.py ".../WARFB/FILE/BINARY" ESHIN 0 24 eshin.png
 
-Kolory RGB z STANDARD.PAL; sprite'y 4-bitowe mapowane przez <NAZWA>.PAL (patrz FORMATS.md).
+RGB colors come from STANDARD.PAL; 4-bit sprites are mapped through <NAME>.PAL (see FORMATS.md).
 """
 import os, struct, sys, zlib
 
@@ -17,7 +17,7 @@ def load_rgb_palette(path):
 
 
 def unzero(seg):
-    """RLE zer: 00 NN = NN bajtow zerowych, 00 00 = koniec, inny bajt = literal."""
+    """Zero RLE: 00 NN = NN zero bytes, 00 00 = end, any other byte = literal."""
     out, i = bytearray(), 0
     while True:
         if seg[i] == 0:
@@ -31,21 +31,46 @@ def unzero(seg):
             i += 1
 
 
-def decode_frame(bop, rec, seg_end, colormaps):
-    """Zwraca liste w*h indeksow palety (0 = przezroczysty)."""
+def colormap_indices(recs):
+    """Full color map index per record (None for type-1 frames).
+
+    Frames of types 2 and 4 are stored grouped by map in increasing order, and the upper
+    nibble of kind is the map number modulo 16: every drop of the nibble adds 16.
+    Only matters for SPELLS (43 maps); see FORMATS.md, "Color map".
+    """
+    out, wraps, prev = [], 0, None
+    for r in recs:
+        if (r[5] & 0x0F) not in (2, 4):
+            out.append(None)
+            continue
+        n = r[5] >> 4
+        if prev is not None and n < prev:
+            wraps += 1
+        out.append(n + 16 * wraps)
+        prev = n
+    return out
+
+
+def decode_frame(bop, rec, seg_end, colormaps, map_index=None):
+    """Returns a list of w*h palette indices (0 = transparent).
+
+    map_index: full color map index from colormap_indices(); defaults to the plain nibble,
+    which is correct for every file except SPELLS.
+    """
     _, _, w, h, off, f0 = rec[:6]
     kind, seg = f0 & 0x0F, bop[off:seg_end]
-    if kind == 1:                      # surowe 8 bpp
+    if kind == 1:                      # raw 8 bpp
         return list(seg[:w * h])
     bw = (w + 1) // 2
-    packed = unzero(seg)[0] if kind == 4 else seg[:bw * h]   # 4: RLE, 2: surowe 4 bpp
-    cmap = colormaps[f0 >> 4] if (f0 >> 4) < len(colormaps) else None
+    packed = unzero(seg)[0] if kind == 4 else seg[:bw * h]   # 4: RLE, 2: raw 4 bpp
+    m = f0 >> 4 if map_index is None else map_index
+    cmap = colormaps[m] if m < len(colormaps) else None
     px = []
     for r in range(h):
         for c in range(w):
             b = packed[r * bw + c // 2]
             if cmap:
-                px.append(cmap[b * 2 + (c & 1)])   # wpis bajtu = (lewy piksel, prawy piksel)
+                px.append(cmap[b * 2 + (c & 1)])   # byte entry = (left pixel, right pixel)
             else:
                 px.append(((b >> 4) if c % 2 == 0 else (b & 15)) * 16)
     return px
@@ -68,13 +93,14 @@ def main(bindir, name, first=0, count=24, out=None, cols=8, scale=3):
     rgb_pal = load_rgb_palette(f"{bindir}/STANDARD.PAL")
 
     recs = [struct.unpack_from('<hhhhIB', fol, i * 16) for i in range(len(fol) // 16)]
+    maps = colormap_indices(recs)
     offsets = sorted(set(r[4] for r in recs)) + [len(bop)]
     sel = recs[first:first + count]
     cw, ch = max(r[2] for r in sel) + 2, max(r[3] for r in sel) + 2
     W, H = cw * cols, ch * ((len(sel) + cols - 1) // cols)
     img = [(40, 40, 48)] * (W * H)
     for k, r in enumerate(sel):
-        px = decode_frame(bop, r, offsets[offsets.index(r[4]) + 1], colormaps)
+        px = decode_frame(bop, r, offsets[offsets.index(r[4]) + 1], colormaps, maps[first + k])
         ox, oy = (k % cols) * cw + 1, (k // cols) * ch + 1
         for j in range(r[3]):
             for i in range(r[2]):

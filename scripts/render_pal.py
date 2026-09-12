@@ -13,4 +13,4 @@ with open(sys.argv[2], 'wb') as f:
         for x in range(w):
             r, g, b = entries.get(x, (0, 0, 0))
             f.write(bytes([r, g, b]))
-print("zapisano", sys.argv[2])
+print("saved", sys.argv[2])

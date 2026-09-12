@@ -1,46 +1,50 @@
 # openHornedRat
 
-Otwarty, fanowski silnik do gry **Warhammer: Shadow of the Horned Rat** (Mindscape, 1995),
-pierwszej strategii czasu rzeczywistego osadzonej w świecie Warhammer Fantasy.
+An open, fan-made engine for **Warhammer: Shadow of the Horned Rat** (Mindscape, 1995),
+the first real-time strategy game set in the Warhammer Fantasy world.
 
-Wzorujemy się na projektach takich jak [OpenMW](https://openmw.org) (Morrowind) czy
-[OpenRA](https://www.openra.net) (Command & Conquer). Chcemy, żeby w oryginalną grę dało się
-wygodnie zagrać na współczesnych systemach, w tym na Linuksie. Bez emulacji, bez Wine
-i bez błędów starego silnika, takich jak brak dźwięku czy losowe zamykanie się gry.
+We follow in the footsteps of projects such as [OpenMW](https://openmw.org) (Morrowind) and
+[OpenRA](https://www.openra.net) (Command & Conquer). The goal is to make the original game
+comfortably playable on modern systems, including Linux, without emulation, without Wine
+and without the old engine's bugs, such as missing sound or random crashes.
 
-## Stan projektu
+## Project status
 
-Projekt jest na wczesnym etapie. Na razie **rozgryzamy formaty plików gry**, a nie piszemy
-jeszcze właściwego silnika. W `scripts/` są parsery i renderery, które już teraz potrafią
-odczytać palety, grafiki teł, sprite'y jednostek i skrypty bitew. Szczegóły:
+The project is at an early stage. For now we are **reverse-engineering the game's file
+formats** rather than writing the engine itself. The scripts in `scripts/` can already read
+almost all of the game's data: palettes, backgrounds and animated unit sprites, battle and
+army scripts, UI bitmaps and texts, fonts, music and sound effects, the 3D battle terrain,
+textures and scenery meshes, and the cutscene videos. What is still missing is the game logic
+(mission scripts, combat rules, save games). Details:
 
-- [`FORMATS.md`](FORMATS.md): opis rozgryzionych i nierozgryzionych formatów plików;
-- [`ROADMAP.md`](ROADMAP.md): plan dalszych prac i kamienie milowe.
+- [`FORMATS.md`](FORMATS.md): description of the reverse-engineered and still unknown file formats;
+- [`ROADMAP.md`](ROADMAP.md): plan of further work and milestones.
 
-## Wymagana oryginalna gra
+## Original game required
 
-**To repozytorium nie zawiera żadnych plików z gry i nigdy nie będzie ich zawierać.**
-Grafika, dźwięk, mapy i skrypty misji są własnością ich właścicieli (Games Workshop i inni).
-Silnik, tak jak OpenMW czy OpenRA, będzie wczytywał assety z **Twojej legalnie kupionej
-kopii gry**.
+**This repository does not contain any files from the game and never will.**
+The graphics, sound, maps and mission scripts are the property of their owners (Games Workshop
+and others). Like OpenMW or OpenRA, the engine will load assets from **your own legally
+purchased copy of the game**.
 
-Grę można kupić na przykład tutaj:
+You can buy the game, for example, here:
 
 - **GOG.com**: [Warhammer: Shadow of the Horned Rat](https://www.gog.com/en/game/warhammer_shadow_of_the_horned_rat),
-  wersja bez DRM. Na tej wersji (GOG v1.0) oparte są dotychczasowe prace.
+  a DRM-free version. All work so far is based on this version (GOG v1.0).
 - **Steam**: [Warhammer: Shadow of the Horned Rat (Classic)](https://store.steampowered.com/app/4280870/Warhammer_Shadow_of_the_Horned_Rat_Classic/),
-  wydanie z 2026 roku. Nie sprawdzaliśmy jeszcze, czy jego pliki są takie same jak w wersji GOG.
+  a 2026 re-release. We have not yet checked whether its files are identical to the GOG version.
 
-Oryginalne wydanie CD-ROM z 1995 roku też powinno działać, ale nie było testowane.
+The original 1995 CD-ROM release should also work, but it has not been tested.
 
-## Użycie skryptów
+## Using the scripts
 
-Skrypty przyjmują jako argument ścieżkę do zainstalowanej gry, czyli do katalogu `WARFB/`
-w instalacji GOG. Wyniki, np. rendery sprite'ów, map czy atlas bitew, zapisują lokalnie.
-Katalogi z takimi wynikami (`samples/`, `battles/`) są w `.gitignore`. Zawierają dane
-wyciągnięte z gry, więc nie wolno ich commitować ani rozpowszechniać.
+The scripts take the path to the installed game as an argument, i.e. the `WARFB/` directory
+of the GOG installation. Their output, e.g. renders of sprites, maps or the battle atlas, is
+written locally. The directories holding such output (`samples/`, `battles/`) are in
+`.gitignore`. They contain data extracted from the game, so they must not be committed or
+distributed.
 
-## Licencja i prawa
+## License and rights
 
-To projekt hobbystyczny i niekomercyjny, niezwiązany z Games Workshop, Mindscape, GOG
-ani SNEG. Warhammer i Shadow of the Horned Rat są znakami towarowymi ich właścicieli.
+This is a hobby, non-commercial project, not affiliated with Games Workshop, Mindscape, GOG
+or SNEG. Warhammer and Shadow of the Horned Rat are trademarks of their respective owners.

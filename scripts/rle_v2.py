@@ -1,7 +1,7 @@
 import struct
 
 def decode_rowwise_triples(data, w, h):
-    """kazdy wiersz: trojki (skip,count,color), koniec wiersza gdy suma >= w"""
+    """each row: (skip,count,color) triples, the row ends when the sum >= w"""
     i, n = 0, len(data)
     row = 0
     x = 0
@@ -15,7 +15,7 @@ def decode_rowwise_triples(data, w, h):
     return i, row
 
 def decode_rowwise_AB(data, w, h):
-    """kazdy wiersz: skip,count -> highbit(count)=FILL+color, else COPY literal"""
+    """each row: skip,count -> highbit(count)=FILL+color, else COPY literal"""
     i, n = 0, len(data)
     row = 0
     x = 0
@@ -54,13 +54,13 @@ def test(name, fn, fol_path, bop_path):
         match = used == len(seg)
         print(f"  frame{f}: w={w} h={h} seglen={len(seg)} used={used} rows_done={rows}/{h} match={match}")
         if match: ok += 1
-    print(f"{name}: {ok}/{n_frames} pasuje\n")
+    print(f"{name}: {ok}/{n_frames} match\n")
 
 DIR = "/home/pawel/snap/steam/common/.local/share/Steam/steamapps/compatdata/3605483607/pfx/drive_c/GOG Games/Warhammer - Shadow of the Horned Rat/WARFB/FILE/BINARY"
 test("rowwise triples", decode_rowwise_triples, DIR+"/SPARKLE.FOL", DIR+"/SPARKLE.BOP")
 test("rowwise A/B", decode_rowwise_AB, DIR+"/SPARKLE.FOL", DIR+"/SPARKLE.BOP")
 
-print("=== sprawdzam druga warstwe (kontynuacja po pierwszym przebiegu) ===")
+print("=== checking for a second layer (continuation after the first pass) ===")
 DIR = "/home/pawel/snap/steam/common/.local/share/Steam/steamapps/compatdata/3605483607/pfx/drive_c/GOG Games/Warhammer - Shadow of the Horned Rat/WARFB/FILE/BINARY"
 fol = open(DIR+"/SPARKLE.FOL", 'rb').read()
 bop = open(DIR+"/SPARKLE.BOP", 'rb').read()
@@ -73,4 +73,4 @@ for f in [5,6,7,8,9,10,11,12]:
     used1, rows1 = decode_rowwise_triples(seg, w, h)
     rest = seg[used1:]
     used2, rows2 = decode_rowwise_triples(rest, w, h)
-    print(f"frame{f}: seglen={len(seg)} warstwa1 used={used1} rows={rows1} | warstwa2 used={used2}/{len(rest)} rows={rows2}")
+    print(f"frame{f}: seglen={len(seg)} layer1 used={used1} rows={rows1} | layer2 used={used2}/{len(rest)} rows={rows2}")
