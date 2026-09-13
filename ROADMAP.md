@@ -71,10 +71,12 @@ texts, fonts, music, sounds); what is missing is one tool that shows it all.
 | 2.1 | RNC ProPack method 2 + `.PBX` container | ✅ | M | 133/133 files, CRCs, textures and meshes rendered |
 | 2.2 | `GRND.GD` terrain height field | ✅ | M | 45 files; relief matches the plan maps; open: height scale |
 | 2.3 | Static battle scene: textured terrain (`grnd.xof`), scenery meshes from `placefurniture` (furniture table), unit sprites at their positions, heights from `GRND.GD` | ✅ | M | `whshr viewer` renders a static PNG (perspective, or orthographic for diagnostics); scenery rotation verified against plan maps; texture transparency provisional |
-| 2.4 | Camera and lighting (`Camera`, `CameraEdge`, `Bank angle`) | 🟡 | M | the original camera is confirmed to be perspective; `viewer`/`viewer-web` have a look-at camera (yaw, pitch, distance, FOV) and ambient/diffuse PBX-normal lighting; open: original parameters (`Camera` → heading, hypothesis `yaw = 180 + Camera`), FOV, eye height, lighting |
+| 2.4 | Camera and lighting (`Camera`, `CameraEdge`, `Bank angle`) | ✅ | M | sufficient for an engine: the original camera is perspective, and the look-at camera (yaw, pitch, distance, FOV) with ambient/diffuse PBX-normal lighting in `viewer`/`viewer-web` reproduces the scene convincingly. Exact original parameters (`Camera` → heading, hypothesis `yaw = 180 + Camera`; FOV, eye height, lighting) are deliberately not pursued |
 | 2.5 | Relation of `GRND.GD` to `grnd.xof` (logic height field vs render mesh?) | ✅ | S | all 44 modern terrain meshes match direct `GRND.GD(x,z)` heights (maximum error 0.02123 mesh units) |
 
 **Milestone M2: static 3D battle viewer.** Any `BFxxx`: terrain, scenery, units at their starting positions.
+✅ **Reached (September 2026)**: `whshr viewer`/`viewer-web` confirm that an engine can use a similar
+perspective battle scene.
 
 ## Phase 3 — cutscenes and speech (REMOTE)
 
@@ -108,7 +110,9 @@ from phases 1–3.
 - **Prototype**: Python + pygame (2D: plan map + animated sprites) as a quick testbed for movement,
   animation and collisions with `OBJECTS`/`BOUNDARIES`. Does not require phase 2.
 - **Target**: an engine reading the game installation on the fly, e.g. C++/SDL2 + OpenGL or Godot
-  (GDExtension for reading the formats). Decide after M2, once it is clear how much 3D is really needed.
+  (GDExtension for reading the formats). M2 showed that a real 3D perspective battle scene is needed;
+  the choice of technology (Godot 4 vs C++/SDL2 + OpenGL) is still open and must be made before the
+  real-time prototype. A Python step writing a local, never-committed asset cache is acceptable at first.
 - Audio in the engine: MIDI through the user's GM soundfont + the converted SBK in bank 1 (GM file
   preferred, FM name rule `name[:6] + 'FM'`); SFX = PCM resampled to `pitch`, volume/pan, loop/list/random,
   priority channels.
@@ -123,13 +127,18 @@ Milestones:
 
 ## Proposed order of the next steps
 
-1. **2.4**: match the original perspective camera (heading from `Camera`, pitch, FOV, distance) and
-   lighting with `viewer-web`, which also validates the height scale.
-2. **Wine instrumentation session** for 1.5a, 3.3 and the smaller open questions (`dir`, frame timing,
-   event semantics, which files are loaded).
-3. **1.5b and 1.8**: resolve effect-sprite layouts and the remaining battle-script semantics as needed
-   by the viewer and future engine.
-4. Phase 4 only before M4/M5, at first targeted at specific questions.
+Phase 2 is closed (M2 reached). Priorities, as decided by the project owner:
+
+1. **Game rules first (4.3, with the parts of 4.2 they need)**: targeted disassembly of
+   `GAMEF.DLL`/`WHSHR.EXE` for combat, morale and how the `s_*` unit stats, ranks and `psy_status`
+   feed into the calculations, compared with Warhammer Fantasy Battle 4th edition. 1.8 (script field
+   semantics) is resolved along the way where the rules need it.
+2. **Real-time engine prototype (nice to have)**: choose the technology (see phase 5), then show the
+   `viewer-web` scene (terrain, scenery, sprites, moving camera) in real time. Independent of 1, so
+   it can run in parallel.
+3. **Later**: unit movement (M3: `Nav*` pathfinding, `OBJECTS` collisions, formations), mission DLLs
+   (4.1), a Wine instrumentation session for 1.5a/3.3 and other open questions only when one blocks
+   work, 1.5b effect sprites once magic is needed, save games (4.4) for M6.
 
 ## Risks and rules
 

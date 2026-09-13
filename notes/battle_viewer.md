@@ -113,8 +113,8 @@ tables are cached per process. The HTTP server is bound only to loopback and sto
 The result verifies the complete static asset path for `BF001` and `BF015`: terrain and every
 scripted scenery placement resolve, as do all units with a sprite resource. `BF015`'s NPC
 Ceridan deliberately uses `VoidType`, so it has no sprite to render. The camera model is settled
-(perspective), but its original parameters are not: how `Camera` maps to the heading, and the
-pitch, FOV, eye distance/height and `CameraEdge` limits still have to be matched against the game.
+(perspective) and sufficient for an engine. Its exact original parameters (how `Camera` maps to the
+heading, pitch, FOV, eye distance/height, `CameraEdge` limits) are deliberately not pursued.
 The sprite frame for `dir = 0`, formation spacing and rank semantics (3D uses 6 mesh = 48 BTS
 units, 2D uses 32), mesh pivots, texture transparency, and original lighting remain open questions
 for 2.4 and Wine instrumentation.

@@ -113,10 +113,13 @@ samples/           - [local only, not in git] renders from the game files, DO NO
 Almost every data format is now reverse-engineered (see the overview table in `FORMATS.md`).
 What is left is listed in `ROADMAP.md` ("Proposed order of the next steps"); in short:
 
-1. Match the original perspective camera and lighting in the 3D battle viewer (`viewer-web`) — milestone M2.
-2. Open questions that need the running game under Wine (`dir` mapping, frame timing, cutscene
-   events, which leftover files are loaded).
-3. Mission logic in `SCRIPT/BFxxx.DLL` and the game rules (disassembly) — deliberately last.
+Phase 2 (static 3D battle viewer, milestone M2) is closed; exact original camera parameters are
+deliberately not pursued.
+
+1. Game rules (combat, morale, unit stats) by targeted disassembly of `GAMEF.DLL`/`WHSHR.EXE` — top priority.
+2. Real-time engine prototype of the battle scene (nice to have; engine technology not chosen yet).
+3. Later: unit movement (M3), mission logic in `SCRIPT/BFxxx.DLL`, and Wine sessions for open
+   questions (`dir` zero frame, frame timing, cutscene events) only when they block work.
 
 When a new format task is done, write the full report to `notes/<topic>.md` and add a condensed
 section plus a row in the overview table of `FORMATS.md`.
