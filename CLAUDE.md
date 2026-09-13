@@ -57,7 +57,8 @@ unknown formats. In short:
 | `.SFX` + WAV | ✅ `MSNDDS.DLL` effect packages; effects with pitch and speech reviewed |
 | `MESH/*/*.PBX`, `GRND.GD` | ✅ RNC ProPack + container (Reality Lab textures and meshes, sprite bundles); terrain height field |
 | Cutscenes `.SI/.SN/.SM/.SR` | ✅ Omni 1.0 container, Smacker films, WAV, MIDS, event tracks; 🟡 event semantics |
-| `SCRIPT/*.DLL` (mission logic) | ⬜ Real Win32 DLLs (MSVC), exporting `DLLGetScriptPointer`/`DLLReturnInstCount`. Require disassembly |
+| Game rules (`GAMEF.DLL`) | ✅ `setstats` byte layout, close combat (WFB 4th ed charts), combat resolution, morale (flat 2–12 Ld roll), shooting (volleys, scatter, reload, ranges, blast damage), rout/pursuit/rally, movement and real time, magic (power pools, spells, dispel), unit behaviour bytecode and events; 🟡 opcode catalogue. Report: `notes/game_rules.md` |
+| `SCRIPT/*.DLL` (mission logic) | 🟡 Win32 DLLs that only carry bytecode unit behaviour scripts (mission ids from 0, 3–37 per DLL; 100–170 shared library) run by a 232-opcode interpreter in `GAMEF.DLL`; opcodes partly named |
 | Save games `savegame.0/.5` | ⬜ Unexplored |
 
 ## Repository layout
@@ -71,10 +72,13 @@ CLAUDE.md          - this file
 FORMATS.md         - format reference: overview table, structures, hypotheses, open questions
 ROADMAP.md         - work plan: game file inventory, phases 0-5 with status, milestones, order of steps
 notes/             - full per-format reports (how each claim was verified, per-file tables, open questions)
-  animations.md, battle_viewer.md, btp_sprite_leftovers.md, fonts_glue.md, music.md, pbx_rnc.md, pe_resources.md,
-  scene_scripts.md, sfx.md, si_omni.md, sprite_names.md, terrain_gd.md
+  animations.md, battle_viewer.md, btp_sprite_leftovers.md, fonts_glue.md, game_rules.md, music.md, pbx_rnc.md,
+  pe_resources.md, scene_scripts.md, sfx.md, si_omni.md, sprite_names.md, terrain_gd.md
 whshr/             - unified package and CLI: python3 -m whshr check|extract|viewer|viewer-web|
-                     viewer-2d|viewer-2d-web|terrain-check (3D battle viewer: battle3d.py, 2D: battle2d.py)
+                     viewer-2d|viewer-2d-web|terrain-check|rules (3D battle viewer: battle3d.py, 2D: battle2d.py,
+                     GAMEF.DLL rule tables and unit stat decoding: rules.py)
+tools/ghidra/      - OPTIONAL analysis-only Ghidra headless scripts (Java) + setup notes; not stdlib Python,
+                     their decompiled output must never be committed
 scripts/           - parsers/renderers/extractors (Python 3 stdlib only); most have a --check mode
   parse_pal.py     - parses a .PAL, checks that indices are sequential
   render_pal.py    - renders a .PAL as a PPM image (color strip)
@@ -117,6 +121,7 @@ Phase 2 (static 3D battle viewer, milestone M2) is closed; exact original camera
 deliberately not pursued.
 
 1. Game rules (combat, morale, unit stats) by targeted disassembly of `GAMEF.DLL`/`WHSHR.EXE` — top priority.
+   First pass done (`notes/game_rules.md`); continue with its open questions, then magic.
 2. Real-time engine prototype of the battle scene (nice to have; engine technology not chosen yet).
 3. Later: unit movement (M3), mission logic in `SCRIPT/BFxxx.DLL`, and Wine sessions for open
    questions (`dir` zero frame, frame timing, cutscene events) only when they block work.

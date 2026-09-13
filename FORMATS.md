@@ -1,9 +1,11 @@
 # File formats — Warhammer: Shadow of the Horned Rat (1995, Mindscape)
 
 Notes from reverse-engineering the game's data formats, done mostly black-box
-(byte analysis + visual verification). The game logic (`GAMEF.DLL`, `WHSHR.EXE`, mission DLLs)
-has not been disassembled; only static data tables in the executables and the sound library
-`MSNDDS.DLL` (the `.SFX` loader) were read. This file is the reference; the full reports on the
+(byte analysis + visual verification). The battle rules in `GAMEF.DLL` (unit stat layout, close
+combat, morale, shooting) were read by targeted static analysis with Ghidra (see "Game rules" and
+`notes/game_rules.md`). The rest of the game logic (`WHSHR.EXE`, mission DLLs) has not been
+disassembled; only static data tables in the executables and the sound library `MSNDDS.DLL`
+(the `.SFX` loader) were read. This file is the reference; the full reports on the
 individual formats, including how each claim was verified, are in `notes/`.
 
 The game is installed (GOG v1.0) in a Wine prefix:
@@ -34,7 +36,8 @@ from game data; they are not part of the repository.
 | Sound effects, speech | `SOUND/**/*.SFX/.WAV`, `GLUE/SPEECH/*.WAV` | ✅ formats and listening review | Sound effects | `notes/sfx.md` |
 | Battle 3D resources | `MESH/*/*.PBX`, `GRND.GD` | ✅ | Battle 3D resources | `notes/pbx_rnc.md`, `notes/terrain_gd.md` |
 | Cutscenes | `ANIM/*.SI/.SN/.SM/.SR` | ✅ containers, 🟡 event semantics | Cutscenes | `notes/si_omni.md`, `notes/scene_scripts.md` |
-| Mission logic | `SCRIPT/BFxxx.DLL` | ⬜ needs disassembly | Mission logic | — |
+| Game rules: unit stats, combat, morale, shooting | `GAMEF.DLL` code and tables, `setstats` | ✅ stat layout, close combat, morale; 🟡 missile constants, some flags | Unit stat fields, Game rules | `notes/game_rules.md` |
+| Mission logic, unit behaviour | `SCRIPT/BFxxx.DLL` | 🟡 bytecode scripts and interpreter identified; opcodes partly named | Mission logic, Game rules | `notes/game_rules.md` |
 | Save games | `SAVE/savegame.*` | ⬜ | Other files | — |
 
 ## `.PAL` — two different formats under the same extension
@@ -485,13 +488,13 @@ addunit:Grudgebringer<Cavalry          name ('<'/'_' = space)
     banner:BannerMrcCmdr,0             banner
     addmagicitem:ItemGrudgeBringer     0..n
     addspell:AmberTanglingThorn        0..n (wizards)
-    set:psy_status=HateSkaven|CantBreak  psychology from the tabletop rules, see below
-    setstats:s_side=2,12,12,4          see below
-    setstats:s_move=4,4,3,3,3,1,3,1,7  profile M WS BS S T W I A Ld
-    setstats:s_mount=1,13,3,16,13,0    s_mount[0] = 1 for cavalry, 0 for infantry; the rest unknown
-    setstats:s_weap=3  S_BalWeap=0  s_pntval=13  s_cmdr=0,0,4,0  s_armname=0,4   (not exactly known; s_pntval ≈ points value)
-    setstats:s_armr=5                  armor (only on some units and leaders)
-    setstats:s_rlmv=…  s_lead=…        rare (6 units, 9 numbers)
+    set:psy_status=HateSkaven|CantBreak  psychology bits, see "Unit stat fields"
+    setstats:s_side=2,12,12,4          side, orgsize, size, ranks    each line fills consecutive
+    setstats:s_move=4,4,3,3,3,1,3,1,7  M WS BS S T W I A Ld          fields of one byte block,
+    setstats:s_mount=1,13,3,16,13,0    mount armour weapon race points missile   see "Unit stat fields"
+    setstats:s_weap=3  S_BalWeap=0  s_pntval=13  s_cmdr=0,0,4,0  s_armname=0,4   repeat fields set above
+    setstats:s_armr=5                  armour code (leaders write it on its own)
+    setstats:s_rlmv=…  s_lead=…        old layout in PLOT1: 9 values starting at s_rlmv / s_lead
     set:s_calualties=0 s_routed=0 s_kills=0 s_Exp=0   campaign state/experience
     ;S_RACE is Human Cavalry...are you sure this is right?
     addleader:Cmdr._Bernhardt          optional leader
@@ -503,15 +506,36 @@ addunit:Grudgebringer<Cavalry          name ('<'/'_' = space)
 endunit:
 ```
 
-**`s_move` = the tabletop Warhammer profile** (M, WS, BS, S, T, W, I, A, Ld). Confirmation:
-Clanrats `5,3,3,3,3,1,4,1,5` is exactly the Clanrat profile from the rulebook; human infantry has `4,3,3,3,3,1,3,1,7`.
+### Unit stat fields (`setstats`)
 
-**`s_side = [type, size, initial_size, ?]`.**
-- `s_side[1] == s_side[2]` in 829/869 units. Following the order of names in `GAMEF.DLL`
-  (`s_rnks s_size s_orgsize s_side`) these are presumably the current and initial unit strength.
-- `s_side[3]` takes values 1–7; hypothesis: number of ranks.
-- `s_side[0]` is a bit field. Decoded by cross-referencing it with the `;S_RACE is …` comments
-  in all files:
+**Layout ✅ (from code, full report `notes/game_rules.md`).** `GAMEF.DLL` maps keywords to tokens
+(table `0x100E97C8`). Tokens 13–39 (`s_side` … `s_banner`) are **one byte each at
+`unit + 0x7A + (token − 13)`**, and a `setstats` line writes its values into consecutive fields
+starting at its key. Tokens 40–43 (`s_calualties`, `s_routed`, `s_kills`, `s_Exp`, written as `set:`)
+are 16-bit fields at `+0x330…+0x336`. Evidence: the editor's unit writer prints each line from that
+byte block; the combat code reads the same offsets; all 1415 units and leaders of the scripts and save
+armies decode with 32 335 values and no contradiction (`python3 -m whshr check`); the in-game panel of
+Mercenary Crossbows (M4 WS3 BS4 S3 T3 W1 I3 A1 Ld7, "Crossbow 12/12") is `SAVE/PLAY.MRC`.
+`python3 -m whshr rules <installation> BF001.BTS` prints the decoded units.
+
+| Token | Field | Meaning |
+|---|---|---|
+| 13 | `s_side` | side and type byte (below) |
+| 14, 15 | `s_orgsize`, `s_size` | original and current number of models (test files leave `orgsize` 0) |
+| 16, 17 | `s_rnks`, `s_wdth` | ranks; frontage `ceil(size / ranks)` (recomputed at run time; rank bonus, charge bonus) |
+| 18, 19 | `s_rkmd`, `s_spar` | runtime: ranks in the formation, models in the last rank (never set by scripts) |
+| 20 | `s_rlmv` | 🟡 flee movement rate (recomputed at unit set-up) |
+| 21–29 | `s_move` `s_wepn` `s_bals` `s_strn` `s_tuff` `s_wnds` `s_init` `s_atks` `s_lead` | **M WS BS S T W I A Ld** |
+| 30 | `s_mount` | 0 none, 1 Warhorse, 2 War Boar, 3 Giant Wolf, 4 Cave Squig (mount profiles in `GAMEF.DLL`) |
+| 31 | `s_armr` | armour code: 0–5 rating (saves none, 6+, 5+, 4+, 3+, **none**), 6 regeneration (4+), 7 void, 8–13 mounted rating 1–6 (6+ … 2+); `BRTXT` 100–113 |
+| 32 | `s_weap` | close combat weapon class: 0 none, 3 hand weapon, 4 two-handed (+2 S), 10 spear/halberd (+1 S) |
+| 33 | `s_race` | `class × 8 + race`: race 0 Human, 1 Elven, 2 Dwarven, 3 Goblinoid, 4 Orc, 5 Skaven, 6 Peasant, 7 big; class 0 notype, 1 Infantry, 2 Cavalry, 3 Archers, 4 Artillary, 5 Wizard, 6 Monster, 7 RollingStock, 8 Special |
+| 34 | `s_pntval` | 🟡 points value (experience for the killer) |
+| 35 | `S_BalWeap` | missile weapon: 1 bow, 2 crossbow, 5 great cannon, 6 mortar, 7 Hellblaster, 8 rock lobber, 9 Wood Elf bow, 11 cannon, 12 doom diver, 13 warp lightning, 14 breath, 15 warpfire, 16 spellcaster marker (Wyvern shaman), 17 Gyrocopter bomb/steam gun, 18 short bow, 19 longbow (artillery: on the leader) |
+| 36–39 | `s_cmdr`, `s_armname`, `s_weponame`, `s_banner` | `s_weponame` = weapon name string `BRTXT 200 + n` (15 "Crossbow", 25 "Scimitar"…); the other three are always 0 |
+
+**`s_side` byte** (token 13) is a bit field, decoded by cross-referencing it with the
+`;S_RACE is …` comments in all files:
   - bit 7 (`0x80`) = **enemy side**: all Skaven, Orcs and Goblins, as well as human enemies (`129` = Human Infantry);
   - bit 6 (`0x40`) = presumably the neutral/NPC side: `RollingStock` (wagons), `Peasant`, allies;
   - bits 0–5 = unit type (dominant label):
@@ -527,11 +551,14 @@ Clanrats `5,3,3,3,3,1,4,1,5` is exactly the Clanrat profile from the rulebook; h
 | 6 | Elven | 13 | Goblinoid Archers | | |
 
   The S_RACE comment does not always match the code (e.g. code 3 is sometimes "Human Cavalry").
-  The editor apparently computed it from another field (`s_race`) and warned about the mismatch.
+  The editor computes the comment from `s_race` (agrees in 879/889 units) and warned about the
+  mismatch between the two fields.
 
-**`psy_status`** (`|` flags): `HateGreens`, `HateSkaven`, `HateDwarfs`, `FearToGobs`,
-`CauseFear`, `CauseTerror`, `Frenzy`, `CantBreak`, `CantRally`, `CantMelee`, `CantDie`,
-`PsyImmune`, `MagicResistent`. These are the psychology rules from tabletop Warhammer.
+**`psy_status`** (`|` flags) ✅ is a 16-bit field at `unit + 0xBE`, bit = token − 19:
+0 `CantBreak`, 1 `Frenzy`, 2 `CauseFear`, 3 `CauseTerror`, 4 `FearToGobs`, 5 `HateDwarfs`,
+6 `HateGreens`, 7 `HateSkaven`, 8 `PsyImmune`, 9 `MagicResistent`, 10 `CantRally`,
+11 `AlwaysPursue` (unused by the scripts), 12 `CantMelee`, 13 `CantDie`. Their effects are listed
+under "Game rules".
 
 ### Parser
 
@@ -544,24 +571,116 @@ python3 scripts/render_battle.py .../FILE/SCRIPT/BF001.BTS out.png 0.5
 
 ### Open questions (scripts)
 
-- Meaning of `set:map`, `whoami`, `s_side[3]`, `s_mount[1..]`, `s_cmdr`, `s_armname`, `s_weap`,
-  `S_BalWeap`, and of the numbers of most objective letters.
+- Meaning of `set:map`, `whoami`, of the stat bytes `s_cmdr`, `s_armname`, `s_banner` (always 0), and of the numbers of most objective letters. The other
+  `setstats` fields are resolved (see "Unit stat fields").
 - The `,N` after `troopsprites`/`banner`/`leaderportrait`/`loadspr`: 0 in all 3314 uses, and when it
   is missing (`loadspr:Wagon`) the file is not packed. Hypothesis: a colour or variant selector.
 - Whether `dir = 0` selects sprite direction frame 0 (derived, not observed in the running game).
 - Units packed in a battle's `SPRITES.PBX` but not declared in its `.BTS` (20 of 44 campaign battles).
   Hypothesis: the mission DLL spawns them.
 
+## Game rules — `GAMEF.DLL`
+
+**Close combat, morale and shooting read from the code; full report with function addresses,
+evidence and open questions: `notes/game_rules.md`.** Checked by `python3 -m whshr check`; tables
+printed by `python3 -m whshr rules <installation>`. Everything below is ✅ unless marked 🟡.
+
+- **Random numbers**: MSVC `rand()`; a D6 is `rand() % 6 + 1`.
+- **Clock and time**: one tick per 100 ms timer message (at most 10 ticks/s); 19 ticks = one segment;
+  segments count 10 → 1 per turn (a turn is 19 s). A unit fights its close combat
+  in the segment equal to its **Initiative** (higher strikes first).
+- **To hit** (`0x100E8C28`, `[attacker WS][defender WS]`) and **to wound** (`0x100E8CB8`, `[S][T]`)
+  are exactly the WFB 4th edition charts for values 1–10. **Save modifier** `max(0, S − 3)`.
+- **Armour save** by `s_armr`: 0 none, 1 6+, 2 5+, 3 4+, 4 3+, **5 none** (table value 7, probably a
+  bug), 6 regeneration 4+, 7 none, 8–13 6+, 5+, 4+, 3+, 2+, 2+. A D6 below the save + modifier fails. Regeneration (6) is a 4+ roll in close
+  combat, but **regenerating models are never wounded by missiles**; an armour item turns code 5 into regeneration.
+- **Attack**: A (×2 with `Frenzy`), WS +1 against a model busy fighting someone else (not monsters), S + weapon class bonus
+  (two-handed +2, spear/halberd +1) +1 for the first `1.5 × frontage` attacking models after a charge. Hatred re-rolls misses in the
+  first round. Mounts attack with their own profile and a fixed charge strength. Magic items of the
+  leaders modify WS, S, A, armour and wounds.
+- **Combat result**: kills + rank bonus `size / width − 1` (width > 3, **no +3 cap**) + attack direction
+  (rear +2, flank +1), summed per side over all units on the same battle grid. No standard bonus found.
+  Resolved once per turn at the grid's creation segment: first two turns after contact, then every 1–2 turns.
+- **Who fights**: a model holding a cell orthogonally next to an enemy model on the combat's 17 × 17
+  grid (12 units per cell); up to frontage models are placed per tick, the rest wait and wrap around.
+  No rank or spear rules. Only monsters strike back immediately (per-round attack pool).
+- **Movement**: M only feeds the speed stat `s_rlmv = trunc(4.8 × M + I) / 2` (the mount's M for riders); units
+  move `s_rlmv × k / 16` world units per tick (k 1.8 free, 1.0 closing in, 2.5 charging, 1.5 fleeing and
+  pursuing), about 9.8" per turn for M4 I3 infantry; terrain does not slow units; they wheel on a front corner.
+- **Magic**: one shared power pool of 0–8 per side, re-rolled by a random walk every 50 s of real time; spells
+  cost 1–3, paid on the click, and always work if the target is in range and within ±50° of the wizard's
+  facing (no casting roll, line of sight or levels). Bolts: Lightning S6 D3, Warp Lightning S5 D6, Fireball S4;
+  Conflagration of Doom and Da Krunch slay models outright; Madness changes a unit's side; Sapphire Arch is a
+  portal. Dispelling is a 50%/100% aura within 80 units (Dispel Magic, Mork Save Uz, Banner of Arcane
+  Protection, Talisman of Obsidian). Banner of Wrath and Grudgebringer cast Lightning/Fireball once per wind.
+- **Commands**: player orders are panel buttons executed by the unit scripts. "Fight harder" (flexed arm, melee
+  only) gives the focused unit +1 S and +1 Leadership for one segment; "Independent" (head icon) lets a unit
+  rally, react and choose targets on its own. Withdraw routs the unit when it is not allowed.
+- **Details**: mounts add their own attacks but cannot be wounded separately; there is no standard, battle standard
+  or general's Leadership; units with I 20 (the Dragon, Orcs under "Ere We Go!") never strike in their own segment.
+- **Leadership test**: pass if `modifier + (rand() % 11 + 2) <= Ld` of the leader (a **uniform 2–12
+  roll, not 2D6**).
+- **Break test**: modifier = how much the combat was lost by; a unit beaten by a fear-causing enemy
+  breaks without a test (unless `CantBreak`, `Frenzy`, `PsyImmune`, Dread Banner); a unit that hates
+  its enemy passes on 10 or less.
+- **Panic**: a test each time the unit's losses cross another quarter of its original size, from any
+  cause, with modifier `1 − remaining quarters` (easier early, harder late).
+- **Fear/terror**: charging a fear-causer needs a Leadership test (failure: charge refused); when charged by
+  or touching one, failure means flight. Terror-causers make non-immune units flee without a roll.
+- **Flank/rear charge**: a charge into the rear arc or the rear half of a flank forces a Leadership test
+  (failure: rout). `FearToGobs` is never used.
+- **Rout and pursuit**: routed units run straight away from their opponent and are removed when they leave
+  the table (`s_routed` counts them); their opponents pursue (not player artillery, wizards, archers) and
+  inflict automatic hits in each segment of contact (🟡). Pursuit ends on a chase budget, the target
+  rallying or dying, or the map edge.
+- **Rally**: not with `CantRally` or at ≤ 25% strength; +1/+2 penalties by casualties; no enemy within
+  160 units; first attempt a turn after the rout, then every 3 segments, **only while the player's
+  "Rally!" order is on** (or the unit's independent toggle). The same order enables the test to stop
+  pursuing; AI units never take it.
+- **Behaviour scripts**: events (rout, charged, rally…) are queued for each unit and handled by its
+  bytecode script from the mission DLL (see "Mission logic"); shouts, portraits and speech come from
+  per-race `React` tables.
+- **Shooting**: no to-hit chart. Archers fire ⌈models / 4⌉ projectiles per volley (artillery one) at a
+  target in the 90° front arc and strictly within range, after halting and turning. Each lands at
+  `rand() % (11 − BS)` scatter steps per axis (8 units per step, scaled by distance/range; +8 behind
+  scenery; artillery `8 × artillery die`). Reload `(10 − I) × 18` ticks minus a weapon constant (bow 43,
+  crossbow 30, longbow 39, short bow 46, Wood Elf bow 54). Ranges use **24 world units per inch** (short
+  bow 16", bow 24", crossbow and longbow 30", great cannon 60"). Arrows: S3 (crossbow, Wood Elf bow S4),
+  one model, 1 wound. Blast weapons hit **every model** of a unit they land in or fly into (great cannon
+  S10 D6, cannon S10 D4, mortar S7 D3, rock lobber S5 D6, Hellblaster S5 within 12" else S4), and random
+  models in the blast margin at S/2 for 1 wound. No moving, long-range or cover modifiers; shooting into
+  close combat is allowed. Artillery misfires on a 6, then explodes on a 1. Dragon breath (D6+3 S8 hits,
+  targets rout), warpfire (D6 S4) and the Doomwheel (3 random-distance bolts) use the spell effect engine.
+  Battle messages come from `GMTXT` 2000–2021 ("Direct hit on the %s!", "The %s has misfired."…).
+
+### Open questions (game rules)
+
+Full register with evidence, next steps and priorities: `notes/game_rules.md`, section 11 (R1–R31).
+The most important ones for an engine:
+
+- How many models fight in practice once movement is simulated (R36); which orders count as a
+  charge or pursuit (R32).
+- The remaining ~150 behaviour script opcodes (R38); magic effects to confirm in the running game: Flamestorm and Curse of Anraheir
+  without an end, AI area spells (R52, R53).
+- Whether an engine should reproduce apparent bugs: armour rating 5 without a save (R11), "Ere We Go!" stopping
+  close combat attacks (R5), charging monsters keeping +1 S (R33); the withdraw condition (R48).
+
 ## Mission logic — `FILE/SCRIPT/BFxxx.DLL`
 
-Real **PE32 Win32 (i386) libraries, compiled with MSVC**, about 24–29 KB, mostly
-C runtime. Internal name `dll.dll`. Exports: `DLLGetScriptPointer`, `DLLReturnInstCount`.
-The game loads them via `script\%s.DLL` (message `Failed to load Script DLL %s`).
-Hypothesis: `DLLGetScriptPointer` returns a table of AI/trigger functions, and units refer
-to them via `set:script=N`. **To be investigated by disassembly** (e.g. Ghidra).
-An open engine would have to rewrite these scripts by hand. The campaign flow around the battles
-(briefings, mission choice, debriefings, movies) is not native code but text: the glue scripts in
-`WND.DLL` (see "PE resources").
+Real **PE32 Win32 (i386) libraries, compiled with MSVC**, about 24–29 KB, mostly C runtime. Internal
+name `dll.dll`. Exports: `DLLGetScriptPointer`, `DLLReturnInstCount`. The game loads them via
+`script\%s.DLL` (message `Failed to load Script DLL %s`).
+
+**The DLLs carry bytecode, not native logic** (✅, `notes/game_rules.md`, "Unit behaviour scripts and
+events"). `DLLGetScriptPointer(id)` is a table lookup: ids from 0 → the mission's unit behaviour scripts (3–37 per DLL; `set:script=N` selects one),
+ids 100–170 → a shared library that is byte-identical in all 45 DLLs. The scripts are arrays of 32-bit words
+(bit 15 = opcode, `0x0ABC` label, `0x80E8` end) run for every unit each tick by an interpreter in
+`GAMEF.DLL` with 232 opcodes. They handle queued events (charged, rout, rally, enemy routed…) and issue
+orders; `set:script=PLAYER_SCRIPT` selects library script 100. About 80 opcodes are named so far; with a
+full opcode catalogue an engine could run the original scripts instead of rewriting them. `DLLReturnInstCount` returns 33000 = `0x80E8`, a format check.
+
+The campaign flow around the battles (briefings, mission choice, debriefings, movies) is not in these
+DLLs either: it is the glue scripts in `WND.DLL` (see "PE resources").
 
 ## Name tables (script names → files)
 

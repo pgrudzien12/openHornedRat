@@ -57,7 +57,7 @@ about 30 standalone scripts, each with its own `--check`; they now need to be co
 | 1.5b | Effect sprite layouts: `SPELLS`, `GENBATT`; which `SPELLS` map belongs to which spell | ⬜ | M | |
 | 1.6 | `.FON` and `GLUE` palettes | ✅ | S | menu text rendered; open: font → UI element, `GAME`/`OPT`/`REND` palettes |
 | 1.7 | `SPRITE3.BTP` and sprite leftovers | ✅ | S | not a LUT; legacy `.FOL` layouts; `SPELLS` map index rule |
-| 1.8 | Script field semantics | 🟡 | M | objective letters solved, `A`/`Z` numbers mostly; open: other letters' numbers, `set:map`, `whoami`, `,N` |
+| 1.8 | Script field semantics | 🟡 | M | objective letters solved, `A`/`Z` numbers mostly; `setstats` unit fields and `psy_status` bits resolved from `GAMEF.DLL` (`notes/game_rules.md`); open: other letters' numbers, `set:map`, `whoami`, `,N` |
 | 1.9 | **Glue script parser and campaign flow graph** (`WND.DLL`: `FLOWSCRIPT*` → `MISSION*WINDOW` → `*BRIEF*` → `*MISSION*` → `BFxxx`, movies, cash) | ✅ | M | full parser and graph builder in `whshr.campaign`, JSON/DOT/Markdown export, verified against all 33 mission windows and 17 flow scripts |
 | 1.10 | Listening checks for music, effects (with `pitch`) and speech | ✅ | S | project owner reviewed the full music renders, effects with `pitch` applied, and speech |
 
@@ -89,16 +89,17 @@ perspective battle scene.
 
 ## Phase 4 — game logic (hardest; disassembly)
 
-Tool: Ghidra (32-bit PE, MSVC 1995). Order from lowest risk:
+Tool: Ghidra 12.1 headless (32-bit PE, MSVC 1995); optional setup and helper scripts in
+`tools/ghidra/`. Order from lowest risk:
 
-| # | Task | Size |
-|---|---|---|
-| 4.1 | Mission DLL interface: what `DLLGetScriptPointer`/`DLLReturnInstCount` return, which game APIs the scripts call (on the small `BF001.DLL`); which units the DLL spawns (units packed in `SPRITES.PBX` but missing from the `.BTS`) | M |
-| 4.2 | In `GAMEF.DLL`/`WHSHR.EXE`: the `.BTS/.MRC` command interpreter and the glue language semantics (syntax and content already known from 1.9) | M–L |
-| 4.3 | Combat rules: how `s_move`, `s_armr`, `psy_status`, ranks and morale feed into the calculations (compare with the Warhammer Fantasy Battle 4th ed. rules) | L |
-| 4.4 | Save games `savegame.0/.5` + campaign state (`ARMY/MARCH/PLAY.MRC`, `debrief.dbf`, gold, mercenaries) | M–L |
-| 4.5 | Rewriting the 45 mission scripts into our own readable format (DSL/Python/Lua) | L, spread over time |
-| 4.6 | Game events → sound effect indices and battle music choice (`battle`, `tense`, `victory`…); runtime palette choice per screen | M |
+| # | Task | Status | Size | Verification / notes |
+|---|---|---|---|---|
+| 4.1 | Mission DLL interface: what `DLLGetScriptPointer`/`DLLReturnInstCount` return, which game APIs the scripts call (on the small `BF001.DLL`); which units the DLL spawns (units packed in `SPRITES.PBX` but missing from the `.BTS`) | 🟡 | M | the DLLs are bytecode tables: mission unit scripts from id 0 (3–37 per DLL, selected by `set:script=N`), 100–170 a shared library identical in all 45 DLLs, run by a 232-opcode interpreter in `GAMEF.DLL`; `DLLReturnInstCount` = format check; events and morale opcodes named (`notes/game_rules.md`); open: remaining opcodes |
+| 4.2 | In `GAMEF.DLL`/`WHSHR.EXE`: the `.BTS/.MRC` command interpreter and the glue language semantics (syntax and content already known from 1.9) | 🟡 | M–L | keyword → token tables, instruction lookup and the editor's unit writer located; `setstats` byte layout established (`notes/game_rules.md`); the section readers and the glue interpreter not traced |
+| 4.3 | Combat rules: how `s_move`, `s_armr`, `psy_status`, ranks and morale feed into the calculations (compare with the Warhammer Fantasy Battle 4th ed. rules) | 🟡 | L | established from code: WFB 4th ed to-hit/to-wound/save charts, armour codes, weapon classes, mounts, magic items, Initiative strike order, combat resolution (uncapped rank bonus, flank/rear), break/panic/fear/terror/rally/pursuit, flat 2–12 Leadership roll, shooting scatter by BS, reload, ranges (24 units per inch), misfires; `python3 -m whshr check` verifies tables and stat layout. Open points register R1–R31 with next steps in `notes/game_rules.md` §11; resolved so far: R1–R10, R12–R27, R29–R35, R39–R45 (charge bonus, monster return blows, battle-grid pairing and timing, events, flank/rear test, fear/terror flight, rout, pursuit, rally schedule, missiles, special weapons, fanatics, command panel and orders, regeneration, mounts, Initiative 20, real time, movement and speeds, script selection, magic: power pools, casting, every spell, dispel, items); decisions for an engine: R11, R33; top remaining: behaviour opcode catalogue and a `whshr` disassembler (R38, R51; batch 3 planned in `notes/game_rules.md` §11.7, interrupted by the spend limit); to confirm under Wine: R52, R53 |
+| 4.4 | Save games `savegame.0/.5` + campaign state (`ARMY/MARCH/PLAY.MRC`, `debrief.dbf`, gold, mercenaries) | ⬜ | M–L | |
+| 4.5 | Rewriting the 45 mission scripts into our own readable format (DSL/Python/Lua) | ⬜ | L, spread over time | alternative now possible: an engine-side interpreter for the original bytecode once the opcodes are catalogued |
+| 4.6 | Game events → sound effect indices and battle music choice (`battle`, `tense`, `victory`…); runtime palette choice per screen | ⬜ | M | |
 
 Supporting alternative: **instrumentation under Wine** (logging file opens, script API calls,
 `MIDI_InitTune` arguments during play) to confirm hypotheses from Ghidra and several open questions
@@ -132,7 +133,11 @@ Phase 2 is closed (M2 reached). Priorities, as decided by the project owner:
 1. **Game rules first (4.3, with the parts of 4.2 they need)**: targeted disassembly of
    `GAMEF.DLL`/`WHSHR.EXE` for combat, morale and how the `s_*` unit stats, ranks and `psy_status`
    feed into the calculations, compared with Warhammer Fantasy Battle 4th edition. 1.8 (script field
-   semantics) is resolved along the way where the rules need it.
+   semantics) is resolved along the way where the rules need it. **First pass done (September 2026):**
+   stat layout, close combat, combat resolution, morale and the shooting mechanics are established in
+   `notes/game_rules.md`; research batches A–F (September 2026) then resolved most open points,
+   including the unit behaviour bytecode, movement, real time and magic. Next: batch 3 (§11.7 of the notes:
+   behaviour opcode catalogue, `whshr` script disassembler, small leftovers).
 2. **Real-time engine prototype (nice to have)**: choose the technology (see phase 5), then show the
    `viewer-web` scene (terrain, scenery, sprites, moving camera) in real time. Independent of 1, so
    it can run in parallel.

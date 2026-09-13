@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from . import legacy
-from . import audio, battle2d, battle3d, campaign, pbx, si, viewer_web
+from . import audio, battle2d, battle3d, campaign, pbx, rules, si, viewer_web
 from .paths import Installation
 
 
@@ -41,6 +41,7 @@ def check(installation):
         )),
         ("campaign flow", lambda: bool(campaign.build_campaign_graph(str(game.root)))),
         ("3D viewer orientation", battle3d.check_orientation),
+        ("game rules tables and unit stats", lambda: rules.check(game.root)),
     )
     failed = sum(not _check(name, callback) for name, callback in checks)
     print(f"\n{len(checks) - failed}/{len(checks)} check groups passed")
@@ -131,6 +132,9 @@ def main(argv=None):
     terrain_parser = commands.add_parser("terrain-check", help="compare GRND.PBX mesh heights with GRND.GD")
     terrain_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     terrain_parser.add_argument("battle", nargs="?", help="optional MESH directory, e.g. BF001")
+    rules_parser = commands.add_parser("rules", help="print GAMEF.DLL combat tables or decoded unit stats")
+    rules_parser.add_argument("installation", type=Path, help="WARFB installation directory")
+    rules_parser.add_argument("script", nargs="?", help="optional BTS/MRC filename or path: decode its units")
     web_parser = commands.add_parser("viewer-web", help="open local browser controls for the battle viewer")
     web_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     web_parser.add_argument("battle", help="BTS filename or path")
@@ -181,6 +185,8 @@ def main(argv=None):
             print("{mesh}: {compared}/{vertices} vertices, RMSE {rmse:.6f}, max {max_error:.6f}, "
                   "outside GD {outside_gd}".format(**result))
         return 0 if results and all(result["max_error"] < 0.025 for result in results) else 1
+    if args.command == "rules":
+        return rules.main(args.installation, args.script)
     if args.command == "viewer-web":
         viewer_web.serve(args.installation, args.battle, args.port)
         return 0
