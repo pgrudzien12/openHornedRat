@@ -107,13 +107,25 @@ from phases 1–3.
 
 ## Phase 5 — engine
 
-- **Tools and extraction**: stay in Python (the `whshr/` package).
-- **Prototype**: Python + pygame (2D: plan map + animated sprites) as a quick testbed for movement,
-  animation and collisions with `OBJECTS`/`BOUNDARIES`. Does not require phase 2.
-- **Target**: an engine reading the game installation on the fly, e.g. C++/SDL2 + OpenGL or Godot
-  (GDExtension for reading the formats). M2 showed that a real 3D perspective battle scene is needed;
-  the choice of technology (Godot 4 vs C++/SDL2 + OpenGL) is still open and must be made before the
-  real-time prototype. A Python step writing a local, never-committed asset cache is acceptable at first.
+- **Architecture**: a data-first engine: original-installation readers -> normalized data -> deterministic
+  headless simulation -> rendering/sound/input frontend. The full decision and constraints are in
+  [`notes/engine_architecture.md`](notes/engine_architecture.md).
+- **Tools, rules, and prototype**: keep `whshr` as the Python reference implementation for readers,
+  validation, rule experiments, and an initial headless/real-time simulation prototype. Build M3 first
+  as a Python testbed (plan map, animated sprites, movement, `Nav*`, `OBJECTS`/`BOUNDARIES`) whose
+  simulation API does not depend on its presentation library. A local, never-committed asset cache is
+  acceptable.
+- **Runtime**: prefer a custom SDL2 frontend with a 3D renderer (initially OpenGL) after the prototype
+  establishes actual requirements. SDL2 covers windowing, input, and audio, not rendering by itself.
+  Godot may be used as a disposable visualization/prototyping client, but must not own the authoritative
+  rules, assets, saves, or mod format.
+- **Modding**: support ordered declarative data packages with stable namespaced identifiers, schemas,
+  validation, dependencies, and deterministic merge/override rules. Original formats remain vanilla
+  inputs, not the public mod authoring format. Defer a sandboxed, versioned mission scripting API until
+  declarative data cannot express a required feature; do not accept arbitrary native plug-ins initially.
+- **Original mission DLLs**: never execute `SCRIPT/BFxxx.DLL` as native code. Read their bytecode tables
+  as data and implement the original interpreter for vanilla compatibility. New mission content will use
+  a readable normalized mission format once the opcode/event model is established.
 - Audio in the engine: MIDI through the user's GM soundfont + the converted SBK in bank 1 (GM file
   preferred, FM name rule `name[:6] + 'FM'`); SFX = PCM resampled to `pitch`, volume/pan, loop/list/random,
   priority channels.

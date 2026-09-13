@@ -3,10 +3,12 @@
 An open, fan-made engine for **Warhammer: Shadow of the Horned Rat** (Mindscape, 1995),
 the first real-time strategy game set in the Warhammer Fantasy world.
 
-We follow in the footsteps of projects such as [OpenMW](https://openmw.org) (Morrowind) and
-[OpenRA](https://www.openra.net) (Command & Conquer). The goal is to make the original game
-comfortably playable on modern systems, including Linux, without emulation, without Wine
-and without the old engine's bugs, such as missing sound or random crashes.
+We follow in the footsteps of projects such as [OpenMW](https://openmw.org) (Morrowind),
+[OpenRA](https://www.openra.net) (Command & Conquer), and OpenXcom. The goal is to make the
+original game comfortably playable on modern systems, including Linux, without emulation,
+without Wine and without the old engine's bugs, such as missing sound or random crashes. In
+the longer term, it aims to support open, data-driven extensions and mods beyond the original
+campaign.
 
 ## Project status
 
@@ -19,6 +21,8 @@ textures and scenery meshes, and the cutscene videos. What is still missing is t
 
 - [`FORMATS.md`](FORMATS.md): description of the reverse-engineered and still unknown file formats;
 - [`ROADMAP.md`](ROADMAP.md): plan of further work and milestones.
+- [`notes/engine_architecture.md`](notes/engine_architecture.md): engine, original-mission
+  compatibility, and modding direction.
 
 ## Original game required
 
