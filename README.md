@@ -19,6 +19,7 @@ textures and scenery meshes, and the cutscene videos. What is still missing is t
 
 - [`FORMATS.md`](FORMATS.md): description of the reverse-engineered and still unknown file formats;
 - [`ROADMAP.md`](ROADMAP.md): plan of further work and milestones.
+- [`docs/testing.md`](docs/testing.md): behaviour-driven development rules for the engine.
 
 ## Original game required
 
@@ -44,6 +45,7 @@ package. The package provides the common entry points:
 ```sh
 python3 -m whshr check /path/to/WARFB
 python3 -m whshr extract /path/to/WARFB extracted
+python3 -m whshr catalog /path/to/WARFB ~/.cache/openhornedrat/catalog.json
 python3 -m whshr viewer /path/to/WARFB BF001.BTS battle.png
 python3 -m whshr viewer /path/to/WARFB BF001.BTS battle-debug.png --diagnostic
 python3 -m whshr viewer /path/to/WARFB BF001.BTS camera.png --projection perspective --yaw 225 --pitch 32 --distance 160 --fov 50
@@ -76,6 +78,38 @@ serves the local browser and renders from the local game installation.
 their `.BTS`/`.MRC` formations. Use `--target-x`, `--target-y`, and `--zoom` to select a view;
 `--spacing` and `--direction-offset` support visual calibration. It does not use PBX terrain or
 scenery and does not alter the independent `viewer`/`viewer-web` 3D asset viewer.
+
+`catalog` writes a metadata-only index for lazy asset loading. It records logical asset IDs,
+original-relative paths, decoder types, and source fingerprints; it neither copies nor decodes
+game assets and should be written outside the repository.
+
+## Native engine prototype
+
+The native prototype uses SDL2 for the window/input loop and OpenGL for rendering. Start it
+against a local game installation with:
+
+```sh
+./scripts/run_engine.sh /path/to/WARFB
+```
+
+The runner starts `SceneMachine`, lazily extracts the original `A1.SI` intro into a temporary
+directory, plays its Smacker video through `ffplay` at the game's verified 8 fps, then enters the
+current menu scene. Install FFmpeg to provide `ffplay`. The runner applies an FFmpeg `setpts`
+filter because the source Smacker header does not represent the engine's 125 ms frame cadence.
+Temporary cutscene output is removed after playback. The menu does not yet have a native visual
+frontend.
+
+The SDL2/OpenGL movement prototype remains available for renderer development:
+
+```sh
+cmake -S . -B build
+cmake --build build
+./build/horned-rat-engine /path/to/WARFB BF001.BTS
+```
+
+It requires the SDL2 and OpenGL development packages plus CMake. It currently validates the
+supplied installation, opens a native window, and provides a deterministic fixed-tick click-to-move
+loop; press `Escape` to quit.
 
 ## License and rights
 
