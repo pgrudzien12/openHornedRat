@@ -6,3 +6,6 @@ samples/
 battles/
 extracted/
 screenshots/
+
+# Native build output.
+build/
