@@ -284,7 +284,7 @@ for (int y = 0; y < h; y++)
 
 ## Sprite animation layout (directional sets)
 
-**Layout reverse-engineered and verified visually; the `dir` mapping and frame timing are open.**
+**Layout reverse-engineered and verified visually; the rotation sense of `dir` is known, its zero frame and frame timing are open.**
 Report: `notes/animations.md`. Export to sheets and animated GIFs: `scripts/anim_export.py`.
 
 72 of the `.FOL/.BOP` sets are **directional sprites**: units, characters, monsters, artillery,
@@ -326,7 +326,10 @@ Verification: an automatic mask comparison (next phase vs next direction) fits `
 in 173 of 178 multi-phase groups, and the other 5 are correct by eye; 31 sets were inspected on
 labelled, anchor-aligned sheets; a group rendered with another group's map gives garbage colours.
 
-Open: how the script `dir` (0..511) maps to the 8 directions, frame timing, some uncertain action
+Script `dir` turns clockwise from +Y (see "Coordinates" under the battle scripts) while the frame
+order runs counter-clockwise on screen, so a north-up view uses `direction = −round(dir / 64) mod 8`;
+in 3D the frame is taken relative to the camera heading (`notes/battle_viewer.md`).
+Open: which frame `dir = 0` selects (derived as frame 0, not observed), frame timing, some uncertain action
 labels, and the layouts of the effect sets `SPELLS` and `GENBATT`.
 
 ## Leftover files: `SPRITE3.BTP`, `SPRITE30.BOP`
@@ -390,8 +393,15 @@ in the rest it deviates by −8…+9). An engine should ignore it and count the 
   and forest edge.
 - Coordinates can go beyond the field (`CameraEdge` reaches −300; in `BF001` the crossbowmen stand
   at x=1814 with a field width of 1600 — hypothesis: reinforcements arriving later).
-- `dir` and the fourth number of `placefurniture` take values 0…511 (max observed 504).
-  **Hypothesis:** a full turn = 512. The zero point and direction of rotation are unverified.
+- `dir` and the fourth number of `placefurniture` take values 0…511 (max observed 504); a full turn
+  is 512. **0 = +Y (north on the plan map), increasing clockwise.** Evidence: over all `BF*.BTS`,
+  units face the nearest unit of another army far better under this convention (mean cosine +0.44)
+  than counter-clockwise (+0.20) or with any other zero point; scenery meshes rotated this way
+  match their plan-map footprints (`BF035` TwinTowers, `BF036` pipe grilles). For a mesh, local +Z
+  faces `(sin a, cos a)` and local +X faces `(cos a, −sin a)` in BTS X/Y.
+- **3D axes:** BTS X → mesh X, BTS Y → mesh Z, height → mesh Y (one mesh unit = 8 BTS units). This is a
+  left-handed frame (as in Direct3D Retained Mode); rendering it with a right-handed camera basis
+  mirrors the scene. Details: `notes/battle_viewer.md`.
 
 ### `.BTS` — sections
 
@@ -422,7 +432,7 @@ Order in the files: `FIELD`, `MISSIONINFO`, `DYNAMIC_LOAD`, `OBJECTS`, `SCENERY`
 | `loadplanmap:MAP001` | plan map, frame 0 of `MAP001.FOL/.BOP` (type 1, 8 bpp) |
 | `loadportbg:BACK14` | portrait background |
 | `Ambient light color`, `Position`, `Bank angle` | floats; almost always zeros (test values 1,2,3… in 2 files) |
-| `Camera:45.0` | 0/45/90/135/180/270 — presumably the initial camera rotation |
+| `Camera:45.0` | 0/45/90/135/180/270 — presumably the initial camera heading, clockwise from north (hypothesis: `BF001` = 45 matches the in-game "N ne E" compass). The battle camera itself is a perspective camera |
 | `set:vx`, `set:vy`, `set:zoom` | only in 1 file; presumably the initial view |
 
 ### Mission objectives (`Objective:L,a,b`)
@@ -538,7 +548,7 @@ python3 scripts/render_battle.py .../FILE/SCRIPT/BF001.BTS out.png 0.5
   `S_BalWeap`, and of the numbers of most objective letters.
 - The `,N` after `troopsprites`/`banner`/`leaderportrait`/`loadspr`: 0 in all 3314 uses, and when it
   is missing (`loadspr:Wagon`) the file is not packed. Hypothesis: a colour or variant selector.
-- The zero point of `dir` and whether a full turn is 512.
+- Whether `dir = 0` selects sprite direction frame 0 (derived, not observed in the running game).
 - Units packed in a battle's `SPRITES.PBX` but not declared in its `.BTS` (20 of 44 campaign battles).
   Hypothesis: the mission DLL spawns them.
 

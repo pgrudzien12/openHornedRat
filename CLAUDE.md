@@ -48,7 +48,7 @@ unknown formats. In short:
 |---|---|
 | `.PAL` (color palette) | ✅ 2 variants: RGB palette (`STANDARD`, `GLUE`/`WIND` halves) or 4→8-bit sprite color maps (512 B each) |
 | `.FOL` / `.BOP` (sprites, backgrounds) | ✅ 8 bpp, 4 bpp, 4 bpp + zero RLE; color map index rule (modulo 16); legacy layouts; visually verified |
-| Unit animation layout | ✅ groups × phases × 8 directions (move/dead/attack/stand/shoot); 🟡 `dir` mapping, anchor y, timing |
+| Unit animation layout | ✅ groups × phases × 8 directions (move/dead/attack/stand/shoot); 🟡 `dir` zero frame (clockwise sense known), anchor y, timing |
 | Script names → files | ✅ sprite and furniture tables in `WHSHR.EXE`/`GAMEF.DLL` |
 | `.BTS` (battle), `.MRC` (army) | ✅ INI-style text scripts, parser works on 87/87 files, layout verified on the plan map. Objective letters solved; some fields (`set:map`, `whoami`, part of `setstats`) still unknown |
 | `DLL/*.DLL` resources | ✅ bitmaps, texts, dialogs, cursors; `WND.DLL` campaign glue scripts parsed into a verified flow graph |
@@ -73,6 +73,8 @@ ROADMAP.md         - work plan: game file inventory, phases 0-5 with status, mil
 notes/             - full per-format reports (how each claim was verified, per-file tables, open questions)
   animations.md, battle_viewer.md, btp_sprite_leftovers.md, fonts_glue.md, music.md, pbx_rnc.md, pe_resources.md,
   scene_scripts.md, sfx.md, si_omni.md, sprite_names.md, terrain_gd.md
+whshr/             - unified package and CLI: python3 -m whshr check|extract|viewer|viewer-web|
+                     viewer-2d|viewer-2d-web|terrain-check (3D battle viewer: battle3d.py, 2D: battle2d.py)
 scripts/           - parsers/renderers/extractors (Python 3 stdlib only); most have a --check mode
   parse_pal.py     - parses a .PAL, checks that indices are sequential
   render_pal.py    - renders a .PAL as a PPM image (color strip)
@@ -111,7 +113,7 @@ samples/           - [local only, not in git] renders from the game files, DO NO
 Almost every data format is now reverse-engineered (see the overview table in `FORMATS.md`).
 What is left is listed in `ROADMAP.md` ("Proposed order of the next steps"); in short:
 
-1. Camera, lighting, and terrain-render validation through the static 3D battle viewer — milestone M2.
+1. Match the original perspective camera and lighting in the 3D battle viewer (`viewer-web`) — milestone M2.
 2. Open questions that need the running game under Wine (`dir` mapping, frame timing, cutscene
    events, which leftover files are loaded).
 3. Mission logic in `SCRIPT/BFxxx.DLL` and the game rules (disassembly) — deliberately last.

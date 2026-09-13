@@ -1,5 +1,6 @@
 """Render a static, textured isometric battle scene to PNG."""
 
+import functools
 import math
 import os
 import struct
@@ -14,6 +15,41 @@ from .sprites import colormap_indices, decode_frame
 
 WORLD_PER_MESH = 8.0
 BACKGROUND = (112, 150, 196)
+DEFAULT_YAW = 45.0
+DEFAULT_PITCH = 26.565
+DEFAULT_DISTANCE = 160.0
+DEFAULT_FOV = 50.0
+DEFAULT_LIGHT = (-0.4, 0.8, -0.3)
+PROJECTIONS = ("orthographic", "perspective")
+# Mesh units a sprite's foot point is moved toward the camera for its depth test, so the ground it
+# stands on (and a gentle slope just behind it) does not clip the billboard.
+SPRITE_DEPTH_BIAS = 1.5
+
+
+def validate_options(width, height, yaw, pitch, zoom, target_x, target_y, ambient, light, scenery_scale,
+                     projection, distance, fov):
+    """Reject camera values which would make projection or rasterization undefined."""
+    values = (width, height, yaw, pitch, zoom, ambient, scenery_scale, distance, fov, *light)
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("camera and lighting values must be finite")
+    if target_x is not None and not math.isfinite(target_x):
+        raise ValueError("target X must be finite")
+    if target_y is not None and not math.isfinite(target_y):
+        raise ValueError("target Y must be finite")
+    if width <= 0 or height <= 0:
+        raise ValueError("image dimensions must be greater than zero")
+    if projection not in PROJECTIONS:
+        raise ValueError(f"projection must be one of: {', '.join(PROJECTIONS)}")
+    if not 5 <= pitch <= 85:
+        raise ValueError("pitch must be between 5 and 85 degrees")
+    if zoom <= 0 or scenery_scale <= 0 or distance <= 0:
+        raise ValueError("zoom, scenery scale, and distance must be greater than zero")
+    if not 1 < fov < 179:
+        raise ValueError("FOV must be between 1 and 179 degrees")
+    if not 0 <= ambient <= 1:
+        raise ValueError("ambient must be between 0 and 1")
+    if not any(light):
+        raise ValueError("light must not be the zero vector")
 
 
 def _container(path):
@@ -21,39 +57,145 @@ def _container(path):
     return pbx.parse_container(data)
 
 
+@functools.lru_cache(maxsize=4)
+def _mesh_assets(mesh_dir):
+    """Decode a MESH directory once per process; the web viewer re-renders the same battle repeatedly."""
+    containers = (_container(mesh_dir / f"{name}.PBX") for name in ("GRND", "SCENERY", "SPRITES"))
+    return (*containers, legacy.module("gd_render").Terrain(mesh_dir / "GRND.GD"))
+
+
+@functools.lru_cache(maxsize=2)
+def _exe_tables(exe_path):
+    return legacy.module("spritemap_build").read_tables(exe_path.read_bytes())
+
+
 def _furniture(game):
-    tables = legacy.module("spritemap_build")
-    _, furniture, _ = tables.read_tables(game.require("WHSHR.EXE").read_bytes())
+    _, furniture, _ = _exe_tables(game.require("WHSHR.EXE"))
     return {entry["name"].casefold(): entry["file"] + ".XOF" for entry in furniture if entry["file"]}
 
 
+def _troop_sprites(exe_path):
+    table = legacy.module("spritemap_build")
+    records = [dict(entry) for entry in _exe_tables(exe_path)[0]]  # assign_categories mutates the records.
+    table.assign_categories(records)
+    return {entry["name"].casefold(): entry["file"] for entry in records
+            if entry["category"] == "troops" and entry["file"]}
+
+
 class Projection:
-    """Orthographic view from the south-west, with game-map Y represented by mesh Z."""
+    """Orthographic or look-at perspective camera; game-map Y is mesh Z."""
 
-    def __init__(self, width, height, field_width, field_height):
+    near = 0.05
+
+    def __init__(self, width, height, field_width, field_height, yaw, pitch, zoom, target_x, target_z,
+                 projection="orthographic", distance=DEFAULT_DISTANCE, fov=DEFAULT_FOV, target_height=0.0):
+        if projection not in PROJECTIONS:
+            raise ValueError(f"projection must be one of: {', '.join(PROJECTIONS)}")
         self.width, self.height = width, height
-        span = max(field_width, field_height) / WORLD_PER_MESH
-        # The visible diamond is twice the map span in the projection's vertical axis.
-        self.scale = min(width / (span * 1.65), height / (span * 1.25))
+        self.yaw, self.pitch = math.radians(yaw), math.radians(pitch)
+        self.target_x, self.target_z = target_x, target_z
+        self.target_height = target_height
+        self.projection = projection
+        self.perspective = projection == "perspective"
+        self.distance = distance
+        self.fov = fov
+        # Game data is left-handed (Direct3D RM): seen from above with +Z up on screen, +X is right.
+        self.right = (-math.cos(self.yaw), 0.0, math.sin(self.yaw))
+        self.view_direction = (-math.sin(self.yaw) * math.cos(self.pitch), -math.sin(self.pitch),
+                               -math.cos(self.yaw) * math.cos(self.pitch))
+        self.up = (-math.sin(self.yaw) * math.sin(self.pitch), math.cos(self.pitch),
+                   -math.cos(self.yaw) * math.sin(self.pitch))
+        horizontal = (math.sin(self.yaw) * math.cos(self.pitch), math.sin(self.pitch),
+                      math.cos(self.yaw) * math.cos(self.pitch))
+        self.eye = tuple(target + distance * offset for target, offset in zip(
+            (target_x, target_height, target_z), horizontal
+        ))
+        self.tan_fov_y = math.tan(math.radians(fov) / 2)
+        self.tan_fov_x = self.tan_fov_y * width / height
+        self.focal_length = height / (2 * self.tan_fov_y)
+        span_x, span_z = field_width / WORLD_PER_MESH, field_height / WORLD_PER_MESH
+        horizontal = abs(math.cos(self.yaw)) * span_x + abs(math.sin(self.yaw)) * span_z
+        vertical = abs(math.sin(self.yaw) * math.sin(self.pitch)) * span_x
+        vertical += abs(math.cos(self.yaw) * math.sin(self.pitch)) * span_z
+        self.scale = zoom * min(width * 0.92 / horizontal, height * 0.82 / vertical)
         self.cx = width / 2
-        self.cy = height * 0.37
-
-    def point(self, x, y, z):
-        return (self.cx + (x - z) * self.scale * 0.82,
-                self.cy + (x + z) * self.scale * 0.39 - y * self.scale * 0.78)
+        self.cy = height / 2
 
     @staticmethod
-    def depth(x, y, z):
-        return x + z + y * 0.25
+    def _dot(left, right):
+        return sum(a * b for a, b in zip(left, right))
+
+    def view(self, x, y, z):
+        """Return camera-space X, up, and forward depth."""
+        if self.perspective:
+            relative = (x - self.eye[0], y - self.eye[1], z - self.eye[2])
+            return (self._dot(relative, self.right), self._dot(relative, self.up),
+                    self._dot(relative, self.view_direction))
+        relative = (x - self.target_x, y - self.target_height, z - self.target_z)
+        horizontal = relative[0] * math.sin(self.yaw) + relative[2] * math.cos(self.yaw)
+        return (self._dot(relative, self.right),
+                relative[1] * math.cos(self.pitch) - horizontal * math.sin(self.pitch),
+                horizontal * math.cos(self.pitch) + relative[1] * math.sin(self.pitch))
+
+    def project(self, view):
+        """Map a camera-space point to screen coordinates and its depth-buffer value."""
+        x, up, depth = view
+        if self.perspective:
+            return (self.cx + x * self.focal_length / depth, self.cy - up * self.focal_length / depth, 1 / depth)
+        return (self.cx + x * self.scale, self.cy - up * self.scale, depth)
+
+    def point(self, x, y, z):
+        return self.project(self.view(x, y, z))[:2]
+
+    def biased_depth(self, view, bias):
+        """Depth-buffer value of a camera-space point moved ``bias`` mesh units toward the camera."""
+        if self.perspective:
+            return 1 / max(view[2] - bias, self.near)
+        return view[2] + bias
+
+    def depth(self, x, y, z):
+        return self.project(self.view(x, y, z))[2]
+
+    def clip_near(self, vertices):
+        """Clip camera-space vertices and UVs to the perspective view frustum."""
+        if not self.perspective:
+            return vertices
+        planes = (
+            lambda view: view[2] - self.near,
+            lambda view: view[0] + view[2] * self.tan_fov_x,
+            lambda view: view[2] * self.tan_fov_x - view[0],
+            lambda view: view[1] + view[2] * self.tan_fov_y,
+            lambda view: view[2] * self.tan_fov_y - view[1],
+        )
+        for plane in planes:
+            if not vertices:
+                break
+            clipped = []
+            for previous, current in zip(vertices[-1:] + vertices[:-1], vertices):
+                previous_view, previous_uv = previous
+                current_view, current_uv = current
+                previous_distance, current_distance = plane(previous_view), plane(current_view)
+                previous_inside, current_inside = previous_distance >= 0, current_distance >= 0
+                if previous_inside != current_inside:
+                    fraction = previous_distance / (previous_distance - current_distance)
+                    clipped.append((
+                        tuple(a + fraction * (b - a) for a, b in zip(previous_view, current_view)),
+                        tuple(a + fraction * (b - a) for a, b in zip(previous_uv, current_uv)),
+                    ))
+                if current_inside:
+                    clipped.append(current)
+            vertices = clipped
+        return vertices
 
 
 class Renderer:
     def __init__(self, width, height):
         self.width, self.height = width, height
         self.pixels = bytearray(bytes(BACKGROUND) * (width * height))
+        self.depth = [float("-inf")] * (width * height)
 
-    def triangle(self, points, uv, texture, transparent=False, shade=1.0):
-        """Rasterize one textured triangle. Geometry is painter-sorted by the caller."""
+    def triangle(self, points, depths, uv, texture, transparent=False, shade=1.0, perspective=False):
+        """Rasterize one textured triangle with depth testing."""
         (x0, y0), (x1, y1), (x2, y2) = points
         determinant = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
         if abs(determinant) < 1e-8:
@@ -71,15 +213,25 @@ class Renderer:
                 c = 1 - a - b
                 if a < 0 or b < 0 or c < 0:
                     continue
-                u = a * uv[0][0] + b * uv[1][0] + c * uv[2][0]
-                v = a * uv[0][1] + b * uv[1][1] + c * uv[2][1]
-                color = palette[tex_px[(int(v * tex_h) % tex_h) * tex_w + int(u * tex_w) % tex_w]]
+                depth = a * depths[0] + b * depths[1] + c * depths[2]
+                if depth <= self.depth[py * self.width + px]:
+                    continue
+                if perspective:
+                    u = (a * uv[0][0] * depths[0] + b * uv[1][0] * depths[1] + c * uv[2][0] * depths[2]) / depth
+                    v = (a * uv[0][1] * depths[0] + b * uv[1][1] * depths[1] + c * uv[2][1] * depths[2]) / depth
+                else:
+                    u = a * uv[0][0] + b * uv[1][0] + c * uv[2][0]
+                    v = a * uv[0][1] + b * uv[1][1] + c * uv[2][1]
+                color = palette[tex_px[(math.floor(v * tex_h) % tex_h) * tex_w + math.floor(u * tex_w) % tex_w]]
                 if transparent and color == (0, 0, 0):
                     continue
-                index = (py * self.width + px) * 3
+                pixel = py * self.width + px
+                self.depth[pixel] = depth
+                index = pixel * 3
                 self.pixels[index:index + 3] = bytes(min(255, int(component * shade)) for component in color)
 
-    def sprite(self, pixels, rgb, width, height, anchor_x, bottom_x, bottom_y, scale):
+    def sprite(self, pixels, rgb, width, height, anchor_x, bottom_x, bottom_y, scale, depth=None):
+        """Draw an upright billboard; with ``depth``, pixels behind the depth buffer are hidden."""
         left = int(round(bottom_x - anchor_x * scale))
         top = int(round(bottom_y - height * scale))
         for sy in range(height):
@@ -93,6 +245,8 @@ class Renderer:
                 px0, px1 = int(left + sx * scale), int(left + (sx + 1) * scale)
                 for py in range(max(0, py0), min(self.height, py1)):
                     for px in range(max(0, px0), min(self.width, px1)):
+                        if depth is not None and depth < self.depth[py * self.width + px]:
+                            continue
                         index = (py * self.width + px) * 3
                         self.pixels[index:index + 3] = bytes(rgb[value])
 
@@ -108,32 +262,49 @@ def _textures(container):
     return [(item["w"], item["h"], item["pixels"], item["palette"]) for item in container["textures"]]
 
 
-def _triangles(mesh, textures, projection, transform=lambda vertex: vertex, scenery=False):
+def _triangles(mesh, textures, projection, transform=lambda vertex: vertex,
+               normal_transform=lambda normal: normal, scenery=False, ambient=0.45, light=DEFAULT_LIGHT):
     vertices, texcoords = mesh["verts"], mesh["uv"]
     result = []
     for face, texture_index in zip(mesh["faces"], mesh["ftex"]):
         if texture_index >= len(textures):
             continue
-        indices = face[0]
+        indices, normal_indices = face
         for index in range(1, len(indices) - 1):
             selected = (indices[0], indices[index], indices[index + 1])
+            selected_normals = (normal_indices[0], normal_indices[index], normal_indices[index + 1])
             world = [transform(vertices[3 * item:3 * item + 3]) for item in selected]
-            points = [projection.point(*item) for item in world]
-            uv = [(texcoords[2 * item], texcoords[2 * item + 1]) for item in selected]
-            depth = sum(projection.depth(*item) for item in world) / 3
-            result.append((depth, points, uv, textures[texture_index], scenery))
+            vertex_uv = [(texcoords[2 * item], texcoords[2 * item + 1]) for item in selected]
+            clipped = projection.clip_near([(projection.view(*vertex), coordinate)
+                                            for vertex, coordinate in zip(world, vertex_uv)])
+            if len(clipped) < 3:
+                continue
+            normals = mesh["normals"]
+            normal = [sum(normal_transform(normals[3 * item:3 * item + 3])[axis] for item in selected_normals)
+                      for axis in range(3)]
+            length = math.sqrt(sum(component * component for component in normal)) or 1
+            light_length = math.sqrt(sum(component * component for component in light))
+            diffuse = max(0, sum(a * b for a, b in zip(normal, light)) / length / light_length)
+            for clipped_index in range(1, len(clipped) - 1):
+                triangle = (clipped[0], clipped[clipped_index], clipped[clipped_index + 1])
+                projected = [projection.project(vertex) for vertex, _ in triangle]
+                points = [vertex[:2] for vertex in projected]
+                depths = [vertex[2] for vertex in projected]
+                uv = [coordinate for _, coordinate in triangle]
+                result.append((sum(depths) / 3, points, depths, uv, textures[texture_index], scenery,
+                               ambient + (1 - ambient) * diffuse))
     return result
 
 
-def _sprite_frame(files, name, palette):
-    """Decode the first idle pose of a unit from files embedded in SPRITES.PBX."""
+def _sprite_frame(files, name, palette, direction=0):
+    """Decode an idle pose of a unit from files embedded in SPRITES.PBX."""
     by_name = {filename.casefold(): data for filename, data in files}
     base = name.casefold()
     fol, bop = by_name.get(base + ".fol"), by_name.get(base + ".bop")
     if fol is None or bop is None:
         return None
     records = [struct.unpack_from("<hhhhIB", fol, offset) for offset in range(0, len(fol), 16)]
-    frame = 72 if len(records) >= 104 else 0
+    frame = 72 + direction if len(records) >= 104 else 0
     record = records[frame]
     offsets = sorted({entry[4] for entry in records}) + [len(bop)]
     colors = by_name.get(base + ".pal", b"")
@@ -141,6 +312,25 @@ def _sprite_frame(files, name, palette):
     map_index = colormap_indices(records)[frame]
     decoded = decode_frame(bop, record, offsets[offsets.index(record[4]) + 1], maps, map_index)
     return decoded, palette, record[2], record[3], fol[frame * 16 + 3]
+
+
+def _formation(unit):
+    """Return individual soldier positions around the regiment centre in mesh units."""
+    stats, position = unit["stats"].get("s_side", []), unit["set"]
+    count = stats[1] if len(stats) > 1 else 1
+    ranks = min(count, stats[3]) if len(stats) > 3 and stats[3] else 1
+    columns = math.ceil(count / ranks)
+    angle = (position.get("dir") or 0) * math.tau / 512
+    # The fourth s_side value is the recorded initial rank count. Spacing remains a visual hypothesis.
+    spacing = 6.0
+    positions = []
+    for index in range(count):
+        row, column = divmod(index, columns)
+        side = (column - (columns - 1) / 2) * spacing
+        forward = (row - (ranks - 1) / 2) * spacing
+        positions.append((position["x"] / WORLD_PER_MESH + side * math.cos(angle) + forward * math.sin(angle),
+                          position["y"] / WORLD_PER_MESH - side * math.sin(angle) + forward * math.cos(angle)))
+    return positions, count, ranks
 
 
 def terrain_comparison(mesh, terrain):
@@ -155,9 +345,29 @@ def terrain_comparison(mesh, terrain):
             differences.append(y - ground)
     return {
         "vertices": len(vertices) // 3, "compared": len(differences), "outside_gd": outside,
-        "rmse": math.sqrt(sum(value * value for value in differences) / len(differences)),
-        "max_error": max(map(abs, differences)),
+        # NaN (not a crash) when no vertex lies inside GRND.GD; it also fails any "< tolerance" check.
+        "rmse": math.sqrt(sum(value * value for value in differences) / len(differences)) if differences else math.nan,
+        "max_error": max(map(abs, differences)) if differences else math.nan,
     }
+
+
+def check_orientation():
+    """Check screen orientation without game data: +X right, +Z up, target at the centre."""
+    ok = True
+    for projection in PROJECTIONS:
+        camera = Projection(640, 480, 1600, 1760, 180, 85, 1.0, 100.0, 110.0, projection, target_height=4.0)
+        cx, cy = camera.point(100.0, 4.0, 110.0)
+        east, north = camera.point(110.0, 4.0, 110.0), camera.point(100.0, 4.0, 120.0)
+        checks = {
+            "target at centre": abs(cx - camera.cx) < 1e-6 and abs(cy - camera.cy) < 1e-6,
+            "+X projects right": east[0] > cx,
+            "+Z projects up": north[1] < cy,
+        }
+        for name, passed in checks.items():
+            if not passed:
+                print(f"orientation {projection}: {name} failed")
+                ok = False
+    return ok
 
 
 def check_terrain(installation, battle=None):
@@ -182,19 +392,28 @@ def check_terrain(installation, battle=None):
     return results
 
 
-def render(installation, battle_file, output, width=1280, height=900, diagnostic=False):
+def render(installation, battle_file, output, width=1280, height=900, diagnostic=False,
+           yaw=DEFAULT_YAW, pitch=DEFAULT_PITCH, zoom=1.0, target_x=None, target_y=None,
+           ambient=0.45, light=DEFAULT_LIGHT, scenery_scale=1.0, projection="orthographic",
+           distance=DEFAULT_DISTANCE, fov=DEFAULT_FOV):
     """Render ``battle_file`` (a name or path) to ``output`` and return scene statistics."""
+    validate_options(width, height, yaw, pitch, zoom, target_x, target_y, ambient, light, scenery_scale,
+                     projection, distance, fov)
     game = Installation(installation)
     battle_path = Path(battle_file)
     if not battle_path.is_file():
         battle_path = game.file_dir("SCRIPT", battle_file)
     battle = load_battle(str(battle_path))
     mesh_dir = game.file_dir("MESH", battle["field"]["mesh"])
-    ground, scenery, sprites = (_container(mesh_dir / f"{name}.PBX") for name in ("GRND", "SCENERY", "SPRITES"))
-    terrain = legacy.module("gd_render").Terrain(mesh_dir / "GRND.GD")
-    projection = Projection(width, height, battle["field"]["width"], battle["field"]["height"])
+    ground, scenery, sprites, terrain = _mesh_assets(mesh_dir)
+    target_x = battle["field"]["width"] / 2 if target_x is None else target_x
+    target_y = battle["field"]["height"] / 2 if target_y is None else target_y
+    target_mesh_x, target_mesh_z = target_x / WORLD_PER_MESH, target_y / WORLD_PER_MESH
+    target_height = terrain.height(target_mesh_x, target_mesh_z) or 0.0
+    projection = Projection(width, height, battle["field"]["width"], battle["field"]["height"], yaw, pitch, zoom,
+                            target_mesh_x, target_mesh_z, projection, distance, fov, target_height)
     renderer = Renderer(width, height)
-    triangles = _triangles(ground["meshes"][0], _textures(ground), projection)
+    triangles = _triangles(ground["meshes"][0], _textures(ground), projection, ambient=ambient, light=light)
     mesh_by_name = {mesh["name"].casefold(): mesh for mesh in scenery["meshes"]}
     furniture = _furniture(game)
     missing_scenery = []
@@ -208,21 +427,25 @@ def render(installation, battle_file, output, width=1280, height=900, diagnostic
         x, z = item["x"] / WORLD_PER_MESH, item["y"] / WORLD_PER_MESH
         ground_height = terrain.height(x, z) or 0.0
 
+        # Script dir turns clockwise seen from above (as for unit formations): local +Z faces
+        # (sin a, cos a) and local +X faces (cos a, -sin a). Verified against BF035/BF036 plan maps.
         def transform(vertex, angle=angle, x=x, z=z, ground_height=ground_height):
             vx, vy, vz = vertex
-            return (x + vx * math.cos(angle) - vz * math.sin(angle),
-                    ground_height + vy, z + vx * math.sin(angle) + vz * math.cos(angle))
+            vx, vy, vz = vx * scenery_scale, vy * scenery_scale, vz * scenery_scale
+            return (x + vx * math.cos(angle) + vz * math.sin(angle),
+                    ground_height + vy, z - vx * math.sin(angle) + vz * math.cos(angle))
 
-        triangles += _triangles(mesh, _textures(scenery), projection, transform, scenery=True)
-    for _, points, uv, texture, transparent in sorted(triangles, key=lambda item: item[0], reverse=True):
-        renderer.triangle(points, uv, texture, transparent)
+        def rotate_normal(normal, angle=angle):
+            nx, ny, nz = normal
+            return (nx * math.cos(angle) + nz * math.sin(angle), ny,
+                    -nx * math.sin(angle) + nz * math.cos(angle))
+
+        triangles += _triangles(mesh, _textures(scenery), projection, transform, rotate_normal, True, ambient, light)
+    for _, points, depths, uv, texture, transparent, shade in sorted(triangles, key=lambda item: item[0], reverse=True):
+        renderer.triangle(points, depths, uv, texture, transparent, shade, projection.perspective)
 
     palette = load_rgb_palette(game.binary_file("STANDARD.PAL"))
-    table = legacy.module("spritemap_build")
-    sprite_records, _, _ = table.read_tables(game.require("WHSHR.EXE").read_bytes())
-    table.assign_categories(sprite_records)
-    sprite_names = {entry["name"].casefold(): entry["file"] for entry in sprite_records
-                    if entry["category"] == "troops" and entry["file"]}
+    sprite_names = _troop_sprites(game.require("WHSHR.EXE"))
     units = [unit for army in battle["armies"] + (battle["merc"] or {}).get("armies", [])
              for unit in army["units"]]
     sprite_files = list(sprites["files"])
@@ -238,7 +461,14 @@ def render(installation, battle_file, output, width=1280, height=900, diagnostic
             except FileNotFoundError:
                 pass
     drawn_units = 0
-    diagnostics = {"battle": battle["file"], "terrain": terrain_comparison(ground["meshes"][0], terrain),
+    diagnostics = {"battle": battle["file"],
+                   "terrain": terrain_comparison(ground["meshes"][0], terrain) if diagnostic else None,
+                   "camera": {
+                       "projection": projection.projection, "yaw": yaw, "pitch": pitch, "zoom": zoom,
+                       "distance": distance, "fov": fov, "target": [target_x, target_y],
+                       "look_at": [target_mesh_x, target_height, target_mesh_z], "eye": projection.eye,
+                   },
+                   "lighting": {"ambient": ambient, "direction": light}, "scenery_scale": scenery_scale,
                    "scenery": [], "units": []}
     mesh_x = ground["meshes"][0]["verts"][::3]
     mesh_z = ground["meshes"][0]["verts"][2::3]
@@ -250,22 +480,42 @@ def render(installation, battle_file, output, width=1280, height=900, diagnostic
             renderer.cross(sx, sy, (255, 0, 255))
             diagnostics["scenery"].append({**item, "mesh": furniture.get(item["name"].casefold()),
                                            "ground_height": terrain.height(x, z)})
-    for unit in sorted(units, key=lambda item: item["set"].get("x", 0) + item["set"].get("y", 0), reverse=True):
+    soldiers, origins = [], []
+    # Sprite frames run counter-clockwise on screen while script dir runs clockwise from +Y, so the
+    # frame follows the camera's screen-up heading (yaw + 180 degrees) minus the unit dir.
+    heading = (yaw + 180) * 512 / 360
+    for unit in units:
         base = sprite_names.get((unit["sprites"] or "").split(",", 1)[0].casefold())
-        frame = base and _sprite_frame(sprite_files, base, palette)
+        direction = math.floor((heading - (unit["set"].get("dir") or 0) + 32) / 64) % 8
+        frame = base and _sprite_frame(sprite_files, base, palette, direction)
         if frame is None or "x" not in unit["set"] or "y" not in unit["set"]:
             continue
-        pixels, rgb, sprite_width, sprite_height, anchor_x = frame
+        positions, count, ranks = _formation(unit)
         x, z = unit["set"]["x"] / WORLD_PER_MESH, unit["set"]["y"] / WORLD_PER_MESH
-        sx, sy = projection.point(x, terrain.height(x, z) or 0, z)
-        renderer.sprite(pixels, rgb, sprite_width, sprite_height, anchor_x, sx, sy, projection.scale / 6)
-        inside = terrain_bounds[0] <= x <= terrain_bounds[1] and terrain_bounds[2] <= z <= terrain_bounds[3]
-        if diagnostic:
-            renderer.cross(sx, sy, (50, 230, 70) if inside else (255, 45, 45), 3)
+        for soldier_x, soldier_z in positions:
+            view = projection.view(soldier_x, terrain.height(soldier_x, soldier_z) or 0, soldier_z)
+            if projection.perspective and view[2] < projection.near:
+                continue
+            soldiers.append((projection.project(view), view, frame))
+        inside = all(terrain_bounds[0] <= soldier_x <= terrain_bounds[1]
+                     and terrain_bounds[2] <= soldier_z <= terrain_bounds[3]
+                     for soldier_x, soldier_z in positions)
+        origins.append((projection.point(x, terrain.height(x, z) or 0, z), inside))
         diagnostics["units"].append({"name": unit["name"], "sprite": unit["sprites"],
                                      "x": unit["set"]["x"], "y": unit["set"]["y"],
-                                     "ground_height": terrain.height(x, z), "inside_mesh": inside})
+                                     "ground_height": terrain.height(x, z), "inside_mesh": inside,
+                                     "soldiers": count, "ranks": ranks, "sprite_direction": direction})
         drawn_units += 1
+    # Larger depth-buffer values are nearer in both projections: paint far soldiers first, and test the
+    # foot point against terrain/scenery so occluders in front hide the billboard.
+    for (sx, sy, _), view, frame in sorted(soldiers, key=lambda item: item[0][2]):
+        pixels, rgb, sprite_width, sprite_height, anchor_x = frame
+        scale = projection.focal_length / view[2] / 12 if projection.perspective else projection.scale / 12
+        renderer.sprite(pixels, rgb, sprite_width, sprite_height, anchor_x, sx, sy, scale,
+                        projection.biased_depth(view, SPRITE_DEPTH_BIAS))
+    if diagnostic:
+        for (sx, sy), inside in origins:
+            renderer.cross(sx, sy, (50, 230, 70) if inside else (255, 45, 45), 3)
     write_png(output, width, height, renderer.pixels)
     if diagnostic:
         Path(output).with_suffix(".json").write_text(json.dumps(diagnostics, indent=2), encoding="utf-8")

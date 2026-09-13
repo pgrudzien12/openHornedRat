@@ -53,7 +53,7 @@ about 30 standalone scripts, each with its own `--check`; they now need to be co
 | 1.3 | `.SFX` effect packages ↔ WAV | ✅ | M | all 18 packages and 663 WAVs checked structurally; listening review complete under 1.10 |
 | 1.4 | Script names → sprite files and 3D objects | ✅ | M | name tables decoded; all campaign names resolve; `,N` meaning open |
 | 1.5 | Animation layout of directional sprites | ✅ | M | groups × phases × 8 directions, standard move/dead/attack/stand/shoot; sheets and GIFs |
-| 1.5a | `dir` 0..511 → direction index, frame timing, anchor y | ⬜ | S–M | compare with the running game under Wine |
+| 1.5a | `dir` 0..511 → direction index, frame timing, anchor y | 🟡 | S–M | `dir` is clockwise from +Y (BTS statistics, scenery vs plan maps); zero frame, timing and anchor y need the running game under Wine |
 | 1.5b | Effect sprite layouts: `SPELLS`, `GENBATT`; which `SPELLS` map belongs to which spell | ⬜ | M | |
 | 1.6 | `.FON` and `GLUE` palettes | ✅ | S | menu text rendered; open: font → UI element, `GAME`/`OPT`/`REND` palettes |
 | 1.7 | `SPRITE3.BTP` and sprite leftovers | ✅ | S | not a LUT; legacy `.FOL` layouts; `SPELLS` map index rule |
@@ -70,8 +70,8 @@ texts, fonts, music, sounds); what is missing is one tool that shows it all.
 |---|---|---|---|---|
 | 2.1 | RNC ProPack method 2 + `.PBX` container | ✅ | M | 133/133 files, CRCs, textures and meshes rendered |
 | 2.2 | `GRND.GD` terrain height field | ✅ | M | 45 files; relief matches the plan maps; open: height scale |
-| 2.3 | Static battle scene: textured terrain (`grnd.xof`), scenery meshes from `placefurniture` (furniture table), unit sprites at their positions, heights from `GRND.GD` | ✅ | M | `whshr viewer` renders a static isometric PNG; scenery rotation and texture transparency remain provisional |
-| 2.4 | Camera and lighting (`Camera`, `CameraEdge`, `Bank angle`) | ⬜ | M | framing as in the game; also verifies the height scale |
+| 2.3 | Static battle scene: textured terrain (`grnd.xof`), scenery meshes from `placefurniture` (furniture table), unit sprites at their positions, heights from `GRND.GD` | ✅ | M | `whshr viewer` renders a static PNG (perspective, or orthographic for diagnostics); scenery rotation verified against plan maps; texture transparency provisional |
+| 2.4 | Camera and lighting (`Camera`, `CameraEdge`, `Bank angle`) | 🟡 | M | the original camera is confirmed to be perspective; `viewer`/`viewer-web` have a look-at camera (yaw, pitch, distance, FOV) and ambient/diffuse PBX-normal lighting; open: original parameters (`Camera` → heading, hypothesis `yaw = 180 + Camera`), FOV, eye height, lighting |
 | 2.5 | Relation of `GRND.GD` to `grnd.xof` (logic height field vs render mesh?) | ✅ | S | all 44 modern terrain meshes match direct `GRND.GD(x,z)` heights (maximum error 0.02123 mesh units) |
 
 **Milestone M2: static 3D battle viewer.** Any `BFxxx`: terrain, scenery, units at their starting positions.
@@ -123,7 +123,8 @@ Milestones:
 
 ## Proposed order of the next steps
 
-1. **2.4**: camera and lighting, using the viewer to match terrain framing and validate the height scale.
+1. **2.4**: match the original perspective camera (heading from `Camera`, pitch, FOV, distance) and
+   lighting with `viewer-web`, which also validates the height scale.
 2. **Wine instrumentation session** for 1.5a, 3.3 and the smaller open questions (`dir`, frame timing,
    event semantics, which files are loaded).
 3. **1.5b and 1.8**: resolve effect-sprite layouts and the remaining battle-script semantics as needed

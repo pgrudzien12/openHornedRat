@@ -46,6 +46,10 @@ python3 -m whshr check /path/to/WARFB
 python3 -m whshr extract /path/to/WARFB extracted
 python3 -m whshr viewer /path/to/WARFB BF001.BTS battle.png
 python3 -m whshr viewer /path/to/WARFB BF001.BTS battle-debug.png --diagnostic
+python3 -m whshr viewer /path/to/WARFB BF001.BTS camera.png --projection perspective --yaw 225 --pitch 32 --distance 160 --fov 50
+python3 -m whshr viewer /path/to/WARFB BF001.BTS topdown.png --projection orthographic --yaw 180 --pitch 85
+python3 -m whshr viewer-web /path/to/WARFB BF001.BTS
+python3 -m whshr viewer-2d /path/to/WARFB BF001.BTS game-view.png --target-x 1100 --target-y 600
 python3 -m whshr terrain-check /path/to/WARFB
 ```
 
@@ -53,10 +57,25 @@ Both commands take the `WARFB/` directory of the GOG installation. Extraction ou
 sprites, maps, and the battle atlas, must remain local. The directories holding such output
 (`samples/`, `battles/`, `extracted/`) are in
 `.gitignore`. They contain data extracted from the game, so they must not be committed or
-distributed. `viewer` writes a static, textured isometric PNG from a battle's terrain, scenery,
-and initial units; its output must also remain local. `--diagnostic` adds scenery-pivot and unit
-origin markers and writes a JSON sidecar. `terrain-check` verifies that each `GRND.PBX` vertex
-height agrees with `GRND.GD`.
+distributed. `viewer` writes a static, textured PNG from a battle's terrain, scenery, and initial
+units; its output must also remain local. `--diagnostic` adds scenery-pivot and unit origin markers
+and writes a JSON sidecar. `terrain-check` verifies that each `GRND.PBX` vertex height agrees with
+`GRND.GD`. `--projection perspective` matches the game's camera model: a look-at eye positioned
+from the selected ground target by yaw, pitch, and `--distance` (mesh units), framed by vertical
+`--fov`. `--projection orthographic` is a diagnostic view, e.g. top-down (`--yaw 180 --pitch 85`,
+north up) for comparison with plan maps. Both modes accept
+`--yaw`, `--pitch`, `--target-x`, and `--target-y`; `--zoom` applies only to orthographic mode.
+`--ambient` and `--light X Y Z` control lighting.
+`--scenery-scale` is a temporary multiplier for calibrating scenery meshes independently.
+`viewer-web` opens local projection, look-at camera, and lighting controls at
+`http://127.0.0.1:8765/`; its field mini-map can set the ground target by clicking. It only
+serves the local browser and renders from the local game installation.
+
+`viewer-2d` is a separate top-down game-view pipeline: it samples the battle's `loadplanmap`
+(`MAP*.FOL/.BOP`) in a 544×386 viewport by default, then composites directional unit sprites in
+their `.BTS`/`.MRC` formations. Use `--target-x`, `--target-y`, and `--zoom` to select a view;
+`--spacing` and `--direction-offset` support visual calibration. It does not use PBX terrain or
+scenery and does not alter the independent `viewer`/`viewer-web` 3D asset viewer.
 
 ## License and rights
 

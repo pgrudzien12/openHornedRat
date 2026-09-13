@@ -13,7 +13,8 @@ verified visually on labelled, anchor-aligned sheets. No disassembly.
 | Direction order: 0 = away from viewer, counter-clockwise on screen | ✅ visually (GIANT, CELWIZ, BRDHRS, WYVERN, cannons) |
 | Standard unit layout `32+8+32+32(+8…)` = move, dead, attack, stand (+ shoot/cast) | ✅ move and dead, 🟡 attack/stand/shoot (visual, partly ambiguous) |
 | Anchor: byte 3 = x, byte 2 = distance of the anchor row from the frame bottom | 🟡 x well supported; y only statistically |
-| Mapping of script `dir` (0..511) to the direction index, frame timing | ❌ needs the running game |
+| Script `dir` (0..511): 0 = +Y (north on the plan map), clockwise, so `direction = −round(dir/64) mod 8` in a north-up view | 🟡 rotation sense from BTS statistics and scenery vs plan maps (`notes/battle_viewer.md`); zero frame derived, not observed |
+| Frame timing | ❌ needs the running game |
 
 ## Inventory (`scripts/anim_inventory.py`)
 
@@ -58,8 +59,9 @@ screen-right side in `E`/`SE` and it is hidden in `W`/`SW`).
 |---|---|---|---|---|---|---|---|---|
 | on screen | N: away from the viewer (back visible) | NW | W: left profile | SW | S: facing the viewer | SE | E: right profile | NE |
 
-The order is counter-clockwise on screen (N → W → S → E). How this maps onto `dir` 0..511 from
-`.BTS/.MRC` (and its zero point) is not known.
+The order is counter-clockwise on screen (N → W → S → E). Script `dir` from `.BTS/.MRC` turns
+clockwise from +Y, so in a north-up view `direction = −round(dir / 64) mod 8`; whether `dir = 0`
+really selects frame 0 has not been observed in the game.
 
 ### Standard unit set (`32+8+32+32`, 37 files; `+8` for archers/wizards, 11 files)
 
@@ -247,8 +249,8 @@ python3 scripts/anim_export.py ".../WARFB"      # all 72 directional sets: 274 G
 
 ## Open questions
 
-- Mapping of `dir` 0..511 to the 8 directions (zero point, rotation sense relative to the plan map,
-  which is Y-flipped) — compare a unit's `dir` in a `.BTS` with its facing in the running game.
+- Zero point of the `dir` → direction mapping (the clockwise sense is established) — compare a unit's
+  `dir` in a `.BTS` with its facing in the running game.
 - Anchor y (byte 2): the ground contact point is only a statistical fit; byte 3 as x is much better supported.
   Why do portraits use bytes 0–3 as two int16 while directional sprites use bytes 2–3 as two u8?
 - Frame timing (frames per second per action), whether attack/shoot loop or play once, and
