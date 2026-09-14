@@ -92,6 +92,19 @@ def main(argv=None):
     game_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     game_parser.add_argument("--player", default="ffplay", help="Smacker player executable (default: ffplay)")
     game_parser.add_argument("--skip-intro", action="store_true", help="enter the main menu without playing A1.SI")
+    engine_parser = commands.add_parser(
+        "engine", help="run the real-time engine (needs the packages in requirements-engine.txt)"
+    )
+    engine_parser.add_argument("installation", type=Path, help="WARFB installation directory")
+    engine_parser.add_argument("--width", type=int, default=1280, help="window width (default: 1280)")
+    engine_parser.add_argument("--height", type=int, default=800, help="window height (default: 800)")
+    engine_parser.add_argument("--skip-intro", action="store_true", help="start in the main menu")
+    engine_parser.add_argument("--hidden", action="store_true", help="do not show the window (captures)")
+    engine_parser.add_argument("--frames", type=int, help="quit after this many frames")
+    engine_parser.add_argument("--screenshot", type=Path,
+                               help="with --frames: save the last frame as PNG; do not commit game assets")
+    engine_parser.add_argument("--frame-time", type=float,
+                               help="fixed seconds per frame instead of wall-clock time (reproducible captures)")
     viewer_parser = commands.add_parser("viewer", help="render a static 3D battle scene to PNG")
     viewer_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     viewer_parser.add_argument("battle", help="BTS filename or path")
@@ -167,6 +180,29 @@ def main(argv=None):
         return 0
     if args.command == "game":
         game.start(args.installation, args.player, args.skip_intro)
+        return 0
+    if args.command == "engine":
+        if args.width <= 0 or args.height <= 0:
+            parser.error("--width and --height must be greater than zero")
+        if args.frames is not None and args.frames <= 0:
+            parser.error("--frames must be greater than zero")
+        if args.screenshot is not None and args.frames is None:
+            parser.error("--screenshot needs --frames")
+        if args.frame_time is not None and args.frame_time < 0:
+            parser.error("--frame-time must not be negative")
+        try:
+            from .frontend import app
+        except ModuleNotFoundError as error:
+            if error.name not in ("pygame", "zengl"):
+                raise
+            print(f"The engine needs {error.name}. Install the frontend packages into a local virtual "
+                  "environment and run the engine with it:\n"
+                  "  python3 -m venv .venv && .venv/bin/pip install --only-binary=:all: -r requirements-engine.txt\n"
+                  "  .venv/bin/python -m whshr engine <WARFB>", file=sys.stderr)
+            return 2
+        result = app.run(args.installation, (args.width, args.height), args.skip_intro, args.hidden,
+                         args.frames, args.screenshot, args.frame_time)
+        print(f"{result['frames']} frames, {result['ticks']} ticks, final scene {result['scene']}")
         return 0
     if args.command == "viewer":
         try:

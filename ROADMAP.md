@@ -116,7 +116,7 @@ from phases 1–3.
   simulation API does not depend on its presentation library. A local, never-committed asset cache is
   acceptable.
 - **Runtime**: **Python is the engine language** (decided September 2026): pygame-ce (SDL2) for window,
-  input and audio, moderngl (OpenGL 3.3) for rendering, FluidSynth for MIDI. Readers, rules and the
+  input and audio, zengl (OpenGL 3.3 core) for rendering, FluidSynth for MIDI. Readers, rules and the
   simulation stay stdlib-only; only the frontend subpackage has third-party dependencies. The earlier C++
   SDL2/OpenGL prototype is parked. Godot may be used as a disposable visualization client, but must not
   own the authoritative rules, assets, saves, or mod format.
@@ -153,7 +153,8 @@ Phase 2 is closed (M2 reached). Priorities, as decided by the project owner:
    `whshr scripts` disassembler) is done, and so is batch 4 (missions and objectives,
    campaign progression and saves, AI/pathfinding/visibility; `notes/game_rules.md`, `notes/campaign.md`); the optional
    batch 5 and the leftovers are listed in `notes/research_plan.md`.
-2. **Real-time engine prototype (nice to have)**: the technology is chosen (Python with pygame-ce and moderngl, see phase 5); show the
+2. **Real-time engine prototype (nice to have)**: the technology is chosen (Python with pygame-ce and zengl, see phase 5). Engine phase 1 is in
+   progress: `python3 -m whshr engine` opens the frontend window with the scene flow and a debug overlay; show the
    `viewer-web` scene (terrain, scenery, sprites, moving camera) in real time. Independent of 1, so
    it can run in parallel.
 3. **Later**: unit movement (M3: `Nav*` pathfinding, `OBJECTS` collisions, formations), mission DLLs

@@ -74,10 +74,16 @@ ROADMAP.md         - work plan: game file inventory, phases 0-5 with status, mil
 notes/             - full per-format reports (how each claim was verified, per-file tables, open questions)
   animations.md, battle_viewer.md, btp_sprite_leftovers.md, campaign.md, fonts_glue.md, game_rules.md, music.md, pbx_rnc.md, research_plan.md,
   pe_resources.md, scene_scripts.md, sfx.md, si_omni.md, sprite_names.md, terrain_gd.md
-whshr/             - unified package and CLI: python3 -m whshr check|extract|viewer|viewer-web|
+whshr/             - unified package and CLI: python3 -m whshr check|extract|catalog|game|engine|viewer|viewer-web|
                      viewer-2d|viewer-2d-web|terrain-check|rules|scripts (3D battle viewer: battle3d.py, 2D: battle2d.py,
                      GAMEF.DLL rule tables and unit stat decoding: rules.py,
-                     behaviour bytecode disassembler: behaviour.py, traced block formation layout: formation.py)
+                     behaviour bytecode disassembler: behaviour.py, traced block formation layout: formation.py,
+                     scenes and lazy assets: scenes.py, campaign_scenes.py, assets.py, catalog.py, cache.py,
+                     battle simulation: engine.py, fixed-step clock: clock.py)
+  frontend/        - runtime frontend, the ONLY third-party-dependent code (pygame-ce + zengl, requirements-engine.txt,
+                     local .venv/); imported solely by `engine`: app.py (window, loop, overlay), views.py, gpu.py
+tests/             - BDD-style unittest scenarios (docs/testing.md): python3 -m unittest discover -s tests -t .
+docs/              - asset_pipeline.md (lazy loading, scene lifecycle), testing.md (BDD rules)
 tools/ghidra/      - OPTIONAL analysis-only Ghidra headless scripts (Java) + setup notes; not stdlib Python,
                      their decompiled output must never be committed
 scripts/           - parsers/renderers/extractors (Python 3 stdlib only); most have a --check mode
@@ -123,7 +129,7 @@ deliberately not pursued.
 
 1. Game rules (combat, morale, unit stats) by targeted disassembly of `GAMEF.DLL`/`WHSHR.EXE` — top priority.
    First pass done (`notes/game_rules.md`); continue with its open questions, then magic.
-2. Real-time engine prototype of the battle scene, in Python (pygame-ce + moderngl frontend; decision and
+2. Real-time engine prototype of the battle scene, in Python (pygame-ce + zengl frontend; decision and
    rationale in `notes/engine_architecture.md`).
 3. Later: unit movement (M3), mission logic in `SCRIPT/BFxxx.DLL`, and Wine sessions for open
    questions (`dir` zero frame, frame timing, cutscene events) only when they block work.

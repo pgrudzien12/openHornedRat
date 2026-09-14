@@ -90,15 +90,29 @@ game assets and should be written outside the repository.
 ## Engine prototype
 
 The engine is written in Python: the `whshr` package holds the readers, rules and simulation, and the
-runtime frontend will use pygame-ce (SDL2) and moderngl (OpenGL); see
-[`notes/engine_architecture.md`](notes/engine_architecture.md). Start the current prototype against a
-local game installation with:
+runtime frontend (`whshr/frontend/`) uses pygame-ce (SDL2) and zengl (OpenGL 3.3 core); see
+[`notes/engine_architecture.md`](notes/engine_architecture.md). The frontend is the only part with
+third-party dependencies. Install them into a local virtual environment and start the engine against a
+local game installation:
+
+```sh
+python3 -m venv .venv && .venv/bin/pip install --only-binary=:all: -r requirements-engine.txt
+.venv/bin/python -m whshr engine /path/to/WARFB
+```
+
+It opens a window driven by the scene state machine, with a debug overlay (FPS, tick count, scene);
+any key or click skips the intro, and closing the window or Ctrl+Q quits. The intro and menu are still
+placeholders while the engine phase 1 is built. `--skip-intro`, `--width`/`--height`, and, for
+reproducible local screenshots, `--hidden --frames N --frame-time S --screenshot out.png` are
+available.
+
+The older runner plays the intro film through an external player:
 
 ```sh
 ./scripts/run_engine.sh /path/to/WARFB
 ```
 
-The runner starts `SceneMachine`, lazily extracts the original `A1.SI` intro into a temporary
+It starts `SceneMachine`, lazily extracts the original `A1.SI` intro into a temporary
 directory, plays its Smacker video through `ffplay` at the game's verified 8 fps, then enters the
 current menu scene. Install FFmpeg to provide `ffplay`. The runner applies an FFmpeg `setpts`
 filter because the source Smacker header does not represent the engine's 125 ms frame cadence.

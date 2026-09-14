@@ -12,7 +12,7 @@ intro cutscene -> main menu -> campaign room -> mission briefing -> battle
 
 The initial implementation targets the GOG v1.0 installation. Its asset readers,
 paths, and reverse-engineered formats remain the Python `whshr` reference
-implementation, which is also the engine: the Python runtime frontend (pygame-ce, moderngl) uses
+implementation, which is also the engine: the Python runtime frontend (pygame-ce, zengl) uses
 these contracts directly.
 
 ## Principles
@@ -162,7 +162,7 @@ large resources and releases them when returning to campaign.
 6. Implement the functional menu and normalized campaign room backed by the campaign
    flow graph.
 7. Implement a mission briefing that resolves and enters one battle.
-8. Connect the existing deterministic battle model and the pygame-ce/moderngl frontend to
+8. Connect the existing deterministic battle model and the pygame-ce/zengl frontend to
    install-backed map and sprite loading.
 
 The Python reference implementation now provides `Scene`, `SceneManifest`,

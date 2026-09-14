@@ -46,13 +46,20 @@ earlier plan for a C++ SDL2/OpenGL frontend (`CMakeLists.txt`, `engine/src/main.
 The runtime frontend will use:
 
 - **pygame-ce** (SDL2 underneath) for the window, input, timing, and audio output;
-- **moderngl** (OpenGL 3.3 core) for rendering terrain, scenery meshes, and sprite billboards, with
+- **zengl** (OpenGL 3.3 core) for rendering terrain, scenery meshes, and sprite billboards, with
   palette and colour-map lookups done at texture upload or in shaders;
 - **FluidSynth** for MIDI music with the converted SoundFont, either through a binding or
   pre-rendered to PCM at load time (decided when music is added).
 
 Both main libraries install as pre-built wheels on Windows, macOS, and Linux. Nothing is installed
 without the project owner's approval.
+
+The first plan named moderngl. When the frontend was started (September 2026), its latest release
+(5.12.0, October 2024) and its `glcontext` dependency had no wheels for Python 3.14, so installing it
+would mean compiling from source. zengl 2.7.3 is by the same author, is actively released, ships
+Python 3.14 wheels for all three platforms, and attaches to the OpenGL context pygame-ce creates. Its
+pipeline objects (shaders, bindings, render state, and target in one object) suit a few large batched
+draws per frame.
 
 ### Why not C++
 
@@ -162,9 +169,8 @@ the opaque original bytecode from becoming the permanent modding language.
 
 ## Near-term consequences
 
-1. Keep the simulation API independent of pygame-ce, moderngl, and any other presentation library.
-2. After approval to install pygame-ce and moderngl, add the frontend subpackage and its requirements
-   file.
+1. Keep the simulation API independent of pygame-ce, zengl, and any other presentation library.
+2. Done: the frontend subpackage `whshr/frontend/` and its requirements file `requirements-engine.txt`.
 3. Engine phase 1, in order: a battle view (plan map or terrain, directional sprites in the traced
    formations) → movement on 100 ms ticks → scenes (menu, transitions, mission briefing, cutscene
    playback with the pure-Python Smacker decoder into a texture) → simplified close combat, shooting,
@@ -175,9 +181,34 @@ the opaque original bytecode from becoming the permanent modding language.
 ## Current prototype
 
 `whshr.engine` defines the presentation-independent battle state and fixed-tick movement behaviour,
-and the Python `SceneMachine` provides the scene lifecycle. `scripts/run_engine.sh` starts it, plays
-the `A1.SI` intro through `ffplay` at the verified 8 fps, and enters the menu scene; the `ffplay`
-playback is a stopgap until the frontend plays films itself.
+and the Python `SceneMachine` provides the scene lifecycle.
+
+The runtime frontend starts with `python3 -m whshr engine <WARFB>`, run with the interpreter of a local,
+git-ignored virtual environment that holds `requirements-engine.txt`:
+
+```sh
+python3 -m venv .venv && .venv/bin/pip install --only-binary=:all: -r requirements-engine.txt
+.venv/bin/python -m whshr engine <WARFB>
+```
+
+Without those packages the command explains how to install them; no other command imports the frontend.
+Its structure:
+
+- `frontend/app.py`: the window (OpenGL 3.3 core), the main loop, and the debug overlay (FPS, tick
+  count, scene). Measured frame time goes through the stdlib `whshr.clock.FixedStepClock`, which releases
+  fixed 10 ms scene steps (at most 25 per frame) to `SceneMachine.update`. Scenes that simulate a battle
+  group those steps into their own 100 ms game ticks. Window close or Ctrl+Q quits.
+- `frontend/views.py`: one view per scene type. A view draws its scene and translates raw pygame input
+  into scene events (for example any key or click becomes `skip` in the intro). Scenes never see pygame
+  events, and a view is replaced, releasing its GPU resources, whenever the machine changes scene.
+- `frontend/gpu.py`: the off-screen colour and depth target presented once per frame, textured
+  screen-space quads, and text labels rendered by pygame's font and uploaded only when they change.
+
+For reproducible captures, `--hidden --frames N --frame-time S --screenshot out.png` renders N frames
+of exactly S seconds each without showing the window. Screenshots show game assets: keep them local.
+
+`python3 -m whshr game` (and `scripts/run_engine.sh`) still plays the `A1.SI` intro through `ffplay`; that
+stopgap is removed once the frontend plays films itself.
 
 The C++ SDL2/OpenGL movement prototype (`CMakeLists.txt`, `engine/src/main.cpp`) is parked. Original
 mission DLLs are data inputs only: the engine will never execute them as native code.

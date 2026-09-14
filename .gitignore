@@ -7,5 +7,8 @@ battles/
 extracted/
 screenshots/
 
+# Local virtual environment for the runtime frontend (requirements-engine.txt).
+.venv/
+
 # Native build output.
 build/

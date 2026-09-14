@@ -1,0 +1,5 @@
+# Runtime frontend only (python3 -m whshr engine). Readers, rules, simulation and scenes stay stdlib-only.
+# Install into a local, git-ignored virtual environment:
+#   python3 -m venv .venv && .venv/bin/pip install --only-binary=:all: -r requirements-engine.txt
+pygame-ce==2.5.8
+zengl==2.7.3

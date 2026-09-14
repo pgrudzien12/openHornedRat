@@ -20,14 +20,19 @@ def _smacker_path(summary, output):
     raise ValueError(f"{summary['file']} has no extracted Smacker video")
 
 
-def start(installation, player="ffplay", skip_intro=False, loaders=None):
-    """Start the current game flow and return after it has reached the menu state."""
+def scene_context(installation, loaders=None):
+    """Validate an installation and return the lazy asset access shared by all scenes."""
     locator = AssetLocator(installation)
     locator.validate()
-    catalog = build(locator.installation)
-    context = SceneAssets(
-        locator, catalog, AssetCache(), default_scene_loaders() if loaders is None else loaders
+    return SceneAssets(
+        locator, build(locator.installation), AssetCache(), default_scene_loaders() if loaders is None else loaders
     )
+
+
+def start(installation, player="ffplay", skip_intro=False, loaders=None):
+    """Start the current game flow and return after it has reached the menu state."""
+    context = scene_context(installation, loaders)
+    locator, catalog = context.locator, context.catalog
     machine = SceneMachine(IntroScene(), context)
 
     if skip_intro:
