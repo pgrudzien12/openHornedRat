@@ -77,7 +77,7 @@ notes/             - full per-format reports (how each claim was verified, per-f
 whshr/             - unified package and CLI: python3 -m whshr check|extract|viewer|viewer-web|
                      viewer-2d|viewer-2d-web|terrain-check|rules|scripts (3D battle viewer: battle3d.py, 2D: battle2d.py,
                      GAMEF.DLL rule tables and unit stat decoding: rules.py,
-                     behaviour bytecode disassembler: behaviour.py)
+                     behaviour bytecode disassembler: behaviour.py, traced block formation layout: formation.py)
 tools/ghidra/      - OPTIONAL analysis-only Ghidra headless scripts (Java) + setup notes; not stdlib Python,
                      their decompiled output must never be committed
 scripts/           - parsers/renderers/extractors (Python 3 stdlib only); most have a --check mode

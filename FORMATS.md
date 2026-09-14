@@ -531,7 +531,7 @@ Mercenary Crossbows (M4 WS3 BS4 S3 T3 W1 I3 A1 Ld7, "Crossbow 12/12") is `SAVE/P
 | 13 | `s_side` | side and type byte (below) |
 | 14, 15 | `s_orgsize`, `s_size` | original and current number of models (test files leave `orgsize` 0) |
 | 16, 17 | `s_rnks`, `s_wdth` | ranks; frontage `ceil(size / ranks)` (recomputed at run time; rank bonus, charge bonus) |
-| 18, 19 | `s_rkmd`, `s_spar` | runtime: ranks in the formation, models in the last rank (never set by scripts) |
+| 18, 19 | `s_rkmd`, `s_spar` | runtime: ranks in the formation, front ranks at full frontage (never set by scripts) |
 | 20 | `s_rlmv` | 🟡 flee movement rate (recomputed at unit set-up) |
 | 21–29 | `s_move` `s_wepn` `s_bals` `s_strn` `s_tuff` `s_wnds` `s_init` `s_atks` `s_lead` | **M WS BS S T W I A Ld** |
 | 30 | `s_mount` | 0 none, 1 Warhorse, 2 War Boar, 3 Giant Wolf, 4 Cave Squig (mount profiles in `GAMEF.DLL`) |
@@ -627,7 +627,8 @@ printed by `python3 -m whshr rules <installation>`. Everything below is ✅ unle
   Protection, Talisman of Obsidian). Banner of Wrath and Grudgebringer cast Lightning/Fireball once per wind.
 - **Formations**: the block is the only formation (infantry, cavalry, archers, wizards, special units). Models
   stand **12 world units** apart; frontage `ceil(models / ranks)` with the leftover models in the front ranks;
-  the unit position is the front-rank centre, reserved for the leader. Ranks can be changed between
+  the unit position is the front-rank centre, reserved for the leader; the collision box (± frontage × 6, ± ranks × 6) is centred `(ranks − 1) × 6` behind
+  it, in the middle of the block. Ranks can be changed between
   `max(1, trunc(0.75 × √models))` and `models ÷ that`. War machines use a fixed crew layout (2 × 3 or 3 × 4 by
   machine), monsters a 2 × 2, 3 × 3 or 5 × 8 cell footprint, wagons two models 22 units apart. Units have up to
   32 models (enemy median 16), usually in 4 ranks.

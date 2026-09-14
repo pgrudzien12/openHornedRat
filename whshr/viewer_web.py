@@ -298,7 +298,7 @@ def serve_2d(installation, battle_file, port=8765):
         ("target_x", "Target X", 0, field["width"] * 1.25, 10, target_x),
         ("target_y", "Target Y", 0, field["height"] * 1.25, 10, target_y),
         ("zoom", "Zoom", .1, 2, .05, 1),
-        ("spacing", "Formation spacing", 8, 96, 2, battle2d.DEFAULT_SPACING),
+        ("spacing", "Formation spacing", 4, 64, 1, battle2d.DEFAULT_SPACING),
         ("direction_offset", "Sprite direction offset", 0, 7, 1, 0),
     ))
     page = _page("WHSHR 2D game view", "2D game view", controls, {"debounce": 120},

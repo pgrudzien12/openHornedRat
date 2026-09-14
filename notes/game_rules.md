@@ -154,7 +154,7 @@ each other (e.g. every `s_mount[2]` equals the separate `s_weap` line). The in-g
 | 15 | `s_size` | `+0x7C` | current number of models | ✅ every per-model loop; decremented when a model is removed (`FUN_10008ca0`) |
 | 16 | `s_rnks` | `+0x7D` | number of ranks | 🟡 read by formation code; values 1–7 fit the unit sizes |
 | 17 | `s_wdth` | `+0x7E` | frontage (models per rank) | ✅ recomputed by the formation code `FUN_1002c9e0` as `ceil(size / ranks)`; rank bonus `size / width − 1` (section 6); charge bonus `1.5 × frontage` |
-| 18, 19 | `s_rkmd`, `s_spar` | `+0x7F`, `+0x80` | runtime: number of ranks in the formation, models in the last rank | ✅ written by `FUN_1002c9e0`; never set by scripts |
+| 18, 19 | `s_rkmd`, `s_spar` | `+0x7F`, `+0x80` | runtime: number of ranks in the formation, number of front ranks at full frontage (all ranks when `size % ranks = 0`) | ✅ written by `FUN_1002c9e0`, read by the slot code `FUN_1002d5f0` (later ranks are offset by half a slot); never set by scripts |
 | 20 | `s_rlmv` | `+0x81` | flee movement rate | 🟡 recomputed from a float at unit set-up (`FUN_10003aa0`); subtracted from the movement counter of fleeing units every tick (`FUN_10029780`) |
 | 21–29 | `s_move`, `s_wepn`, `s_bals`, `s_strn`, `s_tuff`, `s_wnds`, `s_init`, `s_atks`, `s_lead` | `+0x82…+0x8A` | M WS BS S T W I A Ld | ✅ tables indexed by these bytes (sections 5–8); in-game panel |
 | 30 | `s_mount` | `+0x8B` | 0 none, 1 Warhorse, 2 War Boar, 3 Giant Wolf, 4 Cave Squig | ✅ mount records at `0x100E8D58` (section 5.4); 1 on all horse riders, 2 on Boar Boyz, 3 on Wolf Riders |
@@ -269,11 +269,16 @@ and at most 32 models, usually in 4 ranks (3–5).
 - **Spacing**: **12 world units** (half an inch) between models, sideways and front to back, for every class
   including cavalry. The same 12 units are the battle-grid cell. The collision footprint (`FUN_1002c750`) is a
   box with half-extents `frontage × 6` and `ranks × 6`; its diagonal angle is stored in `+0x322` (the arc used
-  for front/flank/rear).
+  for front/flank/rear). The box belongs to the unit's **map object** (`DAT_100e2ef0` + index × 0x20), which
+  `FUN_1002c510` keeps in step with the unit (facing in `+0xC`, centre in `+6`/`+8`): for a block the centre
+  lies `(ranks − 1) × 6` units behind the unit position along the facing, the middle between the first and
+  last rank, so the symmetric box covers every model with half a cell to spare. War machines, monsters and
+  wagons keep the map object at the unit position. `+4` holds a square root computed from the extents
+  (probably the bounding radius). `FUN_10028710` shifts every model of a unit and refreshes its map object.
 - **Block layout** (`FUN_1002cf50`): rank *n* stands `12 × n` units behind the first rank; each rank is centred
   and filled from the outside in, pairwise, with a centre model when its count is odd.
 - **Placement** (`FUN_1002d120`): a slot offset `(x, y)` is rotated by the unit's facing (sine/cosine tables
-  `0x100E26F0`, `0x100E2F30`, 8.8 fixed point) and stored in the model as its target relative to the unit
+  `0x100E26F0`, `0x100E2F30`, 8.8 fixed point; world offset `x = side·cos + forward·sin`, `y = forward·cos − side·sin`) and stored in the model as its target relative to the unit
   position, together with its slot, rank and file. **The unit position is the front-rank centre**, and that
   slot is reserved for the leader model (unless it is fleeing). Every other slot takes the nearest free model
   (octagonal distance), so re-forming moves each soldier to the closest position. `MoveModels`
@@ -295,6 +300,10 @@ and at most 32 models, usually in 4 ranks (3–5).
   (team and wagon), footprint 2 × 4 cells, facing snapped to 45° steps.
 - **Script opcodes**: `ScatterModelsAtNode` (0x48) spreads a unit's models around a node, `PlaceAndReformAtNode`
   (0x4A) re-forms at a node.
+- **On screen**: the BF001 deployment screenshot shows exactly this layout (16 infantry in 3 ranks as 6, 5, 5,
+  the two rear ranks offset by half a spacing; 12 crossbows as 4 × 3). In both units the model spacing is about
+  1.43 times the on-screen sprite width, so one troop sprite pixel covers about **0.45 world units** (measured,
+  not traced; R68). `whshr/formation.py` implements the block layout for both battle viewers.
 
 ### Routes, collisions and visibility ✅
 
@@ -1410,7 +1419,7 @@ static analysis unless marked Wine.
 
 | # | Open point | What is known | How to resolve | Priority |
 |---|---|---|---|---|
-| R28 | **Remaining stat bytes** | ✅ `s_wdth`/`s_rkmd`/`s_spar` = frontage, ranks, models in last rank (recomputed); `s_rlmv` recomputed from a float at set-up; `s_cmdr`, `s_armname`, `s_banner` always 0; `s_rnks` is the script's rank count used by the formation code; second stat block at `+0x95` read for leaders/artillery. | Trace the float for `s_rlmv` in `FUN_10003aa0`; where `+0x95` is copied from the leader. | low |
+| R28 | **Remaining stat bytes** | ✅ `s_wdth`/`s_rkmd`/`s_spar` = frontage, ranks, full-frontage front ranks (recomputed); `s_rlmv` recomputed from a float at set-up; `s_cmdr`, `s_armname`, `s_banner` always 0; `s_rnks` is the script's rank count used by the formation code; second stat block at `+0x95` read for leaders/artillery. | Trace the float for `s_rlmv` in `FUN_10003aa0`; where `+0x95` is copied from the leader. | low |
 | R29 | **Movement** | ✅ `s_rlmv` from M and I, speed factors, turning, charge reach, no terrain effect (section 4). | — | done |
 | R30 | **Magic** | ✅ resolved: power pools, casting, every spell, dispel, AI (sections 8.8–8.12). | — | done |
 | R31 | **`WHSHR.EXE` copy** | ✅ dead code: its battle dispatcher has no callers; only the army writer is used by the front end. | — | done |
@@ -1431,8 +1440,9 @@ static analysis unless marked Wine.
 | R63 | **Objective evaluators** | The 26 per-letter evaluator functions behind the objective table (`+0x10`) were not read; which counts they compare, and what S "Capture Hiln" and Y test in BF001. | Read the functions from the table (`0x1001b270`…`0x1001bd50`). | medium |
 | R64 | **Win/loss dialog codes** | `FUN_1001adc0` opens dialog 9 or 0xF depending on `DAT_100f516c`/`DAT_100f4e60`; which is which. | Read the two globals' writers. | low |
 | R65 | **Deployment nodes** | 🟡 the `ns_startpos` chain outlines the deployment area for the placement UI; units held outside the field are placed by the player. | Read the deployment UI code. | low |
-| R66 | **Footprint box and anchor** | Model slots run from the front-rank centre backwards, but the footprint box is symmetric (± ranks × 6) around its map object position; how that position relates to the unit position was not traced. | Read `FUN_1002c510` and the map object updates (`FUN_10028710`). | medium |
-| R67 | **Formation spacing on screen** | The code places models 12 world units apart; the viewers use provisional spacings (32 units in `viewer-2d`, 48 in the 3D viewer). | Switch the viewers to 12 units, render BF001 and compare with the original (Wine screenshot). | medium |
+| R66 | **Footprint box and anchor** | ✅ resolved: for blocks the map object centre is `(ranks − 1) × 6` behind the unit position, the middle of the block; other kinds keep it at the unit position (section 4, Formations). | — | done |
+| R67 | **Formation spacing on screen** | ✅ resolved: both viewers use the traced 12-unit block (`whshr/formation.py`); the BF001 screenshot matches its rank sizes and offsets (section 4, Formations). | — | done |
+| R68 | **Troop sprite and scenery scale** | One troop sprite pixel ≈ 0.45 world units, measured on a screenshot and used by both viewers but not traced; against it, PBX pines in the 3D viewer look about twice as large as the trees in the screenshot. | Find the billboard scale in the 3D sprite renderer; compare scenery sizes with more screenshots. | low |
 
 ### 11.5 Hypotheses in this report to confirm
 

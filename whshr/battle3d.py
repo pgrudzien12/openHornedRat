@@ -7,7 +7,7 @@ import struct
 import json
 from pathlib import Path
 
-from . import legacy, pbx
+from . import formation, legacy, pbx
 from .image import load_rgb_palette, write_png
 from .paths import Installation
 from .script import load_battle
@@ -315,22 +315,9 @@ def _sprite_frame(files, name, palette, direction=0):
 
 
 def _formation(unit):
-    """Return individual soldier positions around the regiment centre in mesh units."""
-    stats, position = unit["stats"].get("s_side", []), unit["set"]
-    count = stats[1] if len(stats) > 1 else 1
-    ranks = min(count, stats[3]) if len(stats) > 3 and stats[3] else 1
-    columns = math.ceil(count / ranks)
-    angle = (position.get("dir") or 0) * math.tau / 512
-    # The fourth s_side value is the recorded initial rank count. Spacing remains a visual hypothesis.
-    spacing = 6.0
-    positions = []
-    for index in range(count):
-        row, column = divmod(index, columns)
-        side = (column - (columns - 1) / 2) * spacing
-        forward = (row - (ranks - 1) / 2) * spacing
-        positions.append((position["x"] / WORLD_PER_MESH + side * math.cos(angle) + forward * math.sin(angle),
-                          position["y"] / WORLD_PER_MESH - side * math.sin(angle) + forward * math.cos(angle)))
-    return positions, count, ranks
+    """Return individual soldier positions in mesh units, with the unit anchor at the front-rank centre."""
+    positions, count, ranks = formation.unit_layout(unit)
+    return [(x / WORLD_PER_MESH, y / WORLD_PER_MESH) for x, y in positions], count, ranks
 
 
 def terrain_comparison(mesh, terrain):
@@ -510,7 +497,8 @@ def render(installation, battle_file, output, width=1280, height=900, diagnostic
     # foot point against terrain/scenery so occluders in front hide the billboard.
     for (sx, sy, _), view, frame in sorted(soldiers, key=lambda item: item[0][2]):
         pixels, rgb, sprite_width, sprite_height, anchor_x = frame
-        scale = projection.focal_length / view[2] / 12 if projection.perspective else projection.scale / 12
+        pixel_mesh = formation.SPRITE_PIXEL_WORLD_UNITS / WORLD_PER_MESH
+        scale = (projection.focal_length / view[2] if projection.perspective else projection.scale) * pixel_mesh
         renderer.sprite(pixels, rgb, sprite_width, sprite_height, anchor_x, sx, sy, scale,
                         projection.biased_depth(view, SPRITE_DEPTH_BIAS))
     if diagnostic:

@@ -134,7 +134,7 @@ def main(argv=None):
     viewer_2d_parser.add_argument("--zoom", type=float, default=battle2d.DEFAULT_ZOOM,
                                   help="pixels per BTS world unit (default: 1)")
     viewer_2d_parser.add_argument("--spacing", type=float, default=battle2d.DEFAULT_SPACING,
-                                  help="formation soldier spacing in BTS world units (default: 32)")
+                                  help="formation soldier spacing in BTS world units (default: 12, traced in GAMEF.DLL)")
     viewer_2d_parser.add_argument("--direction-offset", type=int, default=0,
                                   help="add a directional sprite-frame offset, in eighth-turns")
     terrain_parser = commands.add_parser("terrain-check", help="compare GRND.PBX mesh heights with GRND.GD")

@@ -10,10 +10,14 @@ the referenced `.MRC`.
 
 The default 544×386 viewport is the size of the supplied cropped game screenshot. Its default
 centre is the battlefield centre; `--target-x`, `--target-y`, and `--zoom` select a game-world
-viewport (at default zoom, one BTS unit is one output pixel). `--spacing` controls the provisional
-formation spacing (32 BTS units by default). The second `s_side` value gives the number of soldiers
-and the fourth gives ranks; each soldier is placed in a centred rectangular formation, rotated by
-the unit's script `dir`.
+viewport (at default zoom, one BTS unit is one output pixel). Soldiers follow the block formation
+traced in `GAMEF.DLL` (`whshr/formation.py`; `notes/game_rules.md`, "Formations"): the third `s_side`
+value (current size) gives the number of models and the fourth the ranks; the unit position is the
+front-rank centre, ranks stand 12 BTS units apart behind it, leftover models widen the front ranks,
+and the slots are rotated by the unit's script `dir`. `--spacing` (default 12, the traced value) is
+kept for experiments. War machine, monster and wagon layouts are not drawn yet. Troop sprites are drawn at
+0.45 world units per sprite pixel (measured on a BF001 screenshot, not traced), so models keep the gaps seen
+in the game.
 
 Directional unit frames use the established `phase * 8 + direction` layout and the first standing
 phase for standard 104-frame sets. Script `dir` is 0 = +Y (north on the plan map) and increases
@@ -115,9 +119,10 @@ scripted scenery placement resolve, as do all units with a sprite resource. `BF0
 Ceridan deliberately uses `VoidType`, so it has no sprite to render. The camera model is settled
 (perspective) and sufficient for an engine. Its exact original parameters (how `Camera` maps to the
 heading, pitch, FOV, eye distance/height, `CameraEdge` limits) are deliberately not pursued.
-The sprite frame for `dir = 0`, formation spacing and rank semantics (3D uses 6 mesh = 48 BTS
-units, 2D uses 32), mesh pivots, texture transparency, and original lighting remain open questions
-for 2.4 and Wine instrumentation.
+The sprite frame for `dir = 0`, mesh pivots, texture transparency, and original lighting remain open
+questions for 2.4 and Wine instrumentation. Formations in both viewers follow the traced block layout
+(12 BTS units = 1.5 mesh units between models) and the measured troop sprite scale; against it, PBX pines
+look about twice as large as in the game screenshot (see `--scenery-scale`).
 
 `BF001` also demonstrates that not every initial unit is inside the rendered terrain mesh:
 `Mercenary Crossbows` is placed at `(1814, 502)`, beyond the `1600`-unit field width and the

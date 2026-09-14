@@ -4,7 +4,7 @@ import math
 import struct
 from pathlib import Path
 
-from . import legacy
+from . import formation, legacy
 from .image import load_rgb_palette, write_png
 from .paths import Installation
 from .script import load_battle
@@ -13,7 +13,7 @@ from .sprites import colormap_indices, decode_frame
 DEFAULT_WIDTH = 544
 DEFAULT_HEIGHT = 386
 DEFAULT_ZOOM = 1.0
-DEFAULT_SPACING = 32.0
+DEFAULT_SPACING = formation.MODEL_SPACING
 BACKGROUND = (24, 26, 32)
 
 
@@ -123,23 +123,8 @@ def _frame_direction(script_dir, offset):
 
 
 def _formation(unit, spacing):
-    """Return soldier anchors in BTS world coordinates, centred on the unit anchor."""
-    position = unit["set"]
-    stats = unit["stats"].get("s_side", [])
-    count = int(stats[1]) if len(stats) > 1 else 1
-    ranks = min(count, int(stats[3])) if len(stats) > 3 and stats[3] else 1
-    columns = math.ceil(count / ranks)
-    angle = (position.get("dir") or 0) * math.tau / 512
-    soldiers = []
-    for index in range(count):
-        row, column = divmod(index, columns)
-        side = (column - (columns - 1) / 2) * spacing
-        forward = (row - (ranks - 1) / 2) * spacing
-        soldiers.append((
-            position["x"] + side * math.cos(angle) + forward * math.sin(angle),
-            position["y"] - side * math.sin(angle) + forward * math.cos(angle),
-        ))
-    return soldiers, count, ranks
+    """Return soldier anchors in BTS world coordinates, with the unit anchor at the front-rank centre."""
+    return formation.unit_layout(unit, spacing)
 
 
 class Viewport:
@@ -174,7 +159,7 @@ class Viewport:
     def sprite(self, frame, palette, x, y):
         """Composite an indexed sprite, scaled together with the world map."""
         anchor_x, anchor_y = self.point(x, y)
-        scale = self.zoom
+        scale = self.zoom * formation.SPRITE_PIXEL_WORLD_UNITS
         left, top = anchor_x - frame["anchor_x"] * scale, anchor_y - frame["anchor_y"] * scale
         x0, x1 = max(0, math.floor(left)), min(self.width, math.ceil(left + frame["width"] * scale))
         y0, y1 = max(0, math.floor(top)), min(self.height, math.ceil(top + frame["height"] * scale))
