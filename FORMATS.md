@@ -38,7 +38,7 @@ from game data; they are not part of the repository.
 | Cutscenes | `ANIM/*.SI/.SN/.SM/.SR` | ✅ containers, 🟡 event semantics | Cutscenes | `notes/si_omni.md`, `notes/scene_scripts.md` |
 | Game rules: unit stats, combat, morale, shooting | `GAMEF.DLL` code and tables, `setstats` | ✅ stat layout, close combat, morale; 🟡 missile constants, some flags | Unit stat fields, Game rules | `notes/game_rules.md` |
 | Mission logic, unit behaviour | `SCRIPT/BFxxx.DLL` | ✅ bytecode scripts, interpreter, all 232 opcodes, disassembler (`whshr scripts`); 🟡 per-mission semantics | Mission logic, Game rules | `notes/game_rules.md` |
-| Save games | `SAVE/savegame.*` | ⬜ | Other files | — |
+| Save games, campaign files | `SAVE/savegame.*`, `ARMY/PLAY/MARCH.MRC`, `debrief.dbf` | ✅ RIFF `WHSV` container, regiment roster, embedded army files; 🟡 some `Result:` values | Save games and campaign files | `notes/campaign.md` |
 
 ## `.PAL` — two different formats under the same extension
 
@@ -418,7 +418,7 @@ Order in the files: `FIELD`, `MISSIONINFO`, `DYNAMIC_LOAD`, `OBJECTS`, `SCENERY`
 | `DYNAMIC_LOAD` | resources to load: `loadspr:Name,n` (sprite sets, e.g. `BattleSprites` → `GENBATT`), `loadsfx:Name` (sound packages, see "Sound effects"), `loadfurn:Type` (3D scenery objects used in `SCENERY`, see "Name tables"), `NoBirds:` |
 | `OBJECTS` | collision objects: `set:status` (`os_active`, `os_solid`, rarely `os_camcollide`), `x`, `y`, `z`, `radius`, `dir`. Optionally `addrectangles:=N` with `rect:x1,y1,x2,y2`, i.e. rectangles relative to the object's center, presumably rotated by `dir`. `z` is not the terrain height under the object (probably the object's own height) |
 | `SCENERY` | `placefurniture:Type,x,y,dir`: trees, rocks, buildings. `Type` is resolved through the furniture table to a `.XOF` mesh in the battle's `SCENERY.PBX`. The `D_` prefix (e.g. `D_SnwWatchTower`) is the destroyed variant, with its own mesh (e.g. `TPINEL_D`) |
-| `BOUNDARIES` | `AddBoundary:Name` + `AddLine:x1,y1,x2,y2`, i.e. named polylines. Names: `BattleEdge` (field boundary), `ViewEdge`, `SightEdge`, `CameraEdge`, `DeploymentArea`/`Merc Deployment` (deployment zone), `Nav1…NavN` (navigation obstacles along impassable terrain), terrain ones: `CliffsEdge`, `RiverEdge`, `WallsEdge`, `Hedge`, `LakeEdge`… |
+| `BOUNDARIES` | `AddBoundary:Name` + `AddLine:x1,y1,x2,y2`, i.e. named polylines. Names: `BattleEdge` (field boundary), `ViewEdge`, `SightEdge`, `CameraEdge`, `DeploymentArea`/`Merc Deployment` (deployment zone), `Nav1…NavN` (navigation obstacles along impassable terrain), terrain ones: `CliffsEdge`, `RiverEdge`, `WallsEdge`, `Hedge`, `LakeEdge`…. Gameplay ✅: `SightEdge` lines block visibility, `ViewEdge`/`CameraEdge` only clip the camera, `Nav*`/`SOLID`/`INVSOLID`/`BattleEdge` are region obstacles for the reactive route controller (no path graph), `DeploymentArea` limits deployment (`notes/game_rules.md` section 4) |
 | `UNITS` | units (format below). Label from the comment: `; Enemy Army` (54), second section `NPC units` (27) |
 | `NODES` | nodes for the mission script: `set:status` (`ns_active`, `ns_startpos`, `NS_END`), `x`, `y`, `radius`, `dir`, `id` (usually 0; also 1–13 and 99). Chains of `ns_startpos` lead to the deployment zone. **Probably each `NS_END` is the target position of one player unit**: in 41/44 campaign battles the number of `NS_END` nodes = the number of player units, and there are usually a few more `ns_startpos` nodes. But only in 8/44 do the units from `.MRC` stand exactly on these nodes, so the positions in `.MRC` are usually not starting positions. 501 of 547 player units have `hidden:`, which fits the army being brought onto the field by the script or by deployment (statistics: `scripts/battle_atlas.py`) |
 
@@ -470,18 +470,26 @@ solved**, checked on all 54 `.BTS`:
 The numbers look like a snapshot that the editor wrote when saving. For `K`, `X`, `R`, `I`, `P`, `V`
 they are unknown.
 
+**Evaluation** ✅ (`notes/game_rules.md`, "Missions and objectives"): `GAMEF.DLL` keeps a table of 40-byte records
+at `0x100F4D48` indexed `L − 'A' + 1`, with the defined flag, flags, caption id, an evaluator function and the
+numbers `a, b`. Evaluators run at battle set-up, every tick (flag `0x2`) and in a separate pass (flag `0x8`); the
+first met objective with flag `0x1` ends the battle. Battle-ending letters: A, F, H, N and Z. Objective G ("Inside
+the gates!", BF015/BF017) lets player units that reach an interior node leave the battle. The 26 evaluator bodies
+(what each letter counts) have not been read.
+
 ### `.MRC` — army
 
 Root `[MERCARMY]`, containing `[UNITS]` (label `; Mercinary Army` or
 `; Mercenary Army (Marching Orders)`) and sometimes `[MISSIONINFO]` (`ARMY.MRC`, `SPRED.MRC`).
-Loaded from `.BTS` via `loadmerc`. `MARCH.MRC` is present both in `FILE/SCRIPT/` and in `SAVE/`,
-so it is presumably the current state of the army in the campaign.
+Loaded from `.BTS` via `loadmerc`. In the campaign the battle engine loads `SAVE/MARCH.MRC` (the regiments
+selected for the next battle) instead; `FILE/SCRIPT/MARCH.MRC` is its empty stub (see "Save games and campaign
+files").
 
 ### Unit (`addunit`), shared by `.BTS` and `.MRC`
 
 ```
 addunit:Grudgebringer<Cavalry          name ('<'/'_' = space)
-    hidden:                            optional: hidden at start (hypothesis)
+    hidden:                            invisible until spotted or placed in deployment; delayed units wait in their script
     set:whoami=2                       0 for ordinary enemies; 1..100 for named units (hypothesis: persistent campaign ID)
     set:hired=0                        0/1: mercenary paid (hypothesis)
     troopsprites:BorderHorse,0         sprite set → .FOL via the sprite table ("Name tables"); ",0" is always 0
@@ -571,13 +579,14 @@ python3 scripts/render_battle.py .../FILE/SCRIPT/BF001.BTS out.png 0.5
 
 ### Open questions (scripts)
 
-- Meaning of `set:map`, `whoami`, of the stat bytes `s_cmdr`, `s_armname`, `s_banner` (always 0), and of the numbers of most objective letters. The other
+- Meaning of `set:map` (`whoami` is the persistent regiment id 0–37, `notes/campaign.md`), of the stat bytes `s_cmdr`, `s_armname`, `s_banner` (always 0), and of the numbers of most objective letters. The other
   `setstats` fields are resolved (see "Unit stat fields").
 - The `,N` after `troopsprites`/`banner`/`leaderportrait`/`loadspr`: 0 in all 3314 uses, and when it
   is missing (`loadspr:Wagon`) the file is not packed. Hypothesis: a colour or variant selector.
 - Whether `dir = 0` selects sprite direction frame 0 (derived, not observed in the running game).
-- Units packed in a battle's `SPRITES.PBX` but not declared in its `.BTS` (20 of 44 campaign battles).
-  Hypothesis: the mission DLL spawns them.
+- ~~Units packed in a battle's `SPRITES.PBX` but not declared in its `.BTS`~~ ✅ resolved: every bundled file is a
+  `.BTS` unit sprite or a `loadspr` entry (animated terrain, `GENBATT`) in all campaign battles; only fanatics are
+  spawned at run time.
 
 ## Game rules — `GAMEF.DLL`
 
@@ -606,7 +615,10 @@ printed by `python3 -m whshr rules <installation>`. Everything below is ✅ unle
   No rank or spear rules. Only monsters strike back immediately (per-round attack pool).
 - **Movement**: M only feeds the speed stat `s_rlmv = trunc(4.8 × M + I) / 2` (the mount's M for riders); units
   move `s_rlmv × k / 16` world units per tick (k 1.8 free, 1.0 closing in, 2.5 charging, 1.5 fleeing and
-  pursuing), about 9.8" per turn for M4 I3 infantry; terrain does not slow units; they wheel on a front corner.
+  pursuing), about 9.8" per turn for M4 I3 infantry; terrain does not slow units; they wheel on a front corner. Routes are
+  a reactive steer-around controller (no path graph, at most 8 waypoints); overlapping friendly units and scenery
+  push apart. Visibility (spotting, AI shooting and casting) needs a 100° view cone (200° in melee), no scenery on
+  the line and no `SightEdge` crossing; terrain height never blocks sight. No army-level AI exists.
 - **Magic**: one shared power pool of 0–8 per side, re-rolled by a random walk every 50 s of real time; spells
   cost 1–3, paid on the click, and always work if the target is in range and within ±50° of the wizard's
   facing (no casting roll, line of sight or levels). Bolts: Lightning S6 D3, Warp Lightning S5 D6, Fireball S4;
@@ -1016,6 +1028,38 @@ RIFF 'MxSt'
   `B*.WAV` = battle and campaign lines, the number is the string id in `BRTXT.DLL` (489/502).
 - 27 scenes are started by the glue scripts (`playmovie`, `iftrueplaymovie`), `A1` (intro) and
   `DEATH01/02` by `WHSHR.EXE`.
+
+## Save games and campaign files — `SAVE/`
+
+**Save format decoded, campaign rules traced** (full report with evidence: `notes/campaign.md`). Written by
+`WHSHR.EXE` (writer `FUN_00443cd2`, reader `FUN_004447b0`); a stdlib reader prototype validates both real saves.
+
+`savegame.0`–`savegame.5` (slot 5 "Last Game" = the glue `autosave:`) are Windows RIFF files, form `WHSV`,
+little-endian, with eleven chunks in fixed order:
+
+| Chunk | Size | Contents |
+|---|---|---|
+| `SHDR` | 248 | `char[64]` description, `char[64]` battle script, `char[64]` current glue window, `u32` version (1), `u32` checksum (sizes of `BK01`+`BKO2`+`BK03`+`RMYI` + size of `WND.DLL`), `u32` ?, `u32` nScripts, nCalls, nWindows, nObjects, `i32` **coffers**, `u32` glue status bits and mask, `i32` bonus counter, 12 zero bytes |
+| `STAX` | nScripts·0x218A8 + nCalls·4 + nWindows·0x84 + nObjects·0xA0 | glue interpreter state (script contexts, call stack, window stack, window objects): a save resumes the glue script exactly where it stopped |
+| `BK01`, `BKO2`, `BK03` | 120, 16, 72 | `u32` book-page flags set by `enablebook:<book>=<page>`, `-1` terminated |
+| `RMYI` | 2028 | 39 × 52-byte regiment records indexed by `whoami` (last all `-1`): keep (never disbanded), for hire, wizard, artillery, pending join, in marching orders, in army, experience at mission start, reinforcements available, base price, price per model, wounded, wounded returning |
+| `RMY1`–`RMY4` | file size | verbatim `ARMY.MRC`, `PLAY.MRC`, `MARCH.MRC`, `debrief.dbf` |
+| `MISS` | 272 | current mission: `u32` BRTXT name id, 4 × `char[32]` (briefing run file, briefing script, battle, mission script), 12 × `u32` ?, debrief evaluator index, `cash` type, initial and completion payments, rates A and B, 2 required objective letters, 8 × forced regiments (`whoami + 1`) at `+0xF0` |
+
+Campaign text files (same syntax as `.MRC`):
+
+| File | Role |
+|---|---|
+| `PLAY.MRC` | master roster: all 38 regiments (`whoami` 0–37), created from `SCRIPT/MAXARMY.MRC` |
+| `ARMY.MRC` | the company, created from `SCRIPT/STRTARMY.MRC` |
+| `MARCH.MRC` | regiments and positions for the next battle, loaded by `GAMEF.DLL` as the player army |
+| `debrief.dbf` | battle result written by `GAMEF.DLL`: `[DEBRIEF]` with `[MISSIONINFO]` `Result:<letter>,<success>,<4 values>` per objective and `[UNITS]` surviving and dead/routed units |
+
+Campaign rules in short: kills give the victim's `s_pntval` as experience; promotions at 2000/4000/6000 XP
+(+1 WS, +1 S, +1 W; wizards learn a spell per 1000 XP); coffers start at 500; each `cash` type selects one of
+19 balance-sheet programs (`BKTXT` 5000–5042 lines); a deployed regiment costs price per model × models, one left
+in camp 10 %; routed models return, 65 % of the killed are wounded and return a mission later; regiments below
+20 % are disbanded unless protected.
 
 ## Other files
 

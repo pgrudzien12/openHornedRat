@@ -50,12 +50,14 @@ This file describes the logic in prose and short pseudo-code. No decompiled list
 11. **Time and movement** ✅ One tick per 100 ms timer message (≤ 10 ticks/s, no catch-up); 19 ticks per segment,
     10 segments per turn = 19 s. M only feeds a speed stat `s_rlmv = trunc(4.8 × M + I) / 2`; units move
     `s_rlmv × k / 16` units per tick (k 1.8 free, 1.0 closing, 2.5 charging, 1.5 fleeing); terrain does not slow
-    them; units wheel on a front corner.
+    them; units wheel on a front corner. Routes use a reactive steer-around controller (no path graph); units push
+    apart on overlap; visibility is a 100° cone blocked by scenery and `SightEdge` lines, never by terrain height.
 12. **Magic** ✅ Each side has one shared power pool of 0–8, re-rolled by a random walk every 50 s of real time;
     spells cost 1–3 and always work when the target is in range and within ±50° of the wizard's facing (no
     casting roll, no line of sight, no miscast). Dispelling is a spell or an item aura with a percentage chance.
-13. **Biggest open points** (section 11): batch 4 (missions and objectives, campaign progression and saves, AI and
-    pathfinding) and a few effects to confirm in the running game (never-ending spells).
+13. **Biggest open points** (section 11): the objective evaluator functions (R63), the optional batch 5 (animation
+    bytecode, sounds by event) and a few effects to confirm in the running game (never-ending spells). Campaign
+    progression and save games: `notes/campaign.md`.
 
 ## Contents
 
@@ -159,7 +161,7 @@ each other (e.g. every `s_mount[2]` equals the separate `s_weap` line). The in-g
 | 31 | `s_armr` | `+0x8C` | armour code: 0–5 rating, 6 regeneration, 7 void, 8–13 mounted rating 1–6 | ✅ save table (section 5.3); `BRTXT` 100–105 "Armour Rating 0–5", 106 "REGENERATE!!!!", 107 "VOID!!!!!!!!!!", 108–113 "Armour Rating 1–6"; Troll has 6 |
 | 32 | `s_weap` | `+0x8D` | close combat weapon class: 0 none, 3 hand weapon, 4 two-handed, 10 spear/halberd class | ✅ strength table (section 5.2); class 4 on Greatswords, Hammerers, Rat Ogre, Treeman; 10 on halberdiers, Stormvermin, Stickers, Wolf Riders, artillery crews |
 | 33 | `s_race` | `+0x8E` | `class × 8 + race`; race 0 Human, 1 Elven, 2 Dwarven, 3 Goblinoid, 4 Orc, 5 Skaven, 6 Peasant, 7 big; class 0 notype, 1 Infantry, 2 Cavalry, 3 Archers, 4 Artillary, 5 Wizard, 6 Monster, 7 RollingStock, 8 Special, 9 Furniture | ✅ name tables `0x100E9B20`/`0x100E9B40`; the editor comment is built from them and agrees with `s_race` in 879/889 units; class drives code paths (`& 0xF8`) |
-| 34 | `s_pntval` | `+0x8F` | points value | 🟡 when a model dies its unit loses and the killer's `s_Exp` gains this value |
+| 34 | `s_pntval` | `+0x8F` | points value: experience gained by the killer, +7 per campaign promotion | ✅ `RemoveModel`; promotions in `notes/campaign.md` |
 | 35 | `S_BalWeap` | `+0x90` | missile weapon code (section 8) | ✅ shooting switches on it |
 | 36 | `s_cmdr` | `+0x91` | unknown, always 0 | ⬜ |
 | 37 | `s_armname` | `+0x92` | armour name, always 0 | 🟡 by analogy with the next field |
@@ -250,6 +252,50 @@ never use `AlwaysPursue`.
   delays, other words opcodes of a 59-entry table at `0x100E7000` (fire event 21, model death 23, `ApplyImpact` 52,
   sounds, effects, removal; 🟡 names).
 
+### Routes, collisions and visibility ✅
+
+Full detail: `extracted/agent_reports/L_ai_pathfinding.md` (local). The key visibility constants were
+spot-checked in the code before merging.
+
+- **Waypoints**: `ExecuteGoto` (`FUN_1002a950`) replaces and shift-click (`FUN_1002a6c0`) appends to a queue of
+  **at most 8 waypoints** (`FUN_1002ab70`); a point within 17 units of the queue head or tail is ignored. Moving
+  onto the unit's own position just halts and re-forms.
+- **Routing is not pathfinding**: a unit walks straight towards its current waypoint. When `ObjectsOnPath`
+  (`FUN_100276a0`) finds the first blocking map object on the line (scenery, spell area objects **or another
+  unit's footprint**, tested with the same `asin(radius / d)` geometry as missile obstruction), `GotoTarget`
+  (`FUN_1002b030`) dry-runs a detour to the left and to the right (`FUN_1002b390`: cost `4 × turn + distance` per
+  leg, +12 000 for leaving the playable area, abandoned beyond a full turn or cost 5 999) and keeps the cheaper
+  side; if both exceed 11 999 the unit gives up ("can't find the way to target"). Each tick `PlanStep`
+  (`FUN_1002b980`) deflects the heading around the current obstruction again. `Nav*`, `SOLID`, `INVSOLID` and
+  `BATTLEEDGE` boundaries are polygon-membership obstacles only, never a graph, so units can get stuck against
+  concave shapes; an engine may use real pathfinding without visible change on the open maps.
+- **Region masks**: `InRegion`/`NotInRegion`/`RegionCrossings` (`FUN_10015c60`, `FUN_10015bd0`, `FUN_10015d20`)
+  scan the boundary records (40 bytes at `*0x100E26DC`) whose flags are active and match the mask; `INVSOLID`
+  inverts containment (the outside of `BattleEdge` is solid); crossings snap to the boundary so movers slide
+  along it. `0xB0` routes and fanatic jumps, `0x100` deployment, `0x200` `SightEdge` (spotting only), `8`
+  `ViewEdge` and `0x40` `CameraEdge` (camera only), `0x20` leaving the table, `0x90` the rout probe.
+- **Collisions** (`ResolveUnitCollisions`, `FUN_100289d0`, once per tick): every overlapping pair of footprints
+  or objects is resolved. **Friendly units and solid scenery push apart** by half the overlap each
+  (`PushApart`, `FUN_10028610`: circle-circle resolution; a charging unit hitting something within its 45°
+  front arc ends the charge, event 0x09). **Enemy contact** engages (fear test, charge, redirect, rout: section
+  5.5 and 7.3); contact with a routing unit makes automatic contact attacks (section 7.7). An `INVSOLID` object
+  straight ahead sends event 0x27. There is no sub-tick sweep, so fast units can briefly overlap.
+- **Visibility** (`IsVisible`, `FUN_10016d70`), shared by hidden-unit spotting and "is my target visible" for
+  AI shooting and casting: the target must lie within the looker's **view cone** (half-width 71/512 turn =
+  **±50°**, doubled to ±100° while in melee), one of three sample rays towards the target (spread by its
+  footprint) must be free of scenery (`ScanObjectsOnLine`, the missile obstruction test), and the line must not
+  cross a **`SightEdge`** boundary (if a battle has none, "No Sight Boundary" and visible). **No range limit and
+  no terrain height** anywhere in spotting, shooting or casting line of sight: hills never hide units.
+- **Hidden units** (`SpotHiddenUnits`, `FUN_10016ca0`, run by threat detection): each hidden enemy that passes
+  `IsVisible` is revealed **permanently** (flag `0x80000` cleared), with event 0x1C to it and 0x1D to the spotter.
+- **AI decisions**: `PickBestTarget` (`FUN_10022280`) scans all units for the highest `UnitScore`; `DetectThreat`
+  (`FUN_10021f80`) spots hidden units, then keeps or re-picks the threat unless braced. `RunAway` (206) is one
+  reactive flee step per behaviour period (±67.5° away from visible enemies), `CircleAroundTarget` (228) one
+  offset move of +11.25°. **There is no army-level AI**: coordination comes only from the "assist a friend who
+  attacks" rule (event 0x13, `AIQuery` 9/10) and from mission scripts that assign "attack the n-th nearest
+  enemy" targets (opcodes 176–191) to individual units. AI armies are not repositioned at battle start (their
+  `.BTS` positions are used).
+
 ### Unit behaviour scripts and events ✅
 
 **Most consequences of morale are decided by bytecode, not C code.** Every live unit runs a behaviour
@@ -276,8 +322,10 @@ script each tick (`RunUnitScript`, `FUN_1001cae0`, called from the battle tick `
   (0x62/0x63), `Query N` (0x16, cases of the AI routine `FUN_100214b0`), `React N` (0xC2).
 - **More from the catalogue** ✅: after `ExecuteOrder` applies a player order, the interpreter drops the target and
   restarts the unit's script at its restart point (op 0x1E). `SetThreatRange` (0x31) sets `+0x218`, used by the AI
-  threat score `worth × (range − distance) / (range / 4)`, ×4 if the enemy targets this unit, ×32 if it is also
-  charging. Node opcodes move to a node (0x1F), face it (0x20), teleport to it (0x49), place and re-form there
+  threat score (`UnitScore`, `FUN_10022330`): `worth × (range − d) / round(range / 4)` with the octagonal distance
+  `d = max(|dx|, |dy|) + min(|dx|, |dy|) / 2`, 0 for friends, broken, `CantMelee` or hidden units and beyond the
+  range; ×4 if the enemy targets this unit, or ×32 instead if it is also charging (see "Routes, collisions and
+  visibility"). Node opcodes move to a node (0x1F), face it (0x20), teleport to it (0x49), place and re-form there
   (0x4A) and scatter models around nodes (0x48). 0x4C, 0x5C, 0x5D are instant 90°/180° turns, 0x4B a wheel.
   Events 0x14/0x15 are reports from a unit to its linked parent (op 0x65), 0x33 comes from op 0x66 and 0x37 from
   op 0x63. A wizard busy casting ignores being charged and "enemy routed" events. Operand sizes of 0x1F, 0x87, 0x95
@@ -336,6 +384,7 @@ script each tick (`RunUnitScript`, `FUN_1001cae0`, called from the battle tick `
 | 0x36 | `AIQuery` case 12 | 🟡 | mission scripts |
 | 0x37 | op 0x63 | event sent to the enemy side | mission scripts |
 | 0x38 | `AIQuery` cases 19/20 | battle state 4 → 5 (broadcast) | |
+| 0x35 | – | unused (no script handles it) | |
 | 0x30 | pairing, withdraw | alone in a combat grid / disengaged | leave grid, re-form |
 
 Mission scripts mostly add cases for 0x03, 0x04, 0x05, 0x13, 0x14, 0x15 and 0x1B.
@@ -377,6 +426,54 @@ gosubs a class layer (153–156) handling morale (rout, fear, pursuit, madness),
 | 170 | 🟡 leave the battle: teleport to node 24, rally, remove from the battle |
 
 Reports and the agent's scratch listings are kept locally in `extracted/agent_reports/` (not in git).
+
+### Missions and objectives ✅ / 🟡
+
+Full detail, per-battle table and BF001 walk-through: `extracted/agent_reports/J_missions.md` (local; survey tool
+`J/survey.py`). Checked before merging: the objective table and letter indexing, the battles defining G, and the
+`SPRITES.PBX` explanation (re-run with `J/sprites_check.py`).
+
+- **Mission scripts use only the catalogued opcodes**: all 45 DLLs were disassembled; patrols, ambushes,
+  reinforcements and guard behaviours are built from node opcodes, timers, events and `AIQuery` calls. There is no
+  mission-specific opcode family.
+- **Spawning**: only Night Goblin fanatics are created at run time (opcode 0xD3, three copies at lateral offsets
+  0/−20/+20, in BF004_5, BF015, BF034, BF038). Everything else exists from the start.
+- **`hidden:`** units exist on the battlefield but are invisible and untargetable until spotted (section "Routes,
+  collisions and visibility") or placed. **Delayed reinforcements** are hidden units whose script first waits (BF001:
+  three Clanrat Warriors wait 150 ticks, then march in along nodes 8 and 9).
+- **`SPRITES.PBX` contents** ✅ (verified independently): in every campaign battle, the bundled sprite files are
+  exactly the `.BTS` units' `troopsprites`/`banner`/`leaderportrait` sprites plus the `loadspr` entries (`GENBATT`,
+  animated terrain such as `U_WATER`, `LAVA*`, `TORFLAM`, `BFK_*`, `N_FIRE`, `BEAM`). The player army's sprites come
+  from the permanent `BINARY/` set. **No extra troops are spawned**; the old "20 of 44 battles" mismatch counted
+  `loadspr` terrain animations.
+- **Deployment**: `DeployTroops:` battles hide all player units; placement is a UI action, not bytecode. `NS_END`
+  nodes match the player unit count (BF001: 3). 🟡 Units with holding positions outside the field (BF001's crossbowmen
+  at x = 1814) are placed by the player during deployment; 🟡 the `ns_startpos` chain probably outlines the
+  deployment area for the UI. AI armies start at their `.BTS` positions.
+- **BF001**: patrol and attack scripts for Hiln's Guard and Sleaquit, Otto Hiln with a short threat range and a
+  scripted flight towards node 5 (🟡 exact trigger chain), the delayed Clanrat wave, and standard interrupt
+  handlers; nothing beyond the general interpreter and library scripts is needed to run it.
+- **Objective table** ✅ `0x100F4D48`: 40-byte records indexed `L − 'A' + 1` (record 0 is empty; opcode 222
+  `IfObjective` uses the same index), with `+0x00` defined (set by the `.BTS` parser `FUN_1000d820`, which also links
+  the defined letters), `+0x08` flags, `+0x0C` in-battle caption (`GMTXT 33000 + L − 'A'`), `+0x10` evaluator function,
+  `+0x14` met, `+0x18/+0x1C` the numbers `a, b`. Flags: `0x1` ends the battle when met, `0x2` evaluated every tick,
+  `0x4` no caption in the end-of-battle list, `0x8` evaluated in the separate pass, `0x10` still evaluated after the
+  battle is decided, `0x20` custom debrief line. **Battle-ending letters**: A (Eliminate the enemy), F (BF009), H
+  (BF015, BF017), N (Get past the Dragon, BF014) and Z (the silent loss condition).
+- **Evaluation** ✅: battle set-up calls every defined evaluator with mode 1; `FUN_1001ae30` runs each tick (from
+  `BattleTick`) and tests the not-yet-met objectives with flag `0x2` in mode 2; the first met objective with flag
+  `0x1` decides the battle (`DAT_100e25b8 = 1`), opens the win or loss dialog (`FUN_1001adc0`) and plays the end
+  stinger. `FUN_1001af30` evaluates flag-`0x8` objectives in mode 3 from a less frequent poll; at the end
+  `FUN_1001ad40` lists captions, or calls the evaluator in mode 4 for a custom debrief line. ⬜ The 26 evaluator
+  functions (what each letter counts) were not read; the known `a, b` snapshots suggest "compare current counts with
+  the stored numbers".
+- **Objective G "Inside the gates!"** ✅ (R60): only BF015 and BF017 (siege battles) define it. Player units then run
+  threat behaviour 12; entering map node 14 in battle state 4 moves the battle to state 5 (event 0x38); a unit that
+  reaches the interior node 99 in state 4 gets event 0x36, and library script 152 sets the allied side, unit flag
+  `0x100` and switches it to script 170, which teleports it to node 24 and removes it from the battle: the unit has
+  got inside the walls. The gate itself (a rolling stock unit) is excluded.
+- **Mission-only events**: 0x05, 0x14/0x15, 0x33, 0x37 and 0x38 are used only by the fanatic battles and the two
+  siege battles; **event 0x35 is never handled by any script** (unused).
 
 ### Player orders and the command panel ✅
 
@@ -1164,6 +1261,15 @@ chart for shooting).
 | `0x10016FC0`, `0x100170C0`, `0x10017170` | `ObjectOnLine`, `ScanObjectsOnLine`, `ScanObjectsOnLine2` | asin half-width test |
 | `0x10001300`, `0x10001410` | `SpawnCorpse`, `UpdateCorpses` | 32-entry corpse ring |
 | `0x1003C440` | `BattleWindowCreate` | magic pools start at `rand() % 8 + 1` |
+| `0x1002A950`, `0x1002A6C0`, `0x1002AB70` | `ExecuteGoto`, `AddWaypoint`, `SetOrQueuePoint` | 8-waypoint queue |
+| `0x1002B030`, `0x1002B390`, `0x1002B980` | `GotoTarget`, `TrySteerSide`, `PlanStep` | reactive route controller |
+| `0x100276A0` | `ObjectsOnPath` | first obstruction on the line (scenery or footprints) |
+| `0x10028610`, `0x10028890` | `PushApart`, `EngageOnContact` | collision response |
+| `0x10015C60`, `0x10015BD0`, `0x10015D20` | `InRegion`, `NotInRegion`, `RegionCrossings` | boundary masks |
+| `0x10016D70`, `0x10016DB0`, `0x10016F70`, `0x10015E20` | `IsVisible`, `ArcAndObstructionTest`, `InFacingArc`, `SightEdgeClear` | visibility |
+| `0x10016CA0` | `SpotHiddenUnits` | events 0x1C/0x1D |
+| `0x10022330`, `0x10022280` | `UnitScore`, `PickBestTarget` | exact threat score |
+| `0x100243C0`, `0x10018820` | `RunAway`, `CircleAroundTargetStep` | |
 | `0x10040930`, `0x10011920`, `0x100238D0` | `SpellButtonClick`, `OrderCast`, `CastPending` | cost, order 0x17, op 147 |
 | `0x1000F870`, `0x1002EC10`, `0x1002EBD0` | `EffectTargetCheck`, `EffectRange`, `CanCastSpells` | range and ±50° arc |
 | `0x10011BE0`, `0x1002FBF0`, `0x1002E2D0` | `EffectTick`, `EffectPhase`, `EndEffect` | per-tick spell updates |
@@ -1271,7 +1377,12 @@ static analysis unless marked Wine.
 | R57 | **Area objects** | ✅ temporary solid scenery (`os_active|os_solid`): push units back, stop charges, bend routes, block spotting, obstruct missiles. | — | done |
 | R58 | **Spells against regenerators** | ✅ no-save spells wound them; save + type 0 spells allow regeneration; Burning Head never wounds them (section 5.3). | — | done |
 | R59 | **Duplicate opcode names** | 0x3A, 0x88 and 0xAF share the name `TakeEventTarget` (same helper, different arguments). | Give distinct names in `whshr/behaviour.py`. | low |
-| R60 | **Objective index 7 and leaving the battle** | `IfObjective 7` in scripts 100/101/152 selects threat mode 12, allied side and, on event 0x36 (`AIQuery` case 12, battle state 4), library script 170 (teleport to node 24, remove from the battle); which objective letter index 7 is (G if A = 1, H if A = 0) is unconfirmed. | Batch 4 agent J (missions and objectives). | medium |
+| R60 | **Objective index 7 and leaving the battle** | ✅ letter G "Inside the gates!" in the siege battles BF015/BF017 (Missions and objectives). | — | done |
+| R61 | **Visibility details** | Unit flag bit 3 (`0x8`) also doubles the view cone together with melee (`0x208`); the `0x90` region test at `0x10026337` in shooting/effect code was not traced; mode 1 of the "attack the n-th nearest" opcodes uses a signed-axis metric (🟡). | Read the callers. | low |
+| R62 | **AI deployment** | ✅ none: AI armies start at their `.BTS` positions (Missions and objectives). | — | done |
+| R63 | **Objective evaluators** | The 26 per-letter evaluator functions behind the objective table (`+0x10`) were not read; which counts they compare, and what S "Capture Hiln" and Y test in BF001. | Read the functions from the table (`0x1001b270`…`0x1001bd50`). | medium |
+| R64 | **Win/loss dialog codes** | `FUN_1001adc0` opens dialog 9 or 0xF depending on `DAT_100f516c`/`DAT_100f4e60`; which is which. | Read the two globals' writers. | low |
+| R65 | **Deployment nodes** | 🟡 the `ns_startpos` chain outlines the deployment area for the placement UI; units held outside the field are placed by the player. | Read the deployment UI code. | low |
 
 ### 11.5 Hypotheses in this report to confirm
 
@@ -1300,6 +1411,8 @@ Only worth the effort if static analysis stalls, as the game exits randomly unde
 - **Planned batches**: the full plan with agent briefs is in `notes/research_plan.md`: batch 3 (below), batch 4
   (J missions and objectives, K campaign progression and saves, L AI, pathfinding and visibility) and an
   optional batch 5 (M animation bytecode, events → sound/music/palette).
+- **Batch 4 done**: L (AI, pathfinding, visibility) and J (missions and objectives) merged into section 4; K
+  (campaign progression and save games) in `notes/campaign.md`.
 - **Batch 3 done** (G, H, I; September 2026): all 232 opcodes and 28 `AIQuery` cases catalogued, the `whshr`
   disassembler with its check, the library script table, R41, R44, R46–R49, R51, R53, R54, R56–R58.
 - **Open decisions for an engine**: whether to reproduce apparent original bugs (R11 armour rating 5, R33

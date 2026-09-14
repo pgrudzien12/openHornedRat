@@ -11,7 +11,7 @@ and `CLAUDE.md` before the next batch starts.
 | Batch | Agents | Status | Depends on |
 |---|---|---|---|
 | 3 | G opcodes 0–115, H opcodes 116–231 and AI queries, I `whshr` script disassembler | ✅ done (September 2026): all 232 opcodes and 28 `AIQuery` cases, `whshr/behaviour.py` and `whshr scripts`; merged into `notes/game_rules.md` | – |
-| 4 | J missions and objectives, K campaign progression and saves, L AI, pathfinding and visibility | ⬜ planned, ready to start | batch 3 ✅ |
+| 4 | J missions and objectives, K campaign progression and saves, L AI, pathfinding and visibility | ✅ done (September 2026): L and J (Sonnet), K (Opus); merged into `notes/game_rules.md` and `notes/campaign.md` | batch 3 ✅ |
 | 5 | M animation bytecode and game events → sound/music/palette (optional) | ⬜ optional | batch 3 |
 | – | small leftovers, Wine checks, engine decisions | not for agents | – |
 

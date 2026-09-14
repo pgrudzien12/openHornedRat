@@ -59,7 +59,7 @@ unknown formats. In short:
 | Cutscenes `.SI/.SN/.SM/.SR` | ✅ Omni 1.0 container, Smacker films, WAV, MIDS, event tracks; 🟡 event semantics |
 | Game rules (`GAMEF.DLL`) | ✅ `setstats` byte layout, close combat (WFB 4th ed charts), combat resolution, morale (flat 2–12 Ld roll), shooting (volleys, scatter, reload, ranges, blast damage), rout/pursuit/rally, movement and real time, magic (power pools, spells, dispel), unit behaviour bytecode and events. Report: `notes/game_rules.md` |
 | `SCRIPT/*.DLL` (mission logic) | 🟡 Win32 DLLs that only carry bytecode unit behaviour scripts (mission ids from 0, 3–37 per DLL; 100–170 shared library) run by a 232-opcode interpreter in `GAMEF.DLL`; all 232 opcodes catalogued, disassembler `python3 -m whshr scripts` |
-| Save games `savegame.0/.5` | ⬜ Unexplored |
+| Save games `savegame.0/.5` | ✅ RIFF `WHSV` (header with coffers, glue state, book flags, regiment roster, embedded `ARMY/PLAY/MARCH.MRC` and `debrief.dbf`, mission record); campaign rules (experience, economy, casualties). Report: `notes/campaign.md` |
 
 ## Repository layout
 
@@ -72,7 +72,7 @@ CLAUDE.md          - this file
 FORMATS.md         - format reference: overview table, structures, hypotheses, open questions
 ROADMAP.md         - work plan: game file inventory, phases 0-5 with status, milestones, order of steps
 notes/             - full per-format reports (how each claim was verified, per-file tables, open questions)
-  animations.md, battle_viewer.md, btp_sprite_leftovers.md, fonts_glue.md, game_rules.md, music.md, pbx_rnc.md, research_plan.md,
+  animations.md, battle_viewer.md, btp_sprite_leftovers.md, campaign.md, fonts_glue.md, game_rules.md, music.md, pbx_rnc.md, research_plan.md,
   pe_resources.md, scene_scripts.md, sfx.md, si_omni.md, sprite_names.md, terrain_gd.md
 whshr/             - unified package and CLI: python3 -m whshr check|extract|viewer|viewer-web|
                      viewer-2d|viewer-2d-web|terrain-check|rules|scripts (3D battle viewer: battle3d.py, 2D: battle2d.py,
