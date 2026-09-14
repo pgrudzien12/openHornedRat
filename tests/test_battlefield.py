@@ -29,11 +29,27 @@ class SpriteFrameSelectionTests(unittest.TestCase):
     def test_given_camera_looking_north_when_units_face_the_four_script_directions_then_frames_turn_counter_clockwise(self):
         frames = [sprite_direction(180, script_dir) for script_dir in (0, 128, 256, 384)]
 
-        # dir 0 faces away (N), 128 east (E profile, frame 6), 256 toward the viewer (S), 384 west (W).
-        self.assertEqual(frames, [0, 6, 4, 2])
+        # Frames run clockwise like script dir: 0 back view, 2 facing screen-right, 4 toward the viewer,
+        # 6 facing screen-left (labelled BRDHRS sheets: horse head right in frame 2, left in frame 6).
+        self.assertEqual(frames, [0, 2, 4, 6])
 
     def test_given_camera_turned_to_look_east_when_unit_faces_east_then_it_is_seen_from_behind(self):
         self.assertEqual(sprite_direction(270, 128), 0)
+
+    def test_given_a_fixed_facing_unit_when_the_camera_orbits_in_45_degree_steps_then_the_frame_advances_by_one(self):
+        # Playtesting report: a standing unit must keep one apparent world facing while the camera
+        # orbits around it, changing sprite by exactly one of the 8 stored directions per 45 degrees
+        # (not faster). Verified against rendered sheets and in-engine captures (notes/battle_viewer.md,
+        # "Real-time engine battle view"): BRDHRS (mounted) and MCSWORD (infantry) rotate smoothly and
+        # monotonically, one direction step per 45 degrees of orbit, for every script `dir`.
+        for script_dir in (0, 64, 100, 200, 300, 400, 511):
+            frames = [sprite_direction(yaw, script_dir) for yaw in range(0, 360, 45)]
+            self.assertEqual(len(set(frames)), 8, f"dir={script_dir}: {frames}")
+            # Orbiting the camera clockwise (yaw grows) steps the frame one direction counter-clockwise, so
+            # the unit keeps its world facing: a north-facing unit seen from the west faces screen-left.
+            for previous, current in zip(frames, frames[1:] + frames[:1]):
+                self.assertEqual((current - previous) % 8, 7, f"dir={script_dir}: {frames}")
+        self.assertEqual((sprite_direction(180, 0), sprite_direction(270, 0)), (0, 6))
 
 
 class AtlasTests(unittest.TestCase):

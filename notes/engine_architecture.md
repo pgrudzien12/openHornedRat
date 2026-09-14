@@ -484,3 +484,20 @@ byte-faithful port; every simplification is called out in each module's docstrin
 - Artillery, special weapons (cannon, mortar, breath weapons, warp lightning, ...), mounts, magic items,
   hatred/frenzy, fear/terror, and the behaviour bytecode interpreter are not modelled, per the task's scope
   for a first playable battle.
+
+## Bug fixes after playtesting
+
+- **Troop sprite facing** (owner report: figures did not keep their facing and changed sprite far too
+  often while the camera rotated). Root cause: the stored direction frames run **clockwise** on screen
+  (0 back view, 2 facing screen-right, 4 toward the viewer, 6 facing screen-left), not counter-clockwise
+  as `notes/animations.md` had recorded. Labelled 4x `BRDHRS` sheets settle it: the horse's head points
+  right in frame 2 and left in frame 6, where the rider's shield arm faces the viewer. With the wrong sign
+  every sprite turned against the camera rotation, so figures seemed to spin at twice the rate and
+  side-facing units showed the mirrored profile. `battlefield.sprite_direction` now returns
+  `round((dir - H) / 64) mod 8` (`H` = the camera's screen-up heading), `battle2d` uses
+  `+round(dir / 64)`, and `battle3d` shares the helper. BDD scenarios in `tests/test_battlefield.py` fix
+  the clockwise order and the orbit sense (one step per 45 degrees, against the orbit).
+- **Intro never ends**: a hidden run and a stdlib scenario both reach `MainMenuScene` at the Omni timeline
+  end (96.5 s), holding the last of the 722 frames from 90.25 s. The last-frame clamp moved from
+  `IntroView` into `smacker.frame_index_at(elapsed, frame_count)` with BDD coverage. The loop the owner saw
+  was not reproduced; see `notes/si_omni.md` ("Playtesting: intro never ends").

@@ -107,10 +107,12 @@ mission briefing with its campaign text (Enter or a click starts the battle), an
 a short fade after each scene change. Ctrl+Q or closing the window quits at any time.
 
 In battle, left-click a player regiment to select it and left-click the ground (or right-click without
-dragging) to order it there; Escape deselects. Regiments move at the documented real-time speeds and walk
+dragging) to order it there; with a selection, clicking an enemy regiment orders a charge. Escape deselects. Regiments move at the documented real-time speeds and walk
 in formation with walking and idle animations. Pan with the arrow keys or WASD or a right-drag, rotate
 with Q/E or a middle-drag, tilt with Page Up/Page Down, zoom with the mouse wheel, and reset with Home.
-Combat, enemy AI and a win or lose condition are not implemented yet.
+Regiments in contact fight simplified close combat, losers test Leadership and may rout, crossbows shoot
+in range, and a simple enemy AI holds, then advances and charges; the battle ends on a Victory or Defeat
+screen that returns to the main menu. The rules are simplified from `notes/game_rules.md`.
 
 Development options: `--battle BF001` starts directly in a battle, `--camera YAW PITCH DISTANCE` sets its
 initial camera, `--skip-intro` starts in the menu, `--width`/`--height` set the window size, and

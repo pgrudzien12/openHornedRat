@@ -118,8 +118,8 @@ def _troop_sprite_files(game):
 
 
 def _frame_direction(script_dir, offset):
-    """Map clockwise BTS direction units onto the counter-clockwise sprite frame order."""
-    return (offset - int(((script_dir or 0) + 32) // 64)) % 8
+    """Map clockwise BTS direction units onto the clockwise sprite frame order of a north-up view."""
+    return (offset + int(((script_dir or 0) + 32) // 64)) % 8
 
 
 def _formation(unit, spacing):

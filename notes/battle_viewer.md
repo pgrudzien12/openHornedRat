@@ -22,8 +22,8 @@ in the game.
 Directional unit frames use the established `phase * 8 + direction` layout and the first standing
 phase for standard 104-frame sets. Script `dir` is 0 = +Y (north on the plan map) and increases
 clockwise (512 units per turn); see "World conventions" below. Sprite directions are stored
-counter-clockwise, so the renderer uses
-`frame_direction = direction_offset - round(dir / 64) (mod 8)`. The zero offset (which sprite frame
+clockwise as well (frame 2 faces screen-right; `notes/animations.md`), so the renderer uses
+`frame_direction = direction_offset + round(dir / 64) (mod 8)`. The zero offset (which sprite frame
 `dir = 0` selects) is still unverified; `--direction-offset` is deliberately exposed for
 screenshot calibration.
 Rendering uses each FOL frame's horizontal anchor and provisional foot-line anchor directly.
@@ -102,7 +102,7 @@ yaw, pending validation against more references.
   four cases, and `BF035` TwinTowers (dir 71) lie on the plan map's NW–SE diagonal; the previous
   counter-clockwise transform put them SW–NE.
 - **3D sprite direction.** Frames are relative to the camera: with screen-up heading
-  `H = (yaw + 180) * 512/360`, `frame_direction = round((H - dir) / 64) mod 8`. At yaw 180 this
+  `H = (yaw + 180) * 512/360`, `frame_direction = round((dir - H) / 64) mod 8`. At yaw 180 this
   reduces to the 2D viewer's formula with offset 0. The zero offset is derived, not observed.
 
 For manual calibration, `whshr viewer-web <WARFB> <BFxxx.BTS>` starts a local panel at
@@ -143,3 +143,17 @@ The anchor row is supported only statistically (`notes/animations.md`).
 `GRND.PBX` surface's `x=200` mesh limit (one mesh unit is eight script units). `GRND.GD` still
 contains a height at this coordinate. The viewer deliberately renders the unit rather than
 clamping it, preserving the scripted starting position.
+
+## Playtesting: troop sprite facing (September 2026)
+
+The owner reported that figures did not keep their facing and changed sprite far too often while the
+camera rotated. Labelled 4x sheets of `BRDHRS` (bundled in `BF001/SPRITES.PBX`) and `MCSWORD` (`BINARY/`)
+`stand`/`move` phase-0 frames (`samples/sprite_facing/`, local only) show that the direction frames run
+**clockwise** on screen: frame 0 is the back view (the rider's shield on screen left), 1 up-right,
+2 facing screen-right (horse head right, sword side toward the viewer), 3 down-right, 4 toward the viewer
+(shield on screen right), 5 down-left, 6 facing screen-left (head left, shield toward the viewer),
+7 up-left. The earlier counter-clockwise reading had swapped the two profiles, so frame selection used the
+wrong sign of the camera heading: every sprite turned against the camera rotation (an apparent double
+spin) and side-facing units showed the mirrored profile. A first check had only proved one frame step per
+45 degrees of orbit, which holds for either sign. Both viewers and the engine now use the clockwise rule
+above; the zero offset (frame 0 for a unit facing away from the camera) is still derived, not observed.

@@ -76,6 +76,22 @@ class IntroSceneTests(unittest.TestCase):
         self.assertIsInstance(machine.active, MainMenuScene)
         self.assertEqual(machine.history[0].reason, "intro completed")
 
+    def test_given_the_intro_timeline_when_its_end_passes_in_small_steps_then_the_main_menu_becomes_active(self):
+        # The real engine never hands a scene one big jump: it ticks in small fixed steps (clock.py,
+        # 10 ms). Playtesting report: the intro looped instead of stopping; reproduce the same
+        # incremental-update pattern here rather than the single machine.update(1.75) above.
+        machine = SceneMachine(IntroScene(), self.context)
+        step = 0.01
+        for _ in range(174):  # 1.74 s, just short of the 1.75 s timeline
+            machine.update(step)
+
+        self.assertIsInstance(machine.active, IntroScene, "must not finish before its own timeline")
+
+        machine.update(step)  # crosses the 1.75 s end
+
+        self.assertIsInstance(machine.active, MainMenuScene)
+        self.assertEqual(machine.history[-1].reason, "intro completed")
+
     def test_given_main_menu_when_new_campaign_is_chosen_then_the_mission_briefing_becomes_active(self):
         briefing_scene = BriefingScene(BF001)
         machine = SceneMachine(MainMenuScene(briefing_scene), self.context)

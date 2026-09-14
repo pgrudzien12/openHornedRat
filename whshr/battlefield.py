@@ -65,12 +65,13 @@ def troop_sprite_files(game):
 def sprite_direction(camera_yaw, script_dir):
     """Directional frame (0-7) of a unit with script ``dir`` seen by a camera with ``camera_yaw`` degrees.
 
-    Frames run counter-clockwise on screen while script dir runs clockwise from +Y, so the frame follows
-    the camera's screen-up heading (yaw + 180 degrees) minus the unit dir. The zero offset is derived, not
-    observed (notes/battle_viewer.md).
+    Frame 0 shows the unit's back and the frames run clockwise on screen, like script dir: frame 2 faces
+    screen-right, 4 the viewer and 6 screen-left (proven on labelled BRDHRS sheets, notes/animations.md).
+    The frame is therefore the unit dir relative to the camera's screen-up heading (yaw + 180 degrees).
+    The zero offset is derived, not observed (notes/battle_viewer.md).
     """
     heading = (camera_yaw + 180) * FULL_TURN / 360
-    return math.floor((heading - (script_dir or 0) + 32) / 64) % DIRECTIONS
+    return math.floor(((script_dir or 0) - heading + 32) / 64) % DIRECTIONS
 
 
 def scenery_transform(item, ground_height, scale=1.0):

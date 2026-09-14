@@ -14,8 +14,8 @@ Layout (see notes/animations.md):
   - a group = a maximal run of consecutive frames with the same colour-map nibble (kind >> 4);
     each group has its own 16-colour map in <NAME>.PAL
   - inside a group: frame = group_start + phase * 8 + direction
-  - direction 0 = facing away from the viewer (up the screen), then counter-clockwise on screen:
-    1 = up-left, 2 = left, 3 = down-left, 4 = towards the viewer, 5 = down-right, 6 = right, 7 = up-right
+  - direction 0 = facing away from the viewer (up the screen), then clockwise on screen:
+    1 = up-right, 2 = right, 3 = down-right, 4 = towards the viewer, 5 = down-left, 6 = left, 7 = up-left
   - anchor (hypothesis): x = record byte 3, y = height - record byte 2
 """
 import os, sys
@@ -23,7 +23,7 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from anim_lib import Canvas, Sprite, find_bindirs, list_sprites, write_gif    # noqa: E402
 
-DIRECTIONS = ('N', 'NW', 'W', 'SW', 'S', 'SE', 'E', 'NE')   # screen directions, 0 = away from viewer
+DIRECTIONS = ('N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW')   # screen directions, 0 = away from viewer
 
 # Action names per group, identified visually (see notes/animations.md). They are labels for
 # humans, not data from the game. Key = frame counts of the groups ("32+8+32+32" etc.).

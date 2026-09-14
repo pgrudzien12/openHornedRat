@@ -119,7 +119,7 @@ class IntroView(SceneView):
         return ()
 
     def _sync(self, elapsed):
-        frame = min(frame_index_at(elapsed), self.smk.nframes - 1)
+        frame = frame_index_at(elapsed, self.smk.nframes)
         if frame != self.last_frame:
             self.smk.decode_to(frame)
             self.video.write(self.smk.img, self.smk.pal)

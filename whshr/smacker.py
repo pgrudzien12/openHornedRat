@@ -18,11 +18,21 @@ NODE = 0x80000000
 ENGINE_FRAME_SECONDS = 0.125  # verified game cadence, independent of the Smacker header's own rate
 
 
-def frame_index_at(elapsed_seconds, frame_seconds=ENGINE_FRAME_SECONDS):
-    """Return the verified-cadence frame index due after ``elapsed_seconds`` of playback."""
+def frame_index_at(elapsed_seconds, frame_count=None, frame_seconds=ENGINE_FRAME_SECONDS):
+    """Return the verified-cadence frame index due after ``elapsed_seconds`` of playback.
+
+    Once ``elapsed_seconds`` runs past the film's own length, the raw index keeps growing; a caller
+    that never stops feeding it time (as the real-time engine deliberately does not, so that a scene's
+    transition remains the single source of truth for when playback ends) would otherwise walk off
+    the end of the decoded film. Passing ``frame_count`` clamps the result to the last frame so it
+    holds there instead.
+    """
     if elapsed_seconds < 0:
         raise ValueError("elapsed seconds must not be negative")
-    return int(elapsed_seconds / frame_seconds)
+    index = int(elapsed_seconds / frame_seconds)
+    if frame_count is not None:
+        index = min(index, frame_count - 1)
+    return index
 
 
 class Bits:

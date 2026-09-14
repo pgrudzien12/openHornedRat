@@ -329,8 +329,8 @@ Verification: an automatic mask comparison (next phase vs next direction) fits `
 in 173 of 178 multi-phase groups, and the other 5 are correct by eye; 31 sets were inspected on
 labelled, anchor-aligned sheets; a group rendered with another group's map gives garbage colours.
 
-Script `dir` turns clockwise from +Y (see "Coordinates" under the battle scripts) while the frame
-order runs counter-clockwise on screen, so a north-up view uses `direction = −round(dir / 64) mod 8`;
+Script `dir` turns clockwise from +Y (see "Coordinates" under the battle scripts) and the frame
+order runs clockwise on screen too (frame 2 faces screen-right), so a north-up view uses `direction = round(dir / 64) mod 8`;
 in 3D the frame is taken relative to the camera heading (`notes/battle_viewer.md`).
 Open: which frame `dir = 0` selects (derived as frame 0, not observed), frame timing, some uncertain action
 labels, and the layouts of the effect sets `SPELLS` and `GENBATT`.

@@ -279,6 +279,31 @@ Per-object details: `extracted/si/INDEX.md` and `extracted/si/<SI>/objects.json`
   uses in cutscenes (the embedded one, presumably).
 - The decoder only does SMK2/SMK4 video (SMK4 modes untested; all films are SMK2) and no audio.
 
+## Playtesting: intro never ends (September 2026)
+
+A player report ("intro should stop and progress... instead it just loops") was investigated
+against the in-engine intro (`whshr.campaign_scenes.IntroScene`, `whshr.smacker.frame_index_at`,
+`whshr.frontend.intro_view.IntroView`). Reproduced directly against the real A1 assets
+(`whshr.game.scene_context` + `IntroScene.enter`/`update`, no frontend/GPU involved):
+`omni_duration_seconds` returns exactly 96.5 s (matching the table above) and `smk.nframes` is 722
+(90.25 s of video at the verified 125 ms cadence); ticking `IntroScene.update` in 10 ms steps (as
+the real engine's fixed-step clock does) transitions to `MainMenuScene` at exactly `t = 96.5`, never
+before and never looping. `Smacker.decode_to` already clamps to `nframes - 1` and only rewinds when
+asked to go *backwards*, so a monotonically growing elapsed time cannot make it restart either.
+
+The one gap found: `frame_index_at` itself was unbounded (`intro_view.IntroView._sync` did the
+`min(..., nframes - 1)` clamp locally, untested by stdlib tests since it lives in the
+pygame-dependent frontend). Moved the clamp into `frame_index_at` itself (`frame_count=None` keeps
+it unbounded when a caller has no frame count) so `IntroView._sync` now reads
+`frame_index_at(elapsed, self.smk.nframes)`, and the clamp — "past the last frame, hold it, never
+wrap" — is covered directly by `tests/test_smacker.py`. If the reported loop still reproduces after
+this, it is not in the scene/video pipeline verified here; the next suspect would be the frontend's
+own frame pacing (`whshr/frontend/app.py`, out of this fix's ownership) — note that its
+`FixedStepClock` (`whshr/clock.py`) caps catch-up steps at `MAX_STEPS_PER_FRAME * FIXED_STEP = 0.25 s`
+per rendered frame and *drops* (not defers) any remainder, so a manual `--frame-time` capture above
+0.25 s (e.g. the `--frame-time 0.5` suggested for verification) advances scene time at half rate,
+not the real per-frame elapsed time; verify with `--frame-time <= 0.25` instead (this repo used 0.1).
+
 ## Proposed changes to ROADMAP.md
 
 - Map of the installation: "Films/cutscenes" → `🟡` (container ✅, films ✅, EVT semantics open);

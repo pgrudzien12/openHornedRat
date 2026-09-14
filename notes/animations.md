@@ -10,10 +10,10 @@ verified visually on labelled, anchor-aligned sheets. No disassembly.
 | Inventory and classification of all 288 `.FOL/.BOP` pairs | ✅ |
 | Colour-map nibble = animation group (each group has its own 16-colour map) | ✅ verified visually (a wrong map gives garbage colours) |
 | 8 directions stored explicitly (no mirroring), `frame = group_start + phase * 8 + direction` | ✅ fits 173/178 multi-phase groups automatically, all 72 sets by eye |
-| Direction order: 0 = away from viewer, counter-clockwise on screen | ✅ visually (GIANT, CELWIZ, BRDHRS, WYVERN, cannons) |
+| Direction order: 0 = away from viewer, clockwise on screen | ✅ labelled 4× BRDHRS sheets (September 2026); the earlier counter-clockwise reading swapped the profiles |
 | Standard unit layout `32+8+32+32(+8…)` = move, dead, attack, stand (+ shoot/cast) | ✅ move and dead, 🟡 attack/stand/shoot (visual, partly ambiguous) |
 | Anchor: byte 3 = x, byte 2 = distance of the anchor row from the frame bottom | 🟡 x well supported; y only statistically |
-| Script `dir` (0..511): 0 = +Y (north on the plan map), clockwise, so `direction = −round(dir/64) mod 8` in a north-up view | 🟡 rotation sense from BTS statistics and scenery vs plan maps (`notes/battle_viewer.md`); zero frame derived, not observed |
+| Script `dir` (0..511): 0 = +Y (north on the plan map), clockwise, so `direction = round(dir/64) mod 8` in a north-up view | 🟡 rotation sense from BTS statistics and scenery vs plan maps (`notes/battle_viewer.md`); zero frame derived, not observed |
 | Frame timing | ❌ needs the running game |
 
 ## Inventory (`scripts/anim_inventory.py`)
@@ -52,16 +52,18 @@ frame = group_start + phase * 8 + direction
 
 ### Directions
 
-8 directions, all stored (no mirroring: e.g. the `BRDHRS` rider holds his shield on the
-screen-right side in `E`/`SE` and it is hidden in `W`/`SW`).
+8 directions, all stored (no mirroring: e.g. the `BRDHRS` rider's shield faces the viewer in `W`
+(frame 6) and is hidden behind the horse in `E` (frame 2)).
 
 | direction | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
 |---|---|---|---|---|---|---|---|---|
-| on screen | N: away from the viewer (back visible) | NW | W: left profile | SW | S: facing the viewer | SE | E: right profile | NE |
+| on screen | N: away from the viewer (back visible) | NE | E: facing screen-right | SE | S: facing the viewer | SW | W: facing screen-left | NW |
 
-The order is counter-clockwise on screen (N → W → S → E). Script `dir` from `.BTS/.MRC` turns
-clockwise from +Y, so in a north-up view `direction = −round(dir / 64) mod 8`; whether `dir = 0`
-really selects frame 0 has not been observed in the game.
+The order is clockwise on screen (N → E → S → W), the same sense as script `dir` from `.BTS/.MRC`
+(clockwise from +Y), so in a north-up view `direction = round(dir / 64) mod 8`. Verified in September
+2026 on labelled 4× `BRDHRS` sheets (horse head right in frame 2, left in frame 6); the earlier
+counter-clockwise table swapped the two profiles. Whether `dir = 0` really selects frame 0 has not been
+observed in the game.
 
 ### Standard unit set (`32+8+32+32`, 37 files; `+8` for archers/wizards, 11 files)
 

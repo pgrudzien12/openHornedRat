@@ -81,11 +81,12 @@ whshr/             - unified package and CLI: python3 -m whshr check|extract|cat
                      scenes and lazy assets: scenes.py, campaign_scenes.py, assets.py, catalog.py, cache.py,
                      battle simulation: engine.py, fixed-step clock: clock.py, battle scene: battle_scene.py,
                      decoded battle data shared by viewers and engine: battlefield.py, battle camera: camera.py,
-                     screen-to-ground picking: picking.py, Smacker decoder: smacker.py, mission briefings: briefing.py)
+                     screen-to-ground picking: picking.py, Smacker decoder: smacker.py, mission briefings: briefing.py,
+                     simplified combat, morale and shooting: combat.py, enemy AI: ai.py, win/lose: result_scene.py)
   frontend/        - runtime frontend, the ONLY third-party-dependent code (pygame-ce + zengl, requirements-engine.txt,
                      local .venv/); imported solely by `engine`: app.py (window, loop, overlay), views.py (registry),
                      scene_view.py, battle_view.py (GPU terrain/scenery/sprites, camera, selection and orders),
-                     intro_view.py (in-engine Smacker playback and WAV cues), menu_view.py (menu, briefing), gpu.py
+                     intro_view.py (in-engine Smacker playback and WAV cues), menu_view.py (menu, briefing), result_view.py, gpu.py
 tests/             - BDD-style unittest scenarios (docs/testing.md): python3 -m unittest discover -s tests -t .
 docs/              - asset_pipeline.md (lazy loading, scene lifecycle), testing.md (BDD rules)
 tools/ghidra/      - OPTIONAL analysis-only Ghidra headless scripts (Java) + setup notes; not stdlib Python,
