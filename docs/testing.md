@@ -73,5 +73,5 @@ the standard test runner can no longer express scenarios clearly.
 - **Integration scenarios:** a synthetic installation flows through locator, catalog,
   loader, and scene setup without original game data.
 - **Original-install regression:** `python3 -m whshr check <WARFB>` and selected
-  manual SDL2/OpenGL visual checks validate reverse-engineering against a legally
+  manual visual checks of the runtime frontend validate reverse-engineering against a legally
   owned local copy. These are not a replacement for portable behavioural tests.

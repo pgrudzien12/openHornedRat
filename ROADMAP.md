@@ -115,10 +115,11 @@ from phases 1–3.
   as a Python testbed (plan map, animated sprites, movement, `Nav*`, `OBJECTS`/`BOUNDARIES`) whose
   simulation API does not depend on its presentation library. A local, never-committed asset cache is
   acceptable.
-- **Runtime**: prefer a custom SDL2 frontend with a 3D renderer (initially OpenGL) after the prototype
-  establishes actual requirements. SDL2 covers windowing, input, and audio, not rendering by itself.
-  Godot may be used as a disposable visualization/prototyping client, but must not own the authoritative
-  rules, assets, saves, or mod format.
+- **Runtime**: **Python is the engine language** (decided September 2026): pygame-ce (SDL2) for window,
+  input and audio, moderngl (OpenGL 3.3) for rendering, FluidSynth for MIDI. Readers, rules and the
+  simulation stay stdlib-only; only the frontend subpackage has third-party dependencies. The earlier C++
+  SDL2/OpenGL prototype is parked. Godot may be used as a disposable visualization client, but must not
+  own the authoritative rules, assets, saves, or mod format.
 - **Modding**: support ordered declarative data packages with stable namespaced identifiers, schemas,
   validation, dependencies, and deterministic merge/override rules. Original formats remain vanilla
   inputs, not the public mod authoring format. Defer a sandboxed, versioned mission scripting API until
@@ -152,7 +153,7 @@ Phase 2 is closed (M2 reached). Priorities, as decided by the project owner:
    `whshr scripts` disassembler) is done, and so is batch 4 (missions and objectives,
    campaign progression and saves, AI/pathfinding/visibility; `notes/game_rules.md`, `notes/campaign.md`); the optional
    batch 5 and the leftovers are listed in `notes/research_plan.md`.
-2. **Real-time engine prototype (nice to have)**: choose the technology (see phase 5), then show the
+2. **Real-time engine prototype (nice to have)**: the technology is chosen (Python with pygame-ce and moderngl, see phase 5); show the
    `viewer-web` scene (terrain, scenery, sprites, moving camera) in real time. Independent of 1, so
    it can run in parallel.
 3. **Later**: unit movement (M3: `Nav*` pathfinding, `OBJECTS` collisions, formations), mission DLLs

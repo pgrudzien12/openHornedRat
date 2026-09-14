@@ -123,7 +123,8 @@ deliberately not pursued.
 
 1. Game rules (combat, morale, unit stats) by targeted disassembly of `GAMEF.DLL`/`WHSHR.EXE` — top priority.
    First pass done (`notes/game_rules.md`); continue with its open questions, then magic.
-2. Real-time engine prototype of the battle scene (nice to have; engine technology not chosen yet).
+2. Real-time engine prototype of the battle scene, in Python (pygame-ce + moderngl frontend; decision and
+   rationale in `notes/engine_architecture.md`).
 3. Later: unit movement (M3), mission logic in `SCRIPT/BFxxx.DLL`, and Wine sessions for open
    questions (`dir` zero frame, frame timing, cutscene events) only when they block work.
 

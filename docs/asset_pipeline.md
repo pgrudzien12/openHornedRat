@@ -12,7 +12,8 @@ intro cutscene -> main menu -> campaign room -> mission briefing -> battle
 
 The initial implementation targets the GOG v1.0 installation. Its asset readers,
 paths, and reverse-engineered formats remain the Python `whshr` reference
-implementation. The SDL2/OpenGL runtime gradually adopts the same contracts.
+implementation, which is also the engine: the Python runtime frontend (pygame-ce, moderngl) uses
+these contracts directly.
 
 ## Principles
 
@@ -77,7 +78,7 @@ the original scripts remain the canonical dependency graph.
 
 ### Startup
 
-1. Parse `horned-rat-engine --data <WARFB>`.
+1. Parse the runtime command's `--data <WARFB>` argument.
 2. Validate the expected `FILE`, `FILE/SCRIPT`, `FILE/BINARY`, and `REMOTE`
    structure without decoding all assets.
 3. Open or regenerate the metadata catalog.
@@ -150,23 +151,23 @@ large resources and releases them when returning to campaign.
 
 ## Implementation order
 
-1. Add native `AssetId`, `AssetLocator`, source fingerprint, and typed catalog record
-   types, matching the Python `Installation` lookup contract.
+1. Add `AssetId`, `AssetLocator`, source fingerprint, and typed catalog record types,
+   matching the `Installation` lookup contract.
 2. Add a Python catalog generator for known cutscenes, PE resources, campaign flow,
    fonts/palettes, and battle scripts. Test generated IDs and source resolution.
-3. Add native catalog loading and an in-memory typed `AssetCache`.
+3. Add catalog loading and an in-memory typed `AssetCache`.
 4. Add a `Scene` interface, `SceneManifest`, transition coordinator, and bootstrap
    loading/error scene.
 5. Implement the intro cutscene and menu transition.
 6. Implement the functional menu and normalized campaign room backed by the campaign
    flow graph.
 7. Implement a mission briefing that resolves and enters one battle.
-8. Connect the existing deterministic battle model and SDL2/OpenGL frontend to
+8. Connect the existing deterministic battle model and the pygame-ce/moderngl frontend to
    install-backed map and sprite loading.
 
 The Python reference implementation now provides `Scene`, `SceneManifest`,
 `Transition`, and `SceneMachine`. It intentionally has no SDL2, HTTP, OpenGL, or
-decoder dependency. The native frontend will consume the same lifecycle contract.
+decoder dependency. The runtime frontend drives the same lifecycle directly.
 
 ## Deferred work
 

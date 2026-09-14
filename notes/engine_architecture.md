@@ -1,8 +1,8 @@
 # Engine architecture and modding direction
 
-This is the implementation direction for the open engine. It is intentionally a
-decision record, not a commitment to a final renderer or programming-language
-boundary before a real-time prototype has proved the design.
+This is the implementation direction for the open engine. It is a decision record: it states the
+chosen language and libraries and why, and it may be revised when a real-time prototype proves a
+design wrong.
 
 ## Goals
 
@@ -35,27 +35,69 @@ The original installation is the source of the vanilla campaign. Original file
 formats are compatibility inputs, not the public authoring format for new
 content.
 
-The existing `whshr` Python package remains the reference implementation for
-format readers, extractors, validation, rule experiments, and a first
-headless/real-time simulation prototype. Python is deliberately useful in the
-long term, not just an analysis tool. If profiling later requires native code,
-settled hot paths may move behind narrow interfaces without changing data
-definitions or the modding contract.
+### Language: Python (decided September 2026)
 
-The preferred production frontend is a custom SDL2-based runtime with a 3D
-renderer (initially likely OpenGL). SDL2 provides windowing, input, and audio;
-it is not itself the renderer or game engine. This has more up-front work than
-Godot, but preserves direct control over unusual original formats, palette
-rules, sprite anchors, battle coordinates, deterministic simulation, and the
-external data model.
+**Python is the main engine language.** The `whshr` package is not only the reference
+implementation but the engine itself: format readers, normalized models, rules, the behaviour
+bytecode interpreter, the deterministic simulation, and the runtime frontend. This supersedes the
+earlier plan for a C++ SDL2/OpenGL frontend (`CMakeLists.txt`, `engine/src/main.cpp`,
+`horned-rat-engine`), which is **parked**: kept in the repository for reference, not developed further.
 
-Godot remains an acceptable disposable visualization or rapid-prototype client
-if its camera, material, UI, or inspection tools materially accelerate work.
-It must not own the authoritative rule implementation, asset formats, saves,
-or mod format. The project does not currently rely on Godot editor workflows,
-and Python is not a first-class Godot gameplay language, so adopting Godot as
-the main runtime would add a bridge and lifecycle dependency without solving a
-current problem.
+The runtime frontend will use:
+
+- **pygame-ce** (SDL2 underneath) for the window, input, timing, and audio output;
+- **moderngl** (OpenGL 3.3 core) for rendering terrain, scenery meshes, and sprite billboards, with
+  palette and colour-map lookups done at texture upload or in shaders;
+- **FluidSynth** for MIDI music with the converted SoundFont, either through a binding or
+  pre-rendered to PCM at load time (decided when music is added).
+
+Both main libraries install as pre-built wheels on Windows, macOS, and Linux. Nothing is installed
+without the project owner's approval.
+
+### Why not C++
+
+Most Python media libraries wrap the same C libraries a C++ engine would link (PyAV wraps FFmpeg,
+pygame wraps SDL2, pyfluidsynth wraps FluidSynth), so C++ offers no extra decoders; Python mainly
+makes them easier to install on every platform. For this game the question hardly arises: every
+original format already has a verified pure-Python reader in `whshr` (Smacker, RNC ProPack, PBX,
+FOL/BOP, SBK, SFX, BTS/MRC, behaviour bytecode).
+
+Measurements on the development machine (September 2026):
+
+| Workload | Result | Consequence |
+|---|---|---|
+| Pure-Python Smacker decoder, cutscene A13 (640×272, 1 249 frames) | whole film in 0.23 s; last frame equal to FFmpeg within ±1 per byte (palette rounding) | cutscenes need no native decoder (the films play at 8 fps) |
+| FFmpeg (C), same film | 0.21 s | no practical advantage |
+| Python software battle render (`viewer`, `viewer-2d`) | 0.38 s / 0.13 s per frame | per-pixel work must move to the GPU, which a C++ engine would need as well |
+| Battle simulation scale | about 30 units of up to 32 models, 100 ms ticks, bytecode scripts | well within Python's reach |
+
+A C++ engine would have to re-implement and re-verify every decoder and rule, or keep Python behind
+an export step whose boundary is extra work and a source of drift; it would also need per-platform
+CMake builds and development packages, and two test suites for one set of rules. Python keeps one
+implementation that is already tested against the original data and is quick to change while the
+rules are still being refined.
+
+### Rules for Python performance
+
+- Never run per-pixel loops per frame. Decode sprites, maps, and textures once at load time and
+  upload them as GPU textures; sprite batches and palette lookups belong to the GPU.
+- The simulation ticks at its own fixed rate (100 ms game ticks), independent of the render frame
+  rate, and never depends on the frontend.
+- Profile before optimising. If a hot path is proven too slow, move that one function behind a narrow
+  interface (a C extension via `ctypes`/`cffi`, or Cython) without changing data definitions, the
+  simulation API, or the modding contract.
+- Distribution to players (a bundled application) is solved later; it does not affect the design.
+
+### Dependencies
+
+The readers, rules, simulation, and `scripts/` remain **Python-stdlib-only**, so they stay testable
+headlessly on a bare Python installation. Only the runtime frontend depends on third-party libraries:
+it lives in its own subpackage, is imported solely by the runtime command, and declares its
+dependencies in a separate requirements file.
+
+Godot remains an acceptable disposable visualization client if its tools materially accelerate an
+experiment. It must not own the authoritative rule implementation, asset formats, saves, or mod
+format.
 
 ## Modding contract
 
@@ -115,38 +157,27 @@ the opaque original bytecode from becoming the permanent modding language.
   practical, visual, audible, or Wine-based runtime verification.
 - Exact original camera parameters are not a goal; the established perspective
   scene is sufficient for an engine.
-- A custom frontend has a higher initial rendering/UI cost. It is justified
-  only while its independent data model and Python-friendly workflow continue
-  to serve the project better than an engine integration.
+- A custom frontend has a higher initial rendering/UI cost than an engine integration. It is
+  justified while its independent data model and single-language workflow serve the project better.
 
 ## Near-term consequences
 
-1. Build M3 as a small Python simulation and visualization testbed first:
-   movement, formations, `Nav*` pathfinding, collisions, directional animation,
-   and debug views.
-2. Keep the testbed's simulation API independent from pygame, SDL2, Godot, and
-   any other presentation library.
-3. Catalogue mission bytecode opcodes and model their state/event interface
-   before designing the public mission schema.
-4. Promote the SDL2/OpenGL frontend only after the prototype confirms the
-   simulation/data boundary and identifies actual rendering needs.
+1. Keep the simulation API independent of pygame-ce, moderngl, and any other presentation library.
+2. After approval to install pygame-ce and moderngl, add the frontend subpackage and its requirements
+   file.
+3. Engine phase 1, in order: a battle view (plan map or terrain, directional sprites in the traced
+   formations) → movement on 100 ms ticks → scenes (menu, transitions, mission briefing, cutscene
+   playback with the pure-Python Smacker decoder into a texture) → simplified close combat, shooting,
+   and morale from `notes/game_rules.md` → one winnable battle.
+4. The behaviour bytecode opcodes are catalogued (`python3 -m whshr scripts`); implement the
+   interpreter in the simulation after the first battle runs with a simple rule-based AI.
 
 ## Current prototype
 
-The runtime will be a standalone SDL2 application with an OpenGL renderer. SDL2 owns
-windowing, input, audio device access, and platform integration; it is not a renderer.
-The first native executable is `horned-rat-engine`.
+`whshr.engine` defines the presentation-independent battle state and fixed-tick movement behaviour,
+and the Python `SceneMachine` provides the scene lifecycle. `scripts/run_engine.sh` starts it, plays
+the `A1.SI` intro through `ffplay` at the verified 8 fps, and enters the menu scene; the `ffplay`
+playback is a stopgap until the frontend plays films itself.
 
-Python remains the reference layer for original-installation readers, normalized data
-models, reverse-engineered rules, and deterministic simulation tests. A frontend must
-not duplicate decoder or rules semantics. The initial `whshr.engine` module defines the
-presentation-independent battle state and fixed-tick movement behaviour.
-
-The first native milestone deliberately validates its installation argument and provides
-a fixed-tick click-to-move loop, but does not yet load game assets. The next increment
-will feed normalized `whshr.engine` battle data to the native frontend, followed by plan
-map and directional-sprite rendering. No extracted game data belongs in this repository.
-
-Godot may be used for disposable visualization experiments, but it must not own assets,
-rules, saves, mission formats, or modding. Original mission DLLs are data inputs only:
-the engine will never execute them as native code.
+The C++ SDL2/OpenGL movement prototype (`CMakeLists.txt`, `engine/src/main.cpp`) is parked. Original
+mission DLLs are data inputs only: the engine will never execute them as native code.

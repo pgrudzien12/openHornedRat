@@ -87,10 +87,12 @@ scenery and does not alter the independent `viewer`/`viewer-web` 3D asset viewer
 original-relative paths, decoder types, and source fingerprints; it neither copies nor decodes
 game assets and should be written outside the repository.
 
-## Native engine prototype
+## Engine prototype
 
-The native prototype uses SDL2 for the window/input loop and OpenGL for rendering. Start it
-against a local game installation with:
+The engine is written in Python: the `whshr` package holds the readers, rules and simulation, and the
+runtime frontend will use pygame-ce (SDL2) and moderngl (OpenGL); see
+[`notes/engine_architecture.md`](notes/engine_architecture.md). Start the current prototype against a
+local game installation with:
 
 ```sh
 ./scripts/run_engine.sh /path/to/WARFB
@@ -103,7 +105,7 @@ filter because the source Smacker header does not represent the engine's 125 ms 
 Temporary cutscene output is removed after playback. The menu does not yet have a native visual
 frontend.
 
-The SDL2/OpenGL movement prototype remains available for renderer development:
+The earlier C++ SDL2/OpenGL movement prototype is parked (kept for reference, no longer developed):
 
 ```sh
 cmake -S . -B build
