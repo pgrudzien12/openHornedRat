@@ -252,6 +252,50 @@ never use `AlwaysPursue`.
   delays, other words opcodes of a 59-entry table at `0x100E7000` (fire event 21, model death 23, `ApplyImpact` 52,
   sounds, effects, removal; 🟡 names).
 
+### Formations ✅
+
+Traced in `GAMEF.DLL` (September 2026). Unit sizes come from `s_side` in the scripts: across the campaign
+battles infantry units have 1–32 models (median 19), cavalry up to 28 (median 16), archers 10–29 (median 18),
+artillery 4–6 crew plus the machine, monsters and special units 1, wagons 2; enemy units have a median of 16
+and at most 32 models, usually in 4 ranks (3–5).
+
+- **Formation kind** by unit class (`FormationKind` `FUN_1002bbb0`, table `0x100F6670`), dispatched by
+  `ReformUnit` (`FUN_1002ca60`): Infantry, Cavalry, Archers, Wizard, Special and notype use the **block**
+  (`FUN_1002cf50`); Artillery the war machine layout (`FUN_1002cb20`); Monster a single-model footprint
+  (`FUN_1002cd80`); RollingStock the wagon layout (`FUN_1002ce70`). **The block is the only formation**: there
+  is no skirmish, column or wedge order.
+- **Size** (`ComputeFormationSize` `FUN_1002c9e0`): `frontage = ceil(models / ranks)`; the leftover models go
+  into the **front** ranks (18 models in 4 ranks: rows of 5, 5, 4, 4).
+- **Spacing**: **12 world units** (half an inch) between models, sideways and front to back, for every class
+  including cavalry. The same 12 units are the battle-grid cell. The collision footprint (`FUN_1002c750`) is a
+  box with half-extents `frontage × 6` and `ranks × 6`; its diagonal angle is stored in `+0x322` (the arc used
+  for front/flank/rear).
+- **Block layout** (`FUN_1002cf50`): rank *n* stands `12 × n` units behind the first rank; each rank is centred
+  and filled from the outside in, pairwise, with a centre model when its count is odd.
+- **Placement** (`FUN_1002d120`): a slot offset `(x, y)` is rotated by the unit's facing (sine/cosine tables
+  `0x100E26F0`, `0x100E2F30`, 8.8 fixed point) and stored in the model as its target relative to the unit
+  position, together with its slot, rank and file. **The unit position is the front-rank centre**, and that
+  slot is reserved for the leader model (unless it is fleeing). Every other slot takes the nearest free model
+  (octagonal distance), so re-forming moves each soldier to the closest position. `MoveModels`
+  (`FUN_1002bea0`) then walks each model towards its slot, never faster than the unit's `s_rlmv`.
+- **Ranks** (`FUN_1002b830`, orders 0x0F/0x10 and the deployment buttons `FUN_10016b40`): refused while fleeing,
+  held (Tangling Thorn) or charging; the request is clamped to `[min, models / min]` with
+  `min = max(1, trunc(0.75 × √models))` (constants 1.5 × 0.5 at `0x100E61F8`/`0x100E6210`). Examples: 8 models
+  2–4 ranks, 18 models 3–6, 24 models 3–8, 32 models 4–8. Re-forming (`HaltAndReform`) restores the script's
+  `s_rnks`.
+- **War machines** (`FUN_1002cb20`): the layout depends on the **leader's sprite** (unit `+0x4E`, the machine,
+  set by the leader's `troopsprites`): Mortar, Cannon, Volley Gun and Doom Diver catapult use a box 2 wide × 3
+  ranks, Great Cannon and Rock Lobber 3 wide × 4 ranks; the machine takes the centre and the crew stand in fixed
+  slots around it.
+- **Monsters** (`FUN_1002cd80`): one model at the unit position; footprint 2 × 2 cells by default (Troll, Rat
+  Ogre, Warpfire Thrower), 3 × 3 for the sprites Gyrocopter, Wyvern, Treeman, Giant, Doomwheel and Dragon
+  (`FUN_100077d0`), 5 × 8 for the Mole Machine. Units whose sprite is not on that list fall back to 2 × 2 even when
+  large: the 3D-mesh Dragon of BF014 (`MeshDragon`) and the Doomwheel entry with `VoidType`.
+- **Wagons** (`FUN_1002ce70`, units of exactly 2 models): the two models stand 22 units apart front to back
+  (team and wagon), footprint 2 × 4 cells, facing snapped to 45° steps.
+- **Script opcodes**: `ScatterModelsAtNode` (0x48) spreads a unit's models around a node, `PlaceAndReformAtNode`
+  (0x4A) re-forms at a node.
+
 ### Routes, collisions and visibility ✅
 
 Full detail: `extracted/agent_reports/L_ai_pathfinding.md` (local). The key visibility constants were
@@ -1269,6 +1313,10 @@ chart for shooting).
 | `0x10016D70`, `0x10016DB0`, `0x10016F70`, `0x10015E20` | `IsVisible`, `ArcAndObstructionTest`, `InFacingArc`, `SightEdgeClear` | visibility |
 | `0x10016CA0` | `SpotHiddenUnits` | events 0x1C/0x1D |
 | `0x10022330`, `0x10022280` | `UnitScore`, `PickBestTarget` | exact threat score |
+| `0x1002CA60`, `0x1002BBB0`, `0x1002C9E0` | `ReformUnit`, `FormationKind`, `ComputeFormationSize` | formation dispatch |
+| `0x1002CF50`, `0x1002CB20`, `0x1002CD80`, `0x1002CE70` | `LayoutBlock`, `LayoutWarMachine`, `LayoutMonster`, `LayoutWagon` | formation kinds |
+| `0x1002D120`, `0x1002C750`, `0x1002BEA0` | `PlaceModelInSlot`, `ComputeFootprint`, `MoveModels` | slots, footprint box, walking to slots |
+| `0x1002B830`, `0x10016B40`, `0x100077D0` | `SetRanks`, `DeployChangeRanks`, `MonsterIsSmall` | rank limits, monster footprint |
 | `0x100243C0`, `0x10018820` | `RunAway`, `CircleAroundTargetStep` | |
 | `0x10040930`, `0x10011920`, `0x100238D0` | `SpellButtonClick`, `OrderCast`, `CastPending` | cost, order 0x17, op 147 |
 | `0x1000F870`, `0x1002EC10`, `0x1002EBD0` | `EffectTargetCheck`, `EffectRange`, `CanCastSpells` | range and ±50° arc |
@@ -1383,6 +1431,8 @@ static analysis unless marked Wine.
 | R63 | **Objective evaluators** | The 26 per-letter evaluator functions behind the objective table (`+0x10`) were not read; which counts they compare, and what S "Capture Hiln" and Y test in BF001. | Read the functions from the table (`0x1001b270`…`0x1001bd50`). | medium |
 | R64 | **Win/loss dialog codes** | `FUN_1001adc0` opens dialog 9 or 0xF depending on `DAT_100f516c`/`DAT_100f4e60`; which is which. | Read the two globals' writers. | low |
 | R65 | **Deployment nodes** | 🟡 the `ns_startpos` chain outlines the deployment area for the placement UI; units held outside the field are placed by the player. | Read the deployment UI code. | low |
+| R66 | **Footprint box and anchor** | Model slots run from the front-rank centre backwards, but the footprint box is symmetric (± ranks × 6) around its map object position; how that position relates to the unit position was not traced. | Read `FUN_1002c510` and the map object updates (`FUN_10028710`). | medium |
+| R67 | **Formation spacing on screen** | The code places models 12 world units apart; the viewers use provisional spacings (32 units in `viewer-2d`, 48 in the 3D viewer). | Switch the viewers to 12 units, render BF001 and compare with the original (Wine screenshot). | medium |
 
 ### 11.5 Hypotheses in this report to confirm
 

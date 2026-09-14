@@ -625,6 +625,12 @@ printed by `python3 -m whshr rules <installation>`. Everything below is ✅ unle
   Conflagration of Doom and Da Krunch slay models outright; Madness changes a unit's side; Sapphire Arch is a
   portal. Dispelling is a 50%/100% aura within 80 units (Dispel Magic, Mork Save Uz, Banner of Arcane
   Protection, Talisman of Obsidian). Banner of Wrath and Grudgebringer cast Lightning/Fireball once per wind.
+- **Formations**: the block is the only formation (infantry, cavalry, archers, wizards, special units). Models
+  stand **12 world units** apart; frontage `ceil(models / ranks)` with the leftover models in the front ranks;
+  the unit position is the front-rank centre, reserved for the leader. Ranks can be changed between
+  `max(1, trunc(0.75 × √models))` and `models ÷ that`. War machines use a fixed crew layout (2 × 3 or 3 × 4 by
+  machine), monsters a 2 × 2, 3 × 3 or 5 × 8 cell footprint, wagons two models 22 units apart. Units have up to
+  32 models (enemy median 16), usually in 4 ranks.
 - **Commands**: player orders are panel buttons executed by the unit scripts. "Fight harder" (flexed arm, melee
   only) gives the focused unit +1 S and +1 Leadership for one segment; "Independent" (head icon) lets a unit
   rally, react and choose targets on its own. Withdraw routs the unit when it is not allowed.
