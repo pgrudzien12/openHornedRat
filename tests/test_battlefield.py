@@ -35,6 +35,19 @@ class SpriteFrameSelectionTests(unittest.TestCase):
     def test_given_camera_turned_to_look_east_when_unit_faces_east_then_it_is_seen_from_behind(self):
         self.assertEqual(sprite_direction(270, 128), 0)
 
+    def test_given_a_fixed_facing_unit_when_the_camera_orbits_in_45_degree_steps_then_the_frame_advances_by_one(self):
+        # Playtesting report: a standing unit must keep one apparent world facing while the camera
+        # orbits around it, changing sprite by exactly one of the 8 stored directions per 45 degrees
+        # (not faster). Verified against rendered sheets and in-engine captures (notes/battle_viewer.md,
+        # "Real-time engine battle view"): BRDHRS (mounted) and MCSWORD (infantry) rotate smoothly and
+        # monotonically, one direction step per 45 degrees of orbit, for every script `dir`.
+        for script_dir in (0, 64, 100, 200, 300, 400, 511):
+            frames = [sprite_direction(yaw, script_dir) for yaw in range(0, 360, 45)]
+            self.assertEqual(len(set(frames)), 8, f"dir={script_dir}: {frames}")
+            # Each step differs from the previous by exactly +1 modulo 8 (single, consistent sense).
+            for previous, current in zip(frames, frames[1:] + frames[:1]):
+                self.assertEqual((current - previous) % 8, 1, f"dir={script_dir}: {frames}")
+
 
 class AtlasTests(unittest.TestCase):
     def test_given_frames_of_several_sheets_when_packed_then_each_rectangle_holds_its_own_pixels_without_overlap(self):

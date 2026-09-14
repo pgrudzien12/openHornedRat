@@ -385,3 +385,26 @@ Open questions and gaps:
 - MIDI music during the intro is not played (skipped per the session brief; no new audio binding added).
 - Audio playback was verified by cue-count bookkeeping in the sandboxed agent environment, which has no
   audio device; a by-ear check on a real desktop is still open.
+
+## Bug fixes after playtesting
+
+Two bugs reported from real play were investigated (details: `notes/battle_viewer.md` "Playtesting:
+troop sprite facing"; `notes/si_omni.md` "Playtesting: intro never ends").
+
+- **Troop sprite facing**: `whshr/battlefield.py`'s `sprite_direction`/`frame_index` were found to
+  already be correct (rate: exactly 8 direction changes per 360 degrees of camera orbit, for any
+  script `dir`; sense: confirmed both by independent geometric derivation and by in-engine captures
+  of a stationary regiment orbited at 8 yaws 45 degrees apart) — no change was made there. A new
+  regression test (`tests/test_battlefield.py`) locks in the one-step-per-45-degrees, single-sense
+  guarantee. The most likely source of the reported "changes too often" is `ROTATE_SPEED = 90`
+  degrees/second in `whshr/frontend/battle_view.py` (not owned by this fix), which cycles all 8
+  directions in 4 seconds while the rotate key is held.
+- **Intro never ends**: reproduced the scene/video pipeline directly (no frontend) and found it
+  already transitions to `MainMenuScene` at exactly the Omni-scheduled 96.5 s, holding the last
+  video frame throughout. The one real gap: `whshr.smacker.frame_index_at` was unbounded, and its
+  clamp to the last frame lived only in the pygame-dependent `IntroView._sync`, untested by stdlib
+  tests. Moved the clamp into `frame_index_at` itself (`frame_count` parameter) and added BDD
+  coverage in `tests/test_smacker.py` and an incremental-update scenario in
+  `tests/test_campaign_scenes.py`. If the reported loop still reproduces in real play, the next
+  suspect is `whshr/frontend/app.py`'s frame pacing around `whshr.clock.FixedStepClock`, which is
+  not owned by this fix (see `notes/si_omni.md` for the exact caveat).

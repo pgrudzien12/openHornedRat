@@ -143,3 +143,33 @@ The anchor row is supported only statistically (`notes/animations.md`).
 `GRND.PBX` surface's `x=200` mesh limit (one mesh unit is eight script units). `GRND.GD` still
 contains a height at this coordinate. The viewer deliberately renders the unit rather than
 clamping it, preserving the scripted starting position.
+
+## Playtesting: troop sprite facing (September 2026)
+
+A player report ("figures do not keep their intended direction... they change too often") was
+investigated against `sprite_direction`/`SpriteSheet.frame_index` (`whshr/battlefield.py`). No rate
+or sign bug was found:
+
+- Labelled, 4x sheets of `BRDHRS` (mounted, bundled in `BF001/SPRITES.PBX`) and `MCSWORD`
+  (infantry, `BINARY/`) `stand`/`move` phase-0 frames confirm the documented direction table
+  (`notes/animations.md`, "Directions"): index 0/4 are near-symmetric front/back "rearing" poses
+  (hard to tell apart by shape alone, as expected for a horse viewed head-on or tail-on), and index
+  2/6 are full profiles, mirrored left/right of each other.
+- `whshr engine BF001 --hidden --camera YAW 40 60` captures of the stationary Grudgebringer Cavalry
+  (`dir=0`, facing north) at all 8 yaws 45 degrees apart show the sprite advancing by exactly one of
+  the 8 stored directions per 45 degrees, in a single consistent (never reversing, never doubling)
+  sense: `sprite_direction(yaw, 0)` for `yaw = 0, 45, ..., 315` gives `4, 5, 6, 7, 0, 1, 2, 3` — matches
+  a geometric derivation (unit-to-camera bearing vs. the unit's own facing) independent of the code.
+  A programmatic sweep (`tests/test_battlefield.py`, one new scenario) confirms exactly 8 direction
+  changes per 360 degrees of camera yaw, for arbitrary `dir`, monotonically increasing by 1 (mod 8).
+- Conclusion: `whshr/battlefield.py` is unchanged. If the reported "too often" still reproduces in
+  play, the likely cause lies outside this file's ownership: `ROTATE_SPEED = 90` degrees/second in
+  `whshr/frontend/battle_view.py` completes a full 8-direction cycle in 4 seconds (one change every
+  0.5 s while holding the rotate key), which is the unavoidable granularity of an 8-direction
+  billboard technique but may read as "spinning" faster than expected; slowing that constant or
+  adding short frame-hold smoothing there (not investigated further; out of this fix's ownership)
+  is the next thing to try if the owner still sees it as wrong after this report.
+- Labelled sheets and captures (git-ignored, local only): `samples/sprite_facing/` (also left in the
+  scratchpad at investigation time). Open question for the owner, by eye: do `BRDHRS` `stand`
+  direction 0 and direction 4 (both a near-vertical "legs down, no horse profile" pose) in fact read
+  as back vs. front respectively, matching the table above?
