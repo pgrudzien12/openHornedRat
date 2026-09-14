@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from . import legacy
-from . import audio, battle2d, battle3d, campaign, catalog, game, pbx, rules, si, viewer_web
+from . import audio, battle2d, battle3d, behaviour, campaign, catalog, game, pbx, rules, si, viewer_web
 from .paths import Installation
 
 
@@ -42,6 +42,7 @@ def check(installation):
         ("campaign flow", lambda: bool(campaign.build_campaign_graph(str(game.root)))),
         ("3D viewer orientation", battle3d.check_orientation),
         ("game rules tables and unit stats", lambda: rules.check(game.root)),
+        ("behaviour scripts", lambda: behaviour.check(game.root)),
     )
     failed = sum(not _check(name, callback) for name, callback in checks)
     print(f"\n{len(checks) - failed}/{len(checks)} check groups passed")
@@ -142,6 +143,12 @@ def main(argv=None):
     rules_parser = commands.add_parser("rules", help="print GAMEF.DLL combat tables or decoded unit stats")
     rules_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     rules_parser.add_argument("script", nargs="?", help="optional BTS/MRC filename or path: decode its units")
+    scripts_parser = commands.add_parser("scripts", help="summarise or disassemble SCRIPT/BFxxx.DLL behaviour scripts")
+    scripts_parser.add_argument("installation", type=Path, help="WARFB installation directory")
+    scripts_parser.add_argument("dll", nargs="?", help="optional mission DLL filename or path, e.g. BF001.DLL")
+    scripts_parser.add_argument("ids", nargs="*", help="optional script ids to disassemble (default: all)")
+    scripts_parser.add_argument("--names", action="append", type=Path,
+                                help="JSON opcode catalogue {\"<op>\": {\"name\": ...}}; may be repeated")
     web_parser = commands.add_parser("viewer-web", help="open local browser controls for the battle viewer")
     web_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     web_parser.add_argument("battle", help="BTS filename or path")
@@ -201,6 +208,8 @@ def main(argv=None):
         return 0 if results and all(result["max_error"] < 0.025 for result in results) else 1
     if args.command == "rules":
         return rules.main(args.installation, args.script)
+    if args.command == "scripts":
+        return behaviour.main(args.installation, args.dll, args.ids, args.names)
     if args.command == "viewer-web":
         viewer_web.serve(args.installation, args.battle, args.port)
         return 0

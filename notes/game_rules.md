@@ -54,8 +54,8 @@ This file describes the logic in prose and short pseudo-code. No decompiled list
 12. **Magic** ✅ Each side has one shared power pool of 0–8, re-rolled by a random walk every 50 s of real time;
     spells cost 1–3 and always work when the target is in range and within ±50° of the wizard's facing (no
     casting roll, no line of sight, no miscast). Dispelling is a spell or an item aura with a percentage chance.
-13. **Biggest open points** (section 11): the behaviour opcode catalogue, and a few effects to confirm in the
-    running game (never-ending spells, AI area spells).
+13. **Biggest open points** (section 11): batch 4 (missions and objectives, campaign progression and saves, AI and
+    pathfinding) and a few effects to confirm in the running game (never-ending spells).
 
 ## Contents
 
@@ -267,12 +267,28 @@ script each tick (`RunUnitScript`, `FUN_1001cae0`, called from the battle tick `
   library, byte-identical in all 45 DLLs**. `DLLReturnInstCount` returns 33000 = `0x80E8` (the end-of-script
   word): a format check, not an instance count. `set:script=PLAYER_SCRIPT` is
   library script 100. So the "mission logic" DLLs are **data** (bytecode), not x86 code to disassemble.
-- **Control opcodes** (names assigned): push PC / return (0x06/0x07), return if true/false (0x08/0x09),
-  goto script (0x0C), switch script at end of tick (0x0D–0x10), gosub/return (0x11/0x13), end of event loop
-  (0x14), yield (0x17), skip if true (0x19), test/set/clear unit flags `+0xB4` (0x22–0x26) and `+0xB8`
+- **Control opcodes** (names assigned; full catalogue of 0x00–0x73 in `extracted/agent_reports/G_opcodes_0_115.md`):
+  push PC (0x06), loop jumps `Loop`/`LoopIfTrue`/`LoopIfFalse` (0x07–0x09), goto script (0x0C), switch script at
+  end of tick (0x0D–0x10, 0x0F high priority), gosub/return (0x11/0x13), end of an event handler: return to the
+  interrupted script or apply a pending switch (0x14), yield (0x17), skip if true (0x19), test/set/clear unit flags `+0xB4` (0x22–0x26) and `+0xB8`
   (0x29–0x2B), condition flags (0x2E–0x30), `GetEvent` (0x68), `ConsumeEvent` (0x69), `CaseEvent N`
-  (0x6A), `Break` (0x6B), `If/IfNot/Else/EndIf` (0x6C–0x6F), queue event to self (0x5E/0x5F), send to own side
+  (0x6A), `Break` (0x6B, jumps to the next label, operand = label word `0x1ABC`), `If/IfNot/Else/EndIf` (0x6C–0x6F), queue event to self (0x5E/0x5F), send to own side / **enemy side**
   (0x62/0x63), `Query N` (0x16, cases of the AI routine `FUN_100214b0`), `React N` (0xC2).
+- **More from the catalogue** ✅: after `ExecuteOrder` applies a player order, the interpreter drops the target and
+  restarts the unit's script at its restart point (op 0x1E). `SetThreatRange` (0x31) sets `+0x218`, used by the AI
+  threat score `worth × (range − distance) / (range / 4)`, ×4 if the enemy targets this unit, ×32 if it is also
+  charging. Node opcodes move to a node (0x1F), face it (0x20), teleport to it (0x49), place and re-form there
+  (0x4A) and scatter models around nodes (0x48). 0x4C, 0x5C, 0x5D are instant 90°/180° turns, 0x4B a wheel.
+  Events 0x14/0x15 are reports from a unit to its linked parent (op 0x65), 0x33 comes from op 0x66 and 0x37 from
+  op 0x63. A wizard busy casting ignores being charged and "enemy routed" events. Operand sizes of 0x1F, 0x87, 0x95
+  and 0x9D are one word longer than first derived.
+- **AI and mission opcodes** (catalogue of 0x74–0xE7 and all 28 `AIQuery` cases in
+  `extracted/agent_reports/H_opcodes_116_231.md`) ✅: `IfObjective n` (222) tests whether the `.BTS` defines
+  objective letter n; library scripts 100, 101 and 152 branch on objective G (behaviour 12, units become allied,
+  side `0x40`). The standard mission AI is behaviour 15 `TrackThreat` (290 mission uses): keep the best threat and
+  attack it when its score exceeds the unit's worth. Opcodes 176–191 attack the n-th nearest unit with side/class
+  filters; 206 is an AI "run away"; 208 turns an artillery crew into Infantry when its machine is lost. Some
+  handlers are duplicates (181 = 180, 185 = 184, 136 = 175) or unused (137, 171, 173, 174).
 - **Events**: 14-byte records `[recipient, code, source, parameter, x, y, link]` in a 128-record pool at
   `0x100E1EB0`, queued per unit by `SendEvent` (`FUN_100211f0`), `BroadcastEvent` (`FUN_10021290`) and
   `SendEventToSide` (`FUN_10021230`). There is no C handler table: every unit script has the frame
@@ -314,10 +330,53 @@ script each tick (`RunUnitScript`, `FUN_1001cae0`, called from the battle tick `
 | 0x2B / 0x2C / 0x2D | order 0x17, casting animation end | cast a spell / launch it / use an item | casting scripts 132, 133, 142 (section 8.8) |
 | 0x31 / 0x32 | Madness | became mad / madness ended | scripts 149 / 168 |
 | 0x34 | movement | destination reached | |
+| 0x05 | `AIQuery` case 5 | message to the unit's current target (`+0x220`) | mission scripts |
+| 0x14 / 0x15 | op 0x65 | report from a unit to its linked parent | mission scripts |
+| 0x33 | `AIQuery` cases 16/20, op 0x66 | threat within reach (fanatic parent units) | mission scripts |
+| 0x36 | `AIQuery` case 12 | 🟡 | mission scripts |
+| 0x37 | op 0x63 | event sent to the enemy side | mission scripts |
+| 0x38 | `AIQuery` cases 19/20 | battle state 4 → 5 (broadcast) | |
 | 0x30 | pairing, withdraw | alone in a combat grid / disengaged | leave grid, re-form |
 
-Mission scripts mostly add cases for 0x03, 0x04, 0x05, 0x13, 0x14, 0x15 and 0x1B. Reports, a script
-disassembler and a disassembly of the library are kept locally in `extracted/agent_reports/` (not in git).
+Mission scripts mostly add cases for 0x03, 0x04, 0x05, 0x13, 0x14, 0x15 and 0x1B.
+
+**Tool** ✅: `whshr/behaviour.py` reads the script tables of every DLL (the lookup of `DLLGetScriptPointer`
+is emulated, so each DLL's ranges are decoded, not assumed) and disassembles with a shipped table of 232
+instruction lengths and the catalogue names; `python3 -m whshr check` ("behaviour scripts") verifies all 45
+DLLs: 3787 scripts (592 mission scripts, 1 to 37 per DLL), 125 519 words with no stray word, the library
+identical everywhere, `DLLReturnInstCount` = 33000, 224 of 232 instruction lengths confirmed from the handler
+bytes (the other 8 transfer control or scan forward), and every `set:script` value of 53 battles present in
+its DLL. `python3 -m whshr scripts <installation> [DLL] [ids…]` prints summaries and listings. Library
+scripts 152–156 have **no end word**: each ends in `ReturnGosub` followed directly by another script.
+Interpreter details: a word is read as signed 16 bits; `0x80E8` is never executed (only a sentinel for forward
+scans); any other non-opcode word is a debug print and does not advance the PC.
+
+**Library scripts 100–170** ✅ (full table with per-event detail: `extracted/agent_reports/I_behaviour_tool.md`).
+A player unit runs 100 and gets a class handler (101–104); each handler handles orders and threats, then
+gosubs a class layer (153–156) handling morale (rout, fear, pursuit, madness), which ends in the common layer
+152. Mission units use the same pieces directly: their event loops gosub 153–156 and AI actions switch to
+158/159/164.
+
+| Ids | Role |
+|---|---|
+| 100 | `PLAYER_SCRIPT`: threat range 240, class handler, threat mode 12 if objective index 7 is defined else 11, wait for battle start, idle |
+| 101–104 | player handlers: infantry/cavalry, artillery (crew becomes infantry when its leader dies), wizards, archers; threats are only answered when **independent** |
+| 105 / 106 | player attack order (approach, charge when in reach → 160) / player charge order (`ChargeForward`) |
+| 107–117, 123–125 | shooting: at a building, a unit, at will, single attempt, launch, 90 % range, hunt, volley (`TargetValid` → animation → projectiles), stop to shoot |
+| 118–122 | AI skirmish: evade threats (`RunAway`), advance on nearest/current target, hunt steps |
+| 126–128 | shooters' threat reaction, archers after an enemy breaks (keep shooting, no pursuit), maddened shooter |
+| 129–149 | magic: cast at target / nearest enemy, cast order 132 (turn, animation, launch 133), AI wizard loops 135–140, turn to cast 141, cast now 142, advance/line of sight/stop 143–146, wizard threat reaction 147, after an enemy breaks 148, maddened wizard 149 |
+| 150 | null handler (consumes events; spawned templates, script 170) |
+| 151 | AI default handler (installed by some missions) |
+| 152 | common event layer: madness end, grid alone, units leaving the battle (event 0x36, objective index 7), orders, targets, melee → 165, flank/rear test, rally, spotted, items |
+| 153–156 | morale layers: infantry, artillery (rout events ignored), wizards, archers |
+| 157, 162 | flight of an artillery crew / rout (the flight itself is C code) |
+| 158–161 | AI attack order, AI threat attack, charge the target (`ChargeTarget`, fear test), brace for a charge |
+| 163–165 | rally and re-form, pursue, melee (idle; close combat is C code) |
+| 166–169 | separate after a collision (🟡), maddened infantry, madness ended, circle for line of sight |
+| 170 | 🟡 leave the battle: teleport to node 24, rally, remove from the battle |
+
+Reports and the agent's scratch listings are kept locally in `extracted/agent_reports/` (not in git).
 
 ### Player orders and the command panel ✅
 
@@ -335,9 +394,9 @@ deployment).
 | 3 | Attack (crossed swords) + click | event 0x04: approach and attack a unit (not `CantMelee`) or building |
 | 0x0B–0x0E | face point, turn left/right 90°, about face | facing ∓0x80 / +0x100 (increasing facing = clockwise) |
 | 0x0F / 0x10 | ranks up / down | re-form with ±1 rank |
-| 0x13 | Withdraw (banner flag, melee) | if `FUN_10024710` allows: disengage, event 0x0F to the opponent; **otherwise the unit routs** |
+| 0x13 | Withdraw (banner flag, melee) | disengages only when fighting rolling stock or furniture (classes 7, 9) with no other enemy unit fighting its models (`FUN_10024710`); **against living enemies the unit routs** (a voluntary rout) |
 | 0x14 | Rally (open hand, broken or pursuing) | toggles the rally / pursuit-restraint attempts (section 7.4) |
-| 0x15 | Charge (war horn) | event 0x06 → fear test → `StartCharge` |
+| 0x15 | Charge (war horn) | event 0x06 → script 106 `ChargeForward` (op 0x4F): a charge **straight ahead**, reach 12 × `s_rlmv`, not inside `0xB0` regions |
 | 0x16 | Fire (crossed bow) + click; Ctrl = Gyrocopter bomb | `OrderFire` (section 8.1) |
 | 0x17 | Magic (chaos star) + spell + click | cast (focused unit) |
 | 0x19 | Halt (open hand) | halt and re-form, "Hold!" |
@@ -353,6 +412,10 @@ pursuing.
 - **Independent** (bit 27, 🟡 name): the unit rallies and tests pursuit restraint without the Rally order, reacts to
   any enemy within its threat distance (not only one engaging it), keeps choosing new targets when shooting or
   casting, and checks for friends on the line of fire. Off at the start; AI units never have it.
+- **Braced** flag `0x100000` ✅: set by `AIQuery` case 7 (library script 161, after event 0x07 and a passed fear test):
+  the charger becomes the target and the unit halts facing it. While set, move, attack, turn, rank, charge and
+  fire orders are ignored; cleared by a new attack event, "opponent gone", rally (event 0x39) or a still-accepted
+  order such as Halt.
 - **Charging** flag `0x80` is set by `StartCharge` and by `FUN_1002d9b0` when a charging or pursuing unit runs into
   a different enemy (the pursuit becomes a charge, events 0x1A/0x07). **Pursuing** flag `0x8000` only by
   `StartPursuit`.
@@ -451,7 +514,11 @@ unit from 4 to 5. Mounted rating 6 is capped at 2+.
 **Regeneration by damage source** ✅: close combat passes damage type 0 → the 4+ regeneration roll. `ApplyImpact`
 calls the save routine only for sources that allow saves, with type `flags & 0xFF3F`: all missiles (type 2) →
 **regeneration never lets the wound through**, so a Troll is immune to bows, crossbows, cannon, mortar, volley gun,
-rock lobber, doom diver and bombs. No-save effects (breath, warpfire, Doomwheel bolts…) wound it normally. There is
+rock lobber, doom diver and bombs. No-save effects (breath, warpfire, Doomwheel bolts…) wound it normally. **Spells**: every no-save spell wounds regenerators (Storm of Shemtek,
+Lightning, Piercing Bolts, Flamestorm, Fireball, Hunting Spear, Fists of Gork, Warp Lightning, Pestilent Breath);
+spells with a save and damage type 0 allow the 4+ regeneration roll (Wind Blast, Azure Blades, Flock of Doom, Gaze of
+Mork, the Shift variant of Flying Bower); The Burning Head (save, fire type 1) never wounds them; Conflagration of
+Doom and Da Krunch remove models outright. There is
 no "fire negates regeneration" rule. **Armour code 5** is not special anywhere else (not in the item code nor in
 the armour display); because its table value 7 is worse than code 6's, the armour items that step a code up (Shield
 of Ptolos, Armour of the Beard) turn a code-5 leader into a *regenerating* one, immune to missiles.
@@ -633,7 +700,8 @@ leave the table, `FUN_10027070`; destroyed buildings, `FUN_10003210`) adds to `s
 It is used in three situations:
 1. **Being charged** (op 0x42 on event 0x07, only if the source really is charging): failure → event 0x0D →
    the unit flees ("Flee the abomination!"), unless `CantBreak`.
-2. **Charging** (op 0x4E): failure → "My men fear the beast!" and the unit halts and re-forms; success starts
+2. **Charging a target** (op 0x4E, the attack/approach charge of scripts 105, 158, 159 → 160; the player's Charge
+   button uses the straight-ahead op 0x4F instead, 🟡 whether that tests fear): failure → "My men fear the beast!" and the unit halts and re-forms; success starts
    the charge (flag `0x80`) and sends event 0x07 to the target.
 3. **Contact while moving** (`FUN_100289d0`, unless bit 14 is set): failure → event 0x0D, flight.
 
@@ -765,7 +833,10 @@ offset = (rand() % (11 − min(BS, 10))) × (random sign) × spread × distance 
 ```
 
 `spread` = 8 for bows and crossbows, `8 × d` for artillery (*d* = the first artillery die, 8.5), **+8 if a
-scenery object lies on the line of fire** (`NextObjectOnLine`, `FUN_100183b0`: buildings, walls, trees).
+scenery object lies on the line of fire** (`NextObjectOnLine`, `FUN_100183b0`: buildings, walls, trees). An object blocks when
+`min(Δ, 512 − Δ) < trunc(asin(radius / d) × 256 / π)`, with `d = trunc(distance)` below the range and Δ the difference
+between the line's direction and the object's bearing `trunc(256 − 256 × atan2(dx, dy) / π)` (`ObjectOnLine`,
+`FUN_10016fc0`); a firer inside an object's circle is never blocked by it.
 Horizontal motion is linear over a fixed flight time; height follows an arc (bows apex ≈ 180 units,
 crossbows ≈ 45, cannon low, mortar and rock lobber high). Holding Ctrl only changes the projectile graphic.
 
@@ -835,7 +906,8 @@ These reuse the **spell effect engine** (`LaunchEffect`, `FUN_1000f950`, innate 
 | 17 Gyrocopter bomb (`FUN_10025a80`, Archers-class files) | Ctrl + command, only while flying (`GMTXT 2020`) | 1, dropped | radius 72, S4, 1 wound, saves; artillery misfire roll |
 | Pestilent Breath (behaviour 0x1B, `FUN_10014c30`) | scripted units | 1 near the unit | S3, 1 wound, no save, passes through |
 
-The doom diver is an ordinary artillery shot (`0x4C` is only its graphic; no steering found).
+The doom diver is an ordinary artillery shot (`0x4C` is only its graphic; no steering found). On landing
+`FUN_10001300` places a dead-diver corpse decal (the ordinary 32-entry corpse ring, random facing): no game effect.
 
 ### 8.7 Night Goblin Fanatics ✅ / 🟡
 
@@ -860,8 +932,8 @@ Full detail: `extracted/agent_reports/F_magic.md` (local).
 - **Power**: one pool per side, 0–8 (player `battle+0x32BA0+0x528`, enemy `+0x52C`; allies use the player's).
   No per-wizard power, no wizard levels. `FUN_1003c9f0` replaces each pool every **50 s of unpaused real time**
   by `Wind(current)` (`FUN_10014cb0`): an empty pool becomes 1–7, otherwise `current − 4 … current + 3`, at least
-  1. (Count and Fixed = 8 modes are debug options behind Ctrl/Shift clicks on the magic panel.) 🟡 The pool
-  probably starts at 0, so the first wind comes after 50 s.
+  1. (Count and Fixed = 8 modes are debug options behind Ctrl/Shift clicks on the magic panel.) Each pool **starts at `rand() % 8 + 1` (1–8)**, set by the battle
+  window's create handler `FUN_1003c440`.
 - **Spell/item table** `0x100F6E48`, 24-byte records `{GMTXT id, effect code, name, kind (1 spell, 2 item),
   cost, flags}`; costs: 1 Dispel Magic, Azure Blades, Lightning, Fireball, Flying Bower, Mork Save Uz,
   Skitterleap, Pestilent Breath; 2 Wind Blast, Sapphire Arch, Piercing Bolts, Burning Head, Hunting Spear,
@@ -873,6 +945,10 @@ Full detail: `extracted/agent_reports/F_magic.md` (local).
   the wizard (a busy wizard: `GMTXT 2014` "…is preparing to cast a spell", order dropped) → casting animation →
   event 0x2C → op 147 `CastPending` → `LaunchEffect`. Storm of Shemtek and Flying Bower keep the wizard busy until
   they end. Ctrl+click on an active spell cancels the caster's effects of that code (no refund).
+  **In close combat** a wizard casts at once without the animation if the target is in range and inside the arc; an
+  engaged wizard cannot turn, so a target outside the arc cancels the spell (op 0xAA). Outside combat the wizard
+  first turns ("Turning Wizard to cast spell.", script 141: instant quarter/half turn beyond 45°, then a wheel);
+  the arc is not re-tested after the turn.
 - **Checks** (`LaunchEffect`, `FUN_1000f950`): fewer than 64 active effects; the caster can cast (class Wizard,
   or a leader with `S_BalWeap` 16, e.g. the Orc shaman on a Wyvern); target point within `EffectRange` of the
   unit centre and within **±50° of facing**; unit-target spells need a unit under the point. **No line of
@@ -891,7 +967,7 @@ of each unit hit. Durations are tick counters: 180 ticks ≈ 18 s, just under on
 |---|---|---|---|---|
 | Wind Blast | 2 | random 4–24" | gust passing through units: S3, 1 wound, save, one model per unit per tick; replaces the previous blast | flight |
 | Azure Blades | 1 | own unit | every tick, units overlapping the target unit (not the target itself) take S4 hits, 1 wound, save | 180 ticks |
-| Storm of Shemtek | 3 | 24" | **2D6 bolts** (🟡 possibly 2D6+1) at the nearest enemy near the point: S6, D3 wounds, no save; wizard frozen | until spent |
+| Storm of Shemtek | 3 | 24" | **2D6+1 bolts** (the phase counter is incremented after every phase, so the 1↔2 loop adds one) at the nearest enemy near the point: S6, D3 wounds, no save; wizard frozen | until spent |
 | Sapphire Arch | 2 | 24" | portal: units swallowed by a previous arch reappear here (killed if gone more than 900 ticks); then every other unit within 48 units vanishes until the next arch | 180 ticks |
 | Lightning | 1 | 24" | bolt: S6, D3 wounds, no save | flight |
 | Piercing Bolts of Burning | 2 | 18" | bolt: S4, 1 wound, no save, fire | flight |
@@ -915,7 +991,9 @@ of each unit hit. Durations are tick counters: 180 ticks ≈ 18 s, just under on
 | Pestilent Breath | 1 | 6" | cloud passing through: S3, 1 wound, no save | flight |
 | Madness | 2 | 24" | the target unit **changes side** (events 0x31/0x32), friends drop it as a target | 180 ticks |
 
-Only Wind Blast, Flamestorm and Tangling Thorn replace the caster's previous instance; other spells stack (two
+Area objects of Wind Blast, Flamestorm, Tangling Thorn and Da Krunch are temporary **solid scenery** (they push
+units back, stop charges, bend routes, block spotting and obstruct missiles). Only Wind Blast, Flamestorm and
+Tangling Thorn replace the caster's previous instance; other spells stack (two
 overlapping Ere We Go casts would restore a wrong I, 🟡). No spell passes the panic or rout bits to
 `ApplyImpact`; panic comes from Burning Head, the Conflagration fuse and the Curse on mounts.
 
@@ -947,14 +1025,14 @@ spells nearby are dispelled too.
 - In the scripts, Banner of Wrath, the Talisman and Arcane Warding appear only in the `RLTEST*.MRC` test armies;
   Arcane Protection appears nowhere.
 
-### 8.12 AI casting ✅ / 🟡
+### 8.12 AI casting ✅
 
 Library scripts (opcodes 147–175 named in the report): a computer wizard picks the nearest enemy and the first
 spell of its list that it can afford and whose rule passes (`AIChooseSpell`, `FUN_10013f40`), turns to face and
 casts. The same scripts run for player wizards given an attack order, so they cast automatically from the
-player's pool. Wind Blast and Sapphire Arch are never chosen. 🟡 The area-spell rule (Conflagration, Flying
-Bower, Tangling Thorn, Flock of Doom, Da Krunch: "no non-friendly unit within the radius of the point") rejects
-the target itself, so the AI probably almost never casts them.
+player's pool. Wind Blast and Sapphire Arch are never chosen. The area-spell rule (Conflagration, Flying Bower, Tangling Thorn, Flock of Doom, Da Krunch) is **inverted**:
+`NonFriendNearPoint` returns 1 whenever a non-friendly unit is within the radius of the point, and the target unit
+itself is at distance 0, so the **AI never casts these spells at a unit target**.
 
 ## 9. Deviations from Warhammer Fantasy Battle 4th edition
 
@@ -1083,6 +1161,9 @@ chart for shooting).
 | `0x1002E2D0` | `EndEffect` | restores I/T after "Ere We Go!", Curse of Anraheir |
 | `0x100291E0` | `BattleTimerTick` | one tick per 100 ms `WM_TIMER` |
 | `0x1003C9F0`, `0x10014CB0` | `WindsOfMagic`, `Wind` | power pools every 50 s |
+| `0x10016FC0`, `0x100170C0`, `0x10017170` | `ObjectOnLine`, `ScanObjectsOnLine`, `ScanObjectsOnLine2` | asin half-width test |
+| `0x10001300`, `0x10001410` | `SpawnCorpse`, `UpdateCorpses` | 32-entry corpse ring |
+| `0x1003C440` | `BattleWindowCreate` | magic pools start at `rand() % 8 + 1` |
 | `0x10040930`, `0x10011920`, `0x100238D0` | `SpellButtonClick`, `OrderCast`, `CastPending` | cost, order 0x17, op 147 |
 | `0x1000F870`, `0x1002EC10`, `0x1002EBD0` | `EffectTargetCheck`, `EffectRange`, `CanCastSpells` | range and ±50° arc |
 | `0x10011BE0`, `0x1002FBF0`, `0x1002E2D0` | `EffectTick`, `EffectPhase`, `EndEffect` | per-tick spell updates |
@@ -1146,10 +1227,10 @@ static analysis unless marked Wine.
 | R19 | **Fear/terror callers** | ✅ resolved: charged → flee, charging → refused, contact → flee; terror without a roll (section 7.3). | — | done |
 | R20 | **Rally and pursuit schedule** | ✅ resolved: first attempt a turn later, then every 3 segments; attempt flag from order 0x14 or bit 27 (sections 7.4, 7.5). | — | done |
 | R21 | **Unused/unclear psychology** | ✅ resolved: `FearToGobs` unused; `CantMelee` is a target property (section 3.4). | — | done |
-| R38 | **Opcode catalogue** | 232 opcodes; control, event, flag, fear/rout/rally/pursuit, shooting (104–134) and casting (147–175) opcodes named in sections 4 and 8. The rest (movement, formation, AI) are unnamed. Per-opcode usage counts over the library and all mission scripts exist locally (`extracted/agent_reports/G/usage.json`). | Batch 3 (section 11.7): two catalogue passes (0–115, 116–231 with the `AIQuery` cases) and a stdlib disassembler in `whshr`. An engine could then run the original unit AI unchanged. | high |
+| R38 | **Opcode catalogue** | ✅ all 232 opcodes catalogued (228 established, 4 hypotheses) and all 28 `AIQuery` cases (`extracted/agent_reports/G_opcodes_0_115.md`, `H_opcodes_116_231.md`, JSON tables); summarised in section 4. The `whshr` disassembler is R51. | — | done |
 | R39 | **Flight and pursuit speeds** | ✅ k 1.5 for both, pursuit step `min(24 × s_rlmv, 10 × distance)` (section 4). | — | done |
 | R40 | **Unit flag bit 27** | ✅ "independent" toggle and its effects (Player orders); 🟡 name. | — | done |
-| R41 | **Remaining event codes** | ✅ 0x09, 0x17, 0x1C/0x1D, 0x2B–0x2D, 0x31/0x32, 0x34; 🟡 0x05 (to a linked unit), 0x36, 0x38 (battle phase change), 0x39; ⬜ no C sender for 0x14, 0x15, 0x33, 0x35, 0x37 (mission bytecode). | Opcode catalogue (R38). | low |
+| R41 | **Remaining event codes** | ✅ senders of 0x05, 0x14/0x15, 0x33, 0x36, 0x37, 0x38 found (section 4); 🟡 meaning of 0x36, 0x39. | — | done |
 | R42 | **Initial scripts** | ✅ `set:script=N` is the mission script id (3–37 per DLL), `PLAYER_SCRIPT` = 100; `DLLReturnInstCount` = 33000 format check. | — | done |
 
 ### 11.3 Shooting and artillery
@@ -1163,13 +1244,13 @@ static analysis unless marked Wine.
 | R26 | **Special missile weapons** | ✅ resolved (section 8.6). | — | done |
 | R27 | **Fanatics** | ✅ hits and death conditions (section 8.7); 🟡 movement and behaviour assignment (R45). | — | done |
 | R43 | **Animation instruction stream** | ✅ per-object animation bytecode in `GAMEF.DLL` `.data`, 59 opcodes (section 4); 🟡 opcode names. | Name the opcodes when animations are implemented. | low |
-| R44 | **Shooting flags** | ✅ `+0xB8` bit 0 anchors machines, bit 3 never set, `+0xB4 0x80000` hidden; 🟡 `+0xB4 0x100` (set by library script 152). | Opcode catalogue (R38). | low |
+| R44 | **Shooting flags** | ✅ `+0xB8` bit 0 anchors machines, bit 3 never set, `+0xB4 0x80000` hidden, `0x100` set by library script 152 on event 0x36 when objective index 7 exists (units leaving the battle, R60). | — | done |
 | R45 | **Fanatic release and movement** | ✅ spawned as three copies by opcode 0xD3, `Query 18` loop, jump opcode 0xD8 (section 8.7); 🟡 spawn trigger event. | Trace the parent script event. | low |
-| R46 | **Obstruction geometry** | `ObjectOnLine` (`FUN_10016fc0`) angular half-width from object radius and distance (x87 code). | Disassemble the float code. | low |
-| R47 | **Doom diver remains** | On landing a model is spawned at the impact point (`FUN_10001300`). | Read `FUN_10001300`. | low |
-| R48 | **Withdraw condition** | Order 0x13 disengages if `FUN_10024710` allows it, otherwise the unit routs. | Read `FUN_10024710`. | medium |
-| R49 | **Order-blocking flag** | `+0xB4 & 0x100000` set by `AIQuery` (`0x10021703`) blocks most orders. | Read the query case. | low |
-| R51 | **Script tools** | The scratch disassemblers `B/sdis.py` and `scriptdump.py` assume 11 mission scripts; `G/sd.py` (all in `extracted/agent_reports/`, local) already reads the real count per DLL. | Build `whshr/behaviour.py` with a check (batch 3, agent I). | medium |
+| R46 | **Obstruction geometry** | ✅ `asin(radius / d)` angular half-width (section 8.3). | — | done |
+| R47 | **Doom diver remains** | ✅ corpse decal, no game effect (section 8.6). | — | done |
+| R48 | **Withdraw condition** | ✅ only against rolling stock/furniture with no other enemy; otherwise the unit routs (Player orders). | — | done |
+| R49 | **Order-blocking flag** | ✅ `0x100000` = braced against a charge (Player orders). | — | done |
+| R51 | **Script tools** | ✅ `whshr/behaviour.py`, `python3 -m whshr scripts`, check group "behaviour scripts" (section 4). | — | done |
 
 ### 11.4 Structures and scope
 
@@ -1183,12 +1264,14 @@ static analysis unless marked Wine.
 | # | Open point (magic) | What is known | How to resolve | Priority |
 |---|---|---|---|---|
 | R52 | **Never-ending spells** | Flamestorm and Curse of Anraheir have no timeout in the code read. | Wine: cast and wait several turns. | medium |
-| R53 | **AI area spells** | The rule seems inverted (rejects the target itself). | Re-read `FUN_10013f40`; Wine: watch an AI wizard. | low |
-| R54 | **Starting power and Storm of Shemtek count** | Pools probably start at 0; the bolt loop may fire 2D6+1. | Read the battle initialisation; re-read the phase loop. | low |
+| R53 | **AI area spells** | ✅ confirmed inverted: the AI never casts area spells at a unit target (section 8.12). | — | done |
+| R54 | **Starting power and Storm of Shemtek count** | ✅ pools start at 1–8; Storm fires 2D6+1 bolts (sections 8.8, 8.9). | — | done |
 | R55 | **Shift variants and Ctrl repeat casts** | Physical-keyboard tests at launch; Ctrl mouse flag repeats casts. | Decide whether an engine keeps them (developer toggles?). | low |
-| R56 | **Casting in close combat, turning to cast** | No test found that stops a wizard in melee from casting; the turn step (`GMTXT 2010`) not traced. | Read scripts 132/142. | low |
-| R57 | **Area objects** | Wind Blast trails, Flamestorm, Tangling Thorn and Da Krunch create map objects with radius and height; effect on movement unknown. | Read `FUN_10017360` users in the mover. | low |
-| R58 | **Spells against regenerators** | Spells with saves pass their damage type to the save routine (see R10/R50). | Dump the flags per spell. | low |
+| R56 | **Casting in close combat, turning to cast** | ✅ casts at once in combat if in arc, else cancelled; turn step outside combat (section 8.8). | — | done |
+| R57 | **Area objects** | ✅ temporary solid scenery (`os_active|os_solid`): push units back, stop charges, bend routes, block spotting, obstruct missiles. | — | done |
+| R58 | **Spells against regenerators** | ✅ no-save spells wound them; save + type 0 spells allow regeneration; Burning Head never wounds them (section 5.3). | — | done |
+| R59 | **Duplicate opcode names** | 0x3A, 0x88 and 0xAF share the name `TakeEventTarget` (same helper, different arguments). | Give distinct names in `whshr/behaviour.py`. | low |
+| R60 | **Objective index 7 and leaving the battle** | `IfObjective 7` in scripts 100/101/152 selects threat mode 12, allied side and, on event 0x36 (`AIQuery` case 12, battle state 4), library script 170 (teleport to node 24, remove from the battle); which objective letter index 7 is (G if A = 1, H if A = 0) is unconfirmed. | Batch 4 agent J (missions and objectives). | medium |
 
 ### 11.5 Hypotheses in this report to confirm
 
@@ -1204,7 +1287,7 @@ Only worth the effort if static analysis stalls, as the game exits randomly unde
 - R11: casualties inflicted on a leader with `s_armr=5` (e.g. Commander Bernhardt).
 - R36: how many models of a deep unit end up fighting after a few turns of combat.
 - R52: does a Flamestorm or a Curse of Anraheir ever end on its own?
-- Whether a Banner of Arcane Warding has any visible effect, and how often AI wizards cast area spells (R53).
+- Whether a Banner of Arcane Warding has any visible effect.
 - Section 7.1: a flat 2–12 roll cannot be distinguished from 2D6 in single tests; not worth testing.
 
 ### 11.7 Status of the analysis and next steps
@@ -1214,12 +1297,11 @@ Only worth the effort if static analysis stalls, as the game exits randomly unde
   E time and movement, F magic. Their full reports, with more detail than this file, are kept locally in
   `extracted/agent_reports/A_close_combat.md` … `F_magic.md` (git-ignored, derived from the binaries), together
   with scratch tools and the Ghidra decompilation in `extracted/decompiled/`.
-- **Interrupted**: batch 3 was stopped by the spend limit right after launch. Its plan and briefs are in
-  `extracted/agent_reports/BATCH3_PLAN.md`:
-  - G: opcodes 0–115, plus R48, R49, R56, R57;
-  - H: opcodes 116–231 and the `AIQuery` cases, plus R53, R54, R58;
-  - I: `whshr/behaviour.py` disassembler with a check and a `scripts` subcommand, a table of what each library
-    script 100–170 does, plus R46, R47.
+- **Planned batches**: the full plan with agent briefs is in `notes/research_plan.md`: batch 3 (below), batch 4
+  (J missions and objectives, K campaign progression and saves, L AI, pathfinding and visibility) and an
+  optional batch 5 (M animation bytecode, events → sound/music/palette).
+- **Batch 3 done** (G, H, I; September 2026): all 232 opcodes and 28 `AIQuery` cases catalogued, the `whshr`
+  disassembler with its check, the library script table, R41, R44, R46–R49, R51, R53, R54, R56–R58.
 - **Open decisions for an engine**: whether to reproduce apparent original bugs (R11 armour rating 5, R33
   charging monsters keeping +1 S, "Ere We Go!" stopping close combat attacks in section 5.1).
 - **Wine candidates**: section 11.6.

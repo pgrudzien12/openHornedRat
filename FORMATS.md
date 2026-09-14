@@ -37,7 +37,7 @@ from game data; they are not part of the repository.
 | Battle 3D resources | `MESH/*/*.PBX`, `GRND.GD` | ✅ | Battle 3D resources | `notes/pbx_rnc.md`, `notes/terrain_gd.md` |
 | Cutscenes | `ANIM/*.SI/.SN/.SM/.SR` | ✅ containers, 🟡 event semantics | Cutscenes | `notes/si_omni.md`, `notes/scene_scripts.md` |
 | Game rules: unit stats, combat, morale, shooting | `GAMEF.DLL` code and tables, `setstats` | ✅ stat layout, close combat, morale; 🟡 missile constants, some flags | Unit stat fields, Game rules | `notes/game_rules.md` |
-| Mission logic, unit behaviour | `SCRIPT/BFxxx.DLL` | 🟡 bytecode scripts and interpreter identified; opcodes partly named | Mission logic, Game rules | `notes/game_rules.md` |
+| Mission logic, unit behaviour | `SCRIPT/BFxxx.DLL` | ✅ bytecode scripts, interpreter, all 232 opcodes, disassembler (`whshr scripts`); 🟡 per-mission semantics | Mission logic, Game rules | `notes/game_rules.md` |
 | Save games | `SAVE/savegame.*` | ⬜ | Other files | — |
 
 ## `.PAL` — two different formats under the same extension
@@ -660,8 +660,8 @@ The most important ones for an engine:
 
 - How many models fight in practice once movement is simulated (R36); which orders count as a
   charge or pursuit (R32).
-- The remaining ~150 behaviour script opcodes (R38); magic effects to confirm in the running game: Flamestorm and Curse of Anraheir
-  without an end, AI area spells (R52, R53).
+- Magic effects to confirm in the running game: Flamestorm and Curse of Anraheir without an end (R52); the
+  meaning of objective index 7 and units leaving the battle through library script 170 (R60).
 - Whether an engine should reproduce apparent bugs: armour rating 5 without a save (R11), "Ere We Go!" stopping
   close combat attacks (R5), charging monsters keeping +1 S (R33); the withdraw condition (R48).
 
@@ -676,8 +676,11 @@ events"). `DLLGetScriptPointer(id)` is a table lookup: ids from 0 → the missio
 ids 100–170 → a shared library that is byte-identical in all 45 DLLs. The scripts are arrays of 32-bit words
 (bit 15 = opcode, `0x0ABC` label, `0x80E8` end) run for every unit each tick by an interpreter in
 `GAMEF.DLL` with 232 opcodes. They handle queued events (charged, rout, rally, enemy routed…) and issue
-orders; `set:script=PLAYER_SCRIPT` selects library script 100. About 80 opcodes are named so far; with a
-full opcode catalogue an engine could run the original scripts instead of rewriting them. `DLLReturnInstCount` returns 33000 = `0x80E8`, a format check.
+orders; `set:script=PLAYER_SCRIPT` selects library script 100. All 232 opcodes are catalogued (`notes/game_rules.md`, section 4), so an engine can run the original scripts
+instead of rewriting them. `python3 -m whshr scripts <installation> [DLL] [ids…]` prints script summaries and
+listings, and the "behaviour scripts" check verifies that all 3787 scripts of the 45 DLLs decode cleanly and
+that every `set:script` value exists. The shared library (ids 100–170) holds the player unit script, class
+event handlers, morale layers, shooting, magic and AI behaviours; mission scripts add battle-specific cases. `DLLReturnInstCount` returns 33000 = `0x80E8`, a format check.
 
 The campaign flow around the battles (briefings, mission choice, debriefings, movies) is not in these
 DLLs either: it is the glue scripts in `WND.DLL` (see "PE resources").
