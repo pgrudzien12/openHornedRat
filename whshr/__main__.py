@@ -9,6 +9,9 @@ from . import legacy
 from . import audio, battle2d, battle3d, battle_replay, behaviour, campaign, catalog, engine, pbx, rules, si, viewer_web
 from .paths import Installation
 
+# Battle logs default to the git-ignored logs/ of this checkout, wherever the engine is started from.
+REPOSITORY_LOGS = Path(__file__).resolve().parents[1] / "logs"
+
 
 def _check(name, callback):
     try:
@@ -104,7 +107,7 @@ def main(argv=None):
                                help="with --frames: save the last frame as PNG; do not commit game assets")
     engine_parser.add_argument("--frame-time", type=float,
                                help="fixed seconds per frame instead of wall-clock time (reproducible captures)")
-    engine_parser.add_argument("--battle-log", type=Path, default=Path("logs"),
+    engine_parser.add_argument("--battle-log", type=Path, default=REPOSITORY_LOGS,
                                help="directory for JSON Lines battle logs (default: logs/)")
     engine_parser.add_argument("--no-battle-log", action="store_true", help="disable battle logging")
     engine_parser.add_argument("--seed", type=int, default=engine.DEFAULT_SEED,
