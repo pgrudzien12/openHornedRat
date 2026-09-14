@@ -150,6 +150,9 @@ class Gpu:
         self.target = RenderTarget(ctx, size)
         self.small_font = pygame.font.Font(None, 22)
         self.title_font = pygame.font.Font(None, 40)
+        # A single opaque white pixel, stretched and tinted black for scene-transition fades.
+        self.fade = ScreenQuad(self, (1, 1))
+        self.fade.write(b"\xff\xff\xff\xff")
 
     def text(self, size, font=None, **options):
         return TextLabel(self, size, font or self.small_font, **options)

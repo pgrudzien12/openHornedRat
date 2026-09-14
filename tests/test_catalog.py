@@ -30,9 +30,17 @@ class CatalogTests(unittest.TestCase):
 
         self.assertEqual(
             [str(record.identifier) for record in assets.records],
-            ["vanilla:battle/bf001", "vanilla:cutscene/intro", "vanilla:palette/standard"],
+            [
+                "vanilla:battle/bf001", "vanilla:cutscene/intro", "vanilla:cutscene/intro-media",
+                "vanilla:palette/standard",
+            ],
         )
         self.assertEqual(assets.get("vanilla:cutscene/intro").decoder, "omni-si")
+        self.assertEqual(assets.get("vanilla:cutscene/intro-media").decoder, "omni-si-media")
+        self.assertEqual(
+            assets.resolve(self.root, "vanilla:cutscene/intro-media"),
+            assets.resolve(self.root, "vanilla:cutscene/intro"),
+        )
         self.assertEqual(
             assets.resolve(self.root, "vanilla:palette/standard"),
             self.root / "UPDATE/BINARY/standard.pal",
@@ -98,6 +106,15 @@ class CatalogTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "relative path"):
             locator.resolve("file", "../outside")
+
+    def test_given_wnd_dll_present_when_catalogued_then_the_first_mission_briefing_is_listed(self):
+        self._write("FILE/DLL/WND.DLL", b"MZ")
+
+        assets = catalog.build(self.root)
+
+        record = assets.get("vanilla:briefing/bf001")
+        self.assertEqual(record.decoder, "campaign-briefing")
+        self.assertEqual(assets.resolve(self.root, record.identifier), self.root / "FILE/DLL/WND.DLL")
 
     def test_given_original_developer_battle_name_when_used_as_an_asset_id_then_it_is_supported(self):
         identifier = AssetId("vanilla", "battle", "_destest")

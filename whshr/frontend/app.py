@@ -24,6 +24,7 @@ MAX_STEPS_PER_FRAME = 25
 MAX_FRAMES_PER_SECOND = 240  # frame cap when vsync is unavailable or the window is hidden
 OVERLAY_REFRESH_SECONDS = 0.25
 WINDOW_TITLE = "openHornedRat"
+FADE_SECONDS = 0.3  # short fade-in from black after every scene switch
 
 
 def open_window(size, hidden=False):
@@ -78,11 +79,14 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
     clock = FixedStepClock(FIXED_STEP, MAX_STEPS_PER_FRAME)
     rate = FrameRate()
     limiter = pygame.time.Clock()
+    fade_remaining = FADE_SECONDS  # fade in from black on the initial scene too
 
     def synchronise(current):
+        nonlocal fade_remaining
         if current.scene is machine.active:
             return current
         current.release()
+        fade_remaining = FADE_SECONDS
         return view_for(gpu, machine.active, options)
 
     if skip_intro and not battle:
@@ -102,12 +106,18 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
                 for scene_event in view.events(event):
                     machine.handle(scene_event)
                     view = synchronise(view)
+                    if machine.quit is not None:
+                        running = False
 
             seconds = elapsed if frame_time is None else frame_time
             for _ in range(clock.advance(seconds)):
                 machine.update(clock.step)
                 view = synchronise(view)
-            view.animate(seconds)
+                if machine.quit is not None:
+                    running = False
+            if running:
+                view.animate(seconds)
+            fade_remaining = max(0.0, fade_remaining - seconds)
 
             rate.frame(now)
             if now - overlay_time >= OVERLAY_REFRESH_SECONDS or frames is not None:
@@ -119,6 +129,9 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
 
             ctx.new_frame()
             view.draw()
+            if fade_remaining > 0:
+                alpha = fade_remaining / FADE_SECONDS
+                gpu.fade.draw(0, 0, *gpu.target.size, tint=(0.0, 0.0, 0.0, alpha))
             overlay.draw(8, 8)
             gpu.target.present()
             ctx.end_frame()
@@ -131,4 +144,7 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
             limiter.tick(MAX_FRAMES_PER_SECOND)
     finally:
         pygame.quit()
-    return {"frames": frame, "ticks": clock.ticks, "scene": type(machine.active).__name__}
+    return {
+        "frames": frame, "ticks": clock.ticks, "scene": type(machine.active).__name__,
+        "quit": machine.quit.reason if machine.quit is not None else None,
+    }

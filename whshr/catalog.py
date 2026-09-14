@@ -86,9 +86,24 @@ def build(installation):
             f"SCRIPT/{path.name}", "battle-script", source_fingerprint(path),
         ))
     for path in _files(game.find("REMOTE", "BINARY", "ANIM"), ".si"):
+        stem = path.stem.casefold()
+        fingerprint = source_fingerprint(path)
         records.append(AssetRecord(
-            AssetId("vanilla", "cutscene", path.stem.casefold()), "cutscene", "remote",
-            f"BINARY/ANIM/{path.name}", "omni-si", source_fingerprint(path),
+            AssetId("vanilla", "cutscene", stem), "cutscene", "remote",
+            f"BINARY/ANIM/{path.name}", "omni-si", fingerprint,
+        ))
+        # Same source file, rebuilt into playable Smacker/WAV media instead of the raw object tree.
+        records.append(AssetRecord(
+            AssetId("vanilla", "cutscene", f"{stem}-media"), "cutscene-media", "remote",
+            f"BINARY/ANIM/{path.name}", "omni-si-media", fingerprint,
+        ))
+
+    wnd_dll = game.find("FILE", "DLL", "WND.DLL")
+    if wnd_dll is not None:
+        # Phase 1 only needs the first campaign battle's briefing; extend this per known mission.
+        records.append(AssetRecord(
+            AssetId("vanilla", "briefing", "bf001"), "briefing", "file", "DLL/WND.DLL",
+            "campaign-briefing", source_fingerprint(wnd_dll),
         ))
 
     standard = game.find("UPDATE", "BINARY", "STANDARD.PAL") or game.find("FILE", "BINARY", "STANDARD.PAL")

@@ -1,7 +1,7 @@
 import unittest
 
 from whshr.assets import AssetId
-from whshr.scenes import Scene, SceneMachine, SceneManifest, Transition
+from whshr.scenes import Quit, Scene, SceneMachine, SceneManifest, Transition
 
 
 class Intro(Scene):
@@ -41,6 +41,17 @@ class TimedScene(Scene):
         return None
 
 
+class QuittableMenu(Scene):
+    def __init__(self):
+        self.handled_after_quit = False
+
+    def handle(self, event, context):
+        if event == "quit":
+            return Quit("player quit")
+        self.handled_after_quit = True
+        return None
+
+
 class SceneMachineTests(unittest.TestCase):
     def test_given_intro_when_player_skips_then_menu_becomes_active_after_intro_exits(self):
         events = []
@@ -73,6 +84,26 @@ class SceneMachineTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "must not be negative"):
             machine.update(-0.1)
+
+    def test_given_a_scene_when_it_requests_quit_then_the_machine_records_it_without_switching_scenes(self):
+        scene = QuittableMenu()
+        machine = SceneMachine(scene, [])
+
+        machine.handle("quit")
+
+        self.assertIs(machine.active, scene)
+        self.assertEqual(machine.quit.reason, "player quit")
+        self.assertEqual(machine.history, [])
+
+    def test_given_a_machine_that_has_quit_when_given_more_events_then_the_scene_no_longer_receives_them(self):
+        scene = QuittableMenu()
+        machine = SceneMachine(scene, [])
+        machine.handle("quit")
+
+        machine.handle("anything")
+        machine.update(0.1)
+
+        self.assertFalse(scene.handled_after_quit)
 
 
 if __name__ == "__main__":

@@ -455,6 +455,9 @@ def process_si(path, outdir=None):
                 entry['output'] = fname
                 if outdir:
                     open(os.path.join(od, fname), 'wb').write(blob)
+            # Keep the rebuilt bytes in memory too: the engine decodes cutscene video/audio directly
+            # from a process_si() summary, without writing temporary files.
+            entry['blob'] = blob
         written[oid] = entry
     summary = {'file': os.path.basename(path), 'size': si['size'], 'version': si['version'],
                'hd_unk': si['hd_unk'], 'chunks': len(si['chunks']), 'pads': si['pads'],
@@ -464,6 +467,7 @@ def process_si(path, outdir=None):
         s2 = dict(summary)
         for e in s2['objects'].values():
             e.get('evt', {}).pop('rows', None)
+            e.pop('blob', None)
         open(os.path.join(od, 'objects.json'), 'w').write(json.dumps(s2, indent=1))
     return summary
 
