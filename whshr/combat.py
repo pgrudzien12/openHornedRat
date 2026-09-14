@@ -14,9 +14,15 @@ Simplifications common to this module (documented placeholders, not traced value
 - Break tests use only the combat round's own casualty difference (game_rules.md 6.2's rank/direction
   bonuses and "first result two turns after contact" timing are not modelled); rally ignores the
   casualties-based Leadership modifier (game_rules.md 7.4) and only checks CantRally and enemy distance.
+
+Every event `whshr.battle_log.BattleLogger` needs for diagnosing the playtest bugs (combat-round
+rolls, Leadership tests, rout/rally, shooting) is emitted here as a `whshr.battle_events.BattleEvent`:
+a `str` (so it still prints and compares like the old plain-string events) carrying a `kind` and a
+`data` mapping of the exact numbers rolled.
 """
 import math
 
+from .battle_events import BattleEvent
 from .rules import EXPECTED_ARMOUR_SAVE, wfb_to_hit, wfb_to_wound
 
 SEGMENT_TICKS = 19  # game_rules.md, "Battle clock": 19 ticks per segment; combat/morale resolve once per segment
@@ -37,9 +43,13 @@ def _d6(rng):
     return rng.randint(1, 6)
 
 
+def _2_to_12(rng):
+    return rng.randint(2, 12)
+
+
 def leadership_test(leadership, rng, modifier=0):
     """game_rules.md 7.1: pass <=> modifier + (uniform 2-12) <= Leadership (not 2D6)."""
-    return modifier + rng.randint(2, 12) <= leadership
+    return modifier + _2_to_12(rng) <= leadership
 
 
 def _armour_threshold(armour, strength):
@@ -62,24 +72,39 @@ def apply_casualties(regiment, count, rng):
 
 
 def _roll_attacks(attacker, defender, rng):
-    """Casualties `attacker`'s front rank inflicts on `defender` in one combat round (game_rules.md 5.2)."""
+    """Casualties `attacker`'s front rank inflicts on `defender` in one combat round (game_rules.md 5.2).
+
+    Returns `(kills, detail)`, where `detail` documents every individual attack for the battle log:
+    `hit_need`/`wound_need`/`save_need` (the target numbers) and, per attack, the hit/wound/save rolls
+    actually made and the result ("missed", "no_wound", "saved" or "killed"; a roll stops early on a
+    miss or failure to wound, so `save_roll` is `None` unless the attack reached the save).
+    """
     attacks = attacker.front_rank_models() * max(1, attacker.attacks)
     hit_need = wfb_to_hit(attacker.ws, defender.ws)
     strength = attacker.strength + attacker.strength_bonus
     wound_need = wfb_to_wound(strength, defender.toughness)
-    if wound_need > 6:
-        return 0
     threshold = _armour_threshold(defender.armour, strength)
+    detail = {"attacks": attacks, "hit_need": hit_need, "wound_need": wound_need, "save_need": threshold,
+              "rolls": []}
+    if wound_need > 6:
+        return 0, detail
     kills = 0
     for _ in range(attacks):
-        if _d6(rng) < hit_need:
+        hit_roll = _d6(rng)
+        if hit_roll < hit_need:
+            detail["rolls"].append({"hit": hit_roll, "wound": None, "save": None, "result": "missed"})
             continue
-        if _d6(rng) < wound_need:
+        wound_roll = _d6(rng)
+        if wound_roll < wound_need:
+            detail["rolls"].append({"hit": hit_roll, "wound": wound_roll, "save": None, "result": "no_wound"})
             continue
-        if _d6(rng) >= threshold:
-            continue  # armour save succeeds
+        save_roll = _d6(rng)
+        if save_roll >= threshold:
+            detail["rolls"].append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "saved"})
+            continue
+        detail["rolls"].append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "killed"})
         kills += 1
-    return min(kills, defender.models)
+    return min(kills, defender.models), detail
 
 
 def refresh_melee_state(battle):
@@ -110,7 +135,9 @@ def resolve_contacts(battle):
                 first.in_melee = second.in_melee = True
                 first.melee_opponent, second.melee_opponent = second.identifier, first.identifier
                 first.target_x = first.target_y = second.target_x = second.target_y = None
-                battle.events.append(f"{first.name} clashes with {second.name}!")
+                battle.events.append(BattleEvent(
+                    f"{first.name} clashes with {second.name}!", "clash",
+                    first=first.identifier, second=second.identifier, distance=distance))
                 break
 
 
@@ -126,46 +153,88 @@ def resolve_melee(battle):
             continue
         resolved.add(regiment.identifier)
         resolved.add(opponent.identifier)
-        kills_by_regiment = _roll_attacks(regiment, opponent, battle.rng)
-        kills_by_opponent = _roll_attacks(opponent, regiment, battle.rng)
+        kills_by_regiment, regiment_detail = _roll_attacks(regiment, opponent, battle.rng)
+        kills_by_opponent, opponent_detail = _roll_attacks(opponent, regiment, battle.rng)
         apply_casualties(opponent, kills_by_regiment, battle.rng)
         apply_casualties(regiment, kills_by_opponent, battle.rng)
-        battle.events.append(
-            f"{regiment.name} and {opponent.name} fight: {kills_by_regiment} vs {kills_by_opponent} casualties.")
+        battle.events.append(BattleEvent(
+            f"{regiment.name} and {opponent.name} fight: {kills_by_regiment} vs {kills_by_opponent} casualties.",
+            "combat_round",
+            first=regiment.identifier, second=opponent.identifier,
+            first_kills=kills_by_regiment, second_kills=kills_by_opponent,
+            first_attacks=regiment_detail, second_attacks=opponent_detail,
+            result_score=kills_by_regiment - kills_by_opponent))
         _break_test(regiment, kills_by_regiment - kills_by_opponent, opponent, battle)
         _break_test(opponent, kills_by_opponent - kills_by_regiment, regiment, battle)
 
 
 def _break_test(regiment, difference, opponent, battle):
-    if not regiment.active or difference >= 0:
+    """The losing side's Leadership test (game_rules.md 6.2, simplified). Logs every check, including a
+    skipped one (regiment already destroyed, won or drew the round, or CantBreak), so a rout can always
+    be traced back to its exact Ld, roll and modifier."""
+    if not regiment.active:
         return
+    if difference >= 0:
+        return  # regiment.active check above still lets a drawn/won round through with no test needed
+    modifier = -difference
     if "CantBreak" in regiment.psychology:
+        battle.events.append(BattleEvent(
+            f"{regiment.name} cannot break (CantBreak).", "leadership_test",
+            regiment=regiment.identifier, opponent=opponent.identifier, leadership=regiment.leadership,
+            modifier=modifier, cant_break=True, roll=None, passed=True))
         return
-    if not leadership_test(regiment.leadership, battle.rng, modifier=-difference):
+    roll = _2_to_12(battle.rng)
+    passed = modifier + roll <= regiment.leadership
+    battle.events.append(BattleEvent(
+        f"{regiment.name} takes a Leadership test (Ld {regiment.leadership}, roll {roll} + {modifier}): "
+        f"{'passes' if passed else 'fails'}.", "leadership_test",
+        regiment=regiment.identifier, opponent=opponent.identifier, leadership=regiment.leadership,
+        roll=roll, modifier=modifier, cant_break=False, passed=passed))
+    if not passed:
         _start_rout(regiment, battle)
 
 
 def _start_rout(regiment, battle):
+    flee_x, flee_y = battle._flee_point(regiment)
     regiment.routing = True
     regiment.in_melee = False
     regiment.melee_opponent = None
     regiment.attack_target = None
     regiment.target_x = regiment.target_y = None
-    battle.events.append(f"{regiment.name} routs!")
+    battle.events.append(BattleEvent(
+        f"{regiment.name} routs!", "rout_start",
+        regiment=regiment.identifier, x=regiment.x, y=regiment.y, flee_x=flee_x, flee_y=flee_y))
 
 
 def resolve_rally(battle):
     """A routing regiment may rally once no enemy is within FLEE_SAFE_DISTANCE (game_rules.md 7.4,
-    simplified: no casualties-based Leadership modifier, no scheduled-segment timer)."""
+    simplified: no casualties-based Leadership modifier, no scheduled-segment timer). Logs every
+    routing regiment's rally check, including why it was skipped (CantRally, enemy too close)."""
     for regiment in battle.regiments.values():
-        if not regiment.routing or "CantRally" in regiment.psychology:
+        if not regiment.routing:
+            continue
+        if "CantRally" in regiment.psychology:
+            battle.events.append(BattleEvent(
+                f"{regiment.name} cannot rally (CantRally).", "rally_test",
+                regiment=regiment.identifier, cant_rally=True, blocked_by_enemy=False, roll=None, passed=False))
             continue
         nearest = battle._nearest_enemy(regiment)
-        if nearest is not None and math.hypot(nearest.x - regiment.x, nearest.y - regiment.y) < FLEE_SAFE_DISTANCE:
+        distance = math.hypot(nearest.x - regiment.x, nearest.y - regiment.y) if nearest is not None else None
+        if distance is not None and distance < FLEE_SAFE_DISTANCE:
+            battle.events.append(BattleEvent(
+                f"{regiment.name} cannot rally: an enemy is {distance:.0f} units away.", "rally_test",
+                regiment=regiment.identifier, cant_rally=False, blocked_by_enemy=True,
+                nearest_enemy_distance=distance, roll=None, passed=False))
             continue
-        if leadership_test(regiment.leadership, battle.rng):
+        roll = _2_to_12(battle.rng)
+        passed = roll <= regiment.leadership
+        battle.events.append(BattleEvent(
+            f"{regiment.name} takes a rally test (Ld {regiment.leadership}, roll {roll}): "
+            f"{'rallies' if passed else 'still routing'}.", "rally_test",
+            regiment=regiment.identifier, cant_rally=False, blocked_by_enemy=False,
+            leadership=regiment.leadership, roll=roll, passed=passed))
+        if passed:
             regiment.routing = False
-            battle.events.append(f"{regiment.name} rallies!")
 
 
 def resolve_shooting(battle):
@@ -182,25 +251,41 @@ def resolve_shooting(battle):
         target = _shooting_target(battle, regiment)
         if target is None:
             continue
+        distance = math.hypot(target.x - regiment.x, target.y - regiment.y)
         shots = max(1, -(-regiment.front_rank_models() // 4))  # ceil(front rank / 4), game_rules.md 8.1
         strength = MISSILE_STRENGTH.get(regiment.missile_code, regiment.strength)
         hit_need = SHOOT_TO_HIT.get(max(1, min(10, regiment.bs)), 4)
         wound_need = wfb_to_wound(strength, target.toughness)
         threshold = _armour_threshold(target.armour, strength)
         kills = 0
+        rolls = []
         if wound_need <= 6:
             for _ in range(shots):
-                if _d6(battle.rng) < hit_need:
+                hit_roll = _d6(battle.rng)
+                if hit_roll < hit_need:
+                    rolls.append({"hit": hit_roll, "wound": None, "save": None, "result": "missed"})
                     continue
-                if _d6(battle.rng) < wound_need:
+                wound_roll = _d6(battle.rng)
+                if wound_roll < wound_need:
+                    rolls.append({"hit": hit_roll, "wound": wound_roll, "save": None, "result": "no_wound"})
                     continue
-                if _d6(battle.rng) >= threshold:
+                save_roll = _d6(battle.rng)
+                if save_roll >= threshold:
+                    rolls.append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "saved"})
                     continue
+                rolls.append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "killed"})
                 kills += 1
         apply_casualties(target, kills, battle.rng)
-        if kills:
-            battle.events.append(f"{regiment.name} shoots {target.name}: {kills} casualties.")
+        battle.events.append(BattleEvent(
+            f"{regiment.name} shoots {target.name}: {kills} casualties." if kills else
+            f"{regiment.name} shoots {target.name}: no casualties.", "shooting",
+            shooter=regiment.identifier, target=target.identifier, distance=distance,
+            range=regiment.missile_range, shots=shots, hit_need=hit_need, wound_need=wound_need,
+            save_need=threshold, rolls=rolls, kills=kills))
         regiment.reload_ticks = _reload_ticks(regiment)
+        battle.events.append(BattleEvent(
+            f"{regiment.name} reloads: ready in {regiment.reload_ticks:.0f} ticks.", "reload",
+            regiment=regiment.identifier, reload_ticks=regiment.reload_ticks))
 
 
 def _shooting_target(battle, regiment):

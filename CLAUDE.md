@@ -64,7 +64,9 @@ unknown formats. In short:
 ## Repository layout
 
 GitHub repository: https://github.com/pgrudzien12/openHornedRat (private).
-`samples/`, `battles/` and `extracted/` are in `.gitignore`: they contain data extracted from the game and are kept locally only.
+`samples/`, `battles/`, `extracted/` and `logs/` are in `.gitignore`: they contain data extracted from
+the game (or, for `logs/`, JSON Lines battle logs naming regiments and units from the game) and are kept
+locally only.
 
 ```
 README.md          - project description (goal, required original game, where to buy it)
@@ -74,15 +76,17 @@ ROADMAP.md         - work plan: game file inventory, phases 0-5 with status, mil
 notes/             - full per-format reports (how each claim was verified, per-file tables, open questions)
   animations.md, battle_viewer.md, btp_sprite_leftovers.md, campaign.md, fonts_glue.md, game_rules.md, music.md, pbx_rnc.md, research_plan.md,
   pe_resources.md, scene_scripts.md, sfx.md, si_omni.md, sprite_names.md, terrain_gd.md
-whshr/             - unified package and CLI: python3 -m whshr check|extract|catalog|engine|viewer|viewer-web|
-                     viewer-2d|viewer-2d-web|terrain-check|rules|scripts (3D battle viewer: battle3d.py, 2D: battle2d.py,
+whshr/             - unified package and CLI: python3 -m whshr check|extract|catalog|engine|battle-replay|viewer|
+                     viewer-web|viewer-2d|viewer-2d-web|terrain-check|rules|scripts (3D battle viewer: battle3d.py, 2D: battle2d.py,
                      GAMEF.DLL rule tables and unit stat decoding: rules.py,
                      behaviour bytecode disassembler: behaviour.py, traced block formation layout: formation.py,
                      scenes and lazy assets: scenes.py, campaign_scenes.py, assets.py, catalog.py, cache.py,
                      battle simulation: engine.py, fixed-step clock: clock.py, battle scene: battle_scene.py,
                      decoded battle data shared by viewers and engine: battlefield.py, battle camera: camera.py,
                      screen-to-ground picking: picking.py, Smacker decoder: smacker.py, mission briefings: briefing.py,
-                     simplified combat, morale and shooting: combat.py, enemy AI: ai.py, win/lose: result_scene.py)
+                     simplified combat, morale and shooting: combat.py, enemy AI: ai.py, win/lose: result_scene.py,
+                     structured battle events: battle_events.py, JSON Lines battle log recorder: battle_log.py,
+                     deterministic replay and comparison (python3 -m whshr battle-replay): battle_replay.py)
   frontend/        - runtime frontend, the ONLY third-party-dependent code (pygame-ce + zengl, requirements-engine.txt,
                      local .venv/); imported solely by `engine`: app.py (window, loop, overlay), views.py (registry),
                      scene_view.py, battle_view.py (GPU terrain/scenery/sprites, camera, selection and orders),

@@ -5,6 +5,7 @@ import math
 import random
 
 from . import ai, combat, formation
+from .battle_events import BattleEvent
 from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, stat_fields
 from .script import load_battle
 
@@ -249,6 +250,21 @@ class Battle:
         regiment.target_x = regiment.target_y = None
         regiment.attack_target = target_id
 
+    def snapshot(self):
+        """Per-regiment state for `whshr.battle_log` (a segment snapshot or the final battle state):
+        position, facing, models, corpse count, and every order/engagement flag needed to trace a
+        regiment's behaviour without re-deriving it from the tick-by-tick event log."""
+        return {
+            identifier: {
+                "x": regiment.x, "y": regiment.y, "direction": regiment.direction,
+                "models": regiment.models, "corpses": len(regiment.corpses),
+                "walking": regiment.walking, "routing": regiment.routing, "fled": regiment.fled,
+                "in_melee": regiment.in_melee, "melee_opponent": regiment.melee_opponent,
+                "attack_target": regiment.attack_target, "reload_ticks": regiment.reload_ticks,
+            }
+            for identifier, regiment in self.regiments.items()
+        }
+
     def regiment_at(self, x, y, player_only=True):
         """Identifier of the regiment whose footprint contains (x, y), or None; the closest one if several."""
         best_id, best_distance = None, None
@@ -299,7 +315,10 @@ class Battle:
                                              regiment.speed_for_mode(FLEEING_K) * scale, arrive=False)
                 if not (0 <= regiment.x <= self.width and 0 <= regiment.y <= self.height):
                     regiment.fled = True
-                    self.events.append(f"{regiment.name} routs off the battlefield.")
+                    self.events.append(BattleEvent(
+                        f"{regiment.name} routs off the battlefield.", "fled",
+                        regiment=regiment.identifier, x=regiment.x, y=regiment.y,
+                        width=self.width, height=self.height))
             elif regiment.attack_target:
                 target = self.regiments.get(regiment.attack_target)
                 if target is None or not target.active:
@@ -377,6 +396,21 @@ class Battle:
         regiment.positions = updated
         return still_moving
 
+    def side_counts(self):
+        """Per-side active/routing/fled/destroyed regiment counts (whshr.battle_log snapshots, and the
+        diagnosis for "defeat never triggered": every result check's inputs are visible here)."""
+        counts = {}
+        for side, label in ((True, "player"), (False, "enemy")):
+            regiments = [r for r in self.regiments.values() if r.player == side]
+            counts[label] = {
+                "active": sum(1 for r in regiments if r.active),
+                "routing": sum(1 for r in regiments if r.routing and r.active),
+                "fled": sum(1 for r in regiments if r.fled),
+                "destroyed": sum(1 for r in regiments if r.destroyed),
+                "total": len(regiments),
+            }
+        return counts
+
     def _update_result(self):
         if not (self._has_enemy and self._has_player):
             return
@@ -384,10 +418,14 @@ class Battle:
         alive_player = any(r.active for r in self.regiments.values() if r.player)
         if not alive_enemy and alive_player:
             self.result = "victory"
-            self.events.append("Victory! The enemy army is destroyed.")
+            self.events.append(BattleEvent(
+                "Victory! The enemy army is destroyed.", "result",
+                result="victory", counts=self.side_counts()))
         elif not alive_player:
             self.result = "defeat"
-            self.events.append("Defeat! Your army is destroyed.")
+            self.events.append(BattleEvent(
+                "Defeat! Your army is destroyed.", "result",
+                result="defeat", counts=self.side_counts()))
 
     def _resolve_collisions(self):
         """Push regiments under orders out of the regiments they overlap (a simplified `PushApart`;

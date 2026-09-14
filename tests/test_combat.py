@@ -29,11 +29,27 @@ class CloseCombatTests(unittest.TestCase):
 
         self.assertEqual(self.defender.models, 6)
         self.assertEqual(self.attacker.models, 10)
+        # Events are still printable strings (docs/testing.md, "Battle.events may stay a list the view
+        # can still print"), but each also carries a `kind` and structured `data` for the battle log.
         self.assertEqual(self.battle.events, [
             "att clashes with def!",
             "att and def fight: 4 vs 0 casualties.",
+            "def takes a Leadership test (Ld 2, roll 12 + 4): fails.",
             "def routs!",
+            "def cannot rally: an enemy is 65 units away.",  # same tick's rally check, still in contact
         ])
+        combat_round = self.battle.events[1]
+        self.assertEqual(combat_round.kind, "combat_round")
+        self.assertEqual(combat_round.data["first_kills"], 4)
+        self.assertEqual(combat_round.data["second_kills"], 0)
+        self.assertEqual(len(combat_round.data["first_attacks"]["rolls"]), 10)  # one entry per attack
+        leadership = self.battle.events[2]
+        self.assertEqual(leadership.kind, "leadership_test")
+        self.assertEqual(leadership.data["regiment"], "def")
+        self.assertFalse(leadership.data["passed"])
+        rout = self.battle.events[3]
+        self.assertEqual(rout.kind, "rout_start")
+        self.assertIn("flee_x", rout.data)
 
     def test_given_a_lost_combat_round_when_the_break_test_fails_then_the_loser_routs_and_flees(self):
         self.battle.tick()
@@ -76,7 +92,10 @@ class RallyTests(unittest.TestCase):
         combat.resolve_rally(battle)
 
         self.assertFalse(routing.routing)
-        self.assertIn("r rallies!", battle.events)
+        self.assertIn("r takes a rally test (Ld 9, roll 8): rallies.", battle.events)
+        rally = battle.events[-1]
+        self.assertEqual(rally.kind, "rally_test")
+        self.assertTrue(rally.data["passed"])
 
     def test_given_an_enemy_within_the_safe_distance_when_checked_then_no_rally_is_attempted(self):
         routing = _regiment("r", 0, 0, True, leadership=9, routing=True)

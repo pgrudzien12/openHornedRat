@@ -501,3 +501,110 @@ byte-faithful port; every simplification is called out in each module's docstrin
   end (96.5 s), holding the last of the 722 frames from 90.25 s. The last-frame clamp moved from
   `IntroView` into `smacker.frame_index_at(elapsed, frame_count)` with BDD coverage. The loop the owner saw
   was not reproduced; see `notes/si_omni.md` ("Playtesting: intro never ends").
+
+## Battle logs and replay
+
+The playtest that produced "Bug fixes after playtesting" above left no record of what actually
+happened, which made both bugs there hard to pin down. Every battle is now recorded to a JSON Lines
+log and can be deterministically replayed, so future playtest reports come with a log instead of a
+memory of what seemed to happen.
+
+**Format.** One JSON object per line, UTF-8, each carrying `type` and `tick` (the `header` is always
+line 1, `tick` 0). Record types:
+
+- `header`: `format_version`, `battle_asset` (`AssetId` string, e.g. `vanilla:battle/bf001`), `bts_path`
+  (the script's own basename), `seed`, `width`/`height`, `started_at` (wall-clock UTC, the *only*
+  wall-clock value in the log -- never read by the simulation, informational only), and `regiments`: one
+  row per regiment with `id`, `name`, `side`, `sprite_resource`/`sprite_base` (the script's troop sprite
+  resource and its resolved `FOL`/`BOP`/`PAL` file base, `whshr.battlefield.troop_sprite_files` -- to
+  check a suspected wrong sprite mapping), `models`/`ranks`/`x`/`y`/`direction`, the decoded combat
+  `profile` (WS/BS/S/T/W/I/A/Ld, armour, strength bonus, missile code/range) and `psychology` flags.
+- `order`: one scene event (`whshr.battle_scene.BattleScene.handle`'s `select`/`deselect`/`move_to`/
+  `attack`), tagged with the tick count at which it was applied (whether or not the engine accepted it;
+  a rejected order -- outside the field, no selection, routing -- is still visible in the log as an
+  order with no effect on the following snapshot).
+- `event`: one `whshr.battle_events.BattleEvent` (`whshr.combat`, `whshr.engine`), as `{"kind", "text",
+  ...structured fields}`. Kinds: `clash`, `combat_round` (per-side attack counts, hit/wound/save target
+  numbers, and every individual attack's rolls and result), `leadership_test` (Ld, roll, modifier,
+  `cant_break`, `passed`), `rout_start` (position and flee-point), `rally_test` (Ld, roll, `cant_rally`,
+  `blocked_by_enemy`, `nearest_enemy_distance`, `passed`), `shooting`/`reload` (shots, target numbers,
+  rolls, distance, range), `fled` (position against `width`/`height` when a routing regiment leaves the
+  field) and `result` (`victory`/`defeat` with the side counts below). `BattleEvent` is a `str` subclass,
+  so `Battle.events` is unchanged for the frontend's rolling event-log overlay and for BDD scenarios that
+  compare it against plain strings (`tests/test_combat.py`); `.kind`/`.data` are the structured payload
+  `BattleLogger` reads instead of re-parsing text.
+- `snapshot`: written every battle segment (`combat.SEGMENT_TICKS`, 19 ticks) and once more at the
+  battle's end: `side_counts` (`Battle.side_counts()`: active/routing/fled/destroyed/total per side --
+  the exact inputs `Battle._update_result` checks, so "why no result was declared" is always visible even
+  when the answer is "one side still has an active regiment"), `result`, and `regiments` (`Battle.
+  snapshot()`: x/y/direction/models/corpses/walking/routing/fled/in_melee/melee_opponent/attack_target/
+  reload_ticks per regiment).
+- `result`: written once, when `Battle.result` is set, with the final `side_counts`.
+- `end`: `reason` (`"result"`, `"player quit"`, or `"scene left"` for any other scene exit) and the final
+  tick; always the last line.
+
+**Where logs go.** `whshr.battle_log.BattleLogger` writes to
+`<log_dir>/battle-<YYYYmmdd-HHMMSS>-<battle_asset_name>.jsonl` (`battle_log.default_log_path`).
+`whshr.battle_scene.BattleScene(battle, log_dir=..., seed=...)` owns the logger: it is created and the
+header written in `enter`, an `event`/`snapshot` pair after every tick in `update`, an `order` in
+`handle`, and `end` in `exit` or via the idempotent `close_log(reason)` (also called by
+`frontend/app.py`'s `finally` block for a window close or Ctrl+Q mid-battle, since that path bypasses
+`SceneMachine`'s own transition/exit). `log_dir=None` disables logging outright (`BattleLogger(path=
+None)` is a no-op recorder); `campaign_scenes.IntroScene`/`MainMenuScene`/`BriefingScene` all take and
+forward `log_dir`/`seed` so the setting applies however the battle is reached -- the `--battle` shortcut
+or intro -> menu -> briefing. `logs/` (repository root) is the default and is `.gitignore`d: a log names
+regiments and units straight from the game script, so it must stay local like `samples/`/`battles/`.
+**Logging never crashes the battle**: any `OSError` opening or writing the log file (missing/unwritable
+directory, disk full, ...) disables the logger silently (`BattleLogger.enabled` reports this) instead of
+raising; `tests/test_battle_log.py` covers both a disabled and an explicitly unwritable log directory.
+The file is flushed after every write, so a crash or a closed window still leaves a usable log.
+
+**CLI.** `python3 -m whshr engine <WARFB>`: `--battle-log DIR` (default `logs/`), `--no-battle-log`,
+`--seed N` (default 1995, unchanged from before this feature so existing behaviour stays reproducible
+by default). The engine prints the log path on exit. `python3 -m whshr battle-replay <WARFB> <log.jsonl>`
+(`whshr.battle_replay`, stdlib-only) rebuilds the battle from the header (same BTS, same seed) through a
+fresh `BattleScene`, replays every recorded `order` at its tick via `scene.handle` and every tick via
+`scene.update(BATTLE_TICK_SECONDS, ...)` (never wall-clock time), and compares each recorded `snapshot`
+(a small float tolerance, `1e-6`, covers accumulated movement rounding) plus the final `result`. It
+prints `replay identical: ...` or the first divergence (`tick`, `regiment`, `field`, `recorded`,
+`replayed`) and exits 1; `--timeline` prints every applied order and emitted event per tick; `--until
+TICK` stops early. Tests inject a synthetic `SceneAssets` via `battle_replay.replay(..., context=...)`
+rather than the real installation (docs/testing.md).
+
+**Determinism contract.** Recording and replay run the identical simulation code path -- `BattleScene.
+handle`/`update`, in turn `Battle.tick`/`order_move`/`order_attack` -- rather than two implementations
+that could drift apart. This only holds if every source of randomness or non-determinism stays inside
+`Battle.rng` (seeded, `whshr.combat`'s only randomness source) and ticks are always driven by the fixed
+100 ms step, never measured wall-clock time; `BattleScene.update`'s `FixedStepClock` already enforces the
+latter for a live battle, and replay calls `scene.update(BATTLE_TICK_SECONDS, ...)` once per recorded
+tick for the same reason. `started_at` in the header is the one deliberate exception: wall-clock,
+informational only, and never read back by `battle_replay`.
+
+**Verification.** A scripted-player run of the real BF001 installation (a synthetic scratch script, not
+committed: charge `Grudgebringer<Cavalry` at the nearest enemy, order `Mercenary_Crossbows` toward the
+field edge, then let the AI and `whshr.combat` play out for up to 4000 ticks) produced a 474-line log
+(210 snapshots, 47 combat rounds, 23 Leadership tests, 16 routs, 14 shooting volleys) and replayed
+byte-for-byte identical (`replay identical: vanilla:battle/bf001 (...), final tick 4000, result None`).
+The battle never resolved in that run: three `Clanrat_Warriors` regiments were destroyed in melee, but
+`Hiln's_Guard`, `Otto_Hiln` and `Sleaquit` stood well outside `ai.ENGAGE_DISTANCE` (400 units, already a
+documented placeholder) the whole time and the AI never advanced them -- exactly the kind of "why no
+result was declared" question the `snapshot` `side_counts` field exists to answer, now visible in the log
+instead of only inferable from a playtest report. `tests/test_battle_log.py` covers the same scenarios
+synthetically: record + replay identical, a combat round's full roll/Leadership detail, a routing
+regiment's field-edge removal logged with its position, per-side `side_counts` in a snapshot, an
+unwritable log directory, disabled logging, and that every log line parses with the header first.
+
+**Open questions / observations, not fixed here (per the task's scope):**
+- A destroyed regiment (`models == 0`) can still show `in_melee: true` with a stale `melee_opponent` in a
+  snapshot (seen in the BF001 log above): `combat.refresh_melee_state` only clears melee state on the
+  *opponent* of a no-longer-active regiment, not on the destroyed regiment's own flags. Cosmetic in the
+  current simplified combat model (a destroyed regiment is excluded from `resolve_melee`/`resolve_
+  contacts`/`resolve_shooting` by their own `active`/`in_melee` filters either way), but visible now that
+  snapshots are logged.
+- A regiment that starts already outside the field's declared bounds (BF001's `Mercenary_Crossbows` at
+  x=1814, field width 1600) never logs a `fled` event even if left alone there, since that only fires for
+  a *routing* regiment crossing the boundary; whether the script's field size or such a unit's placement
+  is the one that needs revisiting is unresolved.
+- `resolve_rally` still runs its Leadership test (and now logs a `rally_test` record) for a regiment that
+  has already fled (`fled=True`); harmless (a fled regiment is inert either way) but a slightly misleading
+  log entry.

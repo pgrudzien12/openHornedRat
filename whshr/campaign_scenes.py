@@ -2,6 +2,7 @@
 
 from .assets import AssetId
 from .battle_scene import BattleScene, FIRST_BATTLE
+from .engine import DEFAULT_SEED
 from .scenes import Quit, Scene, SceneManifest, Transition
 from .si import load_si, walk_objects
 
@@ -31,8 +32,8 @@ class IntroScene(Scene):
 
     manifest = SceneManifest(immediate=(INTRO_CUTSCENE, INTRO_MEDIA), prefetch=(MAIN_MENU,))
 
-    def __init__(self, successor=None):
-        self.successor = successor or MainMenuScene()
+    def __init__(self, successor=None, log_dir=None, seed=DEFAULT_SEED):
+        self.successor = successor or MainMenuScene(log_dir=log_dir, seed=seed)
         self.elapsed_seconds = 0.0
         self.duration_seconds = None
         self.container = None
@@ -61,8 +62,8 @@ class MainMenuScene(Scene):
 
     manifest = SceneManifest(immediate=(MAIN_MENU,))
 
-    def __init__(self, briefing=None):
-        self.briefing = briefing or BriefingScene(FIRST_BATTLE)
+    def __init__(self, briefing=None, log_dir=None, seed=DEFAULT_SEED):
+        self.briefing = briefing or BriefingScene(FIRST_BATTLE, log_dir=log_dir, seed=seed)
 
     def handle(self, event, context):
         if event == "new_campaign":
@@ -75,18 +76,21 @@ class MainMenuScene(Scene):
 class BriefingScene(Scene):
     """Show one battle's campaign briefing text; Start Battle enters the battle itself."""
 
-    def __init__(self, battle):
+    def __init__(self, battle, log_dir=None, seed=DEFAULT_SEED):
         self.battle_id = battle
         self.briefing_id = briefing_asset_for(battle)
         self.manifest = SceneManifest(immediate=(self.briefing_id,), prefetch=(battle,))
         self.briefing = None
+        self.log_dir = log_dir
+        self.seed = seed
 
     def enter(self, context):
         self.briefing = context.load(self.briefing_id)
 
     def handle(self, event, context):
         if event == "start_battle":
-            return Transition(BattleScene(self.battle_id), "briefing accepted")
+            return Transition(BattleScene(self.battle_id, log_dir=self.log_dir, seed=self.seed),
+                              "briefing accepted")
         return None
 
 

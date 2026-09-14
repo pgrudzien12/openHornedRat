@@ -119,6 +119,13 @@ initial camera, `--skip-intro` starts in the menu, `--width`/`--height` set the 
 `--hidden --frames N --frame-time S --screenshot out.png` renders reproducible local screenshots.
 `./scripts/run_engine.sh /path/to/WARFB [options]` runs the same command through `.venv`.
 
+Every battle is recorded by default as a JSON Lines log under `logs/` (`--battle-log DIR` to choose a
+different directory, `--no-battle-log` to disable, `--seed N` to change the deterministic RNG seed); the
+engine prints the log path on exit. `python3 -m whshr battle-replay /path/to/WARFB logs/battle-....jsonl`
+rebuilds the battle from the log and reports `replay identical` or the first divergence; add `--timeline`
+for a readable per-tick account of orders and events, or `--until TICK` to stop early. See
+[`notes/engine_architecture.md`](notes/engine_architecture.md), "Battle logs and replay".
+
 The earlier C++ SDL2/OpenGL movement prototype is parked (kept for reference, no longer developed):
 
 ```sh

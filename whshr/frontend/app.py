@@ -13,6 +13,7 @@ from ..assets import AssetId  # noqa: E402
 from ..battle_scene import BattleScene  # noqa: E402
 from ..campaign_scenes import IntroScene  # noqa: E402
 from ..clock import FixedStepClock  # noqa: E402
+from ..engine import DEFAULT_SEED  # noqa: E402
 from ..game import scene_context  # noqa: E402
 from ..scenes import SceneMachine  # noqa: E402
 from .gpu import Gpu  # noqa: E402
@@ -60,19 +61,22 @@ class FrameRate:
 
 
 def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=None, screenshot=None,
-        frame_time=None, battle=None, camera=None):
+        frame_time=None, battle=None, camera=None, log_dir=None, seed=DEFAULT_SEED):
     """Run the game until the window closes, or for ``frames`` frames when given.
 
     ``frame_time`` replaces the measured wall-clock frame duration, so a capture after a number of frames
     shows the same scene time on every run. ``battle`` (e.g. "BF001") starts directly in that battle and
-    ``camera`` (yaw, pitch, distance) overrides its initial camera.
+    ``camera`` (yaw, pitch, distance) overrides its initial camera. ``log_dir`` (a path, or ``None`` to
+    disable) and ``seed`` are threaded into every ``BattleScene`` reached through the scene flow, so
+    ``--battle-log``/``--no-battle-log``/``--seed`` (``python3 -m whshr engine``) apply however the
+    battle is reached (the ``--battle`` shortcut, or intro -> menu -> briefing).
     """
     context = scene_context(installation)
     ctx = open_window(size, hidden)
     gpu = Gpu(ctx, size)
     overlay = gpu.text((420, 140))
-    initial = (BattleScene(AssetId("vanilla", "battle", Path(battle).stem.casefold())) if battle
-               else IntroScene())
+    initial = (BattleScene(AssetId("vanilla", "battle", Path(battle).stem.casefold()), log_dir=log_dir, seed=seed)
+               if battle else IntroScene(log_dir=log_dir, seed=seed))
     machine = SceneMachine(initial, context)
     options = {"camera": camera}
     view = view_for(gpu, machine.active, options)
@@ -93,8 +97,11 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
         machine.handle("skip")
         view = synchronise(view)
     frame, last, overlay_time, running = 0, time.perf_counter(), float("-inf"), True
+    battle_log_path = None  # tracked across scene transitions so it survives a battle -> result switch
     try:
         while running:
+            if isinstance(machine.active, BattleScene) and machine.active.logger is not None:
+                battle_log_path = machine.active.logger.path or battle_log_path
             now = time.perf_counter()
             elapsed, last = now - last, now
             for event in pygame.event.get():
@@ -143,7 +150,16 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
             pygame.display.flip()
             limiter.tick(MAX_FRAMES_PER_SECOND)
     finally:
+        # The window can close or Ctrl+Q can fire mid-battle, bypassing the scene machine's own
+        # transition/exit path (`machine.quit` above only covers a Quit a scene itself returns): make
+        # sure an open battle log is still finalized so it stays a usable, complete record.
+        if isinstance(machine.active, BattleScene):
+            machine.active.close_log("player quit" if machine.quit is None else machine.quit.reason)
+            if machine.active.logger is not None and machine.active.logger.path:
+                battle_log_path = machine.active.logger.path
         pygame.quit()
+    if battle_log_path is not None:
+        print(f"Battle log: {battle_log_path}")
     return {
         "frames": frame, "ticks": clock.ticks, "scene": type(machine.active).__name__,
         "quit": machine.quit.reason if machine.quit is not None else None,

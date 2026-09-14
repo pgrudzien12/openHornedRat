@@ -13,6 +13,9 @@ screenshots/
 # Machine-specific launcher with a local installation path.
 run-local.sh
 
+# Battle logs (whshr.battle_log): JSON Lines recordings of real battles, contain game data - local only.
+logs/
+
 # Temporary git worktrees of parallel agent sessions.
 .claude/worktrees/
 

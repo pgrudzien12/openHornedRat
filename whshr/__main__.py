@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from . import legacy
-from . import audio, battle2d, battle3d, behaviour, campaign, catalog, pbx, rules, si, viewer_web
+from . import audio, battle2d, battle3d, battle_replay, behaviour, campaign, catalog, engine, pbx, rules, si, viewer_web
 from .paths import Installation
 
 
@@ -104,6 +104,11 @@ def main(argv=None):
                                help="with --frames: save the last frame as PNG; do not commit game assets")
     engine_parser.add_argument("--frame-time", type=float,
                                help="fixed seconds per frame instead of wall-clock time (reproducible captures)")
+    engine_parser.add_argument("--battle-log", type=Path, default=Path("logs"),
+                               help="directory for JSON Lines battle logs (default: logs/)")
+    engine_parser.add_argument("--no-battle-log", action="store_true", help="disable battle logging")
+    engine_parser.add_argument("--seed", type=int, default=engine.DEFAULT_SEED,
+                               help=f"battle RNG seed (default: {engine.DEFAULT_SEED})")
     viewer_parser = commands.add_parser("viewer", help="render a static 3D battle scene to PNG")
     viewer_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     viewer_parser.add_argument("battle", help="BTS filename or path")
@@ -169,6 +174,14 @@ def main(argv=None):
     web_2d_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     web_2d_parser.add_argument("battle", help="BTS filename or path")
     web_2d_parser.add_argument("--port", type=int, default=8765, help="localhost port (default: 8765)")
+    replay_parser = commands.add_parser(
+        "battle-replay", help="deterministically replay a whshr.battle_log JSON Lines log and compare it"
+    )
+    replay_parser.add_argument("installation", type=Path, help="WARFB installation directory")
+    replay_parser.add_argument("log", type=Path, help="battle log file (logs/battle-*.jsonl)")
+    replay_parser.add_argument("--timeline", action="store_true",
+                               help="print a readable per-tick account of orders and events")
+    replay_parser.add_argument("--until", type=int, help="stop replay at this tick")
     args = parser.parse_args(argv)
 
     if args.command == "check":
@@ -196,8 +209,10 @@ def main(argv=None):
                   "  python3 -m venv .venv && .venv/bin/pip install --only-binary=:all: -r requirements-engine.txt\n"
                   "  .venv/bin/python -m whshr engine <WARFB>", file=sys.stderr)
             return 2
+        log_dir = None if args.no_battle_log else args.battle_log
         result = app.run(args.installation, (args.width, args.height), args.skip_intro, args.hidden,
-                         args.frames, args.screenshot, args.frame_time, args.battle, args.camera)
+                         args.frames, args.screenshot, args.frame_time, args.battle, args.camera,
+                         log_dir, args.seed)
         print(f"{result['frames']} frames, {result['ticks']} ticks, final scene {result['scene']}")
         return 0
     if args.command == "viewer":
@@ -248,6 +263,8 @@ def main(argv=None):
     if args.command == "viewer-2d-web":
         viewer_web.serve_2d(args.installation, args.battle, args.port)
         return 0
+    if args.command == "battle-replay":
+        return battle_replay.main(args.installation, args.log, args.timeline, args.until)
     extract(args.installation, args.cache)
     return 0
 
