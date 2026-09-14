@@ -154,7 +154,8 @@ Phase 2 is closed (M2 reached). Priorities, as decided by the project owner:
    campaign progression and saves, AI/pathfinding/visibility; `notes/game_rules.md`, `notes/campaign.md`); the optional
    batch 5 and the leftovers are listed in `notes/research_plan.md`.
 2. **Real-time engine prototype (nice to have)**: the technology is chosen (Python with pygame-ce and zengl, see phase 5). Engine phase 1 is in
-   progress: `python3 -m whshr engine` opens the frontend window with the scene flow and a debug overlay; show the
+   progress: `python3 -m whshr engine` plays the intro, menu and BF001 briefing into the BF001 battle, where
+   player regiments can be selected and moved in formation (steps 1-4 of 5; combat, AI and win/lose remain); show the
    `viewer-web` scene (terrain, scenery, sprites, moving camera) in real time. Independent of 1, so
    it can run in parallel.
 3. **Later**: unit movement (M3: `Nav*` pathfinding, `OBJECTS` collisions, formations), mission DLLs

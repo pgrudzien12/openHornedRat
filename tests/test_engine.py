@@ -124,6 +124,31 @@ class CollisionTests(unittest.TestCase):
         distance = math.hypot(right.x - left.x, right.y - left.y)
         self.assertGreaterEqual(distance, left.bounding_radius() + right.bounding_radius() - 1e-6)
 
+    def test_given_regiments_deployed_overlapping_when_no_orders_are_given_then_neither_is_pushed(self):
+        # BF001 deploys the Grudgebringer cavalry and infantry closer than their bounding circles.
+        cavalry = Regiment("cavalry", "Cavalry", 1090, 639, 0, True, models=12, ranks=3)
+        infantry = Regiment("infantry", "Infantry", 1112, 585, 0, True, models=16, ranks=4)
+        battle = Battle(1600, 1760, [cavalry, infantry])
+
+        for _ in range(10):
+            battle.tick()
+
+        self.assertEqual((cavalry.x, cavalry.y, infantry.x, infantry.y), (1090, 639, 1112, 585))
+        self.assertFalse(cavalry.walking or infantry.walking)
+
+    def test_given_regiment_ordered_into_a_standing_one_when_ticked_then_only_the_moving_regiment_gives_way(self):
+        standing = Regiment("standing", "Standing", 200, 0, 0, True, models=18, ranks=4, speed_per_tick=5.0)
+        walker = Regiment("walker", "Walker", 0, 0, 0, True, models=18, ranks=4, speed_per_tick=5.0)
+        battle = Battle(1000, 1000, [standing, walker])
+        battle.order_move("walker", 400, 0)
+
+        for _ in range(80):
+            battle.tick()
+
+        self.assertEqual((standing.x, standing.y), (200, 0))
+        distance = math.hypot(standing.x - walker.x, standing.y - walker.y)
+        self.assertGreaterEqual(distance, standing.bounding_radius() + walker.bounding_radius() - 1e-6)
+
 
 if __name__ == "__main__":
     unittest.main()

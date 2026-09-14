@@ -31,6 +31,17 @@ class Transition:
     reason: str
 
 
+@dataclass(frozen=True)
+class Quit:
+    """A request, returned by a scene, to end the application rather than switch scenes.
+
+    Distinct from Transition: there is no successor scene and no further exit/enter calls,
+    so the frontend main loop can stop cleanly after seeing SceneMachine.quit set.
+    """
+
+    reason: str
+
+
 @dataclass
 class SceneAssets:
     """Typed asset access provided to scenes without exposing source paths to them."""
@@ -61,11 +72,11 @@ class Scene(ABC):
         """Release scene state before another scene becomes active."""
 
     def handle(self, event, context):
-        """Handle one presentation event and optionally request a transition."""
+        """Handle one presentation event and optionally request a Transition or Quit."""
         return None
 
     def update(self, seconds, context):
-        """Advance deterministic scene time and optionally request a transition."""
+        """Advance deterministic scene time and optionally request a Transition or Quit."""
         if seconds < 0:
             raise ValueError("scene update duration must not be negative")
         return None
@@ -79,26 +90,32 @@ class SceneMachine:
     context: object = None
     active: Scene = field(init=False)
     history: list[Transition] = field(default_factory=list, init=False)
+    quit: Quit = field(default=None, init=False)
 
     def __post_init__(self):
         self.active = self.initial
         self.active.enter(self.context)
 
     def handle(self, event):
-        """Give an event to the active scene and apply its transition, if any."""
-        self._apply(self.active.handle(event, self.context))
+        """Give an event to the active scene and apply its transition or quit, if any."""
+        if self.quit is None:
+            self._apply(self.active.handle(event, self.context))
 
     def update(self, seconds):
-        """Give fixed or measured time to the active scene and apply its transition, if any."""
+        """Give fixed or measured time to the active scene and apply its transition or quit, if any."""
         if seconds < 0:
             raise ValueError("scene update duration must not be negative")
-        self._apply(self.active.update(seconds, self.context))
+        if self.quit is None:
+            self._apply(self.active.update(seconds, self.context))
 
     def _apply(self, transition):
         if transition is None:
             return
+        if isinstance(transition, Quit):
+            self.quit = transition
+            return
         if not isinstance(transition, Transition):
-            raise TypeError("scene callbacks must return Transition or None")
+            raise TypeError("scene callbacks must return Transition, Quit or None")
         self.active.exit(self.context)
         self.active = transition.scene
         self.active.enter(self.context)

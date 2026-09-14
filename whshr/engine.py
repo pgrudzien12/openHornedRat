@@ -191,20 +191,28 @@ class Battle:
         return still_moving
 
     def _resolve_collisions(self):
-        """Push overlapping regiment footprints apart (a simplified `PushApart`; game_rules.md, "Routes,
-        collisions and visibility"): a deterministic, order-independent nudge, not the polygon obstruction
-        routing (`Nav*`) of the original.
+        """Push regiments under orders out of the regiments they overlap (a simplified `PushApart`;
+        game_rules.md, "Routes, collisions and visibility"), not the polygon obstruction routing (`Nav*`).
+
+        Standing regiments never give way, so scripted deployments that already overlap (BF001's Grudgebringer
+        cavalry and infantry) stay where the script placed them. Pairs are visited in identifier order.
         """
         regiments = [self.regiments[key] for key in sorted(self.regiments)]
         for i, first in enumerate(regiments):
             for second in regiments[i + 1:]:
+                yielding = first.moving + second.moving
+                if not yielding:
+                    continue
                 dx, dy = second.x - first.x, second.y - first.y
                 distance = math.hypot(dx, dy)
                 overlap = first.bounding_radius() + second.bounding_radius() - distance
                 if overlap <= 0:
                     continue
                 ux, uy = (dx / distance, dy / distance) if distance > 1e-6 else (1.0, 0.0)
-                first.x -= ux * overlap / 2
-                first.y -= uy * overlap / 2
-                second.x += ux * overlap / 2
-                second.y += uy * overlap / 2
+                share = overlap / yielding
+                if first.moving:
+                    first.x -= ux * share
+                    first.y -= uy * share
+                if second.moving:
+                    second.x += ux * share
+                    second.y += uy * share

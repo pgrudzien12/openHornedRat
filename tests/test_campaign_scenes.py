@@ -2,12 +2,14 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from whshr.assets import AssetLocator
+from whshr.assets import AssetId, AssetLocator
+from whshr.battle_scene import BattleScene
 from whshr.cache import AssetCache
-from whshr.campaign_scenes import IntroScene, MainMenuScene
+from whshr.campaign_scenes import BriefingScene, IntroScene, MainMenuScene, briefing_asset_for
 from whshr.catalog import build
-from whshr.game import start
 from whshr.scenes import SceneAssets, SceneMachine
+
+BF001 = AssetId("vanilla", "battle", "bf001")
 
 
 class IntroSceneTests(unittest.TestCase):
@@ -17,16 +19,23 @@ class IntroSceneTests(unittest.TestCase):
         self._write("FILE/SCRIPT/BF001.BTS", b"[BATTLESCRIPT]\n[END]\n")
         self._write("FILE/BINARY/STANDARD.PAL", b"palette")
         self._write("REMOTE/BINARY/ANIM/A1.SI", b"container")
+        self._write("FILE/DLL/WND.DLL", b"MZ")
         self.container = {
             "root": {
                 "start": 0, "duration": 0,
                 "children": [{"start": 0, "duration": 1_000}, {"start": 500, "duration": 1_250}],
             }
         }
+        self.media = {"objects": {1: {"smk": {}, "blob": b"fake-smk"}}}
+        self.briefing = {"battle": "BF001", "title": "Sven Carlsson", "lines": []}
         self.loaded = []
         self.context = SceneAssets(
             AssetLocator(self.root), build(self.root), AssetCache(),
-            {"omni-si": self._load_container},
+            {
+                "omni-si": self._loader(self.container),
+                "omni-si-media": self._loader(self.media),
+                "campaign-briefing": self._loader(self.briefing),
+            },
         )
 
     def tearDown(self):
@@ -37,16 +46,19 @@ class IntroSceneTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
 
-    def _load_container(self, _, path):
-        self.loaded.append(path)
-        return self.container
+    def _loader(self, value):
+        def load(_record, path):
+            self.loaded.append(path)
+            return value
+        return load
 
-    def test_given_intro_when_entered_then_its_original_container_defines_the_playback_duration(self):
+    def test_given_intro_when_entered_then_its_original_container_and_media_are_loaded(self):
         intro = IntroScene()
         SceneMachine(intro, self.context)
 
         self.assertEqual(intro.duration_seconds, 1.75)
-        self.assertEqual(self.loaded, [self.root / "REMOTE/BINARY/ANIM/A1.SI"])
+        self.assertIs(intro.media, self.media)
+        self.assertEqual(self.loaded, [self.root / "REMOTE/BINARY/ANIM/A1.SI"] * 2)
 
     def test_given_intro_when_player_skips_then_main_menu_becomes_active(self):
         machine = SceneMachine(IntroScene(), self.context)
@@ -64,11 +76,42 @@ class IntroSceneTests(unittest.TestCase):
         self.assertIsInstance(machine.active, MainMenuScene)
         self.assertEqual(machine.history[0].reason, "intro completed")
 
-    def test_given_game_start_when_intro_is_skipped_then_scene_machine_reaches_main_menu(self):
-        machine = start(self.root, skip_intro=True, loaders={"omni-si": self._load_container})
+    def test_given_main_menu_when_new_campaign_is_chosen_then_the_mission_briefing_becomes_active(self):
+        briefing_scene = BriefingScene(BF001)
+        machine = SceneMachine(MainMenuScene(briefing_scene), self.context)
+
+        machine.handle("new_campaign")
+
+        self.assertIs(machine.active, briefing_scene)
+        self.assertEqual(machine.active.briefing, self.briefing)
+        self.assertEqual(machine.history[0].reason, "new campaign started")
+
+    def test_given_main_menu_when_quit_is_chosen_then_the_application_receives_a_quit_signal(self):
+        machine = SceneMachine(MainMenuScene(), self.context)
+
+        machine.handle("quit")
 
         self.assertIsInstance(machine.active, MainMenuScene)
-        self.assertEqual(machine.history[0].reason, "intro skipped")
+        self.assertEqual(machine.quit.reason, "player quit from the main menu")
+        self.assertEqual(machine.history, [])
+
+    def test_given_mission_briefing_when_entered_then_its_campaign_text_is_loaded(self):
+        scene = BriefingScene(BF001)
+
+        SceneMachine(scene, self.context)
+
+        self.assertEqual(scene.briefing_id, briefing_asset_for(BF001))
+        self.assertEqual(scene.briefing, self.briefing)
+
+    def test_given_mission_briefing_when_battle_is_started_then_it_transitions_to_that_battle(self):
+        scene = BriefingScene(BF001)
+        SceneMachine(scene, self.context)
+
+        transition = scene.handle("start_battle", self.context)
+
+        self.assertIsInstance(transition.scene, BattleScene)
+        self.assertEqual(transition.scene.battle_id, BF001)
+        self.assertEqual(transition.reason, "briefing accepted")
 
 
 if __name__ == "__main__":

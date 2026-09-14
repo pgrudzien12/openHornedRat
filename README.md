@@ -100,28 +100,22 @@ python3 -m venv .venv && .venv/bin/pip install --only-binary=:all: -r requiremen
 .venv/bin/python -m whshr engine /path/to/WARFB
 ```
 
-It opens a window driven by the scene state machine, with a debug overlay (FPS, tick count, scene);
-any key or click skips the intro, and closing the window or Ctrl+Q quits. The intro and menu are still
-placeholders while the engine phase 1 is built. `--battle BF001` starts directly in a battle, rendered
-on the GPU (terrain, scenery, troops in their formations); pan with the arrow keys or WASD or a
-right-drag, rotate with Q/E or a middle-drag, tilt with Page Up/Page Down, zoom with the mouse wheel,
-and reset with Home. `--camera YAW PITCH DISTANCE` sets the initial battle camera. `--skip-intro`,
-`--width`/`--height`, and, for
-reproducible local screenshots, `--hidden --frames N --frame-time S --screenshot out.png` are
-available.
+It opens a window driven by the scene state machine, with a debug overlay (FPS, tick count, scene). The
+flow plays the original `A1.SI` intro inside the engine at the verified 8 fps with its WAV sound (any key
+or click skips it), then a simple main menu (New Campaign: N or Enter; Quit: Q or Escape), the BF001
+mission briefing with its campaign text (Enter or a click starts the battle), and the BF001 battle, with
+a short fade after each scene change. Ctrl+Q or closing the window quits at any time.
 
-The older runner plays the intro film through an external player:
+In battle, left-click a player regiment to select it and left-click the ground (or right-click without
+dragging) to order it there; Escape deselects. Regiments move at the documented real-time speeds and walk
+in formation with walking and idle animations. Pan with the arrow keys or WASD or a right-drag, rotate
+with Q/E or a middle-drag, tilt with Page Up/Page Down, zoom with the mouse wheel, and reset with Home.
+Combat, enemy AI and a win or lose condition are not implemented yet.
 
-```sh
-./scripts/run_engine.sh /path/to/WARFB
-```
-
-It starts `SceneMachine`, lazily extracts the original `A1.SI` intro into a temporary
-directory, plays its Smacker video through `ffplay` at the game's verified 8 fps, then enters the
-current menu scene. Install FFmpeg to provide `ffplay`. The runner applies an FFmpeg `setpts`
-filter because the source Smacker header does not represent the engine's 125 ms frame cadence.
-Temporary cutscene output is removed after playback. The menu does not yet have a native visual
-frontend.
+Development options: `--battle BF001` starts directly in a battle, `--camera YAW PITCH DISTANCE` sets its
+initial camera, `--skip-intro` starts in the menu, `--width`/`--height` set the window size, and
+`--hidden --frames N --frame-time S --screenshot out.png` renders reproducible local screenshots.
+`./scripts/run_engine.sh /path/to/WARFB [options]` runs the same command through `.venv`.
 
 The earlier C++ SDL2/OpenGL movement prototype is parked (kept for reference, no longer developed):
 

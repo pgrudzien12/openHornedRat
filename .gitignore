@@ -13,5 +13,8 @@ screenshots/
 # Machine-specific launcher with a local installation path.
 run-local.sh
 
+# Temporary git worktrees of parallel agent sessions.
+.claude/worktrees/
+
 # Native build output.
 build/

@@ -74,16 +74,18 @@ ROADMAP.md         - work plan: game file inventory, phases 0-5 with status, mil
 notes/             - full per-format reports (how each claim was verified, per-file tables, open questions)
   animations.md, battle_viewer.md, btp_sprite_leftovers.md, campaign.md, fonts_glue.md, game_rules.md, music.md, pbx_rnc.md, research_plan.md,
   pe_resources.md, scene_scripts.md, sfx.md, si_omni.md, sprite_names.md, terrain_gd.md
-whshr/             - unified package and CLI: python3 -m whshr check|extract|catalog|game|engine|viewer|viewer-web|
+whshr/             - unified package and CLI: python3 -m whshr check|extract|catalog|engine|viewer|viewer-web|
                      viewer-2d|viewer-2d-web|terrain-check|rules|scripts (3D battle viewer: battle3d.py, 2D: battle2d.py,
                      GAMEF.DLL rule tables and unit stat decoding: rules.py,
                      behaviour bytecode disassembler: behaviour.py, traced block formation layout: formation.py,
                      scenes and lazy assets: scenes.py, campaign_scenes.py, assets.py, catalog.py, cache.py,
                      battle simulation: engine.py, fixed-step clock: clock.py, battle scene: battle_scene.py,
-                     decoded battle data shared by viewers and engine: battlefield.py, battle camera: camera.py)
+                     decoded battle data shared by viewers and engine: battlefield.py, battle camera: camera.py,
+                     screen-to-ground picking: picking.py, Smacker decoder: smacker.py, mission briefings: briefing.py)
   frontend/        - runtime frontend, the ONLY third-party-dependent code (pygame-ce + zengl, requirements-engine.txt,
                      local .venv/); imported solely by `engine`: app.py (window, loop, overlay), views.py (registry),
-                     scene_view.py, battle_view.py (GPU terrain/scenery/sprites, camera controls), gpu.py
+                     scene_view.py, battle_view.py (GPU terrain/scenery/sprites, camera, selection and orders),
+                     intro_view.py (in-engine Smacker playback and WAV cues), menu_view.py (menu, briefing), gpu.py
 tests/             - BDD-style unittest scenarios (docs/testing.md): python3 -m unittest discover -s tests -t .
 docs/              - asset_pipeline.md (lazy loading, scene lifecycle), testing.md (BDD rules)
 tools/ghidra/      - OPTIONAL analysis-only Ghidra headless scripts (Java) + setup notes; not stdlib Python,
@@ -105,7 +107,7 @@ scripts/           - parsers/renderers/extractors (Python 3 stdlib only); most h
   sfx_*.py         - .SFX package parser, WAV statistics
   pbx_*.py         - RNC ProPack decompressor, .PBX container extraction (textures, meshes, sprites)
   gd_render.py     - GRND.GD terrain: check, relief renders, .obj/.json export, height lookup
-  si_*.py          - Omni .SI container extraction, pure-Python Smacker decoder
+  si_*.py          - Omni .SI container extraction; si_smacker.py is a CLI over whshr/smacker.py
   scene_dump.py    - .SN/.SM/.SR scene side files, speech/text links
   rle_v2.py        - OBSOLETE: old, wrong RLE decoder attempts (triples/two layers)
 extracted/         - [local only, not in git] output of the extractors, one directory per topic (~250 MB)

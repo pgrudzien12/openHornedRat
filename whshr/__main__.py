@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from . import legacy
-from . import audio, battle2d, battle3d, behaviour, campaign, catalog, game, pbx, rules, si, viewer_web
+from . import audio, battle2d, battle3d, behaviour, campaign, catalog, pbx, rules, si, viewer_web
 from .paths import Installation
 
 
@@ -88,10 +88,6 @@ def main(argv=None):
     catalog_parser = commands.add_parser("catalog", help="index lazy-loadable assets without extracting them")
     catalog_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     catalog_parser.add_argument("output", type=Path, help="metadata JSON output, normally under a user cache")
-    game_parser = commands.add_parser("game", help="run the current campaign scene flow")
-    game_parser.add_argument("installation", type=Path, help="WARFB installation directory")
-    game_parser.add_argument("--player", default="ffplay", help="Smacker player executable (default: ffplay)")
-    game_parser.add_argument("--skip-intro", action="store_true", help="enter the main menu without playing A1.SI")
     engine_parser = commands.add_parser(
         "engine", help="run the real-time engine (needs the packages in requirements-engine.txt)"
     )
@@ -180,9 +176,6 @@ def main(argv=None):
     if args.command == "catalog":
         result = catalog.write(args.installation, args.output)
         print(f"{args.output}: {len(result.records)} metadata records")
-        return 0
-    if args.command == "game":
-        game.start(args.installation, args.player, args.skip_intro)
         return 0
     if args.command == "engine":
         if args.width <= 0 or args.height <= 0:

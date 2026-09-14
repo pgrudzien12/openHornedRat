@@ -224,19 +224,21 @@ The data behind it is stdlib-only and shared with the static viewers:
   builds `engine.Battle.from_script`, advances it on 100 ms ticks, and releases the battle assets on exit.
   Repeated script unit ids (BF001 has three `Clanrat_Warriors`) become `Clanrat_Warriors#2`, `#3`.
 
-`--battle BF001` starts directly in a battle (a development shortcut until the scene flow reaches it),
+`--battle BF001` starts directly in a battle (a development shortcut; the scene flow reaches it through the
+menu and briefing),
 and `--camera YAW PITCH DISTANCE` sets its initial camera.
 
 For reproducible captures, `--hidden --frames N --frame-time S --screenshot out.png` renders N frames
 of exactly S seconds each without showing the window. Screenshots show game assets: keep them local.
 
-`python3 -m whshr game` (and `scripts/run_engine.sh`) still plays the `A1.SI` intro through `ffplay`; that
-stopgap is removed once the frontend plays films itself.
+The frontend now plays `A1.SI` itself (see "Scene flow (engine step 4)" below); the earlier
+`whshr game` command and its `ffplay` stopgap are removed. `scripts/run_engine.sh <WARFB>` launches
+`python3 -m whshr engine` through the repository's local `.venv`.
 
 The C++ SDL2/OpenGL movement prototype (`CMakeLists.txt`, `engine/src/main.cpp`) is parked. Original
 mission DLLs are data inputs only: the engine will never execute them as native code.
 
-### Movement (engine step 3)
+## Movement (engine step 3)
 
 `whshr.engine.Battle` now moves regiments on the documented speed rule instead of a single arbitrary
 constant, and models walk to their own formation slot rather than teleporting with the block.
@@ -290,9 +292,10 @@ constant, and models walk to their own formation slot rather than teleporting wi
   crossing. `tests/test_picking.py` exercises it against flat and sloped synthetic ground, independent of
   any real battle data.
 - **Collisions**: `Battle._resolve_collisions`, run once per tick after movement, is a simplified,
-  deterministic `PushApart` (game_rules.md, "Routes, collisions and visibility"): every pair of regiments
-  whose bounding circles (`formation.bounding_radius`) overlap is pushed apart by half the overlap each,
-  in identifier order for determinism. This keeps regiments from passing through each other but is not
+  deterministic `PushApart` (game_rules.md, "Routes, collisions and visibility"): when the bounding circles
+  (`formation.bounding_radius`) of two regiments overlap, only the regiments under a move order give way,
+  sharing the overlap, in identifier order for determinism. Standing regiments are never pushed, so
+  scripted deployments that already overlap (BF001's Grudgebringer cavalry and infantry) stay put. This keeps regiments from passing through each other but is not
   the original's polygon obstruction routing (`Nav*`, `ObjectsOnPath`, left/right detours); real
   pathfinding around obstacles is left for a later milestone, as the task called for.
 
@@ -307,3 +310,78 @@ constant, and models walk to their own formation slot rather than teleporting wi
   currently needs this to look reasonable, so it is left as a follow-up rather than guessed at.
 - Collision resolution and formation catch-up are both deliberately simple (circle-circle push, straight
   per-model chase); they are not meant to reproduce `ResolveUnitCollisions`/`ObjectsOnPath` exactly.
+
+## Scene flow (engine step 4)
+
+`python3 -m whshr engine <WARFB>` (no `--battle`) now plays the full phase-1 flow: intro cutscene ->
+main menu -> BF001 mission briefing -> the BF001 battle, each with a short fade-in.
+
+- **Intro playback.** `whshr.smacker` (moved out of `scripts/si_smacker.py`, which is now a thin CLI
+  wrapper around it) decodes the Smacker video kept in `whshr.si.process_si`'s rebuilt object summary.
+  `whshr.si.process_si` now also keeps each rebuilt object's raw bytes in memory (`entry["blob"]`,
+  dropped again before any `objects.json` extraction dump) so the engine never writes temporary files.
+  `whshr.campaign_scenes.IntroScene` loads two catalog assets for the same `.SI` file: the existing
+  `omni-si` (raw object tree, used only for the verified 8 fps timeline length) and a new
+  `omni-si-media` decoder that returns the full `process_si` summary with blobs. The frontend's
+  `frontend/intro_view.IntroView` decodes video frames on demand from `whshr.smacker.frame_index_at
+  (scene.elapsed_seconds)` -- the scene's own clock is the single source of truth for both which frame
+  is due and which WAV cues have started -- uploads each decoded frame as an `r8unorm` palette-index
+  texture plus a 256-colour palette texture, and looks up colours in a small fragment shader (the same
+  index+palette pattern `battle_view.py` already uses for troop sprites). The frame is centred on black
+  at its correct aspect ratio (`VideoQuad` in `frontend/intro_view.py`). All of the container's WAV
+  objects (wind, thunder, leaves, dialogue) play through `pygame.mixer.Sound` at their scheduled start;
+  mixer setup is best-effort and silently no-ops without a usable audio device. MIDI music is skipped
+  (optional per the session brief). Any key or click sends `skip`. Verified visually: frames captured
+  at 2 s/30 s/60 s of engine playback (`--hidden --frame-time 0.1`) match a direct `whshr.smacker`
+  decode of the same frame index byte-for-byte, letterboxing is centred and aspect-correct, the overlay
+  reports 180-200+ FPS during decode, and cue counts increase over time confirming audio scheduling
+  runs (mixer channel activity was checked without an audio device in the sandboxed agent environment;
+  needs a final by-ear check on a real desktop).
+- **Main menu.** `whshr.campaign_scenes.MainMenuScene` is a stdlib scene with two events: `new_campaign`
+  transitions to a `BriefingScene` for the first battle, `quit` returns a new `whshr.scenes.Quit` signal
+  instead of a `Transition`. `frontend/menu_view.MainMenuView` draws clickable text buttons with keyboard
+  shortcuts (N/Enter, Q/Escape) and translates clicks/keys into those two events; it uses simple text,
+  not original front-end graphics (deferred: `notes/pe_resources.md` describes the original bitmaps).
+- **Quit signal.** `whshr.scenes.Quit(reason)` is a third value a scene's `handle`/`update` may return,
+  alongside `Transition` and `None`. `SceneMachine.quit` records it without calling `exit`/`enter` (no
+  scene switch happens) and further `handle`/`update` calls become no-ops once set. `frontend/app.py`'s
+  main loop checks `machine.quit` after every `machine.handle` call and stops cleanly, returning the quit
+  reason from `run()`. Covered by stdlib BDD scenarios in `tests/test_scenes.py` and, end-to-end, by
+  `tests/test_campaign_scenes.py`; verified live by posting a `K_q` key event from a background thread
+  into a hidden `run()` window and observing it exit after one frame with
+  `{"quit": "player quit from the main menu"}`.
+- **Mission briefing.** A new logical asset `vanilla:briefing/<battle>` (currently only `bf001`, listed
+  in `whshr.catalog.build` when `DLL/WND.DLL` exists) resolves through a new stdlib module,
+  `whshr.briefing`: it reuses `whshr.campaign.build_campaign_graph` to find the mission window entry for
+  a battle, then reads its `brief_script` glue text out of `WND.DLL` and its `playtext`/
+  `queuetoplaytext` resource ids out of `BRTXT.DLL`, returning `{title, lines: [{speaker_color, text}]}`
+  in script order. `whshr.campaign_scenes.BriefingScene` loads it and shows it; `start_battle`
+  (Enter or click) transitions to `whshr.battle_scene.BattleScene(self.battle_id)`.
+  `frontend/menu_view.BriefingView` renders the title and word-wrapped spoken lines with `Gpu`'s
+  `pygame.font` labels. Verified against the real installation: BF001 resolves to mission window
+  `MISSIONBP03WINDOW`, title "Sven Carlsson", and 16 correctly ordered/coloured lines of dialogue
+  between Dietrich, Carlsson and Ilmarin.
+- **Transitions.** `frontend/app.py` keeps a short (0.3 s) fade-in-from-black after every scene switch,
+  drawn as a tinted full-screen quad (`Gpu.fade`, a 1x1 white pixel stretched and tinted) over the new
+  scene. This is a frontend-only presentation detail with no stdlib state; only the fade-in direction is
+  implemented (a true crossfade would need to keep the departing view alive one extra frame, deferred).
+- **Entering the battle.** `BriefingScene.handle("start_battle")` returns
+  `Transition(BattleScene(self.battle_id), "briefing accepted")`; `SceneMachine` then calls `exit` on the
+  briefing and `enter` on `BattleScene`, which loads BF001 exactly as the existing `--battle` shortcut
+  does. Verified by driving the whole flow (skip -> new_campaign -> start_battle) through the real
+  frontend and capturing the resulting `BattleScene` frame, which renders BF001's terrain, scenery and
+  troop billboards as before.
+- **Removed the `ffplay` stopgap.** `whshr/game.py` now only exposes `scene_context()` (the lazy-asset
+  setup shared by all scenes); the old `start()` function and the `whshr game` CLI command (which shelled
+  out to `ffplay`) are gone. `scripts/run_engine.sh <WARFB> [engine options...]` now execs
+  `.venv/bin/python -m whshr engine "$@"`, failing with a clear message if that venv is missing.
+
+Open questions and gaps:
+- The fade is fade-in only; a true fade-out of the departing scene is not implemented.
+- The main menu and briefing use plain rendered text, not the original front-end bitmaps/fonts/palettes
+  (`notes/pe_resources.md`, `notes/fonts_glue.md`) or portraits/speech audio for the briefing speakers.
+- `whshr.catalog.build` only lists a briefing asset for `bf001`; supporting further missions needs one
+  more record per mission (or a small generic rule) rather than a hand-picked list.
+- MIDI music during the intro is not played (skipped per the session brief; no new audio binding added).
+- Audio playback was verified by cue-count bookkeeping in the sandboxed agent environment, which has no
+  audio device; a by-ear check on a real desktop is still open.
