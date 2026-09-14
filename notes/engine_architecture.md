@@ -385,3 +385,102 @@ Open questions and gaps:
 - MIDI music during the intro is not played (skipped per the session brief; no new audio binding added).
 - Audio playback was verified by cue-count bookkeeping in the sandboxed agent environment, which has no
   audio device; a by-ear check on a real desktop is still open.
+
+## Combat, morale, shooting and AI (engine step 5)
+
+BF001 is now a playable battle: `whshr.combat` (close combat, morale, rally, shooting) and `whshr.ai`
+(a simple rule-based enemy) are new stdlib-only modules, called from `engine.Battle.tick`; `whshr.result_scene`
+adds the win/lose scene. All three are simplified from `notes/game_rules.md` sections 4-8, not a
+byte-faithful port; every simplification is called out in each module's docstring and summarised below.
+
+- **Combat profile.** `engine._decode_combat_profile` reads WS/BS/S/T/W/I/A/Ld, armour (`s_armr`), weapon
+  class (`s_weap`) and missile code (`S_BalWeap`) straight from each unit's raw `setstats` lines with
+  `rules.stat_fields`, and `psy_status` flags the same way `rules.decode_unit` already did — no `GAMEF.DLL`
+  access is needed at battle time, since the WFB charts it would supply are already verified constants in
+  `whshr.rules` (`wfb_to_hit`, `wfb_to_wound`, `EXPECTED_ARMOUR_SAVE`, `EXPECTED_WEAPON_BONUS`). Verified
+  against the real installation: BF001's Mercenary Crossbows decode to missile code 2 (crossbow, range
+  720), and Otto Hiln/Sleaquit correctly carry `CantBreak`/`CantDie`/`CantRally`.
+- **Movement modes.** `engine.py` now implements the documented k factors (game_rules.md, "Real time and
+  movement"): 1.8 free (unchanged from engine step 3), 2.5 for a charge/attack order (`Battle.order_attack`,
+  chased every tick at the target's current position, never "arriving" on its own — contact ends it), and
+  1.5 fleeing (`Regiment.routing`, moving directly away from the nearest active enemy, `Battle._flee_point`).
+  1.0 "closing" is defined (`CLOSING_K`) but unused: a documented simplification, since this engine does not
+  model the original's charge-counter distinction between closing and charging.
+- **Contact and melee** (`combat.resolve_contacts`/`resolve_melee`, game_rules.md 5.7/6.1, simplified):
+  regiments whose bounding circles touch (`CONTACT_MARGIN` slack) enter melee and stop moving. Once per
+  battle segment (`SEGMENT_TICKS = 19`), each engaged pair fights one simultaneous round: attacks =
+  front rank models x A, hit/wound/save rolls use `rules.wfb_to_hit`/`wfb_to_wound`/`EXPECTED_ARMOUR_SAVE`.
+  There is no ganging-up WS bonus, hatred, magic items, mounts, monsters, or rank/direction result bonus.
+  A multi-wound model dies on its first failed save (no per-model wound tracking). Casualties
+  (`combat.apply_casualties`) turn into corpses at the models' last positions and shrink the formation.
+- **Morale and rally** (game_rules.md 6.2/7.1/7.4, simplified): the losing side's Leadership test uses the
+  documented flat 2-12 roll (`combat.leadership_test`) with modifier = its own casualty deficit for the
+  round (no rank/direction bonus, no "first result two turns after contact" timing); `CantBreak` never
+  routs. A routing regiment (`combat._start_rout`) flees directly away from its nearest active enemy at
+  fleeing speed and is removed (`fled = True`) once it leaves the field. Once per segment, a routing,
+  non-`CantRally` regiment with no enemy within `FLEE_SAFE_DISTANCE` (160 units) retries a plain Leadership
+  test to rally (no casualties-based modifier or scheduled-segment timer).
+- **Shooting** (game_rules.md 8.1-8.3, simplified): only the basic bow-type missile codes
+  (`engine.ARCHER_MISSILE_CODES`: bow, crossbow, Wood Elf bow, short bow, longbow) are modelled as
+  shooters — artillery and special weapons are not. A stationary, non-engaged missile regiment fires at
+  the nearest active enemy within range and its front 45 degree arc (`combat._shooting_target`), a shot
+  count of `ceil(front rank / 4)`, and reloads using the documented formula (`combat._reload_ticks`,
+  game_rules.md 8.2) — verified: an I3 crossbow regiment reloads in exactly 96 ticks, matching the
+  worked example. **Placeholder**: hit chance is a simple BS-indexed die target (`combat.SHOOT_TO_HIT`),
+  not the original's geometric scatter/flight simulation; there are no projectiles in flight (optional
+  per the task).
+- **Enemy AI** (`whshr.ai`, stdlib, no behaviour bytecode): each enemy regiment holds its deployment
+  position until the nearest active player regiment is within `ai.ENGAGE_DISTANCE` (400 units, a
+  documented placeholder trigger distance — not described anywhere in game_rules.md, which covers the
+  original's scripted mission bytecode instead of a from-scratch AI), then charges it
+  (`Regiment.attack_target`); a regiment carrying a missile weapon holds and shoots instead once its
+  target is in range, but still approaches and charges if the target is merely within engage distance but
+  out of missile range. Routing and already-engaged regiments are left alone.
+- **Player orders.** `Battle.order_attack(id, target_id)` orders a selected player regiment to charge a
+  named enemy regiment (charge speed, chased into contact); `order_move` and `order_attack` both reject a
+  routing regiment. `BattleScene.handle` gained an `("attack", enemy_id)` event alongside `select`/
+  `deselect`/`move_to`. `frontend/battle_view.py`'s `_ground_click`: a click on an enemy regiment with a
+  selection now issues `attack` instead of falling through to `move_to`.
+- **Win/lose and the result scene.** `Battle._update_result` (guarded so a one-sided synthetic battle,
+  as most movement tests use, never auto-resolves) sets `result` to `"victory"`/`"defeat"` once every
+  regiment on the other/own side is destroyed or has fled, and `Battle.tick` becomes a no-op afterwards.
+  `BattleScene.update` then returns a `Transition` to the new `whshr.result_scene.ResultScene` (title +
+  a casualty summary line per regiment); `ResultScene` is kept out of `campaign_scenes.py` and imports
+  `MainMenuScene` lazily inside `handle` to avoid an import cycle (`battle_scene` -> `result_scene` ->
+  `campaign_scenes` -> `battle_scene`). `frontend/result_view.py` renders it; any key or click returns to
+  the main menu.
+- **Presentation** (`frontend/battle_view.py`): an engaged regiment plays the `attack` action, a
+  stationary ready-to-shoot missile regiment plays `shoot`; both fall back to the sheet's longest group
+  when a sprite has no such animation (`battlefield.SpriteSheet._group`, unchanged). Corpses
+  (`Regiment.corpses`) are drawn every frame as `dead` frame billboards at the positions models died,
+  independent of whether their regiment is still active; the instance buffer's fixed capacity (computed
+  once from the battle's total starting model count) always suffices because a casualty converts one live
+  instance into exactly one corpse instance, so the sum per regiment never grows. A routing regiment
+  already renders running (the `move` action, facing its flight bearing) with no special-case code, since
+  routing reuses the same anchor-movement/`walking` machinery as an ordinary move order. The debug overlay
+  gained a rolling 3-line battle event log (`BattleView.event_log`, fed from `Battle.events` every frame).
+- **Determinism.** `Battle` owns a seeded `random.Random` (`Battle(..., seed=...)`, default 1995) used by
+  every dice roll in `whshr.combat`; all new BDD scenarios (`tests/test_combat.py`, `tests/test_ai.py`,
+  and additions to `tests/test_engine.py`/`tests/test_battle_scene.py`) fix a seed and assert exact,
+  reproduced outcomes rather than probabilistic ranges.
+- **Verification.** A headless, scripted-player run of the real BF001 installation (a player order every
+  2 simulated seconds at the nearest active enemy, seed 1995) reaches `"victory"` at tick 2127 (about 3.5
+  simulated minutes), after multiple genuine routs, rallies, a shooting exchange, and several melee
+  rounds — see the tick log kept with this session for the full event trace. A synthetic overwhelming-force
+  scenario reaching `"defeat"` is also covered by a BDD test. Screenshots captured the same way (hidden
+  window, scripted orders, camera refocused on the active regiment) show a melee in progress (attack
+  animation on both sides), a regiment fleeing after a lost combat round, and the victory result screen
+  with its casualty summary; kept locally in the scratchpad, not the repository.
+
+**Open questions / placeholders carried forward:**
+- `ai.ENGAGE_DISTANCE`, `combat.SHOOT_TO_HIT`, and the "no ganging-up/rank/direction bonus, one round per
+  segment resolves the whole tally" combat simplification are documented placeholders, not traced values;
+  see each module's docstring.
+- `CLOSING_K` (1.0) is defined but never applied: player/AI attack orders always use charging speed, since
+  this engine has no charge-counter concept to distinguish closing from charging.
+- Multi-wound models (`Regiment.wounds`) are decoded but not used: a model dies on its first failed save,
+  matching every core BF001 infantry/missile unit (W=1) but not correctly modelling higher-wound
+  models/monsters if BF001 ever fields one.
+- Artillery, special weapons (cannon, mortar, breath weapons, warp lightning, ...), mounts, magic items,
+  hatred/frenzy, fear/terror, and the behaviour bytecode interpreter are not modelled, per the task's scope
+  for a first playable battle.

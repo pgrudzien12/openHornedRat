@@ -4,9 +4,10 @@ import tempfile
 import unittest
 
 from whshr.assets import AssetLocator
-from whshr.battle_scene import BattleScene
+from whshr.battle_scene import BATTLE_TICK_SECONDS, BattleScene
 from whshr.cache import AssetCache
 from whshr.catalog import build
+from whshr.result_scene import ResultScene
 from whshr.scenes import SceneAssets, SceneMachine, Scene, Transition
 
 
@@ -136,6 +137,39 @@ class BattleSceneTests(unittest.TestCase):
 
         self.assertIsNone(scene.selected_id)
         self.assertFalse(scene.battle.regiments["Grudgebringer_Infantry"].moving)
+
+
+    def test_given_a_selected_regiment_when_ordered_to_attack_an_enemy_then_it_is_charging(self):
+        scene = BattleScene()
+        SceneMachine(scene, self.context)
+        scene.handle(("select", "Grudgebringer_Infantry"), self.context)
+
+        scene.handle(("attack", "Clanrat_Warriors"), self.context)
+
+        regiment = scene.battle.regiments["Grudgebringer_Infantry"]
+        self.assertEqual(regiment.attack_target, "Clanrat_Warriors")
+
+    def test_given_a_resolved_battle_when_updated_then_it_transitions_to_the_result_scene(self):
+        scene = BattleScene()
+        machine = SceneMachine(scene, self.context)
+        for regiment in scene.battle.regiments.values():
+            if not regiment.player:
+                regiment.models = 0  # every enemy destroyed: the next tick must resolve to victory
+
+        machine.update(BATTLE_TICK_SECONDS)
+
+        self.assertIsInstance(machine.active, ResultScene)
+        self.assertEqual(machine.active.result, "victory")
+        self.assertTrue(machine.active.summary)
+
+    def test_given_the_result_scene_when_dismissed_then_it_returns_to_the_main_menu(self):
+        from whshr.campaign_scenes import MainMenuScene
+        scene = ResultScene("victory", ["Player Regiment: 10/10 models"])
+        machine = SceneMachine(scene, self.context)
+
+        machine.handle("continue")
+
+        self.assertIsInstance(machine.active, MainMenuScene)
 
 
 if __name__ == "__main__":

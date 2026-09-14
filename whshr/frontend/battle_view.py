@@ -6,6 +6,7 @@ left-click, or right-click without dragging, on the ground with a regiment selec
 Escape deselects.
 """
 
+from collections import deque
 from dataclasses import replace
 import math
 import struct
@@ -32,6 +33,7 @@ CLICK_DRAG_THRESHOLD = 4  # pixels; a right button press/release closer than thi
 # per-frame animation timing is not traced (notes/game_rules.md, "Animation bytecode"): this is a
 # documented placeholder, not a measured value.
 WALK_ANIMATION_FPS = 8.0
+EVENT_LOG_LINES = 3  # battle events shown in the debug overlay (whshr.engine.Battle.events, per tick)
 INSTANCE = struct.Struct("10f")  # foot position (mesh), atlas rectangle (pixels), anchor (pixels), selected
 CAMERA = struct.Struct("24f")
 
@@ -160,6 +162,7 @@ class BattleView(SceneView):
         self.camera = replace(self.initial_camera)
         self.soldiers = 0
         self._right_down = None  # screen position of an unreleased right-button press, for click detection
+        self.event_log = deque(maxlen=EVENT_LOG_LINES)  # recent whshr.engine.Battle.events, newest last
 
         ctx.includes["camera"] = CAMERA_BLOCK
         self.camera_buffer = ctx.buffer(size=CAMERA.size, uniform=True)
@@ -222,7 +225,9 @@ class BattleView(SceneView):
         return ()
 
     def _ground_click(self, pixel):
-        """Translate a screen click into a ("select", id) or ("move_to", x, y) scene event, if it hits ground."""
+        """Translate a screen click into a ("select", id), ("attack", id) or ("move_to", x, y) scene
+        event, if it hits ground. A click on an enemy regiment with a selection orders a charge; a click
+        on an enemy regiment with no selection is treated as an ordinary ground click (no order issued)."""
         field, camera = self.scene.field, self.camera
         width, height = self.gpu.target.size
         projection = camera.projection(width, height, field.width, field.height,
@@ -237,6 +242,10 @@ class BattleView(SceneView):
         regiment_id = self.scene.battle.regiment_at(x, y)
         if regiment_id is not None:
             return (("select", regiment_id),)
+        if self.scene.selected_id is not None:
+            enemy_id = self.scene.battle.regiment_at(x, y, player_only=False)
+            if enemy_id is not None:
+                return (("attack", enemy_id),)
         return (("move_to", x, y),)
 
     def animate(self, seconds):
@@ -250,16 +259,18 @@ class BattleView(SceneView):
             self.camera.rotate(turn * ROTATE_SPEED * seconds)
         if tilt := keys[pygame.K_PAGEUP] - keys[pygame.K_PAGEDOWN]:
             self.camera.tilt(tilt * TILT_SPEED * seconds)
+        self.event_log.extend(self.scene.battle.events)
 
     def status(self):
         camera, scene = self.camera, self.scene
         selected = scene.battle.regiments[scene.selected_id].name if scene.selected_id else "-"
-        return (
+        lines = (
             f"battle tick {scene.battle.tick_count}, soldiers {self.soldiers}",
             f"camera yaw {camera.yaw:.0f} pitch {camera.pitch:.0f} distance {camera.distance:.0f}",
             f"target {camera.target_x:.0f}, {camera.target_y:.0f}",
             f"selected {selected}",
         )
+        return lines + tuple(self.event_log)
 
     def _instances(self):
         field, yaw, selected_id, data = self.scene.field, self.camera.yaw, self.scene.selected_id, bytearray()
@@ -267,14 +278,27 @@ class BattleView(SceneView):
             sheet = field.sprite_sheet(regiment.sprite)
             if sheet is None:
                 continue
-            action = "move" if regiment.walking else "stand"
-            phase = int(regiment.animation_seconds * WALK_ANIMATION_FPS) if regiment.walking else 0
-            index = sheet.frame_index(action, phase, sprite_direction(yaw, regiment.direction))
-            frame, rect = sheet.frames[index], sheet.rects[index]
             selected = 1.0 if regiment.identifier == selected_id else 0.0
-            for x, y in regiment.model_positions():
+            if regiment.active:
+                if regiment.in_melee:
+                    action, phase = "attack", int(regiment.animation_seconds * WALK_ANIMATION_FPS)
+                elif regiment.missile_range and not regiment.moving and not regiment.attack_target:
+                    action, phase = "shoot", 0
+                elif regiment.walking:
+                    action, phase = "move", int(regiment.animation_seconds * WALK_ANIMATION_FPS)
+                else:
+                    action, phase = "stand", 0
+                index = sheet.frame_index(action, phase, sprite_direction(yaw, regiment.direction))
+                frame, rect = sheet.frames[index], sheet.rects[index]
+                for x, y in regiment.model_positions():
+                    data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
+                                          *rect, frame.anchor_x, frame.anchor_y, selected)
+            # Corpses (game_rules.md, "Panic": models that died stay on the ground where they fell).
+            for x, y, corpse_direction in regiment.corpses:
+                index = sheet.frame_index("dead", 0, sprite_direction(yaw, corpse_direction))
+                frame, rect = sheet.frames[index], sheet.rects[index]
                 data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
-                                      *rect, frame.anchor_x, frame.anchor_y, selected)
+                                      *rect, frame.anchor_x, frame.anchor_y, 0.0)
         return bytes(data[:self.capacity * INSTANCE.size])
 
     def draw(self):

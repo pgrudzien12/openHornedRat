@@ -150,5 +150,81 @@ class CollisionTests(unittest.TestCase):
         self.assertGreaterEqual(distance, standing.bounding_radius() + walker.bounding_radius() - 1e-6)
 
 
+class AttackOrderTests(unittest.TestCase):
+    def setUp(self):
+        self.player = Regiment("player", "Player", 0, 0, 0, True, models=10, ranks=2, speed_per_tick=5.0)
+        self.enemy = Regiment("enemy", "Enemy", 300, 0, 0, False, models=10, ranks=2, speed_per_tick=5.0)
+        self.battle = Battle(1000, 1000, [self.player, self.enemy])
+
+    def test_given_a_player_regiment_when_ordered_to_attack_an_enemy_then_it_charges_toward_it(self):
+        self.battle.order_attack("player", "enemy")
+        self.battle.tick()
+
+        self.assertEqual(self.player.attack_target, "enemy")
+        self.assertGreater(self.player.x, 0)  # moved toward the enemy
+        self.assertIsNone(self.player.target_x)  # not an ordinary move order
+
+    def test_given_an_attack_order_against_a_player_regiment_then_it_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "enemy regiment"):
+            self.battle.order_attack("player", "player")
+
+    def test_given_a_non_player_regiment_when_ordered_to_attack_then_it_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "not player-controlled"):
+            self.battle.order_attack("enemy", "player")
+
+    def test_given_two_regiments_charging_each_other_when_they_touch_then_they_enter_melee(self):
+        self.battle.order_attack("player", "enemy")
+        self.enemy.attack_target = "player"  # enemy is not player-controlled: drive it directly for the test
+
+        for _ in range(80):
+            self.battle.tick()
+            if self.player.in_melee:
+                break
+
+        self.assertTrue(self.player.in_melee)
+        self.assertTrue(self.enemy.in_melee)
+        self.assertFalse(self.player.moving)
+
+
+class BattleOutcomeTests(unittest.TestCase):
+    """A full, deterministic battle resolves to a win or lose condition and stops simulating."""
+
+    def test_given_an_overwhelming_player_force_when_battle_runs_then_it_ends_in_victory(self):
+        player = Regiment("player", "Player", 0, 0, 0, True, models=40, ranks=4, speed_per_tick=6.0,
+                          ws=6, strength=6, attacks=3, leadership=9)
+        enemy = Regiment("enemy", "Enemy", 60, 0, 0, False, models=5, ranks=1, speed_per_tick=6.0,
+                         ws=1, toughness=1, leadership=2)
+        battle = Battle(1000, 1000, [player, enemy], seed=7)
+        battle.order_attack("player", "enemy")
+
+        for _ in range(500):
+            battle.tick()
+            if battle.result is not None:
+                break
+
+        self.assertEqual(battle.result, "victory")
+        self.assertLess(battle.tick_count, 500)
+        # the battle stops simulating once resolved: later ticks are no-ops
+        ticks_at_result = battle.tick_count
+        battle.tick()
+        self.assertEqual(battle.tick_count, ticks_at_result + 1)
+        self.assertEqual(battle.events, [])
+
+    def test_given_an_overwhelming_enemy_force_when_battle_runs_then_it_ends_in_defeat(self):
+        player = Regiment("player", "Player", 0, 0, 0, True, models=5, ranks=1, speed_per_tick=6.0,
+                          ws=1, toughness=1, leadership=2)
+        enemy = Regiment("enemy", "Enemy", 60, 0, 0, False, models=40, ranks=4, speed_per_tick=6.0,
+                         ws=6, strength=6, attacks=3, leadership=9)
+        battle = Battle(1000, 1000, [player, enemy], seed=11)
+        enemy.attack_target = "player"
+
+        for _ in range(500):
+            battle.tick()
+            if battle.result is not None:
+                break
+
+        self.assertEqual(battle.result, "defeat")
+
+
 if __name__ == "__main__":
     unittest.main()
