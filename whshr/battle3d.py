@@ -1,25 +1,25 @@
 """Render a static, textured isometric battle scene to PNG."""
 
-import functools
 import math
-import os
 import struct
 import json
 from pathlib import Path
 
-from . import formation, legacy, pbx
+from . import formation, legacy
+from .battlefield import (  # noqa: F401 (DEFAULT_LIGHT and WORLD_PER_MESH are part of this module's interface)
+    DEFAULT_LIGHT, WORLD_PER_MESH, container, face_shade, furniture_meshes, mesh_assets, scenery_transform,
+    sprite_direction, troop_sprite_files,
+)
 from .image import load_rgb_palette, write_png
 from .paths import Installation
 from .script import load_battle
 from .sprites import colormap_indices, decode_frame
 
-WORLD_PER_MESH = 8.0
 BACKGROUND = (112, 150, 196)
 DEFAULT_YAW = 45.0
 DEFAULT_PITCH = 26.565
 DEFAULT_DISTANCE = 160.0
 DEFAULT_FOV = 50.0
-DEFAULT_LIGHT = (-0.4, 0.8, -0.3)
 PROJECTIONS = ("orthographic", "perspective")
 # Mesh units a sprite's foot point is moved toward the camera for its depth test, so the ground it
 # stands on (and a gentle slope just behind it) does not clip the billboard.
@@ -50,36 +50,6 @@ def validate_options(width, height, yaw, pitch, zoom, target_x, target_y, ambien
         raise ValueError("ambient must be between 0 and 1")
     if not any(light):
         raise ValueError("light must not be the zero vector")
-
-
-def _container(path):
-    data, _ = pbx.pbx_rnc.unpack_pbx(str(path))
-    return pbx.parse_container(data)
-
-
-@functools.lru_cache(maxsize=4)
-def _mesh_assets(mesh_dir):
-    """Decode a MESH directory once per process; the web viewer re-renders the same battle repeatedly."""
-    containers = (_container(mesh_dir / f"{name}.PBX") for name in ("GRND", "SCENERY", "SPRITES"))
-    return (*containers, legacy.module("gd_render").Terrain(mesh_dir / "GRND.GD"))
-
-
-@functools.lru_cache(maxsize=2)
-def _exe_tables(exe_path):
-    return legacy.module("spritemap_build").read_tables(exe_path.read_bytes())
-
-
-def _furniture(game):
-    _, furniture, _ = _exe_tables(game.require("WHSHR.EXE"))
-    return {entry["name"].casefold(): entry["file"] + ".XOF" for entry in furniture if entry["file"]}
-
-
-def _troop_sprites(exe_path):
-    table = legacy.module("spritemap_build")
-    records = [dict(entry) for entry in _exe_tables(exe_path)[0]]  # assign_categories mutates the records.
-    table.assign_categories(records)
-    return {entry["name"].casefold(): entry["file"] for entry in records
-            if entry["category"] == "troops" and entry["file"]}
 
 
 class Projection:
@@ -282,17 +252,14 @@ def _triangles(mesh, textures, projection, transform=lambda vertex: vertex,
             normals = mesh["normals"]
             normal = [sum(normal_transform(normals[3 * item:3 * item + 3])[axis] for item in selected_normals)
                       for axis in range(3)]
-            length = math.sqrt(sum(component * component for component in normal)) or 1
-            light_length = math.sqrt(sum(component * component for component in light))
-            diffuse = max(0, sum(a * b for a, b in zip(normal, light)) / length / light_length)
+            shade = face_shade(normal, ambient, light)
             for clipped_index in range(1, len(clipped) - 1):
                 triangle = (clipped[0], clipped[clipped_index], clipped[clipped_index + 1])
                 projected = [projection.project(vertex) for vertex, _ in triangle]
                 points = [vertex[:2] for vertex in projected]
                 depths = [vertex[2] for vertex in projected]
                 uv = [coordinate for _, coordinate in triangle]
-                result.append((sum(depths) / 3, points, depths, uv, textures[texture_index], scenery,
-                               ambient + (1 - ambient) * diffuse))
+                result.append((sum(depths) / 3, points, depths, uv, textures[texture_index], scenery, shade))
     return result
 
 
@@ -370,10 +337,10 @@ def check_terrain(installation, battle=None):
         gd, packed = directory / "GRND.GD", directory / "GRND.PBX"
         if not gd.is_file() or not packed.is_file():
             continue
-        container = _container(packed)
-        if not container["meshes"]:  # BF004 uses the legacy container layout.
+        container_data = container(packed)
+        if not container_data["meshes"]:  # BF004 uses the legacy container layout.
             continue
-        comparison = terrain_comparison(container["meshes"][0], legacy.module("gd_render").Terrain(gd))
+        comparison = terrain_comparison(container_data["meshes"][0], legacy.module("gd_render").Terrain(gd))
         comparison["mesh"] = directory.name
         results.append(comparison)
     return results
@@ -392,7 +359,7 @@ def render(installation, battle_file, output, width=1280, height=900, diagnostic
         battle_path = game.file_dir("SCRIPT", battle_file)
     battle = load_battle(str(battle_path))
     mesh_dir = game.file_dir("MESH", battle["field"]["mesh"])
-    ground, scenery, sprites, terrain = _mesh_assets(mesh_dir)
+    ground, scenery, sprites, terrain = mesh_assets(mesh_dir)
     target_x = battle["field"]["width"] / 2 if target_x is None else target_x
     target_y = battle["field"]["height"] / 2 if target_y is None else target_y
     target_mesh_x, target_mesh_z = target_x / WORLD_PER_MESH, target_y / WORLD_PER_MESH
@@ -402,7 +369,7 @@ def render(installation, battle_file, output, width=1280, height=900, diagnostic
     renderer = Renderer(width, height)
     triangles = _triangles(ground["meshes"][0], _textures(ground), projection, ambient=ambient, light=light)
     mesh_by_name = {mesh["name"].casefold(): mesh for mesh in scenery["meshes"]}
-    furniture = _furniture(game)
+    furniture = furniture_meshes(game)
     missing_scenery = []
     for item in battle["scenery"]:
         mesh_name = furniture.get(item["name"].casefold())
@@ -410,29 +377,14 @@ def render(installation, battle_file, output, width=1280, height=900, diagnostic
         if mesh is None:
             missing_scenery.append(item["name"])
             continue
-        angle = item["dir"] * math.tau / 512
         x, z = item["x"] / WORLD_PER_MESH, item["y"] / WORLD_PER_MESH
-        ground_height = terrain.height(x, z) or 0.0
-
-        # Script dir turns clockwise seen from above (as for unit formations): local +Z faces
-        # (sin a, cos a) and local +X faces (cos a, -sin a). Verified against BF035/BF036 plan maps.
-        def transform(vertex, angle=angle, x=x, z=z, ground_height=ground_height):
-            vx, vy, vz = vertex
-            vx, vy, vz = vx * scenery_scale, vy * scenery_scale, vz * scenery_scale
-            return (x + vx * math.cos(angle) + vz * math.sin(angle),
-                    ground_height + vy, z - vx * math.sin(angle) + vz * math.cos(angle))
-
-        def rotate_normal(normal, angle=angle):
-            nx, ny, nz = normal
-            return (nx * math.cos(angle) + nz * math.sin(angle), ny,
-                    -nx * math.sin(angle) + nz * math.cos(angle))
-
+        transform, rotate_normal = scenery_transform(item, terrain.height(x, z) or 0.0, scenery_scale)
         triangles += _triangles(mesh, _textures(scenery), projection, transform, rotate_normal, True, ambient, light)
     for _, points, depths, uv, texture, transparent, shade in sorted(triangles, key=lambda item: item[0], reverse=True):
         renderer.triangle(points, depths, uv, texture, transparent, shade, projection.perspective)
 
     palette = load_rgb_palette(game.binary_file("STANDARD.PAL"))
-    sprite_names = _troop_sprites(game.require("WHSHR.EXE"))
+    sprite_names = troop_sprite_files(game)
     units = [unit for army in battle["armies"] + (battle["merc"] or {}).get("armies", [])
              for unit in army["units"]]
     sprite_files = list(sprites["files"])
@@ -468,12 +420,9 @@ def render(installation, battle_file, output, width=1280, height=900, diagnostic
             diagnostics["scenery"].append({**item, "mesh": furniture.get(item["name"].casefold()),
                                            "ground_height": terrain.height(x, z)})
     soldiers, origins = [], []
-    # Sprite frames run counter-clockwise on screen while script dir runs clockwise from +Y, so the
-    # frame follows the camera's screen-up heading (yaw + 180 degrees) minus the unit dir.
-    heading = (yaw + 180) * 512 / 360
     for unit in units:
         base = sprite_names.get((unit["sprites"] or "").split(",", 1)[0].casefold())
-        direction = math.floor((heading - (unit["set"].get("dir") or 0) + 32) / 64) % 8
+        direction = sprite_direction(yaw, unit["set"].get("dir"))
         frame = base and _sprite_frame(sprite_files, base, palette, direction)
         if frame is None or "x" not in unit["set"] or "y" not in unit["set"]:
             continue

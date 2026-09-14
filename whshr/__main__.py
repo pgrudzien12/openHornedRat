@@ -99,6 +99,9 @@ def main(argv=None):
     engine_parser.add_argument("--width", type=int, default=1280, help="window width (default: 1280)")
     engine_parser.add_argument("--height", type=int, default=800, help="window height (default: 800)")
     engine_parser.add_argument("--skip-intro", action="store_true", help="start in the main menu")
+    engine_parser.add_argument("--battle", help="start directly in a battle, e.g. BF001 (development shortcut)")
+    engine_parser.add_argument("--camera", type=float, nargs=3, metavar=("YAW", "PITCH", "DISTANCE"),
+                               help="initial battle camera: degrees, degrees, mesh units")
     engine_parser.add_argument("--hidden", action="store_true", help="do not show the window (captures)")
     engine_parser.add_argument("--frames", type=int, help="quit after this many frames")
     engine_parser.add_argument("--screenshot", type=Path,
@@ -201,7 +204,7 @@ def main(argv=None):
                   "  .venv/bin/python -m whshr engine <WARFB>", file=sys.stderr)
             return 2
         result = app.run(args.installation, (args.width, args.height), args.skip_intro, args.hidden,
-                         args.frames, args.screenshot, args.frame_time)
+                         args.frames, args.screenshot, args.frame_time, args.battle, args.camera)
         print(f"{result['frames']} frames, {result['ticks']} ticks, final scene {result['scene']}")
         return 0
     if args.command == "viewer":

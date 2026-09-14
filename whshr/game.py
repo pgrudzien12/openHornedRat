@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 
 from .assets import AssetLocator
+from .battlefield import load_battlefield
 from .cache import AssetCache
 from .campaign_scenes import IntroScene, MainMenuScene, default_scene_loaders
 from .catalog import build
@@ -24,9 +25,12 @@ def scene_context(installation, loaders=None):
     """Validate an installation and return the lazy asset access shared by all scenes."""
     locator = AssetLocator(installation)
     locator.validate()
-    return SceneAssets(
-        locator, build(locator.installation), AssetCache(), default_scene_loaders() if loaders is None else loaders
-    )
+    if loaders is None:
+        loaders = {
+            **default_scene_loaders(),
+            "battle-script": lambda _record, path: load_battlefield(locator.installation, path),
+        }
+    return SceneAssets(locator, build(locator.installation), AssetCache(), loaders)
 
 
 def start(installation, player="ffplay", skip_intro=False, loaders=None):

@@ -124,6 +124,20 @@ questions for 2.4 and Wine instrumentation. Formations in both viewers follow th
 (12 BTS units = 1.5 mesh units between models) and the measured troop sprite scale; against it, PBX pines
 look about twice as large as in the game screenshot (see `--scenery-scale`).
 
+## Real-time engine battle view
+
+`python3 -m whshr engine <WARFB> --battle BF001` (see `notes/engine_architecture.md`) renders the same
+scene on the GPU from `whshr.battlefield`. The static viewer uses the same placement, shading and
+frame-direction helpers, and the same camera model. With the same camera (perspective, yaw 225,
+distance 160, looking at the player units) the GPU frame matches the `viewer` PNG: terrain, gully,
+watch tower, pines and all 85 soldiers are in place. A top-down capture (yaw 180, pitch 85) keeps the
+plan-map orientation.
+
+One deliberate difference: the engine stands a troop sprite on its FOL foot anchor (byte 3 = column,
+byte 2 = rows above the frame bottom, as in `viewer-2d`), so soldiers stand 6–13 sprite pixels
+(0.3–0.7 mesh units) lower than in `viewer`, which puts the frame's bottom row on the ground.
+The anchor row is supported only statistically (`notes/animations.md`).
+
 `BF001` also demonstrates that not every initial unit is inside the rendered terrain mesh:
 `Mercenary Crossbows` is placed at `(1814, 502)`, beyond the `1600`-unit field width and the
 `GRND.PBX` surface's `x=200` mesh limit (one mesh unit is eight script units). `GRND.GD` still

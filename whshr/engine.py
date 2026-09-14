@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import math
 
+from . import formation
 from .script import load_battle
 
 DEFAULT_TICK_RATE = 60
@@ -21,10 +22,18 @@ class Regiment:
     player: bool
     target_x: float | None = None
     target_y: float | None = None
+    models: int = 1
+    ranks: int = 1
+    sprite: str | None = None  # script troop sprite resource, e.g. "ClanRats"
 
     @property
     def moving(self):
         return self.target_x is not None
+
+    def model_positions(self, spacing=formation.MODEL_SPACING):
+        """Positions of the regiment's models in its block formation (BTS world units)."""
+        return formation.place(self.x, self.y, self.direction,
+                               formation.block_slots(self.models, self.ranks, spacing))
 
 
 class Battle:
@@ -45,9 +54,13 @@ class Battle:
 
     @classmethod
     def from_battle_file(cls, path, move_speed=DEFAULT_MOVE_SPEED):
-        source = load_battle(path)
+        return cls.from_script(load_battle(path), move_speed)
+
+    @classmethod
+    def from_script(cls, source, move_speed=DEFAULT_MOVE_SPEED):
+        """Build the battle from a loaded BTS/MRC script; repeated unit ids get ``#2``, ``#3``... suffixes."""
         field = source["field"]
-        regiments = []
+        regiments, used = [], set()
         armies = [(army, False) for army in source["armies"]]
         armies.extend((army, True) for army in (source["merc"] or {}).get("armies", []))
         for army, player in armies:
@@ -55,9 +68,15 @@ class Battle:
                 position = unit["set"]
                 if "x" not in position or "y" not in position:
                     continue
+                identifier, suffix = unit["id"], 2
+                while identifier in used:
+                    identifier, suffix = f"{unit['id']}#{suffix}", suffix + 1
+                used.add(identifier)
+                models, ranks = formation.unit_size(unit)
                 regiments.append(Regiment(
-                    unit["id"], unit["name"], float(position["x"]), float(position["y"]),
-                    int(position.get("dir") or 0) % 512, player,
+                    identifier, unit["name"], float(position["x"]), float(position["y"]),
+                    int(position.get("dir") or 0) % 512, player, models=models, ranks=ranks,
+                    sprite=(unit.get("sprites") or "").split(",", 1)[0].strip() or None,
                 ))
         return cls(field["width"], field["height"], regiments, move_speed)
 

@@ -204,6 +204,29 @@ Its structure:
 - `frontend/gpu.py`: the off-screen colour and depth target presented once per frame, textured
   screen-space quads, and text labels rendered by pygame's font and uploaded only when they change.
 
+- `frontend/battle_view.py`: the battle scene on the GPU. The static geometry is one buffer and one draw
+  call: terrain and every scenery placement are baked into world-space triangles with precomputed flat
+  lighting, and all their textures share one texture array. Troops are one instanced draw of upright
+  billboards: sprite frames are palette indices in one atlas, coloured by a palette texture in the
+  fragment shader. Each billboard is depth-tested at its foot moved toward the camera, as in `battle3d`.
+  Camera: arrow keys or WASD pan, Q/E rotate, Page Up/Page Down tilt, the mouse wheel zooms, right-drag
+  pans, middle-drag rotates, and Home resets.
+
+The data behind it is stdlib-only and shared with the static viewers:
+
+- `whshr.battlefield.load_battlefield` decodes a battle once: terrain, scenery transforms, flat shading,
+  texture layers, troop sprite sheets (the per-battle `SPRITES.PBX` first, then `BINARY/`), the sprite
+  atlas and the battle palette. `battle3d` uses the same placement, shading, frame-direction and table
+  helpers, and its PNG output was byte-identical before and after that refactor.
+- `whshr.camera.BattleCamera` is the camera state and controls. It produces the verified `battle3d`
+  perspective `Projection`, and its initial yaw follows the `180 + Camera` working hypothesis.
+- `whshr.battle_scene.BattleScene` loads the battle through `SceneAssets` (decoder `battle-script`),
+  builds `engine.Battle.from_script`, advances it on 100 ms ticks, and releases the battle assets on exit.
+  Repeated script unit ids (BF001 has three `Clanrat_Warriors`) become `Clanrat_Warriors#2`, `#3`.
+
+`--battle BF001` starts directly in a battle (a development shortcut until the scene flow reaches it),
+and `--camera YAW PITCH DISTANCE` sets its initial camera.
+
 For reproducible captures, `--hidden --frames N --frame-time S --screenshot out.png` renders N frames
 of exactly S seconds each without showing the window. Screenshots show game assets: keep them local.
 

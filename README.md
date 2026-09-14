@@ -102,7 +102,11 @@ python3 -m venv .venv && .venv/bin/pip install --only-binary=:all: -r requiremen
 
 It opens a window driven by the scene state machine, with a debug overlay (FPS, tick count, scene);
 any key or click skips the intro, and closing the window or Ctrl+Q quits. The intro and menu are still
-placeholders while the engine phase 1 is built. `--skip-intro`, `--width`/`--height`, and, for
+placeholders while the engine phase 1 is built. `--battle BF001` starts directly in a battle, rendered
+on the GPU (terrain, scenery, troops in their formations); pan with the arrow keys or WASD or a
+right-drag, rotate with Q/E or a middle-drag, tilt with Page Up/Page Down, zoom with the mouse wheel,
+and reset with Home. `--camera YAW PITCH DISTANCE` sets the initial battle camera. `--skip-intro`,
+`--width`/`--height`, and, for
 reproducible local screenshots, `--hidden --frames N --frame-time S --screenshot out.png` are
 available.
 

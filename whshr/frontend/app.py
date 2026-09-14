@@ -1,6 +1,7 @@
 """Runtime main loop: window, fixed-step scene updates, input, drawing and the debug overlay."""
 
 import os
+from pathlib import Path
 import time
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
@@ -8,6 +9,8 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame  # noqa: E402
 import zengl  # noqa: E402
 
+from ..assets import AssetId  # noqa: E402
+from ..battle_scene import BattleScene  # noqa: E402
 from ..campaign_scenes import IntroScene  # noqa: E402
 from ..clock import FixedStepClock  # noqa: E402
 from ..game import scene_context  # noqa: E402
@@ -56,18 +59,22 @@ class FrameRate:
 
 
 def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=None, screenshot=None,
-        frame_time=None):
+        frame_time=None, battle=None, camera=None):
     """Run the game until the window closes, or for ``frames`` frames when given.
 
     ``frame_time`` replaces the measured wall-clock frame duration, so a capture after a number of frames
-    shows the same scene time on every run.
+    shows the same scene time on every run. ``battle`` (e.g. "BF001") starts directly in that battle and
+    ``camera`` (yaw, pitch, distance) overrides its initial camera.
     """
     context = scene_context(installation)
     ctx = open_window(size, hidden)
     gpu = Gpu(ctx, size)
     overlay = gpu.text((420, 140))
-    machine = SceneMachine(IntroScene(), context)
-    view = view_for(gpu, machine.active)
+    initial = (BattleScene(AssetId("vanilla", "battle", Path(battle).stem.casefold())) if battle
+               else IntroScene())
+    machine = SceneMachine(initial, context)
+    options = {"camera": camera}
+    view = view_for(gpu, machine.active, options)
     clock = FixedStepClock(FIXED_STEP, MAX_STEPS_PER_FRAME)
     rate = FrameRate()
     limiter = pygame.time.Clock()
@@ -76,9 +83,9 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
         if current.scene is machine.active:
             return current
         current.release()
-        return view_for(gpu, machine.active)
+        return view_for(gpu, machine.active, options)
 
-    if skip_intro:
+    if skip_intro and not battle:
         machine.handle("skip")
         view = synchronise(view)
     frame, last, overlay_time, running = 0, time.perf_counter(), float("-inf"), True
@@ -96,9 +103,11 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
                     machine.handle(scene_event)
                     view = synchronise(view)
 
-            for _ in range(clock.advance(elapsed if frame_time is None else frame_time)):
+            seconds = elapsed if frame_time is None else frame_time
+            for _ in range(clock.advance(seconds)):
                 machine.update(clock.step)
                 view = synchronise(view)
+            view.animate(seconds)
 
             rate.frame(now)
             if now - overlay_time >= OVERLAY_REFRESH_SECONDS or frames is not None:

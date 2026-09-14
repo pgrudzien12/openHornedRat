@@ -79,9 +79,11 @@ whshr/             - unified package and CLI: python3 -m whshr check|extract|cat
                      GAMEF.DLL rule tables and unit stat decoding: rules.py,
                      behaviour bytecode disassembler: behaviour.py, traced block formation layout: formation.py,
                      scenes and lazy assets: scenes.py, campaign_scenes.py, assets.py, catalog.py, cache.py,
-                     battle simulation: engine.py, fixed-step clock: clock.py)
+                     battle simulation: engine.py, fixed-step clock: clock.py, battle scene: battle_scene.py,
+                     decoded battle data shared by viewers and engine: battlefield.py, battle camera: camera.py)
   frontend/        - runtime frontend, the ONLY third-party-dependent code (pygame-ce + zengl, requirements-engine.txt,
-                     local .venv/); imported solely by `engine`: app.py (window, loop, overlay), views.py, gpu.py
+                     local .venv/); imported solely by `engine`: app.py (window, loop, overlay), views.py (registry),
+                     scene_view.py, battle_view.py (GPU terrain/scenery/sprites, camera controls), gpu.py
 tests/             - BDD-style unittest scenarios (docs/testing.md): python3 -m unittest discover -s tests -t .
 docs/              - asset_pipeline.md (lazy loading, scene lifecycle), testing.md (BDD rules)
 tools/ghidra/      - OPTIONAL analysis-only Ghidra headless scripts (Java) + setup notes; not stdlib Python,
