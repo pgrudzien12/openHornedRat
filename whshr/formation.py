@@ -35,6 +35,24 @@ def place(x, y, direction, slots):
     return [(x + side * cos + forward * sin, y - side * sin + forward * cos) for side, forward in slots]
 
 
+def footprint(models, ranks, spacing=MODEL_SPACING):
+    """Local block half-extents (side, forward) and the footprint centre's forward offset behind the unit
+    position: a box of half-extents ``frontage x 6`` and ``ranks x 6``, centred ``(ranks - 1) x 6`` units
+    behind the unit position (game_rules.md, "Formations" / `FUN_1002c750`, `FUN_1002c510`).
+    """
+    sizes = rank_sizes(models, ranks)
+    if not sizes:
+        return 0.0, 0.0, 0.0
+    half = spacing / 2
+    return max(sizes) * half, len(sizes) * half, (len(sizes) - 1) * half
+
+
+def bounding_radius(models, ranks, spacing=MODEL_SPACING):
+    """A circle covering the whole footprint; used for regiment picking and simple collisions."""
+    half_side, half_forward, _ = footprint(models, ranks, spacing)
+    return math.hypot(half_side, half_forward)
+
+
 def unit_size(unit):
     """Return a script unit's (models, ranks); s_side is [side, orgsize, size, ranks] and the current size counts."""
     stats = unit["stats"].get("s_side", [])

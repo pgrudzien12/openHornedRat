@@ -1,7 +1,9 @@
 """Battle view: terrain, scenery and troop sprite billboards on the GPU, with a free battle camera.
 
 Controls: arrow keys or WASD pan, Q/E rotate, Page Up/Page Down tilt, mouse wheel zooms, right-drag pans,
-middle-drag rotates, Home resets the camera.
+middle-drag rotates, Home resets the camera. Left-click a player regiment to select it (tinted yellow);
+left-click, or right-click without dragging, on the ground with a regiment selected orders it there;
+Escape deselects.
 """
 
 from dataclasses import replace
@@ -11,6 +13,7 @@ import struct
 import pygame
 import zengl
 
+from .. import picking
 from ..battle3d import SPRITE_DEPTH_BIAS
 from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, sprite_direction
 from ..camera import BattleCamera
@@ -24,7 +27,12 @@ ROTATE_SPEED = 90.0  # degrees per second
 TILT_SPEED = 30.0  # degrees per second
 WHEEL_ZOOM = 0.9
 DRAG_ROTATE = 0.3  # degrees per pixel
-INSTANCE = struct.Struct("9f")  # foot position (mesh), atlas rectangle (pixels), anchor (pixels)
+CLICK_DRAG_THRESHOLD = 4  # pixels; a right button press/release closer than this counts as a click
+# Frames per second of the walking animation while a regiment is not settled in formation. The original
+# per-frame animation timing is not traced (notes/game_rules.md, "Animation bytecode"): this is a
+# documented placeholder, not a measured value.
+WALK_ANIMATION_FPS = 8.0
+INSTANCE = struct.Struct("10f")  # foot position (mesh), atlas rectangle (pixels), anchor (pixels), selected
 CAMERA = struct.Struct("24f")
 
 CAMERA_BLOCK = """
@@ -95,8 +103,10 @@ SPRITE_VERTEX_SHADER = """
 layout (location = 0) in vec3 in_foot;
 layout (location = 1) in vec4 in_rect;
 layout (location = 2) in vec2 in_anchor;
+layout (location = 3) in float in_selected;
 
 out vec2 v_texel;
+out float v_selected;
 
 const vec2 corners[4] = vec2[](vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0));
 
@@ -111,6 +121,7 @@ void main() {
     vec4 biased = to_clip(vec3(view.xy, max(view.z - sprite.y, projection.z)));
     gl_Position.z = biased.z / biased.w * gl_Position.w;
     v_texel = in_rect.xy + corner * in_rect.zw;
+    v_selected = in_selected;
 }
 """
 
@@ -121,6 +132,7 @@ uniform sampler2D atlas;
 uniform sampler2D palette;
 
 in vec2 v_texel;
+in float v_selected;
 out vec4 frag_color;
 
 void main() {
@@ -128,7 +140,9 @@ void main() {
     if (index == 0) {
         discard;
     }
-    frag_color = vec4(texelFetch(palette, ivec2(index, 0), 0).rgb, 1.0);
+    vec3 color = texelFetch(palette, ivec2(index, 0), 0).rgb;
+    color = mix(color, vec3(1.0, 0.95, 0.3), v_selected * 0.5);
+    frag_color = vec4(color, 1.0);
 }
 """
 
@@ -145,6 +159,7 @@ class BattleView(SceneView):
             self.initial_camera = replace(self.initial_camera, yaw=yaw % 360, pitch=pitch, distance=distance)
         self.camera = replace(self.initial_camera)
         self.soldiers = 0
+        self._right_down = None  # screen position of an unreleased right-button press, for click detection
 
         ctx.includes["camera"] = CAMERA_BLOCK
         self.camera_buffer = ctx.buffer(size=CAMERA.size, uniform=True)
@@ -177,7 +192,7 @@ class BattleView(SceneView):
                        {"type": "sampler", "binding": 0, "image": self.atlas, **clamp},
                        {"type": "sampler", "binding": 1, "image": self.palette, **clamp}],
             depth=depth, framebuffer=[target.color, target.depth],
-            vertex_buffers=zengl.bind(self.instance_buffer, "3f 4f 2f /i", 0, 1, 2),
+            vertex_buffers=zengl.bind(self.instance_buffer, "3f 4f 2f 1f /i", 0, 1, 2, 3),
             topology="triangle_strip", vertex_count=4, instance_count=0,
         )
 
@@ -194,7 +209,35 @@ class BattleView(SceneView):
             camera.rotate(event.rel[0] * DRAG_ROTATE)
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_HOME:
             self.camera = replace(self.initial_camera)
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            return (("deselect",),)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            return self._ground_click(event.pos)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+            self._right_down = event.pos
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 3:
+            start, self._right_down = self._right_down, None
+            if start is not None and math.dist(start, event.pos) <= CLICK_DRAG_THRESHOLD:
+                return self._ground_click(event.pos)
         return ()
+
+    def _ground_click(self, pixel):
+        """Translate a screen click into a ("select", id) or ("move_to", x, y) scene event, if it hits ground."""
+        field, camera = self.scene.field, self.camera
+        width, height = self.gpu.target.size
+        projection = camera.projection(width, height, field.width, field.height,
+                                       field.ground_height(camera.target_x, camera.target_y))
+        ground = picking.pick_ground(
+            projection, pixel[0], pixel[1],
+            lambda x, z: field.ground_height(x * WORLD_PER_MESH, z * WORLD_PER_MESH),
+        )
+        if ground is None:
+            return ()
+        x, y = ground[0] * WORLD_PER_MESH, ground[1] * WORLD_PER_MESH
+        regiment_id = self.scene.battle.regiment_at(x, y)
+        if regiment_id is not None:
+            return (("select", regiment_id),)
+        return (("move_to", x, y),)
 
     def animate(self, seconds):
         keys = pygame.key.get_pressed()
@@ -209,24 +252,29 @@ class BattleView(SceneView):
             self.camera.tilt(tilt * TILT_SPEED * seconds)
 
     def status(self):
-        camera, battle = self.camera, self.scene.battle
+        camera, scene = self.camera, self.scene
+        selected = scene.battle.regiments[scene.selected_id].name if scene.selected_id else "-"
         return (
-            f"battle tick {battle.tick_count}, soldiers {self.soldiers}",
+            f"battle tick {scene.battle.tick_count}, soldiers {self.soldiers}",
             f"camera yaw {camera.yaw:.0f} pitch {camera.pitch:.0f} distance {camera.distance:.0f}",
             f"target {camera.target_x:.0f}, {camera.target_y:.0f}",
+            f"selected {selected}",
         )
 
     def _instances(self):
-        field, yaw, data = self.scene.field, self.camera.yaw, bytearray()
+        field, yaw, selected_id, data = self.scene.field, self.camera.yaw, self.scene.selected_id, bytearray()
         for regiment in self.scene.battle.regiments.values():
             sheet = field.sprite_sheet(regiment.sprite)
             if sheet is None:
                 continue
-            index = sheet.frame_index("stand", 0, sprite_direction(yaw, regiment.direction))
+            action = "move" if regiment.walking else "stand"
+            phase = int(regiment.animation_seconds * WALK_ANIMATION_FPS) if regiment.walking else 0
+            index = sheet.frame_index(action, phase, sprite_direction(yaw, regiment.direction))
             frame, rect = sheet.frames[index], sheet.rects[index]
+            selected = 1.0 if regiment.identifier == selected_id else 0.0
             for x, y in regiment.model_positions():
                 data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
-                                      *rect, frame.anchor_x, frame.anchor_y)
+                                      *rect, frame.anchor_x, frame.anchor_y, selected)
         return bytes(data[:self.capacity * INSTANCE.size])
 
     def draw(self):

@@ -79,6 +79,64 @@ class BattleSceneTests(unittest.TestCase):
 
         self.assertEqual(len(self.loaded), 2)
 
+    def test_given_a_click_on_a_player_regiment_when_selected_then_it_becomes_the_selection(self):
+        scene = BattleScene()
+        SceneMachine(scene, self.context)
+
+        scene.handle(("select", "Grudgebringer_Infantry"), self.context)
+
+        self.assertEqual(scene.selected_id, "Grudgebringer_Infantry")
+
+    def test_given_a_click_on_an_enemy_regiment_when_selected_then_the_selection_does_not_change(self):
+        scene = BattleScene()
+        SceneMachine(scene, self.context)
+
+        scene.handle(("select", "Clanrat_Warriors"), self.context)
+
+        self.assertIsNone(scene.selected_id)
+
+    def test_given_a_selected_regiment_when_moved_to_a_ground_point_then_it_is_ordered_there(self):
+        scene = BattleScene()
+        SceneMachine(scene, self.context)
+        scene.handle(("select", "Grudgebringer_Infantry"), self.context)
+
+        scene.handle(("move_to", 600.0, 600.0), self.context)
+
+        regiment = scene.battle.regiments["Grudgebringer_Infantry"]
+        self.assertEqual((regiment.target_x, regiment.target_y), (600.0, 600.0))
+
+    def test_given_no_selection_when_a_ground_point_is_clicked_then_no_regiment_is_ordered(self):
+        scene = BattleScene()
+        SceneMachine(scene, self.context)
+
+        scene.handle(("move_to", 600.0, 600.0), self.context)
+
+        for regiment in scene.battle.regiments.values():
+            self.assertFalse(regiment.moving)
+
+    def test_given_an_out_of_field_move_when_ordered_then_the_selection_stays_and_state_is_unchanged(self):
+        scene = BattleScene()
+        SceneMachine(scene, self.context)
+        scene.handle(("select", "Grudgebringer_Infantry"), self.context)
+        regiment = scene.battle.regiments["Grudgebringer_Infantry"]
+        before = (regiment.x, regiment.y, regiment.target_x, regiment.target_y)
+
+        scene.handle(("move_to", -50.0, 600.0), self.context)
+
+        self.assertEqual(scene.selected_id, "Grudgebringer_Infantry")
+        self.assertEqual((regiment.x, regiment.y, regiment.target_x, regiment.target_y), before)
+
+    def test_given_a_selection_when_deselected_then_a_later_ground_click_orders_nothing(self):
+        scene = BattleScene()
+        SceneMachine(scene, self.context)
+        scene.handle(("select", "Grudgebringer_Infantry"), self.context)
+
+        scene.handle(("deselect",), self.context)
+        scene.handle(("move_to", 600.0, 600.0), self.context)
+
+        self.assertIsNone(scene.selected_id)
+        self.assertFalse(scene.battle.regiments["Grudgebringer_Infantry"].moving)
+
 
 if __name__ == "__main__":
     unittest.main()
