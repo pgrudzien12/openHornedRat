@@ -3,9 +3,10 @@
 Timing is expressed in ticks: SEGMENT_TICKS (19) ticks make one segment, SEGMENTS_PER_TURN (10)
 segments make one turn (game_rules.md 5.1, 6.2, 7.4).
 """
+import math
 import unittest
 
-from whshr import combat
+from whshr import combat, formation
 from whshr.engine import Battle, Regiment
 
 
@@ -25,15 +26,25 @@ def _run(battle, ticks):
     return events
 
 
+def _join_fight(battle, group_id, *regiments, turn=0):
+    """Test helper: put `regiments` into a fresh shared fight `group_id`, touching every regiment of
+    the opposite side among them, without going through `combat.resolve_contacts`' geometry."""
+    battle.fights[group_id] = combat._new_fight(turn)
+    for regiment in regiments:
+        regiment.in_melee = True
+        regiment.melee_group = group_id
+        regiment.melee_touching = frozenset(
+            r.identifier for r in regiments if r.player != regiment.player)
+
+
 class InitiativeTimingTests(unittest.TestCase):
     """game_rules.md 5.1: a unit attacks once per turn, in the segment equal to its Initiative."""
 
     def test_given_two_engaged_regiments_with_different_initiative_when_ticked_one_full_turn_then_each_strikes_exactly_once(self):
-        high_i = _regiment("hi", 0, 0, True, initiative=10, speed_per_tick=0.0,
-                            in_melee=True, melee_opponent="lo", melee_next_test_turn=100)
-        low_i = _regiment("lo", 10, 0, False, initiative=1, speed_per_tick=0.0,
-                           in_melee=True, melee_opponent="hi", melee_next_test_turn=100)
+        high_i = _regiment("hi", 0, 0, True, initiative=10, speed_per_tick=0.0)
+        low_i = _regiment("lo", 10, 0, False, initiative=1, speed_per_tick=0.0)
         battle = Battle(1000, 1000, [high_i, low_i], seed=1)
+        _join_fight(battle, "g", high_i, low_i, turn=100)  # next_test_turn far ahead: never due here
 
         events = _run(battle, combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN)
 
@@ -110,27 +121,26 @@ class RankAndDirectionBonusTests(unittest.TestCase):
         self.assertEqual(combat._direction_bonus(attacker, defender), 1)
 
     def test_given_a_kill_deficit_smaller_than_the_rank_bonus_when_the_break_test_is_due_then_the_deep_unit_does_not_lose_the_result(self):
-        deep = _regiment("deep", 0, 0, True, leadership=7, in_melee=True, melee_opponent="shallow",
-                          melee_tally=3.0, melee_next_test_turn=2)  # 1 kill behind, +3 rank bonus already folded in
-        shallow = _regiment("shallow", 10, 0, False, leadership=7, in_melee=True, melee_opponent="deep",
-                            melee_tally=2.0, melee_next_test_turn=2)
+        deep = _regiment("deep", 0, 0, True, leadership=7)
+        shallow = _regiment("shallow", 10, 0, False, leadership=7)
         battle = Battle(1000, 1000, [deep, shallow], seed=0)
+        _join_fight(battle, "g", deep, shallow, turn=0)
+        # 1 kill behind, +3 rank bonus already folded in: the deep unit is not on the losing side.
+        battle.fights["g"]["tally"] = {True: 3.0, False: 2.0}
 
-        combat._resolve_break_tests(deep, shallow, 2, battle)
+        combat._resolve_group_break_test("g", [deep, shallow], 2, battle)
 
-        # The deep unit is not on the losing side once its rank bonus is folded in; only its
-        # opponent (still behind) is tested.
         deep_tests = [e for e in battle.events if e.kind == "leadership_test" and e.data["regiment"] == "deep"]
         self.assertEqual(deep_tests, [])
 
     def test_given_a_kill_deficit_without_a_rank_bonus_when_the_break_test_is_due_then_the_loser_is_tested(self):
-        loser = _regiment("loser", 0, 0, True, leadership=7, in_melee=True, melee_opponent="winner",
-                          melee_tally=0.0, melee_next_test_turn=2)
-        winner = _regiment("winner", 10, 0, False, leadership=7, in_melee=True, melee_opponent="loser",
-                           melee_tally=2.0, melee_next_test_turn=2)
+        loser = _regiment("loser", 0, 0, True, leadership=7)
+        winner = _regiment("winner", 10, 0, False, leadership=7)
         battle = Battle(1000, 1000, [loser, winner], seed=0)
+        _join_fight(battle, "g", loser, winner, turn=0)
+        battle.fights["g"]["tally"] = {True: 0.0, False: 2.0}
 
-        combat._resolve_break_tests(loser, winner, 2, battle)
+        combat._resolve_group_break_test("g", [loser, winner], 2, battle)
 
         leadership = [e for e in battle.events if e.kind == "leadership_test"]
         self.assertEqual(len(leadership), 1)
@@ -226,6 +236,20 @@ class CasualtiesAndCantRallyTests(unittest.TestCase):
         self.assertTrue(routing.routing)
         self.assertTrue(battle.events[-1].data["too_many_casualties"])
 
+    def test_given_a_regiment_that_has_fled_the_field_when_checked_then_it_is_never_offered_a_rally_attempt(self):
+        # Bug: fled regiments (routing off the map edge) kept passing rally tests and returning, because
+        # resolve_rally only checked `routing`, never `active` (which `fled` makes permanently False).
+        fled = _regiment("r", 0, 0, True, leadership=9, routing=True, fled=True, rally_next_segment=0)
+        enemy = _regiment("e", 1000, 1000, False)
+        battle = Battle(2000, 2000, [fled, enemy], seed=0)
+
+        combat.resolve_rally(battle)
+
+        self.assertEqual(battle.events, [])
+        self.assertTrue(fled.routing)
+        self.assertTrue(fled.fled)
+        self.assertFalse(fled.active)
+
 
 class CloseCombatStrikeTests(unittest.TestCase):
     """Given fixed statistics, dice seed, formation, and range, an attack produces the documented
@@ -254,6 +278,13 @@ class CloseCombatStrikeTests(unittest.TestCase):
         strike = next(e for e in self.battle.events if e.data.get("attacker") == "att")
         self.assertEqual(strike.data["kills"], 4)
 
+    def test_given_more_casualties_than_models_when_applied_then_it_is_clamped_to_the_current_size(self):
+        removed = combat.apply_casualties(self.defender, 999, self.battle.rng)
+
+        self.assertEqual(removed, 10)
+        self.assertEqual(self.defender.models, 0)
+        self.assertTrue(self.defender.destroyed)
+
     def test_given_casualties_when_applied_then_the_formation_shrinks_and_leaves_corpses(self):
         combat.apply_casualties(self.defender, 3, self.battle.rng)
 
@@ -261,12 +292,15 @@ class CloseCombatStrikeTests(unittest.TestCase):
         self.assertEqual(len(self.defender.corpses), 3)
         self.assertEqual(len(self.defender.model_positions()), 7)
 
-    def test_given_more_casualties_than_models_when_applied_then_it_is_clamped_to_the_current_size(self):
-        removed = combat.apply_casualties(self.defender, 999, self.battle.rng)
+    def test_given_a_cant_die_defender_when_casualties_are_applied_then_no_models_are_removed(self):
+        # game_rules.md 7.6: CantDie models are never removed by wounds.
+        immortal = _regiment("i", 0, 0, False, psychology=frozenset({"CantDie"}))
 
-        self.assertEqual(removed, 10)
-        self.assertEqual(self.defender.models, 0)
-        self.assertTrue(self.defender.destroyed)
+        removed = combat.apply_casualties(immortal, 5, self.battle.rng)
+
+        self.assertEqual(removed, 0)
+        self.assertEqual(immortal.models, 10)
+        self.assertEqual(immortal.corpses, [])
 
 
 class ShootingTests(unittest.TestCase):
@@ -318,6 +352,58 @@ class ContactAndMeleeStateTests(unittest.TestCase):
 
         self.assertFalse(routing.in_melee)
         self.assertFalse(pursuer.in_melee)
+
+    def test_given_footprints_two_model_spacings_apart_when_bounding_circles_overlap_then_they_do_not_clash(self):
+        # Two default-shaped regiments (10 models, 2 ranks, both facing +Y) stacked front-to-back: their
+        # footprints (half_forward 12 each) are exactly two model spacings (24 units) apart, but their
+        # bounding circles (radius ~32) still overlap at that 48-unit centre distance. Must not clash on
+        # circle touch, only on the footprints actually meeting (game_rules.md, "Engagement").
+        left = _regiment("left", 0, 0, True, speed_per_tick=0.0)
+        right = _regiment("right", 0, 48, False, speed_per_tick=0.0)
+        battle = Battle(2000, 2000, [left, right], seed=0)
+        gap = formation.footprint_gap(left.footprint_corners(), right.footprint_corners())
+        self.assertAlmostEqual(gap, 2 * formation.MODEL_SPACING, places=6)
+        self.assertLess(48.0, left.bounding_radius() + right.bounding_radius())
+
+        battle.tick()
+
+        self.assertEqual([e.kind for e in battle.events if e.kind == "clash"], [])
+        self.assertFalse(left.in_melee)
+        self.assertFalse(right.in_melee)
+
+    def test_given_a_charging_regiment_when_it_closes_then_it_keeps_moving_until_footprints_touch_then_clashes(self):
+        charger = _regiment("charger", 0, 0, True, models=10, ranks=2, speed_per_tick=6.0)
+        target = _regiment("target", 120, 0, False, models=10, ranks=2, speed_per_tick=0.0)
+        battle = Battle(2000, 2000, [charger, target], seed=0)
+        battle.order_attack("charger", "target")
+
+        for _ in range(60):
+            battle.tick()
+            if charger.in_melee:
+                break
+
+        self.assertTrue(charger.in_melee)
+        self.assertTrue(target.in_melee)
+        gap = formation.footprint_gap(charger.footprint_corners(), target.footprint_corners())
+        self.assertLessEqual(gap, combat.CONTACT_MARGIN)
+
+    def test_given_two_regiments_touching_one_enemy_when_they_clash_then_they_share_one_fight_and_both_strike(self):
+        # No 2 vs 1: two player regiments touching the same lone enemy regiment must share a single
+        # fight (game_rules.md 5.7's battle grid), and both get to strike it in their own segment.
+        left = _regiment("left", 0, 0, True, initiative=10, speed_per_tick=0.0)
+        right = _regiment("right", 10, 12, True, initiative=10, speed_per_tick=0.0)
+        enemy = _regiment("enemy", 10, -10, False, initiative=10, models=40, ranks=8, speed_per_tick=0.0)
+        battle = Battle(2000, 2000, [left, right, enemy], seed=0)
+
+        battle.tick()
+
+        self.assertTrue(left.in_melee and right.in_melee and enemy.in_melee)
+        self.assertEqual(left.melee_group, right.melee_group)
+        self.assertEqual(left.melee_group, enemy.melee_group)
+        strikes = [e for e in battle.events if e.kind == "melee_strike"]
+        self.assertEqual({e.data["attacker"] for e in strikes}, {"left", "right", "enemy"})
+        fight = battle.fights[left.melee_group]
+        self.assertGreater(fight["tally"][True], 0)  # left and right's kills/bonuses share one tally
 
 
 if __name__ == "__main__":

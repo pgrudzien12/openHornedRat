@@ -89,16 +89,17 @@ class Regiment:
     # Combat/order state (whshr.combat, whshr.ai).
     attack_target: str | None = None  # identifier of an enemy regiment this regiment is charging
     in_melee: bool = False
-    melee_opponent: str | None = None
+    melee_group: str | None = None  # id of the shared multi-regiment fight (Battle.fights), if any
+    melee_touching: frozenset = field(default_factory=frozenset)  # enemy ids this footprint touches now
     routing: bool = False  # fleeing the field; ignores orders, moves away from the nearest enemy
     fled: bool = False  # a routing regiment that has left the battlefield (removed from play)
     reload_ticks: float = 0.0  # ticks remaining before a missile regiment may shoot again
     corpses: list = field(default_factory=list)  # (x, y, direction) of models that have died, for the view
 
     # Traced close-combat/rally timing (game_rules.md 5.5, 6.1-6.2, 7.4), see whshr.combat.
+    # The fight's own-side tally, breakdown and next break-test turn (6.1-6.2) live on
+    # `Battle.fights[regiment.melee_group]`, shared by every regiment in that fight.
     original_models: int | None = None  # starting model count, for rally's casualties modifier
-    melee_tally: float = 0.0  # own accumulated combat-result score since the last break test (6.1)
-    melee_next_test_turn: int | None = None  # turn number the next break test is due (6.2)
     melee_charging: bool = False  # true until this regiment's first strike after joining a charge (5.5)
     rally_next_segment: int | None = None  # absolute segment index of the next scheduled rally attempt (7.4)
 
@@ -137,10 +138,7 @@ class Regiment:
         return sizes[0] if sizes else 0
 
     def _footprint(self):
-        half_side, half_forward, centre = formation.footprint(self.models, self.ranks)
-        angle = (self.direction or 0) * math.tau / formation.FULL_TURN
-        cos, sin = math.cos(angle), math.sin(angle)
-        return self.x - centre * sin, self.y - centre * cos, half_side, half_forward, cos, sin
+        return formation.footprint_frame(self.x, self.y, self.direction, self.models, self.ranks)
 
     def contains(self, x, y):
         """True when a ground point lies inside the regiment's oriented block footprint."""
@@ -152,6 +150,11 @@ class Regiment:
 
     def bounding_radius(self):
         return formation.bounding_radius(self.models, self.ranks)
+
+    def footprint_corners(self):
+        """The four world-space corners of this regiment's oriented block footprint, for
+        `formation.footprint_gap` (close-combat contact, `whshr.combat.resolve_contacts`)."""
+        return formation.footprint_corners(self.x, self.y, self.direction, self.models, self.ranks)
 
 
 def _decode_combat_profile(unit):
@@ -198,6 +201,8 @@ class Battle:
         self.tick_count = 0
         self.rng = random.Random(seed)
         self.events = []  # battle events emitted by the most recent tick (plain strings)
+        self.fights = {}  # group id -> {"next_test_turn", "tally": {True/False}, "breakdown": {...}}
+        self._fight_seq = 0  # counter for fresh whshr.combat fight group ids
         self.result = None  # None while the battle is ongoing, else "victory" or "defeat"
         # A battle only has a win/lose condition once it actually has both sides (movement-only tests
         # and synthetic battles commonly field only one side, which must never auto-resolve).
@@ -270,7 +275,8 @@ class Battle:
                 "x": regiment.x, "y": regiment.y, "direction": regiment.direction,
                 "models": regiment.models, "corpses": len(regiment.corpses),
                 "walking": regiment.walking, "routing": regiment.routing, "fled": regiment.fled,
-                "in_melee": regiment.in_melee, "melee_opponent": regiment.melee_opponent,
+                "in_melee": regiment.in_melee, "melee_group": regiment.melee_group,
+                "melee_touching": sorted(regiment.melee_touching),
                 "attack_target": regiment.attack_target, "reload_ticks": regiment.reload_ticks,
             }
             for identifier, regiment in self.regiments.items()
@@ -449,6 +455,11 @@ class Battle:
         for i, first in enumerate(regiments):
             for second in regiments[i + 1:]:
                 if first.in_melee or second.in_melee:
+                    continue
+                if first.player != second.player:
+                    # Opposite sides never push apart: a charging regiment must be free to close all
+                    # the way to footprint contact (combat.resolve_contacts), not stop at circle
+                    # distance (see resolve_contacts' CONTACT_MARGIN docstring).
                     continue
                 first_yields = first.moving or first.routing or first.attack_target is not None
                 second_yields = second.moving or second.routing or second.attack_target is not None

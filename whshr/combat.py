@@ -33,9 +33,9 @@ from .rules import EXPECTED_ARMOUR_SAVE, wfb_to_hit, wfb_to_wound
 SEGMENT_TICKS = 19  # game_rules.md, "Battle clock": 19 ticks per segment
 SEGMENTS_PER_TURN = 10  # game_rules.md 5.1: segments count down from 10 to 1 within a turn
 FLEE_SAFE_DISTANCE = 160.0  # game_rules.md 7.4: no rally attempt while an enemy is this close
-# A regiment's bounding circles are considered "in contact" with this much slack, so two blocks that
-# are merely adjacent (not exactly overlapping) still engage (game_rules.md, "Engagement").
-CONTACT_MARGIN = 4.0
+# Two footprints (formation.footprint_gap) are considered "in contact" once they are within about one
+# model spacing (game_rules.md, "Engagement": front ranks must actually touch, not just be close).
+CONTACT_MARGIN = formation.MODEL_SPACING
 SHOOT_ARC_HALF = 64  # +/- 45 degrees (of 512), game_rules.md 8.1 "Arc of fire"
 DIRECTION_BONUS = {0: 0, 1: 1, 2: 2, 3: 1}  # front, flank, rear, flank (game_rules.md 6.1)
 # Placeholder shooting to-hit chart by BS (game_rules.md 8.1 says shooting is geometric, not a WS-style
@@ -65,8 +65,14 @@ def _armour_threshold(armour, strength):
 
 
 def apply_casualties(regiment, count, rng):
-    """Remove up to `count` models, turning them into corpses at their current positions."""
-    if count <= 0 or regiment.models <= 0:
+    """Remove up to `count` models, turning them into corpses at their current positions.
+
+    game_rules.md 7.6: `CantDie` models are never removed by wounds. The combat result score still
+    counts every wound rolled against them regardless (`resolve_melee` scores `_roll_attacks`' raw
+    `kills`, not this function's return value): the notes do not say whether a `CantDie` model's
+    wounds count toward the break-test tally, so this is a documented placeholder that they do.
+    """
+    if count <= 0 or regiment.models <= 0 or "CantDie" in regiment.psychology:
         return 0
     count = min(count, regiment.models)
     positions = list(regiment.model_positions())
@@ -136,15 +142,22 @@ def _roll_attacks(attacker, defender, rng, charge_bonus=0):
 
 
 def refresh_melee_state(battle):
-    """Free a regiment from melee once its opponent is no longer an active, standing enemy."""
+    """Free a regiment from melee one tick early (before `_advance_regiments` unfreezes it) once every
+    enemy it was touching is no longer an active, standing target; `resolve_contacts` would release it
+    anyway next tick, but only after movement already ran frozen for one more tick."""
     for regiment in battle.regiments.values():
         if not regiment.in_melee:
             continue
-        opponent = battle.regiments.get(regiment.melee_opponent)
-        if opponent is None or not opponent.active or opponent.routing:
+        if not any(_touching_enemy_active(battle, enemy_id) for enemy_id in regiment.melee_touching):
             regiment.in_melee = False
-            regiment.melee_opponent = None
+            regiment.melee_group = None
+            regiment.melee_touching = frozenset()
             regiment.attack_target = None
+
+
+def _touching_enemy_active(battle, enemy_id):
+    enemy = battle.regiments.get(enemy_id)
+    return enemy is not None and enemy.active and not enemy.routing
 
 
 def _segment_state(tick_count):
@@ -155,52 +168,153 @@ def _segment_state(tick_count):
     return absolute_segment, turn, SEGMENTS_PER_TURN - segment_in_turn
 
 
-def resolve_contacts(battle):
-    """Regiments whose footprints touch enter melee (game_rules.md 5.7's battle grid, simplified to a
-    circle-circle contact test); a routing regiment is never engaged in close combat (game_rules.md
-    7.7: "pursuers never engage fleeing units in close combat")."""
-    _, turn, _ = _segment_state(battle.tick_count)
-    candidates = [r for r in battle.regiments.values() if r.active and not r.in_melee and not r.routing]
-    for i, first in enumerate(candidates):
-        if first.in_melee:
+def _new_fight(turn):
+    return {
+        "next_test_turn": turn + 2,  # game_rules.md 6.2: the first result comes two turns after contact
+        "tally": {True: 0.0, False: 0.0},
+        "breakdown": {True: {"kills": 0, "rank": 0, "direction": 0},
+                      False: {"kills": 0, "rank": 0, "direction": 0}},
+    }
+
+
+def _new_fight_id(battle):
+    battle._fight_seq += 1
+    return f"fight{battle._fight_seq}"
+
+
+def _merge_fights(battle, keep_id, other_ids):
+    """Fold `other_ids`' tallies/breakdowns/timers into `keep_id` when previously separate fights turn
+    out to be connected through a shared regiment (game_rules.md 5.7's battle grid: several units may
+    share one fight)."""
+    keep = battle.fights[keep_id]
+    for other_id in other_ids:
+        other = battle.fights.pop(other_id, None)
+        if other is None:
             continue
-        for second in candidates[i + 1:]:
-            if second.in_melee or second.player == first.player:
+        for side in (True, False):
+            keep["tally"][side] += other["tally"][side]
+            for field_name in ("kills", "rank", "direction"):
+                keep["breakdown"][side][field_name] += other["breakdown"][side][field_name]
+        keep["next_test_turn"] = min(keep["next_test_turn"], other["next_test_turn"])
+
+
+def resolve_contacts(battle):
+    """Group regiments whose oriented footprints actually touch into shared fights (game_rules.md 5.7's
+    battle grid: several regiments per side may share one fight, so a side can gang up on a lone enemy);
+    a routing regiment is never engaged in close combat (game_rules.md 7.7: "pursuers never engage
+    fleeing units in close combat"). Recomputed every tick so a regiment that dies or a footprint that
+    shrinks below contact range releases its neighbours, and a third regiment closing in joins the fight
+    already in progress instead of starting a separate 1v1."""
+    _, turn, _ = _segment_state(battle.tick_count)
+    active = [r for r in battle.regiments.values() if r.active and not r.routing]
+    by_id = {r.identifier: r for r in active}
+    touching = {r.identifier: set() for r in active}
+    old_touching = {r.identifier: r.melee_touching for r in active}
+    for i, first in enumerate(active):
+        for second in active[i + 1:]:
+            if second.player == first.player:
                 continue
-            distance = math.hypot(second.x - first.x, second.y - first.y)
-            if distance <= first.bounding_radius() + second.bounding_radius() + CONTACT_MARGIN:
-                first.in_melee = second.in_melee = True
-                first.melee_opponent, second.melee_opponent = second.identifier, first.identifier
-                # game_rules.md 5.5: the moving side with a charge/pursuit order is the charger and gets
-                # +1 S on its first strike; both units' tallies and break-test timer reset on contact.
-                first.melee_charging = first.attack_target == second.identifier
-                second.melee_charging = second.attack_target == first.identifier
-                first.melee_tally = second.melee_tally = 0.0
-                first.melee_next_test_turn = second.melee_next_test_turn = turn + 2
-                first.target_x = first.target_y = second.target_x = second.target_y = None
+            gap = formation.footprint_gap(first.footprint_corners(), second.footprint_corners())
+            if gap <= CONTACT_MARGIN:
+                touching[first.identifier].add(second.identifier)
+                touching[second.identifier].add(first.identifier)
+
+    for identifier, neighbours in touching.items():
+        regiment = by_id[identifier]
+        for enemy_id in neighbours - old_touching[identifier]:
+            if identifier < enemy_id:  # log each new pair once
+                enemy = by_id[enemy_id]
                 battle.events.append(BattleEvent(
-                    f"{first.name} clashes with {second.name}!", "clash",
-                    first=first.identifier, second=second.identifier, distance=distance))
-                break
+                    f"{regiment.name} clashes with {enemy.name}!", "clash",
+                    first=identifier, second=enemy_id,
+                    distance=math.hypot(enemy.x - regiment.x, enemy.y - regiment.y)))
+
+    parent = {identifier: identifier for identifier in touching}
+
+    def find(node):
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    for identifier, neighbours in touching.items():
+        for enemy_id in neighbours:
+            root_a, root_b = find(identifier), find(enemy_id)
+            if root_a != root_b:
+                parent[root_a] = root_b
+
+    components = {}
+    for identifier in touching:
+        if touching[identifier]:
+            components.setdefault(find(identifier), []).append(identifier)
+
+    kept_groups = set()
+    for members in components.values():
+        existing_ids = sorted({by_id[m].melee_group for m in members if by_id[m].melee_group})
+        if existing_ids:
+            group_id = existing_ids[0]
+            if len(existing_ids) > 1:
+                _merge_fights(battle, group_id, existing_ids[1:])
+        else:
+            group_id = _new_fight_id(battle)
+            battle.fights[group_id] = _new_fight(turn)
+        kept_groups.add(group_id)
+        for identifier in members:
+            regiment = by_id[identifier]
+            regiment.melee_touching = frozenset(touching[identifier])
+            if regiment.melee_group != group_id:
+                # game_rules.md 5.5: the moving side with a charge/pursuit order is the charger and gets
+                # +1 S on its first strike after joining a fight (whether the fight is brand new or a
+                # third regiment joining one already under way).
+                if regiment.attack_target in touching[identifier]:
+                    regiment.melee_charging = True
+                regiment.melee_group = group_id
+                regiment.target_x = regiment.target_y = None
+            regiment.in_melee = True
+
+    for identifier, regiment in by_id.items():
+        if not touching[identifier] and regiment.in_melee:
+            regiment.in_melee = False
+            regiment.melee_group = None
+            regiment.melee_touching = frozenset()
+
+    for group_id in list(battle.fights):
+        if group_id not in kept_groups:
+            battle.fights.pop(group_id, None)
+
+
+def _pick_melee_target(attacker, battle):
+    """The nearest active enemy `attacker` is footprint-touching right now (game_rules.md 5.7: an
+    attacker strikes whichever touching opponent it is engaged with); ties break on identifier for a
+    deterministic replay."""
+    candidates = []
+    for enemy_id in attacker.melee_touching:
+        enemy = battle.regiments.get(enemy_id)
+        if enemy is not None and enemy.active:
+            candidates.append(enemy)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda e: (math.hypot(e.x - attacker.x, e.y - attacker.y), e.identifier))
 
 
 def resolve_melee(battle):
-    """A unit strikes only in its own Initiative segment, once per turn (game_rules.md 5.1); its kills
-    plus rank and direction bonus accumulate into its own tally (6.1). At each turn's last segment, the
-    losing side (by tally difference) takes a break test, timed per `resolve_contacts`/`_schedule_next_test`
-    (6.2, simplified: every turn once due, instead of varying with Initiative)."""
+    """A unit strikes only in its own Initiative segment, once per turn (game_rules.md 5.1), at whichever
+    touching enemy `_pick_melee_target` selects; kills plus rank and direction bonus accumulate into its
+    fight's own-side tally (6.1). At each turn's last segment, every fight's losing side (by tally
+    difference) takes a break test, timed by that fight's `next_test_turn` (6.2, simplified: every turn
+    once due, instead of varying with Initiative)."""
     _, turn, segment_number = _segment_state(battle.tick_count)
-    resolved = set()
+    groups = {}
     for regiment in battle.regiments.values():
-        if not regiment.in_melee or regiment.identifier in resolved:
-            continue
-        opponent = battle.regiments.get(regiment.melee_opponent)
-        if opponent is None or not opponent.in_melee:
-            continue
-        resolved.add(regiment.identifier)
-        resolved.add(opponent.identifier)
-        for attacker, defender in ((regiment, opponent), (opponent, regiment)):
+        if regiment.in_melee and regiment.melee_group:
+            groups.setdefault(regiment.melee_group, []).append(regiment)
+    for group_id, members in groups.items():
+        fight = battle.fights[group_id]
+        for attacker in members:
             if attacker.initiative != segment_number:
+                continue
+            defender = _pick_melee_target(attacker, battle)
+            if defender is None:
                 continue
             charge_bonus = 1 if attacker.melee_charging else 0
             attacker.melee_charging = False
@@ -208,53 +322,63 @@ def resolve_melee(battle):
             apply_casualties(defender, kills, battle.rng)
             rank_bonus = _rank_bonus(attacker)
             direction_bonus = _direction_bonus(attacker, defender)
-            attacker.melee_tally += kills + rank_bonus + direction_bonus
+            fight["tally"][attacker.player] += kills + rank_bonus + direction_bonus
+            breakdown = fight["breakdown"][attacker.player]
+            breakdown["kills"] += kills
+            breakdown["rank"] += rank_bonus
+            breakdown["direction"] += direction_bonus
             battle.events.append(BattleEvent(
                 f"{attacker.name} strikes {defender.name} in segment {segment_number} (turn {turn}): "
-                f"{kills} casualties, tally {attacker.melee_tally:.0f} (+{rank_bonus} rank, +{direction_bonus} dir"
-                f"{', +1 charge' if charge_bonus else ''}).",
+                f"{kills} casualties, side tally {fight['tally'][attacker.player]:.0f} "
+                f"(+{rank_bonus} rank, +{direction_bonus} dir{', +1 charge' if charge_bonus else ''}).",
                 "melee_strike",
-                attacker=attacker.identifier, defender=defender.identifier, turn=turn, segment=segment_number,
-                kills=kills, rank_bonus=rank_bonus, direction_bonus=direction_bonus, charge_bonus=charge_bonus,
-                tally=attacker.melee_tally, attacks=detail))
+                attacker=attacker.identifier, defender=defender.identifier, fight=group_id, turn=turn,
+                segment=segment_number, kills=kills, rank_bonus=rank_bonus, direction_bonus=direction_bonus,
+                charge_bonus=charge_bonus, tally=dict(fight["tally"]), attacks=detail))
         if segment_number == 1:
-            _resolve_break_tests(regiment, opponent, turn, battle)
+            _resolve_group_break_test(group_id, members, turn, battle)
 
 
-def _resolve_break_tests(regiment, opponent, turn, battle):
-    """Evaluate the shared battle grid's break test once it is due (game_rules.md 6.2): only the losing
-    side (by accumulated tally) is tested; both tallies reset and the next test is due next turn."""
-    if regiment.melee_next_test_turn is None or turn < regiment.melee_next_test_turn:
+def _resolve_group_break_test(group_id, members, turn, battle):
+    """Evaluate one fight's break test once it is due (game_rules.md 6.2): only the losing side (by
+    accumulated tally) is tested, every active regiment on that side; the tally and its breakdown reset
+    and the next test is due next turn."""
+    fight = battle.fights[group_id]
+    if turn < fight["next_test_turn"]:
         return
-    difference = regiment.melee_tally - opponent.melee_tally
-    _break_test(regiment, difference, opponent, battle)
-    _break_test(opponent, -difference, regiment, battle)
-    regiment.melee_tally = opponent.melee_tally = 0.0
-    regiment.melee_next_test_turn = opponent.melee_next_test_turn = turn + 1
+    difference = fight["tally"][True] - fight["tally"][False]
+    if difference != 0:
+        losing_side = difference < 0
+        modifier = abs(difference)
+        breakdown = {True: dict(fight["breakdown"][True]), False: dict(fight["breakdown"][False])}
+        for regiment in members:
+            if regiment.player == losing_side:
+                _break_test(regiment, modifier, group_id, breakdown, battle)
+    fight["tally"] = {True: 0.0, False: 0.0}
+    fight["breakdown"] = {True: {"kills": 0, "rank": 0, "direction": 0},
+                           False: {"kills": 0, "rank": 0, "direction": 0}}
+    fight["next_test_turn"] = turn + 1
 
 
-def _break_test(regiment, difference, opponent, battle):
+def _break_test(regiment, modifier, group_id, breakdown, battle):
     """The losing side's Leadership test (game_rules.md 6.2, simplified). Logs every check, including a
-    skipped one (regiment already destroyed, won or drew the round, or CantBreak), so a rout can always
-    be traced back to its exact Ld, roll and modifier."""
+    skipped one (regiment already destroyed or CantBreak), so a rout can always be traced back to its
+    exact Ld, roll, modifier and the kills/rank/direction breakdown (per side) behind that modifier."""
     if not regiment.active:
         return
-    if difference >= 0:
-        return  # regiment.active check above still lets a drawn/won round through with no test needed
-    modifier = -difference
     if "CantBreak" in regiment.psychology:
         battle.events.append(BattleEvent(
             f"{regiment.name} cannot break (CantBreak).", "leadership_test",
-            regiment=regiment.identifier, opponent=opponent.identifier, leadership=regiment.leadership,
-            modifier=modifier, cant_break=True, roll=None, passed=True))
+            regiment=regiment.identifier, fight=group_id, leadership=regiment.leadership,
+            modifier=modifier, breakdown=breakdown, cant_break=True, roll=None, passed=True))
         return
     roll = _2_to_12(battle.rng)
     passed = modifier + roll <= regiment.leadership
     battle.events.append(BattleEvent(
         f"{regiment.name} takes a Leadership test (Ld {regiment.leadership}, roll {roll} + {modifier}): "
         f"{'passes' if passed else 'fails'}.", "leadership_test",
-        regiment=regiment.identifier, opponent=opponent.identifier, leadership=regiment.leadership,
-        roll=roll, modifier=modifier, cant_break=False, passed=passed))
+        regiment=regiment.identifier, fight=group_id, leadership=regiment.leadership,
+        roll=roll, modifier=modifier, breakdown=breakdown, cant_break=False, passed=passed))
     if not passed:
         _start_rout(regiment, battle)
 
@@ -263,7 +387,8 @@ def _start_rout(regiment, battle):
     flee_x, flee_y = battle._flee_point(regiment)
     regiment.routing = True
     regiment.in_melee = False
-    regiment.melee_opponent = None
+    regiment.melee_group = None
+    regiment.melee_touching = frozenset()
     regiment.attack_target = None
     regiment.target_x = regiment.target_y = None
     # game_rules.md 7.4: the first rally attempt comes one full turn (SEGMENTS_PER_TURN segments) after
@@ -296,7 +421,9 @@ def resolve_rally(battle):
     that has "CantRally", makes no attempt at all."""
     absolute_segment, _, _ = _segment_state(battle.tick_count)
     for regiment in battle.regiments.values():
-        if not regiment.routing:
+        # A regiment that has fled off the field is permanently out (game_rules.md, "Flight"): once
+        # `fled`, `active` is false forever, so it must never be offered another rally attempt.
+        if not regiment.routing or not regiment.active:
             continue
         if regiment.rally_next_segment is None or absolute_segment < regiment.rally_next_segment:
             continue
