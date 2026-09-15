@@ -95,6 +95,17 @@ class Regiment:
     reload_ticks: float = 0.0  # ticks remaining before a missile regiment may shoot again
     corpses: list = field(default_factory=list)  # (x, y, direction) of models that have died, for the view
 
+    # Traced close-combat/rally timing (game_rules.md 5.5, 6.1-6.2, 7.4), see whshr.combat.
+    original_models: int | None = None  # starting model count, for rally's casualties modifier
+    melee_tally: float = 0.0  # own accumulated combat-result score since the last break test (6.1)
+    melee_next_test_turn: int | None = None  # turn number the next break test is due (6.2)
+    melee_charging: bool = False  # true until this regiment's first strike after joining a charge (5.5)
+    rally_next_segment: int | None = None  # absolute segment index of the next scheduled rally attempt (7.4)
+
+    def __post_init__(self):
+        if self.original_models is None:
+            self.original_models = self.models
+
     @property
     def moving(self):
         return self.target_x is not None

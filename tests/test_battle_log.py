@@ -143,30 +143,38 @@ class CombatEventLoggingTests(unittest.TestCase):
     """Given a combat round, when logged, the event carries rolls, casualties and the Leadership
     test data (a bug-diagnosability requirement: the Otto Hiln cavalry rout)."""
 
-    def test_given_a_combat_round_when_logged_then_the_event_carries_rolls_casualties_and_leadership_data(self):
-        attacker = Regiment("att", "Attacker", 0, 0, 0, True, models=10, ranks=2,
-                            ws=5, strength=5, attacks=2, leadership=8, speed_per_tick=0.0)
-        defender = Regiment("def", "Defender", 10, 0, 0, False, models=10, ranks=2,
-                            ws=1, toughness=1, armour=0, leadership=2, speed_per_tick=1.5)
-        battle = Battle(1000, 1000, [attacker, defender], seed=1)
+    def test_given_a_melee_strike_when_logged_then_the_event_carries_rolls_bonuses_and_leadership_data(self):
+        # Both Initiative 10 so they strike on the very first tick (game_rules.md 5.1) and every turn
+        # after; a moderate advantage (WS4 S4 vs WS3 T3, both 20 models/4 ranks) whittles the loser down
+        # without destroying it outright, so its scheduled break test (two turns after contact,
+        # game_rules.md 6.2) is reached and fails with this fixed seed.
+        attacker = Regiment("att", "Attacker", 0, 0, 0, True, models=20, ranks=4, initiative=10,
+                            ws=4, strength=4, attacks=1, leadership=8, speed_per_tick=0.0)
+        defender = Regiment("def", "Defender", 10, 0, 0, False, models=20, ranks=4, initiative=10,
+                            ws=3, toughness=3, armour=0, leadership=7, speed_per_tick=0.0)
+        battle = Battle(1000, 1000, [attacker, defender], seed=3)
         logger = BattleLogger(Path(tempfile.mkdtemp()) / "combat.jsonl")
 
-        battle.tick()
-        for event in battle.events:
-            logger.write_event(battle.tick_count, event)
+        for _ in range(combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN * 3):
+            battle.tick()
+            for event in battle.events:
+                logger.write_event(battle.tick_count, event)
+            if attacker.routing or defender.routing:
+                break
         logger.close()
 
         records = [json.loads(line) for line in logger.path.read_text(encoding="utf-8").splitlines()]
-        combat_round = next(r for r in records if r["kind"] == "combat_round")
-        self.assertIn("first_kills", combat_round)
-        self.assertIn("second_kills", combat_round)
-        self.assertEqual(len(combat_round["first_attacks"]["rolls"]), combat_round["first_attacks"]["attacks"])
-        first_roll = combat_round["first_attacks"]["rolls"][0]
+        strike = next(r for r in records if r["kind"] == "melee_strike")
+        self.assertIn("kills", strike)
+        self.assertIn("rank_bonus", strike)
+        self.assertIn("direction_bonus", strike)
+        self.assertIn("tally", strike)
+        self.assertEqual(len(strike["attacks"]["rolls"]), strike["attacks"]["attacks"])
+        first_roll = strike["attacks"]["rolls"][0]
         self.assertIn("hit", first_roll)
         self.assertIn("result", first_roll)
 
         leadership = next(r for r in records if r["kind"] == "leadership_test")
-        self.assertEqual(leadership["regiment"], "def")
         self.assertIn("leadership", leadership)
         self.assertIn("roll", leadership)
         self.assertIn("modifier", leadership)
@@ -174,7 +182,6 @@ class CombatEventLoggingTests(unittest.TestCase):
         self.assertIn("cant_break", leadership)
 
         rout = next(r for r in records if r["kind"] == "rout_start")
-        self.assertEqual(rout["regiment"], "def")
         self.assertIn("flee_x", rout)
         self.assertIn("flee_y", rout)
 

@@ -1,4 +1,8 @@
-"""BDD scenarios for close combat, morale, rally and shooting (whshr.combat), per docs/testing.md."""
+"""BDD scenarios for close combat, morale, rally and shooting (whshr.combat), per docs/testing.md.
+
+Timing is expressed in ticks: SEGMENT_TICKS (19) ticks make one segment, SEGMENTS_PER_TURN (10)
+segments make one turn (game_rules.md 5.1, 6.2, 7.4).
+"""
 import unittest
 
 from whshr import combat
@@ -8,65 +12,247 @@ from whshr.engine import Battle, Regiment
 def _regiment(identifier, x, y, player, **kwargs):
     models = kwargs.pop("models", 10)
     ranks = kwargs.pop("ranks", 2)
-    return Regiment(identifier, identifier, x, y, 0, player, models=models, ranks=ranks, **kwargs)
+    direction = kwargs.pop("direction", 0)
+    return Regiment(identifier, identifier, x, y, direction, player, models=models, ranks=ranks, **kwargs)
 
 
-class CloseCombatTests(unittest.TestCase):
+def _run(battle, ticks):
+    """Tick `battle` `ticks` times and return every event emitted, in order."""
+    events = []
+    for _ in range(ticks):
+        battle.tick()
+        events.extend(battle.events)
+    return events
+
+
+class InitiativeTimingTests(unittest.TestCase):
+    """game_rules.md 5.1: a unit attacks once per turn, in the segment equal to its Initiative."""
+
+    def test_given_two_engaged_regiments_with_different_initiative_when_ticked_one_full_turn_then_each_strikes_exactly_once(self):
+        high_i = _regiment("hi", 0, 0, True, initiative=10, speed_per_tick=0.0,
+                            in_melee=True, melee_opponent="lo", melee_next_test_turn=100)
+        low_i = _regiment("lo", 10, 0, False, initiative=1, speed_per_tick=0.0,
+                           in_melee=True, melee_opponent="hi", melee_next_test_turn=100)
+        battle = Battle(1000, 1000, [high_i, low_i], seed=1)
+
+        events = _run(battle, combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN)
+
+        strikes = [e for e in events if e.kind == "melee_strike"]
+        self.assertEqual(sum(1 for e in strikes if e.data["attacker"] == "hi"), 1)
+        self.assertEqual(sum(1 for e in strikes if e.data["attacker"] == "lo"), 1)
+        self.assertEqual(next(e for e in strikes if e.data["attacker"] == "hi").data["segment"], 10)
+        self.assertEqual(next(e for e in strikes if e.data["attacker"] == "lo").data["segment"], 1)
+
+
+class BreakTestTimingTests(unittest.TestCase):
+    """game_rules.md 6.2: the first break test result comes two turns after contact."""
+
+    def setUp(self):
+        # A clear winner (more attacks, better WS/S) against a weaker but not instantly wiped-out
+        # defender, both with matching Initiative so both strike every turn; seed 3 makes the winner
+        # (the attacker) eventually fail its own Leadership test in this particular matchup.
+        self.attacker = _regiment("att", 0, 0, True, ws=4, strength=4, attacks=1, leadership=8,
+                                  initiative=10, models=20, ranks=4, speed_per_tick=0.0)
+        self.defender = _regiment("def", 10, 0, False, ws=3, toughness=3, armour=0, leadership=7,
+                                  initiative=10, models=20, ranks=4, speed_per_tick=0.0)
+        self.battle = Battle(1000, 1000, [self.attacker, self.defender], seed=3)
+
+    def test_given_a_fresh_contact_when_ticked_through_two_turns_then_no_break_test_happens_yet(self):
+        turn_ticks = combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN
+        events = _run(self.battle, turn_ticks * 2 + combat.SEGMENT_TICKS * 9)  # up to turn 2's segment 1
+
+        self.assertNotIn("leadership_test", [e.kind for e in events])
+
+    def test_given_a_fresh_contact_when_ticked_past_two_turns_then_a_break_test_happens(self):
+        events = _run(self.battle, combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN * 2 + combat.SEGMENT_TICKS * 10)
+
+        self.assertIn("leadership_test", [e.kind for e in events])
+
+    def test_given_a_clanrats_style_charge_when_ticked_through_the_first_turn_then_the_defender_does_not_rout(self):
+        # game_rules.md's BF001 diagnosis: a 3-0 first round used to trigger an immediate failed break
+        # test and instant rout. With traced timing, no break test at all can happen in the first turn.
+        clanrats = _regiment("clanrats", 0, 0, True, ws=3, strength=3, attacks=1, leadership=7,
+                              initiative=4, models=13, ranks=3, speed_per_tick=0.0)
+        infantry = _regiment("infantry", 10, 0, False, ws=3, strength=3, toughness=3, attacks=1,
+                             leadership=7, initiative=4, models=16, ranks=4, speed_per_tick=0.0)
+        battle = Battle(1000, 1000, [clanrats, infantry], seed=1)
+
+        _run(battle, combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN)
+
+        self.assertFalse(infantry.routing)
+        self.assertFalse(clanrats.routing)
+
+
+class RankAndDirectionBonusTests(unittest.TestCase):
+    """game_rules.md 6.1: rank bonus (deep formations) and direction bonus (flank/rear attacks)."""
+
+    def test_given_a_shallow_formation_when_the_rank_bonus_is_computed_then_it_is_zero(self):
+        shallow = _regiment("s", 0, 0, True, models=6, ranks=2)  # frontage 3, not > 3
+        self.assertEqual(combat._rank_bonus(shallow), 0)
+
+    def test_given_a_deep_formation_when_the_rank_bonus_is_computed_then_it_counts_the_ranks_behind_the_first(self):
+        deep = _regiment("d", 0, 0, True, models=16, ranks=4)  # frontage 4, size/width - 1 = 3
+        self.assertEqual(combat._rank_bonus(deep), 3)
+
+    def test_given_an_attack_from_the_front_when_the_direction_bonus_is_computed_then_it_is_zero(self):
+        defender = _regiment("def", 0, 0, False, direction=0)  # direction 0 faces +Y (formation.place)
+        attacker = _regiment("att", 0, 10, True)  # in front of the defender's facing
+        self.assertEqual(combat._direction_bonus(attacker, defender), 0)
+
+    def test_given_an_attack_from_the_rear_when_the_direction_bonus_is_computed_then_it_is_two(self):
+        defender = _regiment("def", 0, 0, False, direction=0)
+        attacker = _regiment("att", 0, -10, True)  # behind the defender's facing
+        self.assertEqual(combat._direction_bonus(attacker, defender), 2)
+
+    def test_given_an_attack_from_the_flank_when_the_direction_bonus_is_computed_then_it_is_one(self):
+        defender = _regiment("def", 0, 0, False, direction=0)
+        attacker = _regiment("att", 10, 0, True)  # to the defender's side
+        self.assertEqual(combat._direction_bonus(attacker, defender), 1)
+
+    def test_given_a_kill_deficit_smaller_than_the_rank_bonus_when_the_break_test_is_due_then_the_deep_unit_does_not_lose_the_result(self):
+        deep = _regiment("deep", 0, 0, True, leadership=7, in_melee=True, melee_opponent="shallow",
+                          melee_tally=3.0, melee_next_test_turn=2)  # 1 kill behind, +3 rank bonus already folded in
+        shallow = _regiment("shallow", 10, 0, False, leadership=7, in_melee=True, melee_opponent="deep",
+                            melee_tally=2.0, melee_next_test_turn=2)
+        battle = Battle(1000, 1000, [deep, shallow], seed=0)
+
+        combat._resolve_break_tests(deep, shallow, 2, battle)
+
+        # The deep unit is not on the losing side once its rank bonus is folded in; only its
+        # opponent (still behind) is tested.
+        deep_tests = [e for e in battle.events if e.kind == "leadership_test" and e.data["regiment"] == "deep"]
+        self.assertEqual(deep_tests, [])
+
+    def test_given_a_kill_deficit_without_a_rank_bonus_when_the_break_test_is_due_then_the_loser_is_tested(self):
+        loser = _regiment("loser", 0, 0, True, leadership=7, in_melee=True, melee_opponent="winner",
+                          melee_tally=0.0, melee_next_test_turn=2)
+        winner = _regiment("winner", 10, 0, False, leadership=7, in_melee=True, melee_opponent="loser",
+                           melee_tally=2.0, melee_next_test_turn=2)
+        battle = Battle(1000, 1000, [loser, winner], seed=0)
+
+        combat._resolve_break_tests(loser, winner, 2, battle)
+
+        leadership = [e for e in battle.events if e.kind == "leadership_test"]
+        self.assertEqual(len(leadership), 1)
+        self.assertEqual(leadership[0].data["regiment"], "loser")
+
+
+class RallyTimingTests(unittest.TestCase):
+    """game_rules.md 7.4: the first rally attempt is one full turn after the rout, then every 3 segments."""
+
+    def test_given_a_regiment_that_just_routed_when_checked_before_its_scheduled_segment_then_no_attempt_is_made(self):
+        routing = _regiment("r", 0, 0, True, leadership=9, routing=True, rally_next_segment=5)
+        enemy = _regiment("e", 1000, 1000, False)
+        battle = Battle(2000, 2000, [routing, enemy], seed=0)
+        battle.tick_count = 4 * combat.SEGMENT_TICKS  # absolute_segment 4, still before segment 5
+
+        combat.resolve_rally(battle)
+
+        self.assertEqual(battle.events, [])
+        self.assertTrue(routing.routing)
+
+    def test_given_a_regiment_whose_scheduled_segment_has_come_when_checked_then_an_attempt_is_made(self):
+        routing = _regiment("r", 0, 0, True, leadership=9, routing=True, rally_next_segment=5)
+        enemy = _regiment("e", 1000, 1000, False)
+        battle = Battle(2000, 2000, [routing, enemy], seed=0)
+        battle.tick_count = 5 * combat.SEGMENT_TICKS
+
+        combat.resolve_rally(battle)
+
+        self.assertEqual([e.kind for e in battle.events], ["rally_test"])
+
+    def test_given_a_regiment_starting_to_rout_when_the_rout_begins_then_its_first_rally_attempt_is_scheduled_one_turn_later(self):
+        attacker = _regiment("att", 0, 0, True, ws=4, strength=4, attacks=1, leadership=8, initiative=10,
+                             models=20, ranks=4, speed_per_tick=0.0)
+        defender = _regiment("def", 10, 0, False, ws=3, toughness=3, armour=0, leadership=7,
+                             initiative=10, models=20, ranks=4, speed_per_tick=0.0)
+        battle = Battle(1000, 1000, [attacker, defender], seed=3)  # eventually the attacker breaks first
+        rout_event, segment_at_rout = None, None
+        for _ in range(combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN * 3):
+            battle.tick()
+            found = next((e for e in battle.events if e.kind == "rout_start"), None)
+            if found is not None:
+                rout_event = found
+                segment_at_rout = battle.tick_count // combat.SEGMENT_TICKS
+                break
+
+        self.assertIsNotNone(rout_event)
+        routed = battle.regiments[rout_event.data["regiment"]]
+        self.assertTrue(routed.routing)
+        self.assertEqual(routed.rally_next_segment, segment_at_rout + combat.SEGMENTS_PER_TURN)
+
+
+class CasualtiesAndCantRallyTests(unittest.TestCase):
+    def test_given_no_enemy_nearby_when_the_leadership_test_passes_then_the_unit_rallies(self):
+        routing = _regiment("r", 0, 0, True, leadership=9, routing=True, rally_next_segment=0)
+        enemy = _regiment("e", 1000, 1000, False)
+        battle = Battle(2000, 2000, [routing, enemy], seed=0)  # seed 0: the roll passes Ld 9
+
+        combat.resolve_rally(battle)
+
+        self.assertFalse(routing.routing)
+        rally = battle.events[-1]
+        self.assertEqual(rally.kind, "rally_test")
+        self.assertTrue(rally.data["passed"])
+
+    def test_given_an_enemy_within_the_safe_distance_when_checked_then_no_rally_is_attempted(self):
+        routing = _regiment("r", 0, 0, True, leadership=9, routing=True, rally_next_segment=0)
+        enemy = _regiment("e", 50, 0, False)  # well within FLEE_SAFE_DISTANCE
+        battle = Battle(2000, 2000, [routing, enemy], seed=0)
+
+        combat.resolve_rally(battle)
+
+        self.assertTrue(routing.routing)
+        self.assertTrue(battle.events[-1].data["blocked_by_enemy"])
+
+    def test_given_cant_rally_psychology_when_checked_then_the_unit_never_rallies(self):
+        routing = _regiment("r", 0, 0, True, leadership=9, routing=True, rally_next_segment=0,
+                            psychology=frozenset({"CantRally"}))
+        enemy = _regiment("e", 1000, 1000, False)
+        battle = Battle(2000, 2000, [routing, enemy], seed=0)
+
+        combat.resolve_rally(battle)
+
+        self.assertTrue(routing.routing)
+
+    def test_given_casualties_at_or_below_a_quarter_of_strength_when_checked_then_the_unit_cannot_rally(self):
+        routing = _regiment("r", 0, 0, True, leadership=9, routing=True, rally_next_segment=0,
+                            models=2, original_models=10)  # 8 casualties >= 3 x 2 models left
+        enemy = _regiment("e", 1000, 1000, False)
+        battle = Battle(2000, 2000, [routing, enemy], seed=0)
+
+        combat.resolve_rally(battle)
+
+        self.assertTrue(routing.routing)
+        self.assertTrue(battle.events[-1].data["too_many_casualties"])
+
+
+class CloseCombatStrikeTests(unittest.TestCase):
     """Given fixed statistics, dice seed, formation, and range, an attack produces the documented
-    casualties, morale result, and emitted battle events (docs/testing.md, "Combat")."""
+    casualties and emitted battle events (docs/testing.md, "Combat")."""
 
     def setUp(self):
         # A hard-hitting attacker (WS5, S5, A2) against a weak, low-Leadership defender (WS1, T1, no
-        # armour, Ld2): seed 1 is fixed so the round's exact casualties are reproducible.
+        # armour, Ld2), both Initiative 10 so they clash and strike on the very same tick; seed 1 is
+        # fixed so the round's exact casualties are reproducible.
         self.attacker = _regiment("att", 0, 0, True, ws=5, strength=5, attacks=2, leadership=8,
-                                  speed_per_tick=0.0)
+                                  initiative=10, speed_per_tick=0.0)
         self.defender = _regiment("def", 10, 0, False, ws=1, toughness=1, armour=0, leadership=2,
-                                  speed_per_tick=1.5)
+                                  initiative=10, speed_per_tick=1.5)
         self.battle = Battle(1000, 1000, [self.attacker, self.defender], seed=1)
 
-    def test_given_two_touching_regiments_when_ticked_then_they_clash_and_fight_in_the_same_tick(self):
+    def test_given_two_touching_regiments_with_matching_initiative_when_ticked_then_they_clash_and_strike_once_each(self):
         self.battle.tick()
 
         self.assertEqual(self.defender.models, 6)
-        self.assertEqual(self.attacker.models, 10)
-        # Events are still printable strings (docs/testing.md, "Battle.events may stay a list the view
-        # can still print"), but each also carries a `kind` and structured `data` for the battle log.
-        self.assertEqual(self.battle.events, [
-            "att clashes with def!",
-            "att and def fight: 4 vs 0 casualties.",
-            "def takes a Leadership test (Ld 2, roll 12 + 4): fails.",
-            "def routs!",
-            "def cannot rally: an enemy is 65 units away.",  # same tick's rally check, still in contact
-        ])
-        combat_round = self.battle.events[1]
-        self.assertEqual(combat_round.kind, "combat_round")
-        self.assertEqual(combat_round.data["first_kills"], 4)
-        self.assertEqual(combat_round.data["second_kills"], 0)
-        self.assertEqual(len(combat_round.data["first_attacks"]["rolls"]), 10)  # one entry per attack
-        leadership = self.battle.events[2]
-        self.assertEqual(leadership.kind, "leadership_test")
-        self.assertEqual(leadership.data["regiment"], "def")
-        self.assertFalse(leadership.data["passed"])
-        rout = self.battle.events[3]
-        self.assertEqual(rout.kind, "rout_start")
-        self.assertIn("flee_x", rout.data)
-
-    def test_given_a_lost_combat_round_when_the_break_test_fails_then_the_loser_routs_and_flees(self):
-        self.battle.tick()
-
-        self.assertTrue(self.defender.routing)
-        self.assertFalse(self.defender.in_melee)
-        self.battle.tick()
-        # A routed opponent frees the winner from melee the following tick (whshr.combat.refresh_melee_state).
-        self.assertFalse(self.attacker.in_melee)
-        self.assertGreater(self.defender.x, 10)  # fleeing away from the attacker (game_rules.md 7.7)
-
-    def test_given_cant_break_psychology_when_the_round_is_lost_then_the_unit_never_routs(self):
-        self.defender.psychology = frozenset({"CantBreak"})
-
-        self.battle.tick()
-
+        self.assertEqual(self.attacker.models, 9)
+        kinds = [e.kind for e in self.battle.events]
+        self.assertEqual(kinds, ["clash", "melee_strike", "melee_strike"])
+        # No break test yet: the first one is due two turns after contact (game_rules.md 6.2).
+        self.assertNotIn("leadership_test", kinds)
         self.assertFalse(self.defender.routing)
+        strike = next(e for e in self.battle.events if e.data.get("attacker") == "att")
+        self.assertEqual(strike.data["kills"], 4)
 
     def test_given_casualties_when_applied_then_the_formation_shrinks_and_leaves_corpses(self):
         combat.apply_casualties(self.defender, 3, self.battle.rng)
@@ -81,40 +267,6 @@ class CloseCombatTests(unittest.TestCase):
         self.assertEqual(removed, 10)
         self.assertEqual(self.defender.models, 0)
         self.assertTrue(self.defender.destroyed)
-
-
-class RallyTests(unittest.TestCase):
-    def test_given_no_enemy_nearby_when_the_leadership_test_passes_then_the_unit_rallies(self):
-        routing = _regiment("r", 0, 0, True, leadership=9, routing=True)
-        enemy = _regiment("e", 1000, 1000, False)
-        battle = Battle(2000, 2000, [routing, enemy], seed=0)  # seed 0: the roll passes Ld 9
-
-        combat.resolve_rally(battle)
-
-        self.assertFalse(routing.routing)
-        self.assertIn("r takes a rally test (Ld 9, roll 8): rallies.", battle.events)
-        rally = battle.events[-1]
-        self.assertEqual(rally.kind, "rally_test")
-        self.assertTrue(rally.data["passed"])
-
-    def test_given_an_enemy_within_the_safe_distance_when_checked_then_no_rally_is_attempted(self):
-        routing = _regiment("r", 0, 0, True, leadership=9, routing=True)
-        enemy = _regiment("e", 50, 0, False)  # well within FLEE_SAFE_DISTANCE
-        battle = Battle(2000, 2000, [routing, enemy], seed=0)
-
-        combat.resolve_rally(battle)
-
-        self.assertTrue(routing.routing)
-
-    def test_given_cant_rally_psychology_when_checked_then_the_unit_never_rallies(self):
-        routing = _regiment("r", 0, 0, True, leadership=9, routing=True,
-                            psychology=frozenset({"CantRally"}))
-        enemy = _regiment("e", 1000, 1000, False)
-        battle = Battle(2000, 2000, [routing, enemy], seed=0)
-
-        combat.resolve_rally(battle)
-
-        self.assertTrue(routing.routing)
 
 
 class ShootingTests(unittest.TestCase):
