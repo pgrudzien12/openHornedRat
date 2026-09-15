@@ -406,30 +406,53 @@ byte-faithful port; every simplification is called out in each module's docstrin
   1.5 fleeing (`Regiment.routing`, moving directly away from the nearest active enemy, `Battle._flee_point`).
   1.0 "closing" is defined (`CLOSING_K`) but unused: a documented simplification, since this engine does not
   model the original's charge-counter distinction between closing and charging.
-- **Contact and melee** (`combat.resolve_contacts`/`resolve_melee`, game_rules.md 5.1/5.2/5.5/6.1,
-  timing and bonuses now traced): regiments whose bounding circles touch (`CONTACT_MARGIN` slack) enter
-  melee and stop moving; the moving side with an active charge order is flagged as the charger
-  (`Regiment.melee_charging`) and gets +1 S on its first strike (game_rules.md 5.5, granted once per
-  regiment rather than decremented per attacking model). **A unit strikes once per turn, in the segment
-  equal to its own Initiative** (`combat._segment_state`, segments count down 10..1 within a
-  `SEGMENTS_PER_TURN = 10`-segment turn), not every segment: two engaged units with different Initiative
-  now strike at different points in the turn. Attacks = front rank models x A (front rank of both sides
-  only, not capped by the opponent's frontage); hit/wound/save rolls use `rules.wfb_to_hit`/
+- **Contact** (`combat.resolve_contacts`, game_rules.md "Engagement"): recomputed every tick over every
+  active, non-routing regiment's **oriented block footprint** (`formation.footprint_corners`/
+  `footprint_gap` — the exact minimum distance between two oriented rectangles, not a bounding-circle
+  approximation), so a regiment only enters melee once its front rank is within one model spacing
+  (`CONTACT_MARGIN = formation.MODEL_SPACING`, 12 world units) of an enemy's footprint. This replaced an
+  earlier bounding-circle contact test that let two regiments "fight" tens of world units apart without
+  their sprites ever touching on screen (an owner playtest report); `engine._resolve_collisions`'
+  push-apart now also skips every cross-player pair (it only keeps same-side regiments from overlapping
+  a stationary ally), so a charging regiment is free to keep closing all the way to footprint contact
+  instead of stopping at the old, looser circle distance.
+- **Fight groups** (`Battle.fights`, game_rules.md 5.7's battle grid): `resolve_contacts` unions every
+  touching pair (regardless of side) into connected components each tick, so **several regiments on one
+  side can share a single fight against a lone enemy** — the fix for BF001's "no 2 vs 1" bug, where a
+  single `Regiment.melee_opponent` field made that impossible. Each fight keeps one shared id
+  (`Regiment.melee_group`), a per-side score tally and a kills/rank/direction breakdown
+  (`Battle.fights[group]["tally"]`/`"breakdown"`), and its own break-test timer; a regiment newly joining
+  an existing fight (a third regiment closing in) does not reset that fight's tally. `Regiment.
+  melee_touching` is the live set of enemy ids this regiment's footprint currently touches.
+- **Melee resolution** (`combat.resolve_melee`, game_rules.md 5.1/5.2/5.5/6.1): a unit strikes once per
+  turn, in the segment equal to its own Initiative (`combat._segment_state`, segments count down 10..1
+  within a `SEGMENTS_PER_TURN = 10`-segment turn), against the nearest enemy it is currently touching
+  (`combat._pick_melee_target`); the moving side with an active charge order is flagged as the charger
+  (`Regiment.melee_charging`) and gets +1 S on its first strike after joining a fight (game_rules.md 5.5,
+  granted once per regiment rather than decremented per attacking model). Attacks = front rank models x A
+  (front rank only, not capped by the opponent's frontage); hit/wound/save rolls use `rules.wfb_to_hit`/
   `wfb_to_wound`/`EXPECTED_ARMOUR_SAVE`. Each strike's kills plus **rank bonus** (`combat._rank_bonus`:
   `size / frontage - 1` when frontage > 3, uncapped) and **direction bonus** (`combat._direction_bonus`:
-  +2 rear, +1 flank, quartering the angle of attacker relative to defender facing) accumulate into the
-  attacker's own running tally (`Regiment.melee_tally`) — this is the fix for BF001's diagnosed bug
-  (a 3-0 first round used to trigger an instant failed break test and rout at the tick of contact).
-  There is still no ganging-up WS bonus, hatred, magic items, mounts or monsters. A multi-wound model
-  dies on its first failed save (no per-model wound tracking). Casualties (`combat.apply_casualties`)
-  turn into corpses at the models' last positions and shrink the formation.
-- **Break tests** (`combat._resolve_break_tests`, game_rules.md 6.2, timing traced): on contact, both
-  regiments' tallies reset and their first break test is scheduled two turns later
-  (`Regiment.melee_next_test_turn = contact_turn + 2`); once due (checked at each turn's last segment),
-  the losing side (by tally difference, so rank/direction bonuses can outweigh a raw kill deficit) takes
-  the documented flat 2-12 Leadership roll (`combat.leadership_test`) with modifier = its tally deficit;
-  both tallies then reset and the next test is due next turn — simplified from the original, which varies
-  the interval with the units' Initiatives. `CantBreak` never routs.
+  +2 rear, +1 flank, quartering the angle of attacker relative to the defender it struck) accumulate into
+  its **fight's own-side tally**, not a per-regiment one — this, plus the fight-group fix above, is what
+  keeps the break-test modifier proportional to the actual round (the traced diagnosis found modifiers of
+  +6/+9/+10 caused by stale/mis-paired tallies from the old single-opponent model; after the fix the same
+  log's largest modifier is +3, see below). There is still no ganging-up WS bonus, hatred, magic items,
+  mounts or monsters. A multi-wound model dies on its first failed save (no per-model wound tracking).
+  Casualties (`combat.apply_casualties`) turn into corpses at the models' last positions and shrink the
+  formation — **except `CantDie` models** (game_rules.md 7.6), which are never removed; their wounds
+  still count toward the tally (`_roll_attacks`' raw `kills`, not `apply_casualties`' return value), a
+  documented placeholder since the notes do not say whether they should.
+- **Break tests** (`combat._resolve_group_break_test`, game_rules.md 6.2, timing traced): a fresh fight's
+  tally and breakdown start at zero and its first break test is due two turns after contact
+  (`fight["next_test_turn"] = contact_turn + 2`); once due (checked at each turn's last segment), the
+  losing side (by tally difference, so rank/direction bonuses can outweigh a raw kill deficit) — **every
+  active regiment on that side of the fight**, not just one pairwise opponent — takes the documented flat
+  2-12 Leadership roll (`combat.leadership_test`) with modifier = the tally deficit; the `leadership_test`
+  event now also carries both sides' kills/rank/direction `breakdown` so a large modifier can always be
+  traced back to what produced it. The tally and breakdown then reset and the next test is due next turn
+  — simplified from the original, which varies the interval with the units' Initiatives. `CantBreak`
+  never routs.
 - **Rally** (game_rules.md 7.4, timing and casualties modifier traced): a routing regiment
   (`combat._start_rout`) schedules its first rally attempt one full turn later
   (`Regiment.rally_next_segment`), then every 3 segments regardless of outcome; it flees directly away
@@ -438,6 +461,14 @@ byte-faithful port; every simplification is called out in each module's docstrin
   and no enemy within `FLEE_SAFE_DISTANCE` (160 units) takes a Leadership test with modifier +2
   (casualties > size), +1 (3x casualties > size) or 0 (`combat._rally_modifier`, using
   `Regiment.original_models` set at creation); casualties at or above 3x size block rallying outright.
+  `resolve_rally` now also skips any regiment that is `not regiment.active` (i.e. `fled`, since `active`
+  is `not destroyed and not fled`) before checking `rally_next_segment` — the fix for an owner-reported
+  bug where a regiment that had already routed off the field edge (`fled = True`) kept passing later
+  rally tests and effectively returning to play, because the old check only looked at `routing` (which
+  `fled` never clears). A `fled` regiment is now permanently out: no rally tests, no orders
+  (`order_move`/`order_attack` already required `player`/not-`routing`), no movement or contact
+  (`active` already gated those), and no rendering (`battle_view` already iterates only `active`
+  regiments).
 - **Verified against a real BF001 log** (`logs/battle-20260915-090524-bf001.jsonl`, `python3 -m whshr
   battle-replay`): under the pre-fix rules that log's own recorded snapshots show Grudgebringer Cavalry
   already routing by tick 323, 36 ticks after its tick-287 contact (under two segments); replaying the
@@ -446,6 +477,19 @@ byte-faithful port; every simplification is called out in each module's docstrin
   confirming the "instant rout on contact" bug is gone. The order replay itself diverges from tick 323
   (the AI's own attack-target choice differs once its decisions no longer follow the old per-segment
   break-test cadence), which is the expected kind of divergence for a rules change, not a regression.
+- **Verified against a second real BF001 log** (`logs/battle-20260915-234951-bf001.jsonl`, contact/fight
+  group/fled fix): the owner reported units "fighting many squares apart" and break-test modifiers of
+  +6/+9/+10 (worst: the cavalry vs. the single `CantDie` assassin Sleaquit, roll 8 + modifier 10 against
+  Ld 7). Replaying the same orders under the new footprint contact and fight groups: 18 clashes, anchor-
+  to-anchor clash distance 21.6-66.4 world units (up to a large regiment's own half-frontage — the front
+  ranks are confirmed touching by `formation.footprint_gap <= CONTACT_MARGIN` at every one of them, not
+  merely "close"), and the largest break-test modifier across the whole replay is now +3.0. A one-frame
+  hidden-window capture at the first recorded clash (`Grudgebringer<Cavalry` vs. `Clanrat_Warriors`,
+  tick 286) shows the touching regiment in its attack pose clustered tightly at the contact point;
+  `Regiment.melee_touching` confirms the pairing programmatically. The replay still diverges from the
+  logged snapshots soon after (expected: the rules changed), and two regiments (`Grudgebringer<Infantry`,
+  `Clanrat_Warriors`) sharing one fight against a third strike independently in the timeline, confirming
+  the fight-group fix.
 - **Shooting** (game_rules.md 8.1-8.3, simplified): only the basic bow-type missile codes
   (`engine.ARCHER_MISSILE_CODES`: bow, crossbow, Wood Elf bow, short bow, longbow) are modelled as
   shooters — artillery and special weapons are not. A stationary, non-engaged missile regiment fires at
@@ -563,7 +607,7 @@ line 1, `tick` 0). Record types:
   battle's end: `side_counts` (`Battle.side_counts()`: active/routing/fled/destroyed/total per side --
   the exact inputs `Battle._update_result` checks, so "why no result was declared" is always visible even
   when the answer is "one side still has an active regiment"), `result`, and `regiments` (`Battle.
-  snapshot()`: x/y/direction/models/corpses/walking/routing/fled/in_melee/melee_opponent/attack_target/
+  snapshot()`: x/y/direction/models/corpses/walking/routing/fled/in_melee/melee_group/melee_touching/attack_target/
   reload_ticks per regiment).
 - `result`: written once, when `Battle.result` is set, with the final `side_counts`.
 - `end`: `reason` (`"result"`, `"player quit"`, or `"scene left"` for any other scene exit) and the final
@@ -621,12 +665,12 @@ regiment's field-edge removal logged with its position, per-side `side_counts` i
 unwritable log directory, disabled logging, and that every log line parses with the header first.
 
 **Open questions / observations, not fixed here (per the task's scope):**
-- A destroyed regiment (`models == 0`) can still show `in_melee: true` with a stale `melee_opponent` in a
-  snapshot (seen in the BF001 log above): `combat.refresh_melee_state` only clears melee state on the
-  *opponent* of a no-longer-active regiment, not on the destroyed regiment's own flags. Cosmetic in the
-  current simplified combat model (a destroyed regiment is excluded from `resolve_melee`/`resolve_
-  contacts`/`resolve_shooting` by their own `active`/`in_melee` filters either way), but visible now that
-  snapshots are logged.
+- A destroyed regiment (`models == 0`) can still show `in_melee: true` with a stale `melee_group`/
+  `melee_touching` in a snapshot (seen in the BF001 log above): `resolve_contacts` only releases
+  regiments it still considers `active`, not the destroyed regiment's own flags, and `refresh_melee_state`
+  only runs on regiments that are themselves `in_melee`. Cosmetic in the current simplified combat model
+  (a destroyed regiment is excluded from `resolve_melee`/`resolve_contacts`/`resolve_shooting` by their
+  own `active`/`in_melee` filters either way), but visible now that snapshots are logged.
 - A regiment that starts already outside the field's declared bounds (BF001's `Mercenary_Crossbows` at
   x=1814, field width 1600) never logs a `fled` event even if left alone there, since that only fires for
   a *routing* regiment crossing the boundary; whether the script's field size or such a unit's placement
