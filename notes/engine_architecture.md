@@ -406,20 +406,46 @@ byte-faithful port; every simplification is called out in each module's docstrin
   1.5 fleeing (`Regiment.routing`, moving directly away from the nearest active enemy, `Battle._flee_point`).
   1.0 "closing" is defined (`CLOSING_K`) but unused: a documented simplification, since this engine does not
   model the original's charge-counter distinction between closing and charging.
-- **Contact and melee** (`combat.resolve_contacts`/`resolve_melee`, game_rules.md 5.7/6.1, simplified):
-  regiments whose bounding circles touch (`CONTACT_MARGIN` slack) enter melee and stop moving. Once per
-  battle segment (`SEGMENT_TICKS = 19`), each engaged pair fights one simultaneous round: attacks =
-  front rank models x A, hit/wound/save rolls use `rules.wfb_to_hit`/`wfb_to_wound`/`EXPECTED_ARMOUR_SAVE`.
-  There is no ganging-up WS bonus, hatred, magic items, mounts, monsters, or rank/direction result bonus.
-  A multi-wound model dies on its first failed save (no per-model wound tracking). Casualties
-  (`combat.apply_casualties`) turn into corpses at the models' last positions and shrink the formation.
-- **Morale and rally** (game_rules.md 6.2/7.1/7.4, simplified): the losing side's Leadership test uses the
-  documented flat 2-12 roll (`combat.leadership_test`) with modifier = its own casualty deficit for the
-  round (no rank/direction bonus, no "first result two turns after contact" timing); `CantBreak` never
-  routs. A routing regiment (`combat._start_rout`) flees directly away from its nearest active enemy at
-  fleeing speed and is removed (`fled = True`) once it leaves the field. Once per segment, a routing,
-  non-`CantRally` regiment with no enemy within `FLEE_SAFE_DISTANCE` (160 units) retries a plain Leadership
-  test to rally (no casualties-based modifier or scheduled-segment timer).
+- **Contact and melee** (`combat.resolve_contacts`/`resolve_melee`, game_rules.md 5.1/5.2/5.5/6.1,
+  timing and bonuses now traced): regiments whose bounding circles touch (`CONTACT_MARGIN` slack) enter
+  melee and stop moving; the moving side with an active charge order is flagged as the charger
+  (`Regiment.melee_charging`) and gets +1 S on its first strike (game_rules.md 5.5, granted once per
+  regiment rather than decremented per attacking model). **A unit strikes once per turn, in the segment
+  equal to its own Initiative** (`combat._segment_state`, segments count down 10..1 within a
+  `SEGMENTS_PER_TURN = 10`-segment turn), not every segment: two engaged units with different Initiative
+  now strike at different points in the turn. Attacks = front rank models x A (front rank of both sides
+  only, not capped by the opponent's frontage); hit/wound/save rolls use `rules.wfb_to_hit`/
+  `wfb_to_wound`/`EXPECTED_ARMOUR_SAVE`. Each strike's kills plus **rank bonus** (`combat._rank_bonus`:
+  `size / frontage - 1` when frontage > 3, uncapped) and **direction bonus** (`combat._direction_bonus`:
+  +2 rear, +1 flank, quartering the angle of attacker relative to defender facing) accumulate into the
+  attacker's own running tally (`Regiment.melee_tally`) — this is the fix for BF001's diagnosed bug
+  (a 3-0 first round used to trigger an instant failed break test and rout at the tick of contact).
+  There is still no ganging-up WS bonus, hatred, magic items, mounts or monsters. A multi-wound model
+  dies on its first failed save (no per-model wound tracking). Casualties (`combat.apply_casualties`)
+  turn into corpses at the models' last positions and shrink the formation.
+- **Break tests** (`combat._resolve_break_tests`, game_rules.md 6.2, timing traced): on contact, both
+  regiments' tallies reset and their first break test is scheduled two turns later
+  (`Regiment.melee_next_test_turn = contact_turn + 2`); once due (checked at each turn's last segment),
+  the losing side (by tally difference, so rank/direction bonuses can outweigh a raw kill deficit) takes
+  the documented flat 2-12 Leadership roll (`combat.leadership_test`) with modifier = its tally deficit;
+  both tallies then reset and the next test is due next turn — simplified from the original, which varies
+  the interval with the units' Initiatives. `CantBreak` never routs.
+- **Rally** (game_rules.md 7.4, timing and casualties modifier traced): a routing regiment
+  (`combat._start_rout`) schedules its first rally attempt one full turn later
+  (`Regiment.rally_next_segment`), then every 3 segments regardless of outcome; it flees directly away
+  from its nearest active enemy at fleeing speed and is removed (`fled = True`) once it leaves the field.
+  When its scheduled segment comes, a non-`CantRally` regiment with casualties below 3x its current size
+  and no enemy within `FLEE_SAFE_DISTANCE` (160 units) takes a Leadership test with modifier +2
+  (casualties > size), +1 (3x casualties > size) or 0 (`combat._rally_modifier`, using
+  `Regiment.original_models` set at creation); casualties at or above 3x size block rallying outright.
+- **Verified against a real BF001 log** (`logs/battle-20260915-090524-bf001.jsonl`, `python3 -m whshr
+  battle-replay`): under the pre-fix rules that log's own recorded snapshots show Grudgebringer Cavalry
+  already routing by tick 323, 36 ticks after its tick-287 contact (under two segments); replaying the
+  same orders under the traced timing produces no break test at all by the log's last recorded tick
+  (469, the player quit), since the earliest one is now due at contact_turn + 2 turns (tick ~667) —
+  confirming the "instant rout on contact" bug is gone. The order replay itself diverges from tick 323
+  (the AI's own attack-target choice differs once its decisions no longer follow the old per-segment
+  break-test cadence), which is the expected kind of divergence for a rules change, not a regression.
 - **Shooting** (game_rules.md 8.1-8.3, simplified): only the basic bow-type missile codes
   (`engine.ARCHER_MISSILE_CODES`: bow, crossbow, Wood Elf bow, short bow, longbow) are modelled as
   shooters — artillery and special weapons are not. A stationary, non-engaged missile regiment fires at
