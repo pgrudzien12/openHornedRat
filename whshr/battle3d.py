@@ -387,15 +387,15 @@ def render(installation, battle_file, output, width=1280, height=900, diagnostic
     sprite_names = sprite_files(game, "troops")
     units = [unit for army in battle["armies"] + (battle["merc"] or {}).get("armies", [])
              for unit in army["units"]]
-    sprite_files = list(sprites["files"])
-    bundled = {name.casefold() for name, _ in sprite_files}
+    sprite_file_data = list(sprites["files"])
+    bundled = {name.casefold() for name, _ in sprite_file_data}
     for name in {sprite_names.get((unit["sprites"] or "").split(",", 1)[0].casefold()) for unit in units} - {None}:
         for suffix in (".FOL", ".BOP", ".PAL"):
             filename = name + suffix
             if filename.casefold() in bundled:
                 continue
             try:
-                sprite_files.append((filename, game.binary_file(filename).read_bytes()))
+                sprite_file_data.append((filename, game.binary_file(filename).read_bytes()))
                 bundled.add(filename.casefold())
             except FileNotFoundError:
                 pass
@@ -423,7 +423,7 @@ def render(installation, battle_file, output, width=1280, height=900, diagnostic
     for unit in units:
         base = sprite_names.get((unit["sprites"] or "").split(",", 1)[0].casefold())
         direction = sprite_direction(yaw, unit["set"].get("dir"))
-        frame = base and _sprite_frame(sprite_files, base, palette, direction)
+        frame = base and _sprite_frame(sprite_file_data, base, palette, direction)
         if frame is None or "x" not in unit["set"] or "y" not in unit["set"]:
             continue
         positions, count, ranks = _formation(unit)

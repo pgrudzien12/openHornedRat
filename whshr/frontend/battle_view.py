@@ -310,7 +310,6 @@ class BattleView(SceneView):
         super().draw()
         field, camera = self.scene.field, self.camera
         width, height = self.gpu.target.size
-        self.hud.draw(width, height)
         projection = camera.projection(width, height, field.width, field.height,
                                        field.ground_height(camera.target_x, camera.target_y))
         self.camera_buffer.write(CAMERA.pack(
@@ -324,6 +323,7 @@ class BattleView(SceneView):
         self.soldiers = self.sprites.instance_count = len(instances) // INSTANCE.size
         self.mesh.render()
         self.sprites.render()
+        self.hud.draw(width, height)
 
     def release(self):
         for resource in (self.mesh, self.sprites, self.vertex_buffer, self.instance_buffer, self.camera_buffer,

@@ -8,9 +8,6 @@ from . import ai, combat, formation
 from .battle_events import BattleEvent
 from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, stat_fields
 from .script import load_battle
-from dotenv import load_dotenv
-
-load_dotenv()
 
 TICK_SECONDS = 0.1  # the battle clock ticks every 100 ms (game_rules.md, "Battle clock")
 
