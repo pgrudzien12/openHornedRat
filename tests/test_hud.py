@@ -20,7 +20,7 @@ sys.modules.setdefault("zengl", types.ModuleType("zengl"))
 
 from whshr.engine import Battle, Regiment
 from whshr.battlefield import SpriteFrame, SpriteSheet
-from whshr.frontend.battle_view import BattleView
+from whshr.frontend.battle_view import BANNER_MARKER_RAISE, BattleView, INSTANCE
 from whshr.frontend.hud import Hud, MINIMAP_SIZE
 
 
@@ -46,7 +46,7 @@ class HudTests(unittest.TestCase):
         self.assertEqual(self.hud.minimap_position((1263, 299)), (1000.0, 0.0))
         self.assertIsNone(self.hud.minimap_position((500, 300)))
 
-    def test_given_a_banner_marker_when_rasterized_then_its_bottom_middle_is_the_regiment_position(self):
+    def test_given_an_active_bannered_regiment_when_the_minimap_is_drawn_then_its_marker_is_bottom_centred(self):
         marker = SpriteFrame(3, 2, 0, 2, bytes((0, 0, 0, 0, 1, 0)))
         self.hud.field.ui_sheets["banner"] = SpriteSheet("BANNER", [marker, marker], [])
         self.hud.battle.regiments["player"].banner = "banner"
@@ -58,6 +58,20 @@ class HudTests(unittest.TestCase):
         y = round((1 - 100 / 800) * (MINIMAP_SIZE[1] - 1))
         offset = (y * MINIMAP_SIZE[0] + x) * 4
         self.assertEqual(rgba[offset:offset + 4], bytes((12, 34, 56, 255)))
+
+    def test_given_a_destroyed_bannered_regiment_when_the_minimap_is_drawn_then_its_marker_is_absent(self):
+        marker = SpriteFrame(3, 2, 0, 2, bytes((0, 0, 0, 0, 1, 0)))
+        self.hud.field.ui_sheets["banner"] = SpriteSheet("BANNER", [marker, marker], [])
+        player = self.hud.battle.regiments["player"]
+        player.banner, player.models = "banner", 0
+        self.hud._minimap_background = bytes((1, 2, 3, 255)) * (MINIMAP_SIZE[0] * MINIMAP_SIZE[1])
+
+        rgba = self.hud._minimap_rgba()
+
+        x = round(100 / 1000 * (MINIMAP_SIZE[0] - 1))
+        y = round((1 - 100 / 800) * (MINIMAP_SIZE[1] - 1))
+        offset = (y * MINIMAP_SIZE[0] + x) * 4
+        self.assertEqual(rgba[offset:offset + 4], bytes((1, 2, 3, 255)))
 
     def test_given_a_selected_regiment_when_commands_are_checked_then_only_valid_orders_enable(self):
         player = self.hud.battle.regiments["player"]
@@ -104,6 +118,67 @@ class BattleViewHudInputTests(unittest.TestCase):
 
         self.assertEqual(view.events(event), (("move_to", 123.0, 456.0),))
         view._ground_click.assert_not_called()
+
+    def test_given_no_selected_unit_when_the_minimap_is_clicked_then_it_does_not_issue_or_leak_an_order(self):
+        hud = SimpleNamespace(minimap_position=lambda pos: (123.0, 456.0), hit_test=lambda pos: None,
+                              occupies=lambda pos: True, set_pressed=Mock())
+        view = self._view(hud, selected_id=None)
+        event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+
+        self.assertEqual(view.events(event), ())
+        view._ground_click.assert_not_called()
+
+    def test_given_a_move_button_when_held_then_its_pressed_art_stays_visible_until_mouse_up(self):
+        hud = SimpleNamespace(minimap_position=lambda pos: None, hit_test=lambda pos: "move",
+                              occupies=lambda pos: True, set_pressed=Mock())
+        view = self._view(hud)
+        down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+        up = SimpleNamespace(type=pygame.MOUSEBUTTONUP, button=1, pos=(100, 100))
+
+        self.assertEqual(view.events(down), ())
+        self.assertEqual(view.order_mode, "move")
+        self.assertEqual(hud.set_pressed.call_args_list[-1].args, ("move",))
+        self.assertEqual(view.events(up), ())
+        self.assertEqual(hud.set_pressed.call_args_list[-1].args, (None,))
+
+    def test_given_a_right_click_that_ends_on_hud_chrome_then_it_does_not_issue_a_ground_order(self):
+        hud = SimpleNamespace(minimap_position=lambda pos: None, hit_test=lambda pos: None,
+                              occupies=lambda pos: pos == (20, 20), set_pressed=Mock())
+        view = self._view(hud)
+        down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=3, pos=(10, 10))
+        up = SimpleNamespace(type=pygame.MOUSEBUTTONUP, button=3, pos=(20, 20))
+
+        self.assertEqual(view.events(down), ())
+        self.assertEqual(view.events(up), ())
+        view._ground_click.assert_not_called()
+
+
+class BattleBannerVisibilityTests(unittest.TestCase):
+    def _view_with_banner(self, active=True):
+        regiment = Regiment("player", "Player", 100, 200, 0, True, models=1 if active else 0,
+                            banner="banner")
+        marker = SpriteFrame(32, 32, 0, 32, bytes(32 * 32))
+        banner = SpriteSheet("BANNER", [marker, marker, marker], [],
+                             rects=[(0, 0, 32, 32)] * 3)
+        field = SimpleNamespace(
+            ui_sheets={"banner": banner}, sprite_sheet=lambda resource: None,
+            ground_height=lambda x, y: 2.0,
+        )
+        view = BattleView.__new__(BattleView)
+        view.scene = SimpleNamespace(field=field, battle=Battle(1000, 800, [regiment]), selected_id="player")
+        view.camera = SimpleNamespace(yaw=180)
+        view.capacity = 1
+        return view
+
+    def test_given_an_active_bannered_regiment_when_the_battle_view_draws_then_one_banner_marker_is_visible(self):
+        instance = INSTANCE.unpack(self._view_with_banner()._instances())
+
+        self.assertEqual(instance[:3], (12.5, 2.0 + BANNER_MARKER_RAISE, 25.0))
+        self.assertEqual(instance[3:7], (0.0, 0.0, 32.0, 32.0))
+        self.assertEqual(instance[7:], (16.0, 32.0, 1.0))
+
+    def test_given_a_destroyed_bannered_regiment_when_the_battle_view_draws_then_no_banner_marker_is_visible(self):
+        self.assertEqual(self._view_with_banner(active=False)._instances(), b"")
 
 
 if __name__ == "__main__":
