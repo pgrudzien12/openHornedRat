@@ -74,7 +74,8 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
     context = scene_context(installation)
     ctx = open_window(size, hidden)
     gpu = Gpu(ctx, size)
-    overlay = gpu.text((420, 140))
+    # Wider debug overlay; unrelated to the battle HUD.
+    overlay = gpu.text((820, 140))
     initial = (BattleScene(AssetId("vanilla", "battle", Path(battle).stem.casefold()), log_dir=log_dir, seed=seed)
                if battle else IntroScene(log_dir=log_dir, seed=seed))
     machine = SceneMachine(initial, context)

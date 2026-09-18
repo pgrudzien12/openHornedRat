@@ -8,6 +8,9 @@ from . import ai, combat, formation
 from .battle_events import BattleEvent
 from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, stat_fields
 from .script import load_battle
+from dotenv import load_dotenv
+
+load_dotenv()
 
 TICK_SECONDS = 0.1  # the battle clock ticks every 100 ms (game_rules.md, "Battle clock")
 
@@ -66,6 +69,8 @@ class Regiment:
     models: int = 1
     ranks: int = 1
     sprite: str | None = None  # script troop sprite resource, e.g. "ClanRats"
+    banner: str | None = None  # script banner resource
+    portrait: str | None = None  # leader portrait resource
     speed_per_tick: float = DEFAULT_SPEED_PER_TICK  # BTS world units per 100 ms tick, moving freely
     positions: list = field(default_factory=list)  # current per-model (x, y); lazily seeded in formation
     walking: bool = False  # true while the anchor or any model is still travelling
@@ -235,6 +240,8 @@ class Battle:
                     identifier, unit["name"], float(position["x"]), float(position["y"]),
                     int(position.get("dir") or 0) % 512, player, models=models, ranks=ranks,
                     sprite=(unit.get("sprites") or "").split(",", 1)[0].strip() or None,
+                    banner=unit.get("banner") or None,
+                    portrait=(unit.get("leader") or {}).get("portrait") or None,
                     speed_per_tick=speed_per_tick(profile.get("M"), profile.get("I")),
                     **_decode_combat_profile(unit),
                 ))

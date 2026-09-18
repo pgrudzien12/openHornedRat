@@ -53,13 +53,19 @@ def furniture_meshes(game):
     return {entry["name"].casefold(): entry["file"] + ".XOF" for entry in furniture if entry["file"]}
 
 
-def troop_sprite_files(game):
-    """Script troop sprite resource (casefolded) -> FOL/BOP/PAL file base."""
+def sprite_files(game, category):
+    """Sprite resources in one sprite-table category -> FOL/BOP/PAL file base."""
+    return resource_files(game, {category})
+
+
+def resource_files(game, categories=None):
+    """Return sprite resources by name, optionally restricted to sprite-table categories."""
     table = legacy.module("spritemap_build")
     records = [dict(entry) for entry in exe_tables(game.require("WHSHR.EXE"))[0]]  # assign_categories mutates.
     table.assign_categories(records)
+    categories = set(categories) if categories is not None else None
     return {entry["name"].casefold(): entry["file"] for entry in records
-            if entry["category"] == "troops" and entry["file"]}
+            if entry["file"] and (categories is None or entry["category"] in categories)}
 
 
 def sprite_direction(camera_yaw, script_dir):
@@ -255,6 +261,7 @@ class Battlefield:
     atlas_size: tuple
     atlas: bytes
     sheets: dict  # troop sprite resource name (casefolded) -> SpriteSheet
+    ui_sheets: dict  # global HUD and per-unit portrait/banner sheets
     missing_scenery: list
 
     @property
@@ -315,7 +322,8 @@ def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=D
         bake_mesh(mesh, len(ground["textures"]), len(scenery["textures"]), vertex, normal, ambient, light, vertices)
 
     bundled = {name.casefold(): data for name, data in sprites["files"]}
-    names = troop_sprite_files(game)
+    names = sprite_files(game, "troops")
+    ui_names = resource_files(game, {"portraits", "banners", "backgrounds", "special", "terrain"})
     sheets, by_base = {}, {}
     for unit in script_units(script):
         resource = (unit["sprites"] or "").split(",", 1)[0].strip()
@@ -332,6 +340,35 @@ def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=D
         if by_base[base] is not None:
             sheets[resource.casefold()] = by_base[base]
     atlas_size, atlas = build_atlas([sheet for sheet in by_base.values() if sheet is not None])
+    ui_sheets, ui_by_base = {}, {}
+
+    def load_ui(base):
+        if not base or base in ui_by_base:
+            return
+        try:
+            ui_by_base[base] = read_sprite_sheet(
+                base, _sprite_file(game, bundled, base + ".FOL"),
+                _sprite_file(game, bundled, base + ".BOP"),
+                _sprite_file(game, bundled, base + ".PAL", required=False),
+            )
+        except (FileNotFoundError, ValueError):
+            ui_by_base[base] = None
+
+    # These are engine-global assets rather than files listed in SPRITES.PBX.
+    load_ui("ICONS")
+    load_ui("BACKALL")
+    portrait_bg = script["field"].get("portrait_bg")
+    load_ui(portrait_bg)
+    ui_resources = []
+    for unit in script_units(script):
+        for resource in (unit.get("banner"), (unit.get("leader") or {}).get("portrait")):
+            if resource:
+                base = ui_names.get(resource.casefold())
+                load_ui(base)
+                ui_resources.append((resource, base))
+    for resource, base in (("ICONS", "ICONS"), ("BACKALL", "BACKALL"), (portrait_bg, portrait_bg), *ui_resources):
+        if resource and base in ui_by_base and ui_by_base[base] is not None:
+            ui_sheets[resource.casefold()] = ui_by_base[base]
     palette = load_rgb_palette(game.binary_file((script["field"]["palette"] or "standard") + ".PAL"))
-    return Battlefield(script, terrain, vertices, size, layers, palette, atlas_size, atlas, sheets,
+    return Battlefield(script, terrain, vertices, size, layers, palette, atlas_size, atlas, sheets, ui_sheets,
                        sorted(set(missing)))

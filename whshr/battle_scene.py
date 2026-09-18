@@ -2,7 +2,7 @@
 
 from . import battle_log, combat
 from .assets import AssetId
-from .battlefield import troop_sprite_files
+from .battlefield import sprite_files
 from .clock import FixedStepClock
 from .engine import Battle, DEFAULT_SEED
 from .result_scene import ResultScene
@@ -42,7 +42,7 @@ class BattleScene(Scene):
         self._log_closed = False
         if self.logger.enabled:
             try:
-                sprite_bases = troop_sprite_files(context.locator.installation)
+                sprite_bases = sprite_files(context.locator.installation, "troops")
             except Exception:  # a header must never block the battle; sprite_base then stays unresolved
                 sprite_bases = {}
             self.logger.write_header(

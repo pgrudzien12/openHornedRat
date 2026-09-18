@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -94,7 +95,7 @@ def main(argv=None):
     engine_parser = commands.add_parser(
         "engine", help="run the real-time engine (needs the packages in requirements-engine.txt)"
     )
-    engine_parser.add_argument("installation", type=Path, help="WARFB installation directory")
+    engine_parser.add_argument("installation", type=Path, nargs="?", default=None, help="WARFB installation directory")
     engine_parser.add_argument("--width", type=int, default=1280, help="window width (default: 1280)")
     engine_parser.add_argument("--height", type=int, default=800, help="window height (default: 800)")
     engine_parser.add_argument("--skip-intro", action="store_true", help="start in the main menu")
@@ -186,7 +187,11 @@ def main(argv=None):
                                help="print a readable per-tick account of orders and events")
     replay_parser.add_argument("--until", type=int, help="stop replay at this tick")
     args = parser.parse_args(argv)
-
+    if args.installation is None:
+        warfb = os.getenv("WARFB")
+        if warfb is None:
+            parser.error("installation directory must be specified either as an argument or via the WARFB environment variable")
+        args.installation = Path(warfb)
     if args.command == "check":
         return 0 if check(args.installation) else 1
     if args.command == "catalog":

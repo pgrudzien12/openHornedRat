@@ -10,6 +10,10 @@ screenshots/
 # Local virtual environment for the runtime frontend (requirements-engine.txt).
 .venv/
 
+# Local editor and environment configuration.
+.env
+.vscode/
+
 # Machine-specific launcher with a local installation path.
 run-local.sh
 

@@ -8,7 +8,7 @@ from pathlib import Path
 from . import formation, legacy
 from .battlefield import (  # noqa: F401 (DEFAULT_LIGHT and WORLD_PER_MESH are part of this module's interface)
     DEFAULT_LIGHT, WORLD_PER_MESH, container, face_shade, furniture_meshes, mesh_assets, scenery_transform,
-    sprite_direction, troop_sprite_files,
+    sprite_direction, sprite_files,
 )
 from .image import load_rgb_palette, write_png
 from .paths import Installation
@@ -384,7 +384,7 @@ def render(installation, battle_file, output, width=1280, height=900, diagnostic
         renderer.triangle(points, depths, uv, texture, transparent, shade, projection.perspective)
 
     palette = load_rgb_palette(game.binary_file("STANDARD.PAL"))
-    sprite_names = troop_sprite_files(game)
+    sprite_names = sprite_files(game, "troops")
     units = [unit for army in battle["armies"] + (battle["merc"] or {}).get("armies", [])
              for unit in army["units"]]
     sprite_files = list(sprites["files"])

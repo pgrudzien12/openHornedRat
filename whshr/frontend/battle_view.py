@@ -20,6 +20,7 @@ from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, sprite_d
 from ..camera import BattleCamera
 from ..formation import SPRITE_PIXEL_WORLD_UNITS
 from .scene_view import SceneView
+from .hud import Hud
 
 SKY = (112, 150, 196)
 NEAR, FAR = 0.5, 4000.0  # mesh units
@@ -199,6 +200,9 @@ class BattleView(SceneView):
             topology="triangle_strip", vertex_count=4, instance_count=0,
         )
 
+        self.hud = Hud(self.gpu, field)
+        self.hud.bind_battle(scene.battle)
+
     def events(self, event):
         camera = self.camera
         if event.type == pygame.MOUSEWHEEL:
@@ -241,6 +245,7 @@ class BattleView(SceneView):
         x, y = ground[0] * WORLD_PER_MESH, ground[1] * WORLD_PER_MESH
         regiment_id = self.scene.battle.regiment_at(x, y)
         if regiment_id is not None:
+            self.hud.set_portrait(regiment_id)
             return (("select", regiment_id),)
         if self.scene.selected_id is not None:
             enemy_id = self.scene.battle.regiment_at(x, y, player_only=False)
@@ -305,6 +310,7 @@ class BattleView(SceneView):
         super().draw()
         field, camera = self.scene.field, self.camera
         width, height = self.gpu.target.size
+        self.hud.draw(width, height)
         projection = camera.projection(width, height, field.width, field.height,
                                        field.ground_height(camera.target_x, camera.target_y))
         self.camera_buffer.write(CAMERA.pack(
@@ -323,3 +329,4 @@ class BattleView(SceneView):
         for resource in (self.mesh, self.sprites, self.vertex_buffer, self.instance_buffer, self.camera_buffer,
                          self.textures, self.atlas, self.palette):
             self.gpu.ctx.release(resource)
+        self.hud.release()
