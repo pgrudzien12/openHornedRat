@@ -19,8 +19,9 @@ sys.modules.setdefault("pygame", pygame)
 sys.modules.setdefault("zengl", types.ModuleType("zengl"))
 
 from whshr.engine import Battle, Regiment
+from whshr.battlefield import SpriteFrame, SpriteSheet
 from whshr.frontend.battle_view import BattleView
-from whshr.frontend.hud import Hud
+from whshr.frontend.hud import Hud, MINIMAP_SIZE
 
 
 class HudTests(unittest.TestCase):
@@ -28,7 +29,7 @@ class HudTests(unittest.TestCase):
         player = Regiment("player", "Player", 100, 100, 0, True, models=10, ranks=2)
         enemy = Regiment("enemy", "Enemy", 700, 600, 0, False, models=10, ranks=2)
         self.hud = Hud.__new__(Hud)
-        self.hud.field = SimpleNamespace(width=1000, height=800)
+        self.hud.field = SimpleNamespace(width=1000, height=800, palette=[(0, 0, 0), (12, 34, 56)], ui_sheets={})
         self.hud.battle = Battle(1000, 800, [player, enemy])
         self.hud.selected = "player"
         self.hud._draw_size = (1280, 720)
@@ -44,6 +45,19 @@ class HudTests(unittest.TestCase):
         self.assertEqual(self.hud.minimap_position((1024, 16)), (0.0, 800.0))
         self.assertEqual(self.hud.minimap_position((1263, 299)), (1000.0, 0.0))
         self.assertIsNone(self.hud.minimap_position((500, 300)))
+
+    def test_given_a_banner_marker_when_rasterized_then_its_bottom_middle_is_the_regiment_position(self):
+        marker = SpriteFrame(3, 2, 0, 2, bytes((0, 0, 0, 0, 1, 0)))
+        self.hud.field.ui_sheets["banner"] = SpriteSheet("BANNER", [marker, marker], [])
+        self.hud.battle.regiments["player"].banner = "banner"
+        self.hud._minimap_background = bytes((1, 2, 3, 255)) * (MINIMAP_SIZE[0] * MINIMAP_SIZE[1])
+
+        rgba = self.hud._minimap_rgba()
+
+        x = round(100 / 1000 * (MINIMAP_SIZE[0] - 1))
+        y = round((1 - 100 / 800) * (MINIMAP_SIZE[1] - 1))
+        offset = (y * MINIMAP_SIZE[0] + x) * 4
+        self.assertEqual(rgba[offset:offset + 4], bytes((12, 34, 56, 255)))
 
     def test_given_a_selected_regiment_when_commands_are_checked_then_only_valid_orders_enable(self):
         player = self.hud.battle.regiments["player"]

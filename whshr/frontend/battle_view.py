@@ -34,6 +34,7 @@ CLICK_DRAG_THRESHOLD = 4  # pixels; a right button press/release closer than thi
 # per-frame animation timing is not traced (notes/game_rules.md, "Animation bytecode"): this is a
 # documented placeholder, not a measured value.
 WALK_ANIMATION_FPS = 8.0
+BANNER_MARKER_RAISE = 4.0  # mesh units: above a 64-pixel troop sprite, below the camera's horizon
 EVENT_LOG_LINES = 3  # battle events shown in the debug overlay (whshr.engine.Battle.events, per tick)
 INSTANCE = struct.Struct("10f")  # foot position (mesh), atlas rectangle (pixels), anchor (pixels), selected
 CAMERA = struct.Struct("24f")
@@ -173,7 +174,8 @@ class BattleView(SceneView):
                                   array=len(field.texture_layers))
         self.atlas = ctx.image(field.atlas_size, "r8unorm", field.atlas)
         self.palette = ctx.image((256, 1), "rgba8unorm", b"".join(bytes((*rgb, 255)) for rgb in field.palette))
-        self.capacity = max(1, sum(regiment.models for regiment in scene.battle.regiments.values()))
+        self.capacity = max(1, sum(regiment.models for regiment in scene.battle.regiments.values())
+                            + len(scene.battle.regiments))
         self.instance_buffer = ctx.buffer(size=self.capacity * INSTANCE.size)
 
         camera_layout = {"name": "Camera", "binding": 0}
@@ -305,10 +307,8 @@ class BattleView(SceneView):
         field, yaw, selected_id, data = self.scene.field, self.camera.yaw, self.scene.selected_id, bytearray()
         for regiment in self.scene.battle.regiments.values():
             sheet = field.sprite_sheet(regiment.sprite)
-            if sheet is None:
-                continue
             selected = 1.0 if regiment.identifier == selected_id else 0.0
-            if regiment.active:
+            if sheet is not None and regiment.active:
                 if regiment.in_melee:
                     action, phase = "attack", int(regiment.animation_seconds * WALK_ANIMATION_FPS)
                 elif regiment.missile_range and not regiment.moving and not regiment.attack_target:
@@ -322,12 +322,20 @@ class BattleView(SceneView):
                 for x, y in regiment.model_positions():
                     data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
                                           *rect, frame.anchor_x, frame.anchor_y, selected)
-            # Corpses (game_rules.md, "Panic": models that died stay on the ground where they fell).
-            for x, y, corpse_direction in regiment.corpses:
-                index = sheet.frame_index("dead", 0, sprite_direction(yaw, corpse_direction))
-                frame, rect = sheet.frames[index], sheet.rects[index]
-                data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
-                                      *rect, frame.anchor_x, frame.anchor_y, 0.0)
+            if sheet is not None:
+                # Corpses (game_rules.md, "Panic": models that died stay on the ground where they fell).
+                for x, y, corpse_direction in regiment.corpses:
+                    index = sheet.frame_index("dead", 0, sprite_direction(yaw, corpse_direction))
+                    frame, rect = sheet.frames[index], sheet.rects[index]
+                    data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
+                                          *rect, frame.anchor_x, frame.anchor_y, 0.0)
+            banner = field.ui_sheets.get((regiment.banner or "").casefold())
+            if regiment.active and banner is not None and len(banner.frames) > 2 and banner.rects:
+                frame, rect = banner.frames[2], banner.rects[2]
+                data += INSTANCE.pack(regiment.x / WORLD_PER_MESH,
+                                      field.ground_height(regiment.x, regiment.y) + BANNER_MARKER_RAISE,
+                                      regiment.y / WORLD_PER_MESH,
+                                      *rect, frame.width / 2, frame.height, selected)
         return bytes(data[:self.capacity * INSTANCE.size])
 
     def draw(self):
@@ -344,7 +352,9 @@ class BattleView(SceneView):
         instances = self._instances()
         if instances:
             self.instance_buffer.write(instances)
-        self.soldiers = self.sprites.instance_count = len(instances) // INSTANCE.size
+        self.sprites.instance_count = len(instances) // INSTANCE.size
+        self.soldiers = sum(regiment.models for regiment in self.scene.battle.regiments.values()
+                            if regiment.active)
         self.mesh.render()
         self.sprites.render()
         self.hud.set_selected(self.scene.selected_id)

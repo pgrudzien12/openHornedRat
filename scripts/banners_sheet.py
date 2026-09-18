@@ -14,7 +14,7 @@ from whshr.paths import Installation
 from whshr.script import load_battle, resource_name
 
 
-FRAME_ROLES = ("HUD 72X104", "TROOP 16X24", "MAP 32X32")
+FRAME_ROLES = ("HUD 72X104", "MAP 16X24", "TROOP 32X32")
 
 
 def banner_sheets(game, battle_name):

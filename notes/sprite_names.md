@@ -50,7 +50,7 @@ Each command therefore looks names up in its own category.
 | 4–78 | troops (`MercCaptain`→`MCCAPT` … `RockLobber`→`ROCKLOB`) | `troopsprites`, `loadspr` | 16–312 type-4 frames, 32×64/64×64/128×128 |
 | 79–122 | leader portraits (`Commander`→`COMM`, `EshinAss`→`SKA4` …) | `leaderportrait` | 6–8 type-1 frames (face + mouth/eye frames) |
 | 123 | `AllBGs`→`BACKALL` | ? | 21 × 120×152 type-1 frames |
-| 124–186 | banners (`BannerMrcCmdr`→`BANMC` … `BannerDragon`→`BANDRAG`) | `banner` | 3 frames: 72×104 HUD, 16×24 troop marker, 32×32 minimap marker |
+| 124–186 | banners (`BannerMrcCmdr`→`BANMC` … `BannerDragon`→`BANDRAG`) | `banner` | 3 frames: 72×104 HUD, 16×24 minimap marker, 32×32 troop marker |
 | 187–214 | animated terrain tiles (`u_water`, `Lava*`, `G_Lava*`, `BFK_*`, `U_SArch*`, `TorFlam`, `Beam`) | `loadspr` | 4 or 8 type-1 frames |
 | 215–219 | `PlanMap`→`MAP1`, `PortBG`→`MAP1`, `VoidBin`, `Buttons`→`icons`, `Portrait` | engine | placeholders |
 
@@ -204,7 +204,7 @@ data.
 
 `python3 scripts/banners_sheet.py <WARFB> BF001.BTS extracted/bf001_banners.png --scale=2` renders
 every distinct banner used by that battle. Visual inspection confirms frame 0 is the full HUD
-banner, frame 1 the compact vertical troop marker, and frame 2 the square minimap marker.
+banner, frame 1 the compact vertical minimap marker, and frame 2 the square in-world troop marker.
 - For renderers (e.g. `render_battle.py`): `names['troopsprites'][n]['file']` gives the `.FOL`
   base name, and `names['placefurniture'][n]['file']` gives the `.XOF` object in the battle's `SCENERY.PBX`.
 

@@ -339,7 +339,6 @@ def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=D
                 by_base[base] = None
         if by_base[base] is not None:
             sheets[resource.casefold()] = by_base[base]
-    atlas_size, atlas = build_atlas([sheet for sheet in by_base.values() if sheet is not None])
     ui_sheets, ui_by_base = {}, {}
 
     def load_ui(base):
@@ -361,18 +360,25 @@ def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=D
     load_ui(planmap)
     portrait_bg = script["field"].get("portrait_bg")
     load_ui(portrait_bg)
-    ui_resources = []
+    ui_resources, banner_bases = [], {}
     for unit in script_units(script):
-        for resource in (resource_name(unit.get("banner")),
-                         resource_name((unit.get("leader") or {}).get("portrait"))):
+        banner = resource_name(unit.get("banner"))
+        for resource in (banner, resource_name((unit.get("leader") or {}).get("portrait"))):
             if resource:
                 base = ui_names.get(resource.casefold())
                 load_ui(base)
                 ui_resources.append((resource, base))
+                if resource == banner and base:
+                    banner_bases[base] = None
     for resource, base in (("ICONS", "ICONS"), ("BACKALL", "BACKALL"), (planmap, planmap),
                            (portrait_bg, portrait_bg), *ui_resources):
         if resource and base in ui_by_base and ui_by_base[base] is not None:
             ui_sheets[resource.casefold()] = ui_by_base[base]
+    # Banner frame 2 is an in-world regiment marker, so these sheets also need atlas rectangles.
+    atlas_sheets = [sheet for sheet in by_base.values() if sheet is not None]
+    atlas_sheets.extend(ui_by_base[base] for base in banner_bases
+                        if ui_by_base.get(base) is not None)
+    atlas_size, atlas = build_atlas(atlas_sheets)
     palette = load_rgb_palette(game.binary_file((script["field"]["palette"] or "standard") + ".PAL"))
     return Battlefield(script, terrain, vertices, size, layers, palette, atlas_size, atlas, sheets, ui_sheets,
                        sorted(set(missing)))

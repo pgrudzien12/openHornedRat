@@ -14,6 +14,7 @@ ICON_INDEX = {
 BUTTON_SIZE = 48
 # Native battle-map footprint: 240 × 284 pixels.
 MINIMAP_SIZE = (240, 284)
+PANEL_HEIGHT = 152
 
 
 def frame_rgba(frame, palette):
@@ -224,10 +225,24 @@ class Hud:
             x = round(regiment.x / self.field.width * (width - 1))
             y = round((1 - regiment.y / self.field.height) * (height - 1))
             color = (65, 139, 221, 255) if regiment.player else (205, 62, 54, 255)
-            fill(x - 2, y - 2, 5, color)
+            banner = self._sheet(regiment.banner)
+            marker = banner.frames[1] if banner is not None and len(banner.frames) > 1 else None
             if regiment.identifier == self.selected:
                 fill(x - 3, y - 3, 7, (244, 231, 127, 255))
-                fill(x - 1, y - 1, 3, color)
+            if marker is None:
+                fill(x - 2, y - 2, 5, color)
+                continue
+            # Frame 1 is the compact map marker. Its FOL anchor is not useful here:
+            # centre it on X and put its bottom edge exactly at the regiment position.
+            left, top = x - marker.width // 2, y - marker.height + 1
+            for marker_y in range(marker.height):
+                for marker_x in range(marker.width):
+                    index = marker.pixels[marker_y * marker.width + marker_x]
+                    if index:
+                        offset_x, offset_y = left + marker_x, top + marker_y
+                        if 0 <= offset_x < width and 0 <= offset_y < height:
+                            offset = (offset_y * width + offset_x) * 4
+                            pixels[offset:offset + 4] = bytes((*self.field.palette[index], 255))
         return bytes(pixels)
 
     def draw(self, width, height):
@@ -238,9 +253,15 @@ class Hud:
         if self.selected is not None:
             panel = self.banner or self.background
             if panel:
-                panel.draw(16, height - 168, 240, 152)
+                if self.banner:
+                    banner_width = round(PANEL_HEIGHT * self.banner.size[0] / self.banner.size[1])
+                    panel.draw(16, height - 168, banner_width, PANEL_HEIGHT)
+                else:
+                    panel.draw(16, height - 168, 240, PANEL_HEIGHT)
             if self.portrait:
-                self.portrait.draw(32, height - 160, 120, 120)
+                portrait_height = 112
+                portrait_width = round(portrait_height * self.portrait.size[0] / self.portrait.size[1])
+                self.portrait.draw(24, height - 152, portrait_width, portrait_height)
             self.caption.set_lines(self.current_stats_lines())
             self.caption.draw(156, height - 160)
 
