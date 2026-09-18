@@ -270,6 +270,18 @@ class Battle:
         regiment.target_x = regiment.target_y = None
         regiment.attack_target = target_id
 
+    def order_halt(self, identifier):
+        """Cancel the selected regiment's current movement or charge order in place."""
+        regiment = self.regiments[identifier]
+        if not regiment.player:
+            raise ValueError(f"{identifier} is not player-controlled")
+        if regiment.routing:
+            raise ValueError(f"{identifier} is routing and cannot be ordered")
+        if regiment.in_melee:
+            raise ValueError(f"{identifier} is in melee and cannot be ordered")
+        regiment.target_x = regiment.target_y = None
+        regiment.attack_target = None
+
     def snapshot(self):
         """Per-regiment state for `whshr.battle_log` (a segment snapshot or the final battle state):
         position, facing, models, corpse count, and every order/engagement flag needed to trace a

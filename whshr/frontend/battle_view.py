@@ -163,6 +163,7 @@ class BattleView(SceneView):
         self.camera = replace(self.initial_camera)
         self.soldiers = 0
         self._right_down = None  # screen position of an unreleased right-button press, for click detection
+        self.order_mode = None  # a HUD Move/Attack click changes how the next battlefield click is interpreted
         self.event_log = deque(maxlen=EVENT_LOG_LINES)  # recent whshr.engine.Battle.events, newest last
 
         ctx.includes["camera"] = CAMERA_BLOCK
@@ -217,14 +218,28 @@ class BattleView(SceneView):
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_HOME:
             self.camera = replace(self.initial_camera)
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.order_mode = None
             return (("deselect",),)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            minimap_position = self.hud.minimap_position(event.pos)
+            if minimap_position is not None:
+                self.order_mode = None
+                return (("move_to", *minimap_position),) if self.scene.selected_id is not None else ()
+            action = self.hud.hit_test(event.pos)
+            if action == "halt":
+                return (("halt",),)
+            if action in {"move", "attack"}:
+                self.order_mode = action
+                return ()
+            if self.hud.occupies(event.pos):
+                return ()
             return self._ground_click(event.pos)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
-            self._right_down = event.pos
+            self._right_down = None if self.hud.occupies(event.pos) else event.pos
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 3:
             start, self._right_down = self._right_down, None
-            if start is not None and math.dist(start, event.pos) <= CLICK_DRAG_THRESHOLD:
+            if (start is not None and not self.hud.occupies(event.pos)
+                    and math.dist(start, event.pos) <= CLICK_DRAG_THRESHOLD):
                 return self._ground_click(event.pos)
         return ()
 
@@ -244,11 +259,15 @@ class BattleView(SceneView):
             return ()
         x, y = ground[0] * WORLD_PER_MESH, ground[1] * WORLD_PER_MESH
         regiment_id = self.scene.battle.regiment_at(x, y)
-        if regiment_id is not None:
-            self.hud.set_portrait(regiment_id)
+        if regiment_id is not None and self.order_mode is None:
             return (("select", regiment_id),)
         if self.scene.selected_id is not None:
             enemy_id = self.scene.battle.regiment_at(x, y, player_only=False)
+            mode, self.order_mode = self.order_mode, None
+            if mode == "attack":
+                return (("attack", enemy_id),) if enemy_id is not None else ()
+            if mode == "move":
+                return (("move_to", x, y),)
             if enemy_id is not None:
                 return (("attack", enemy_id),)
         return (("move_to", x, y),)
@@ -323,6 +342,7 @@ class BattleView(SceneView):
         self.soldiers = self.sprites.instance_count = len(instances) // INSTANCE.size
         self.mesh.render()
         self.sprites.render()
+        self.hud.set_selected(self.scene.selected_id)
         self.hud.draw(width, height)
 
     def release(self):

@@ -173,6 +173,32 @@ python3 scripts/spritemap_verify.py ".../WARFB" extracted/sprite_names/map.json 
   - `unresolved`;
   - `sprite_table` and `furniture_table`: all records;
   - `pbx_crosscheck`: per battle.
+
+## `ICONS.FOL` command frames
+
+`ICONS` is the general-purpose UI sheet (225 frames), not an eight-button battle strip. The
+runtime HUD imports this visually verified catalogue from `whshr.frontend.hud.ICON_INDEX`; entries
+with two indices are raised/pressed button pairs.
+
+| Meaning | Frames |
+|---|---:|
+| Move (boots) | 0 / 1 |
+| Attack (crossed swords) | 2 / 3 |
+| Shoot (crossed bows) | 4 / 5 |
+| Magic/special (chaos star) | 6 / 7 |
+| Halt (open hand) | 37 / 38 |
+| Hourglass/status | 46 / 47 |
+
+Frames 8/9 are a second spell/rune icon, 10/11 a skull/lightning status icon, and 35/36 a curved
+arrow over troops; none has a verified formation, withdraw, or rally meaning. Frames 58–63 are a
+wrench and directional arrows, not armour. The six armour icons documented in
+`notes/btp_sprite_leftovers.md` belong to the legacy `ICON2` sheet and must not be indexed through
+`ICONS`.
+
+`python3 scripts/icons_sheet.py <WARFB> extracted/icons_sheet.png --cols=15 --scale=2` renders
+the full labelled contact sheet using `whshr.battlefield.read_sprite_sheet`, the same decode path
+used by the engine frontend. The local render is intentionally ignored with other extracted game
+data.
 - For renderers (e.g. `render_battle.py`): `names['troopsprites'][n]['file']` gives the `.FOL`
   base name, and `names['placefurniture'][n]['file']` gives the `.XOF` object in the battle's `SCENERY.PBX`.
 

@@ -40,6 +40,24 @@ class BattleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside"):
             self.battle.order_move("player", 101, 10)
 
+    def test_given_a_moving_or_charging_player_regiment_when_halted_then_its_order_is_cancelled(self):
+        self.battle.order_move("player", 70, 10)
+        self.battle.order_halt("player")
+        self.assertFalse(self.player.moving)
+        self.assertIsNone(self.player.attack_target)
+
+        self.battle.order_attack("player", "enemy")
+        self.battle.order_halt("player")
+        self.assertFalse(self.player.moving)
+        self.assertIsNone(self.player.attack_target)
+
+    def test_given_a_routing_or_enemy_regiment_when_halted_then_the_order_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "not player-controlled"):
+            self.battle.order_halt("enemy")
+        self.player.routing = True
+        with self.assertRaisesRegex(ValueError, "routing"):
+            self.battle.order_halt("player")
+
     def test_given_documented_movement_stat_when_computing_speed_then_it_matches_the_worked_example(self):
         # game_rules.md: "An M4 I3 infantry unit covers about 9.8 inches per turn moving freely."
         per_turn_inches = speed_per_tick(4, 3) * 190 / 24  # 190 ticks per turn, 24 world units per inch

@@ -63,8 +63,7 @@ class BattleScene(Scene):
             self._log_closed = True
 
     def handle(self, event, context):
-        """Player intent from the view: ("select", id), ("deselect",), ("move_to", x, y) or
-        ("attack", enemy_id)."""
+        """Player intent from the view: select, move, attack, halt or deselect."""
         if self.logger is not None and self.logger.enabled:
             self.logger.write_order(self.battle.tick_count, event)
         kind, *args = event
@@ -88,6 +87,12 @@ class BattleScene(Scene):
                     self.battle.order_attack(self.selected_id, target_id)
                 except ValueError:
                     pass  # not an enemy regiment, the selection is routing, or the target is gone
+        elif kind == "halt":
+            if self.selected_id is not None:
+                try:
+                    self.battle.order_halt(self.selected_id)
+                except ValueError:
+                    pass  # no player selection, or the unit is routing/in melee
         return None
 
     def update(self, seconds, context):

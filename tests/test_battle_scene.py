@@ -149,6 +149,17 @@ class BattleSceneTests(unittest.TestCase):
         regiment = scene.battle.regiments["Grudgebringer_Infantry"]
         self.assertEqual(regiment.attack_target, "Clanrat_Warriors")
 
+    def test_given_a_moving_selected_regiment_when_halted_then_its_destination_is_cleared(self):
+        scene = BattleScene()
+        SceneMachine(scene, self.context)
+        scene.handle(("select", "Grudgebringer_Infantry"), self.context)
+        scene.handle(("move_to", 600.0, 600.0), self.context)
+
+        scene.handle(("halt",), self.context)
+
+        regiment = scene.battle.regiments["Grudgebringer_Infantry"]
+        self.assertFalse(regiment.moving)
+
     def test_given_a_resolved_battle_when_updated_then_it_transitions_to_the_result_scene(self):
         scene = BattleScene()
         machine = SceneMachine(scene, self.context)
