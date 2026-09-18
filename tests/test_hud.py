@@ -32,16 +32,17 @@ class HudTests(unittest.TestCase):
         self.hud.battle = Battle(1000, 800, [player, enemy])
         self.hud.selected = "player"
         self.hud._draw_size = (1280, 720)
+        self.hud.pressed_action = None
 
     def test_given_hud_chrome_when_hit_tested_then_all_drawn_regions_are_occupied(self):
-        self.assertTrue(self.hud.occupies((1070, 30)))  # minimap
+        self.assertTrue(self.hud.occupies((1030, 30)))  # minimap
         self.assertTrue(self.hud.occupies((20, 600)))   # selected-unit panel
         self.assertTrue(self.hud.occupies((1170, 550)))  # command panel
         self.assertFalse(self.hud.occupies((500, 300)))
 
     def test_given_a_minimap_pixel_when_converted_then_it_maps_to_the_battlefield_axes(self):
-        self.assertEqual(self.hud.minimap_position((1064, 16)), (0.0, 800.0))
-        self.assertEqual(self.hud.minimap_position((1263, 159)), (1000.0, 0.0))
+        self.assertEqual(self.hud.minimap_position((1024, 16)), (0.0, 800.0))
+        self.assertEqual(self.hud.minimap_position((1263, 299)), (1000.0, 0.0))
         self.assertIsNone(self.hud.minimap_position((500, 300)))
 
     def test_given_a_selected_regiment_when_commands_are_checked_then_only_valid_orders_enable(self):
@@ -54,6 +55,12 @@ class HudTests(unittest.TestCase):
         self.assertTrue(self.hud._button_enabled("halt", player))
         player.routing = True
         self.assertFalse(self.hud._button_enabled("move", player))
+
+    def test_given_a_pressed_command_when_released_then_its_visual_state_is_cleared(self):
+        self.hud.set_pressed("move")
+        self.assertEqual(self.hud.pressed_action, "move")
+        self.hud.set_pressed(None)
+        self.assertIsNone(self.hud.pressed_action)
 
 
 class BattleViewHudInputTests(unittest.TestCase):
@@ -68,7 +75,7 @@ class BattleViewHudInputTests(unittest.TestCase):
 
     def test_given_a_non_actionable_hud_click_when_handled_then_it_never_reaches_ground_picking(self):
         hud = SimpleNamespace(minimap_position=lambda pos: None, hit_test=lambda pos: None,
-                              occupies=lambda pos: True)
+                              occupies=lambda pos: True, set_pressed=Mock())
         view = self._view(hud)
         event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
 
@@ -77,7 +84,7 @@ class BattleViewHudInputTests(unittest.TestCase):
 
     def test_given_a_selected_unit_when_the_minimap_is_clicked_then_it_emits_a_move_order(self):
         hud = SimpleNamespace(minimap_position=lambda pos: (123.0, 456.0), hit_test=lambda pos: None,
-                              occupies=lambda pos: True)
+                              occupies=lambda pos: True, set_pressed=Mock())
         view = self._view(hud)
         event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
 

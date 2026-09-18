@@ -7,7 +7,7 @@ import random
 from . import ai, combat, formation
 from .battle_events import BattleEvent
 from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, stat_fields
-from .script import load_battle
+from .script import load_battle, resource_name
 
 TICK_SECONDS = 0.1  # the battle clock ticks every 100 ms (game_rules.md, "Battle clock")
 
@@ -236,9 +236,9 @@ class Battle:
                 regiments.append(Regiment(
                     identifier, unit["name"], float(position["x"]), float(position["y"]),
                     int(position.get("dir") or 0) % 512, player, models=models, ranks=ranks,
-                    sprite=(unit.get("sprites") or "").split(",", 1)[0].strip() or None,
-                    banner=unit.get("banner") or None,
-                    portrait=(unit.get("leader") or {}).get("portrait") or None,
+                    sprite=resource_name(unit.get("sprites")),
+                    banner=resource_name(unit.get("banner")),
+                    portrait=resource_name((unit.get("leader") or {}).get("portrait")),
                     speed_per_tick=speed_per_tick(profile.get("M"), profile.get("I")),
                     **_decode_combat_profile(unit),
                 ))

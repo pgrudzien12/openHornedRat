@@ -14,7 +14,7 @@ import struct
 from . import legacy, pbx
 from .image import load_rgb_palette
 from .paths import Installation
-from .script import load_battle
+from .script import load_battle, resource_name
 from .sprites import colormap_indices, decode_frame
 
 WORLD_PER_MESH = 8.0  # BTS world units per mesh (PBX/GD) unit
@@ -326,7 +326,7 @@ def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=D
     ui_names = resource_files(game, {"portraits", "banners", "backgrounds", "special", "terrain"})
     sheets, by_base = {}, {}
     for unit in script_units(script):
-        resource = (unit["sprites"] or "").split(",", 1)[0].strip()
+        resource = resource_name(unit["sprites"])
         base = names.get(resource.casefold())
         if base is None:
             continue
@@ -357,16 +357,20 @@ def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=D
     # These are engine-global assets rather than files listed in SPRITES.PBX.
     load_ui("ICONS")
     load_ui("BACKALL")
+    planmap = script["field"].get("planmap")
+    load_ui(planmap)
     portrait_bg = script["field"].get("portrait_bg")
     load_ui(portrait_bg)
     ui_resources = []
     for unit in script_units(script):
-        for resource in (unit.get("banner"), (unit.get("leader") or {}).get("portrait")):
+        for resource in (resource_name(unit.get("banner")),
+                         resource_name((unit.get("leader") or {}).get("portrait"))):
             if resource:
                 base = ui_names.get(resource.casefold())
                 load_ui(base)
                 ui_resources.append((resource, base))
-    for resource, base in (("ICONS", "ICONS"), ("BACKALL", "BACKALL"), (portrait_bg, portrait_bg), *ui_resources):
+    for resource, base in (("ICONS", "ICONS"), ("BACKALL", "BACKALL"), (planmap, planmap),
+                           (portrait_bg, portrait_bg), *ui_resources):
         if resource and base in ui_by_base and ui_by_base[base] is not None:
             ui_sheets[resource.casefold()] = ui_by_base[base]
     palette = load_rgb_palette(game.binary_file((script["field"]["palette"] or "standard") + ".PAL"))

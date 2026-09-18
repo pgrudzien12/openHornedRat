@@ -66,6 +66,21 @@ class BattleTests(unittest.TestCase):
     def test_given_a_regiment_without_a_decoded_profile_when_built_then_it_gets_the_documented_placeholder(self):
         self.assertEqual(speed_per_tick(None, None), speed_per_tick(4, 3))
 
+    def test_given_script_resources_with_variant_suffixes_when_built_then_their_resource_names_are_normalized(self):
+        source = {
+            "field": {"width": 100, "height": 100},
+            "armies": [{"units": [{
+                "id": "unit", "name": "Unit", "sprites": "ClanRats,0", "banner": "BannerHiln,0",
+                "leader": {"portrait": "Commander,0"}, "set": {"x": 10, "y": 10}, "stats": {},
+            }]}],
+            "merc": None,
+        }
+
+        regiment = Battle.from_script(source).regiments["unit"]
+
+        self.assertEqual((regiment.sprite, regiment.banner, regiment.portrait),
+                         ("ClanRats", "BannerHiln", "Commander"))
+
 
 class FormationMovementTests(unittest.TestCase):
     """Models walk to their formation slots instead of teleporting with the block."""

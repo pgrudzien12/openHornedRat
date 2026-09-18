@@ -219,13 +219,16 @@ class BattleView(SceneView):
             self.camera = replace(self.initial_camera)
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             self.order_mode = None
+            self.hud.set_pressed(None)
             return (("deselect",),)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self.hud.set_pressed(None)
             minimap_position = self.hud.minimap_position(event.pos)
             if minimap_position is not None:
                 self.order_mode = None
                 return (("move_to", *minimap_position),) if self.scene.selected_id is not None else ()
             action = self.hud.hit_test(event.pos)
+            self.hud.set_pressed(action)
             if action == "halt":
                 return (("halt",),)
             if action in {"move", "attack"}:
@@ -234,6 +237,8 @@ class BattleView(SceneView):
             if self.hud.occupies(event.pos):
                 return ()
             return self._ground_click(event.pos)
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self.hud.set_pressed(None)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
             self._right_down = None if self.hud.occupies(event.pos) else event.pos
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 3:

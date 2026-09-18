@@ -50,7 +50,7 @@ Each command therefore looks names up in its own category.
 | 4–78 | troops (`MercCaptain`→`MCCAPT` … `RockLobber`→`ROCKLOB`) | `troopsprites`, `loadspr` | 16–312 type-4 frames, 32×64/64×64/128×128 |
 | 79–122 | leader portraits (`Commander`→`COMM`, `EshinAss`→`SKA4` …) | `leaderportrait` | 6–8 type-1 frames (face + mouth/eye frames) |
 | 123 | `AllBGs`→`BACKALL` | ? | 21 × 120×152 type-1 frames |
-| 124–186 | banners (`BannerMrcCmdr`→`BANMC` … `BannerDragon`→`BANDRAG`) | `banner` | 3 frames: 72×104 type 2 + two small type-4/2 frames |
+| 124–186 | banners (`BannerMrcCmdr`→`BANMC` … `BannerDragon`→`BANDRAG`) | `banner` | 3 frames: 72×104 HUD, 16×24 troop marker, 32×32 minimap marker |
 | 187–214 | animated terrain tiles (`u_water`, `Lava*`, `G_Lava*`, `BFK_*`, `U_SArch*`, `TorFlam`, `Beam`) | `loadspr` | 4 or 8 type-1 frames |
 | 215–219 | `PlanMap`→`MAP1`, `PortBG`→`MAP1`, `VoidBin`, `Buttons`→`icons`, `Portrait` | engine | placeholders |
 
@@ -64,6 +64,8 @@ Notes:
 - `loadplanmap:MAP001` and `loadportbg:BACK14` take the 8.3 name directly. The table has only the
   placeholders `PlanMap`/`PortBG` → `MAP1`. Hypothesis: the command overwrites the file field
   of the placeholder.
+- Banner scripts conventionally include a `,0` suffix (`BannerHiln,0`). The runtime strips that
+  variant suffix before resolving the mapped sheet; retaining it prevents every banner lookup.
 
 **Furniture table**: 402 records of 60 bytes. It follows the sprite table directly; record 0 is
 `VoidFurn`. The array ends at `BFKeepEndColumn`, and the bytes after it are unrelated strings.
@@ -199,6 +201,10 @@ wrench and directional arrows, not armour. The six armour icons documented in
 the full labelled contact sheet using `whshr.battlefield.read_sprite_sheet`, the same decode path
 used by the engine frontend. The local render is intentionally ignored with other extracted game
 data.
+
+`python3 scripts/banners_sheet.py <WARFB> BF001.BTS extracted/bf001_banners.png --scale=2` renders
+every distinct banner used by that battle. Visual inspection confirms frame 0 is the full HUD
+banner, frame 1 the compact vertical troop marker, and frame 2 the square minimap marker.
 - For renderers (e.g. `render_battle.py`): `names['troopsprites'][n]['file']` gives the `.FOL`
   base name, and `names['placefurniture'][n]['file']` gives the `.XOF` object in the battle's `SCENERY.PBX`.
 

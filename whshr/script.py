@@ -147,6 +147,11 @@ def _cmd(node, key, default=None):
     return next((v for k, v in node['cmds'] if k.lower() == key.lower()), default)
 
 
+def resource_name(value):
+    """Return the resource token before the script's optional ``,N`` variant suffix."""
+    return (value or "").split(",", 1)[0].strip() or None
+
+
 def _cmds(node, key):
     return [v for k, v in node['cmds'] if k.lower() == key.lower()]
 

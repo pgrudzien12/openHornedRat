@@ -12,7 +12,8 @@ ICON_INDEX = {
 }
 
 BUTTON_SIZE = 48
-MINIMAP_SIZE = (200, 144)
+# Native battle-map footprint: 240 × 284 pixels.
+MINIMAP_SIZE = (240, 284)
 
 
 def frame_rgba(frame, palette):
@@ -33,6 +34,7 @@ class Hud:
         portrait_bg = field.script["field"].get("portrait_bg")
         self.background = self._quad(self._sheet(portrait_bg) or self._sheet("backall"), 0)
         self.banner = self.portrait = None
+        self.planmap = self._sheet(field.script["field"].get("planmap"))
         self.icons = self._sheet("icons")
         self.button_icons = {
             action: (self._quad(self.icons, pair[0]), self._quad(self.icons, pair[1]))
@@ -41,9 +43,11 @@ class Hud:
         self.caption = gpu.text((96, 144), pygame.font.Font(None, 18),
                                 color=self.color, background=(0, 0, 0, 170))
         self.minimap = ScreenQuad(gpu, MINIMAP_SIZE)
+        self._minimap_background = self._minimap_background_rgba()
         self.selected = None
         self.battle = None
         self._draw_size = None
+        self.pressed_action = None
 
     def _sheet(self, name):
         return self.field.ui_sheets.get(name.casefold()) if name else None
@@ -108,6 +112,10 @@ class Hud:
     def bind_battle(self, battle):
         self.battle = battle
 
+    def set_pressed(self, action):
+        """Show the pressed art for one command while its mouse button is held."""
+        self.pressed_action = action
+
     def _button_layout(self, width, height):
         """The four currently modelled command slots in the bottom-right panel."""
         right, top, step = width - 16, height - 172, 52
@@ -171,13 +179,20 @@ class Hud:
                 return action
         return None
 
-    def _minimap_rgba(self):
-        """Rasterize active regiment positions into a cheap CPU-side minimap."""
+    def _minimap_background_rgba(self):
+        """Build the static plan-map backdrop once; the dynamic unit layer is added per frame."""
         width, height = MINIMAP_SIZE
         pixels = bytearray((29, 37, 31, 255)) * (width * height)
 
-        def fill(left, top, size, color):
-            fill_rect(left, top, size, size, color)
+        if self.planmap and self.planmap.frames:
+            frame = self.planmap.frames[0]
+            for y in range(height):
+                source_y = min(frame.height - 1, round(y / (height - 1) * (frame.height - 1)))
+                for x in range(width):
+                    source_x = min(frame.width - 1, round(x / (width - 1) * (frame.width - 1)))
+                    color = self.field.palette[frame.pixels[source_y * frame.width + source_x]]
+                    offset = (y * width + x) * 4
+                    pixels[offset:offset + 4] = bytes((*color, 255))
 
         def fill_rect(left, top, rect_width, rect_height, color):
             for y in range(max(0, top), min(height, top + rect_height)):
@@ -189,6 +204,18 @@ class Hud:
         fill_rect(0, height - 1, width, 1, (176, 157, 97, 255))
         fill_rect(0, 0, 1, height, (176, 157, 97, 255))
         fill_rect(width - 1, 0, 1, height, (176, 157, 97, 255))
+        return bytes(pixels)
+
+    def _minimap_rgba(self):
+        """Rasterize active regiment positions over the cached plan-map backdrop."""
+        width, height = MINIMAP_SIZE
+        pixels = bytearray(self._minimap_background)
+
+        def fill(left, top, size, color):
+            for y in range(max(0, top), min(height, top + size)):
+                for x in range(max(0, left), min(width, left + size)):
+                    offset = (y * width + x) * 4
+                    pixels[offset:offset + 4] = bytes(color)
         if self.battle is None or not self.field.width or not self.field.height:
             return bytes(pixels)
         for regiment in self.battle.regiments.values():
@@ -223,7 +250,8 @@ class Hud:
             if not icon_pair or not icon_pair[0] or state is None or not state.player or not state.active:
                 continue
             enabled = self._button_enabled(action, state)
-            icon_pair[0].draw(left, top, BUTTON_SIZE, BUTTON_SIZE,
+            icon = icon_pair[1] if self.pressed_action == action and icon_pair[1] else icon_pair[0]
+            icon.draw(left, top, BUTTON_SIZE, BUTTON_SIZE,
                               tint=(1, 1, 1, 1) if enabled else (0.38, 0.38, 0.38, 0.82))
 
     def release(self):
