@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pygame
 
+from .bitmap_font import BitmapFont
 from .gpu import ScreenQuad
 from .scene_view import SceneView
 
@@ -42,7 +43,8 @@ class CaravanView(SceneView):
         self.talk_eyes = [self._load_quad(gpu, f"TALKEYESCELL{index}.png") for index in range(3)]
         self.elapsed = 0.0
         self.hover = None
-        self.hint = gpu.text((260, 36), gpu.small_font, background=(0, 0, 0, 180))
+        self.hint = gpu.text((640, 16), BitmapFont(scene.font), color=(220, 30, 30),
+                             background=None, padding=0, align="center")
 
     @classmethod
     def _load_quad(cls, gpu, filename):
@@ -182,8 +184,10 @@ class CaravanView(SceneView):
             self.scrolls[index].draw(left + rect.x * scale, top + rect.y * scale,
                                      rect.width * scale, rect.height * scale)
         if self.hover:
-            mouse_x, mouse_y = pygame.mouse.get_pos()
-            self.hint.draw(mouse_x + 12, mouse_y + 12)
+            hint_width, hint_height = self.hint.text_size
+            self.hint.draw(left + (width - hint_width * scale) / 2,
+                           top + height - (hint_height + 8) * scale,
+                           hint_width * scale, hint_height * scale)
 
     def release(self):
         for quad in (

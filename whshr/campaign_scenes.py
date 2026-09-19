@@ -13,6 +13,7 @@ INTRO_MEDIA = AssetId("vanilla", "cutscene", "a1-media")
 MAIN_MENU = AssetId("vanilla", "ui", "main-menu")
 ANIMATION_TEXT = AssetId("vanilla", "text", "anim")
 SUBTITLE_FONT = AssetId("vanilla", "font", "subtext")
+CARAVAN_FONT = AssetId("vanilla", "font", "pcsubt")
 OPENING_TEXT_IDS = (1100, 1101, 1102)
 
 
@@ -124,12 +125,18 @@ class CaravanScene(Scene):
     browsing remain presentation hooks until their persistence/views are added.
     """
 
+    manifest = SceneManifest(immediate=(CARAVAN_FONT,))
+
     def __init__(self, campaign, has_message=False):
         self.campaign = campaign
         self.has_message = has_message
         self.dietrich_mode = None  # ``reading`` / ``talking`` while his close-up is open
         self.selected_book = None
         self.save_requested = False
+        self.font = None
+
+    def enter(self, context):
+        self.font = context.load(CARAVAN_FONT)
 
     @property
     def gold(self):

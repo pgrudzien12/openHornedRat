@@ -21,6 +21,7 @@ class IntroSceneTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self._write("FILE/SCRIPT/BF001.BTS", b"[BATTLESCRIPT]\n[END]\n")
         self._write("FILE/BINARY/STANDARD.PAL", b"palette")
+        self._write("FILE/BINARY/PCSUBT.FON", b"MZ")
         self._write("FILE/DLL/ANTXT.DLL", b"MZ")
         self._write("FILE/BINARY/GLUE/SUBTEXT.FON", b"MZ")
         self._write("REMOTE/BINARY/ANIM/A1.SI", b"container")

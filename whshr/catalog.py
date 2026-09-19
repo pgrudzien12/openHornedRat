@@ -122,6 +122,13 @@ def build(installation):
             "warhammer-fon", source_fingerprint(subtext_fon),
         ))
 
+    pcsubt_fon = game.find("FILE", "BINARY", "PCSUBT.FON")
+    if pcsubt_fon is not None:
+        records.append(AssetRecord(
+            AssetId("vanilla", "font", "pcsubt"), "font", "file", "BINARY/PCSUBT.FON",
+            "warhammer-fon", source_fingerprint(pcsubt_fon),
+        ))
+
     standard = game.find("UPDATE", "BINARY", "STANDARD.PAL") or game.find("FILE", "BINARY", "STANDARD.PAL")
     if standard is not None:
         records.append(AssetRecord(
