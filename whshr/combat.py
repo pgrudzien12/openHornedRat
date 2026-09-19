@@ -65,11 +65,12 @@ def _armour_threshold(armour, strength):
     return save + max(0, strength - 3)
 
 
-def apply_casualties(regiment, count, rng, battle=None):
+def apply_casualties(regiment, count, rng, battle):
     """Remove up to `count` randomly chosen models, turning them into corpses at their positions.
 
     Used where the original does not single out a victim (shooting, spells). Close combat kills the
-    specific model that was struck instead, through `kill_models`.
+    specific model that was struck instead, through `kill_models`. `battle` is required so that the
+    models left fighting a corpse are always released, whatever killed it.
 
     game_rules.md 7.6: `CantDie` models are never removed by wounds. The combat result score still
     counts every wound rolled against them regardless (the callers score the raw wound count, not
@@ -85,7 +86,7 @@ def apply_casualties(regiment, count, rng, battle=None):
     return kill_models(regiment, indices, battle=battle)
 
 
-def kill_models(regiment, indices, battle=None):
+def kill_models(regiment, indices, battle):
     """Remove the named models, leaving corpses where they stood and freeing any grid cells they held.
 
     Unlike a whole-formation reseed, the surviving models keep their identity (`ModelState.uid`) and
@@ -99,7 +100,7 @@ def kill_models(regiment, indices, battle=None):
     victims = sorted({index for index in indices if 0 <= index < len(positions)}, reverse=True)
     if not victims:
         return 0
-    grid = _grid_of(battle, regiment) if battle is not None else None
+    grid = _grid_of(battle, regiment)
     dead_uids = set()
     for index in victims:
         regiment.corpses.append((*positions[index], regiment.direction))
@@ -110,8 +111,7 @@ def kill_models(regiment, indices, battle=None):
         del regiment.positions[index]
         del regiment.melee_models[index]
     regiment.models -= len(victims)
-    if battle is not None:
-        _unpair_dead(battle, regiment, dead_uids)
+    _unpair_dead(battle, regiment, dead_uids)
     return len(victims)
 
 
@@ -579,7 +579,8 @@ def resolve_shooting(battle):
                     continue
                 rolls.append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "killed"})
                 kills += 1
-        apply_casualties(target, kills, battle.rng)
+        # Pass the battle so a model shot out of a melee also releases whoever was fighting it.
+        apply_casualties(target, kills, battle.rng, battle=battle)
         battle.events.append(BattleEvent(
             f"{regiment.name} shoots {target.name}: {kills} casualties." if kills else
             f"{regiment.name} shoots {target.name}: no casualties.", "shooting",

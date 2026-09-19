@@ -159,6 +159,19 @@ class CasualtyIdentityTests(unittest.TestCase):
                 if model.opponent and model.opponent[0] == owner.identifier:
                     self.assertIsNotNone(owner.index_of(model.opponent[1]))
 
+    def test_given_a_model_killed_by_shooting_when_it_dies_then_its_attackers_are_released(self):
+        # Shooting picks its victims at random rather than naming them, but a model shot out of a
+        # melee still has to release whoever was fighting it.
+        grid = _grid(self.battle, self.defender)
+        owner = self.battle.regiments[grid.owner_id]
+
+        combat.apply_casualties(owner, owner.models, self.battle.rng, self.battle)
+
+        for regiment in self.battle.regiments.values():
+            for model in regiment.melee_models:
+                self.assertNotEqual(
+                    model.opponent[0] if model.opponent else None, owner.identifier)
+
     def test_given_a_casualty_when_survivors_shift_down_then_their_pairings_still_name_the_same_models(self):
         # Pairings are stored by identity, not by list position, so removing an early model must not
         # silently re-point a survivor's pairing at its neighbour.

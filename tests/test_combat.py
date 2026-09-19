@@ -293,14 +293,14 @@ class CloseCombatStrikeTests(unittest.TestCase):
         self.assertEqual(strikers, {"att", "def"})
 
     def test_given_more_casualties_than_models_when_applied_then_it_is_clamped_to_the_current_size(self):
-        removed = combat.apply_casualties(self.defender, 999, self.battle.rng)
+        removed = combat.apply_casualties(self.defender, 999, self.battle.rng, self.battle)
 
         self.assertEqual(removed, 10)
         self.assertEqual(self.defender.models, 0)
         self.assertTrue(self.defender.destroyed)
 
     def test_given_casualties_when_applied_then_the_formation_shrinks_and_leaves_corpses(self):
-        combat.apply_casualties(self.defender, 3, self.battle.rng)
+        combat.apply_casualties(self.defender, 3, self.battle.rng, self.battle)
 
         self.assertEqual(self.defender.models, 7)
         self.assertEqual(len(self.defender.corpses), 3)
@@ -310,7 +310,7 @@ class CloseCombatStrikeTests(unittest.TestCase):
         # game_rules.md 7.6: CantDie models are never removed by wounds.
         immortal = _regiment("i", 0, 0, False, psychology=frozenset({"CantDie"}))
 
-        removed = combat.apply_casualties(immortal, 5, self.battle.rng)
+        removed = combat.apply_casualties(immortal, 5, self.battle.rng, self.battle)
 
         self.assertEqual(removed, 0)
         self.assertEqual(immortal.models, 10)
