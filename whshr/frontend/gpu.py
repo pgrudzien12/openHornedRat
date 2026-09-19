@@ -116,12 +116,13 @@ class TextLabel(ScreenQuad):
     """Lines of text rendered with pygame's font once per change and uploaded as a texture."""
 
     def __init__(self, gpu, size, font, color=(235, 230, 210), background=(0, 0, 0, 150), padding=6,
-                 align="left"):
+                 align="left", fixed_width=False):
         super().__init__(gpu, size)
         if align not in ("left", "center"):
             raise ValueError(f"unsupported text alignment: {align!r}")
         self.font, self.color, self.background, self.padding = font, color, background, padding
         self.align = align
+        self.fixed_width = fixed_width
         self.text_size = (0, 0)
         self._lines = None
 
@@ -132,7 +133,8 @@ class TextLabel(ScreenQuad):
             return self.text_size
         self._lines = lines
         rendered = [self.font.render(line, True, self.color) for line in lines if line]
-        width = min(self.size[0], max((line.get_width() for line in rendered), default=0) + 2 * self.padding)
+        content_width = max((line.get_width() for line in rendered), default=0) + 2 * self.padding
+        width = self.size[0] if self.fixed_width else min(self.size[0], content_width)
         height = min(self.size[1], sum(line.get_height() for line in rendered) + 2 * self.padding)
         surface = pygame.Surface(self.size, pygame.SRCALPHA)
         if rendered and self.background:

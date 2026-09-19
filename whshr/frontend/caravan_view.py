@@ -47,7 +47,7 @@ class CaravanView(SceneView):
         self.elapsed = 0.0
         self.hover = None
         self.hint = gpu.text((640, 16), BitmapFont(scene.font), color=(220, 30, 30),
-                             background=None, padding=0, align="center")
+                             background=None, padding=0, align="center", fixed_width=True)
 
     @classmethod
     def _load_quad(cls, gpu, filename, colorkey=False):
@@ -187,10 +187,9 @@ class CaravanView(SceneView):
             self.scrolls[index].draw(left + rect.x * scale, top + rect.y * scale,
                                      rect.width * scale, rect.height * scale)
         if self.hover:
-            hint_width, hint_height = self.hint.text_size
-            self.hint.draw(left + (width - hint_width * scale) / 2,
-                           top + height - (hint_height + 8) * scale,
-                           hint_width * scale, hint_height * scale)
+            _, hint_height = self.hint.text_size
+            self.hint.draw(left, top + height - (hint_height + 8) * scale,
+                           width, hint_height * scale)
 
     def release(self):
         for quad in (
