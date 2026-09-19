@@ -94,6 +94,95 @@ class BreakTestTimingTests(unittest.TestCase):
         self.assertFalse(clanrats.routing)
 
 
+class DisengagementTests(unittest.TestCase):
+    """game_rules.md 5.7, "Leaving": a unit leaves a fight on destruction, rout, or when no enemy
+    remains on it -- not when its own footprint drifts apart, and not when the one enemy it happened
+    to be touching leaves while the fight goes on."""
+
+    def test_given_an_ally_still_fighting_when_one_enemy_routs_then_the_others_stay_engaged(self):
+        # Two player regiments and two enemies share one fight; one enemy routs. Nobody may leave:
+        # the other enemy is still standing in the same fight.
+        left = _regiment("left", 0, 0, True, initiative=5, speed_per_tick=0.0)
+        right = _regiment("right", 30, 0, True, initiative=5, speed_per_tick=0.0)
+        first = _regiment("e_first", 0, 12, False, initiative=5, speed_per_tick=0.0)
+        second = _regiment("e_second", 30, 12, False, initiative=5, speed_per_tick=0.0)
+        battle = Battle(1000, 1000, [left, right, first, second], seed=0)
+        _join_fight(battle, "g", left, right, first, second)
+        first.routing = True  # one enemy has broken; the other has not
+
+        combat.refresh_melee_state(battle)
+
+        self.assertTrue(left.in_melee)
+        self.assertTrue(right.in_melee)
+        self.assertEqual(left.melee_group, "g")
+
+    def test_given_no_enemy_left_in_the_fight_when_refreshed_then_the_unit_disengages(self):
+        player = _regiment("p", 0, 0, True, initiative=5, speed_per_tick=0.0)
+        enemy = _regiment("e", 0, 12, False, initiative=5, speed_per_tick=0.0)
+        battle = Battle(1000, 1000, [player, enemy], seed=0)
+        _join_fight(battle, "g", player, enemy)
+        enemy.routing = True
+
+        combat.refresh_melee_state(battle)
+
+        self.assertFalse(player.in_melee)
+        self.assertIsNone(player.melee_group)
+
+    def test_given_a_shrinking_formation_when_its_footprint_pulls_apart_then_it_stays_engaged(self):
+        # Casualties shrink a block's footprint, which must never by itself end a close combat.
+        player = _regiment("p", 0, 0, True, models=20, ranks=4, initiative=5, speed_per_tick=0.0)
+        enemy = _regiment("e", 0, 300, False, models=20, ranks=4, initiative=5, speed_per_tick=0.0)
+        battle = Battle(1000, 1000, [player, enemy], seed=0)
+        _join_fight(battle, "g", player, enemy)  # engaged, but far apart: geometry must not matter
+
+        combat.kill_models(player, list(range(16)), battle=battle)  # down to 4 models
+        combat.kill_models(enemy, list(range(16)), battle=battle)
+        combat.refresh_melee_state(battle)
+        combat.resolve_contacts(battle)
+
+        self.assertTrue(player.in_melee)
+        self.assertTrue(enemy.in_melee)
+
+
+class PursuitTests(unittest.TestCase):
+    """game_rules.md 7.5: the routed unit's opponents switch to another opponent in the same fight if
+    there is one, and otherwise pursue."""
+
+    def test_given_a_lone_opponent_when_it_routs_then_the_winner_pursues_it(self):
+        winner = _regiment("w", 0, 0, True, initiative=5, leadership=9, speed_per_tick=1.0)
+        loser = _regiment("l", 0, 12, False, initiative=5, leadership=2, speed_per_tick=1.0)
+        battle = Battle(1000, 1000, [winner, loser], seed=0)
+        _join_fight(battle, "g", winner, loser)
+
+        combat._start_rout(loser, battle)
+
+        self.assertEqual(winner.attack_target, "l")
+        self.assertIn("pursuit_start", [e.kind for e in battle.events])
+
+    def test_given_another_enemy_in_the_fight_when_one_routs_then_the_winner_does_not_pursue(self):
+        winner = _regiment("w", 0, 0, True, initiative=5, speed_per_tick=1.0)
+        loser = _regiment("l", 0, 12, False, initiative=5, speed_per_tick=1.0)
+        other = _regiment("o", 12, 0, False, initiative=5, speed_per_tick=1.0)
+        battle = Battle(1000, 1000, [winner, loser, other], seed=0)
+        _join_fight(battle, "g", winner, loser, other)
+
+        combat._start_rout(loser, battle)
+
+        self.assertIsNone(winner.attack_target)
+        self.assertNotIn("pursuit_start", [e.kind for e in battle.events])
+
+    def test_given_player_missile_troops_when_their_opponent_routs_then_they_hold(self):
+        archers = _regiment("a", 0, 0, True, initiative=5, speed_per_tick=1.0,
+                            missile_code=2, missile_range=720.0)
+        loser = _regiment("l", 0, 12, False, initiative=5, speed_per_tick=1.0)
+        battle = Battle(1000, 1000, [archers, loser], seed=0)
+        _join_fight(battle, "g", archers, loser)
+
+        combat._start_rout(loser, battle)
+
+        self.assertIsNone(archers.attack_target)
+
+
 class RankAndDirectionBonusTests(unittest.TestCase):
     """game_rules.md 6.1: rank bonus (deep formations) and direction bonus (flank/rear attacks)."""
 

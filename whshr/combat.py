@@ -192,23 +192,35 @@ def _roll_model_attacks(attacker, defender, rng, charge_bonus=0, gang_bonus=0):
 
 
 def refresh_melee_state(battle):
-    """Free a regiment from melee one tick early (before `_advance_regiments` unfreezes it) once every
-    enemy it was touching is no longer an active, standing target; `resolve_contacts` would release it
-    anyway next tick, but only after movement already ran frozen for one more tick."""
+    """Free a regiment from melee one tick early (before `_advance_regiments` unfreezes it) once **no
+    enemy remains in its fight at all** (game_rules.md 5.7, "Leaving": a unit leaves the grid on
+    destruction, rout, or when no enemy remains on it).
+
+    The test is over the whole fight, not over the regiment's own `melee_touching` list: several
+    regiments share one grid, so the enemy a given regiment happened to be touching can rout while the
+    fight it belongs to carries on around it. Testing only the touching list made a unit walk away
+    from a melee its allies were still locked in.
+    """
     for regiment in battle.regiments.values():
         if not regiment.in_melee:
             continue
-        if not any(_touching_enemy_active(battle, enemy_id) for enemy_id in regiment.melee_touching):
-            battle_grid.release(battle, regiment)
-            regiment.in_melee = False
-            regiment.melee_group = None
-            regiment.melee_touching = frozenset()
-            regiment.attack_target = None
+        if _fight_has_enemy(battle, regiment):
+            continue
+        battle_grid.release(battle, regiment)
+        regiment.in_melee = False
+        regiment.melee_group = None
+        regiment.melee_touching = frozenset()
+        regiment.attack_target = None
 
 
-def _touching_enemy_active(battle, enemy_id):
-    enemy = battle.regiments.get(enemy_id)
-    return enemy is not None and enemy.active and not enemy.routing
+def _fight_has_enemy(battle, regiment):
+    """True while some active, standing enemy is still in `regiment`'s fight."""
+    if regiment.melee_group is None:
+        return False
+    return any(other.active and not other.routing
+               and other.player != regiment.player
+               and other.melee_group == regiment.melee_group
+               for other in battle.regiments.values())
 
 
 def _segment_state(tick_count):
@@ -280,6 +292,21 @@ def resolve_contacts(battle):
                     f"{regiment.name} clashes with {enemy.name}!", "clash",
                     first=identifier, second=enemy_id,
                     distance=math.hypot(enemy.x - regiment.x, enemy.y - regiment.y)))
+
+    # game_rules.md 5.7, "Leaving": a unit leaves a fight on destruction, rout, or when no enemy
+    # remains on it -- never because the two footprints drifted apart. Since a formation's footprint
+    # shrinks as its models die, re-deriving engagement from geometry alone would silently disengage
+    # units that are still fighting, so an existing engagement is kept alive here as long as the enemy
+    # it names is still an active, standing member of the same fight (`active` already excludes the
+    # dead and the routing).
+    for identifier, regiment in by_id.items():
+        if not regiment.in_melee or not regiment.melee_group:
+            continue
+        for enemy_id in old_touching[identifier]:
+            enemy = by_id.get(enemy_id)
+            if enemy is not None and enemy.melee_group == regiment.melee_group:
+                touching[identifier].add(enemy_id)
+                touching[enemy_id].add(identifier)
 
     parent = {identifier: identifier for identifier in touching}
 
@@ -463,6 +490,10 @@ def _break_test(regiment, modifier, group_id, breakdown, battle):
 
 def _start_rout(regiment, battle):
     flee_x, flee_y = battle._flee_point(regiment)
+    group_id = regiment.melee_group
+    opponents = [other for other in battle.regiments.values()
+                 if other.active and other.player != regiment.player
+                 and other.melee_group == group_id and group_id is not None]
     battle_grid.release(battle, regiment)
     regiment.routing = True
     regiment.in_melee = False
@@ -477,6 +508,38 @@ def _start_rout(regiment, battle):
     battle.events.append(BattleEvent(
         f"{regiment.name} routs!", "rout_start",
         regiment=regiment.identifier, x=regiment.x, y=regiment.y, flee_x=flee_x, flee_y=flee_y))
+    _react_to_rout(regiment, opponents, group_id, battle)
+
+
+def _react_to_rout(routed, opponents, group_id, battle):
+    """game_rules.md 7.5: the routed unit's opponents "first look for another opponent in the same
+    fight and switch to it if there is one; otherwise pursue".
+
+    Without this a victorious unit is simply released from the fight and stands idle until the player
+    orders it somewhere, which is not what the original does.
+
+    Simplifications: the pursuit has no chase budget, restraint test or "more attractive target"
+    check (game_rules.md 7.5's `PursuingUnitUpdate`); it is an ordinary charge order at the fleeing
+    unit, which `resolve_contacts` will not turn back into close combat while that unit is routing
+    (7.7: "pursuers never engage fleeing units in close combat"). Player missile troops never pursue,
+    standing in for the traced "player artillery, wizards and archers never pursue".
+    """
+    for opponent in opponents:
+        if opponent.routing or not opponent.active:
+            continue
+        still_fighting = any(
+            other.active and not other.routing and other.player != opponent.player
+            and other.melee_group == group_id
+            for other in battle.regiments.values())
+        if still_fighting:
+            continue  # another enemy is still on this grid: keep fighting it, do not pursue
+        if opponent.player and opponent.missile_range:
+            continue  # missile troops hold instead of chasing
+        opponent.attack_target = routed.identifier
+        opponent.target_x = opponent.target_y = None
+        battle.events.append(BattleEvent(
+            f"{opponent.name} pursues {routed.name}!", "pursuit_start",
+            regiment=opponent.identifier, target=routed.identifier))
 
 
 def _rally_modifier(regiment):
