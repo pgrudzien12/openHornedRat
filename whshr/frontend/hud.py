@@ -49,6 +49,7 @@ class Hud:
         self.battle = None
         self._draw_size = None
         self.pressed_action = None
+        self._marker_order = []
 
     def _sheet(self, name):
         return self.field.ui_sheets.get(name.casefold()) if name else None
@@ -70,6 +71,8 @@ class Hud:
         if regiment_id == self.selected:
             return
         self.selected = regiment_id
+        if regiment_id is not None:
+            self._promote_marker(regiment_id)
         state = self._regiment(regiment_id)
         for quad in (self.banner, self.portrait):
             if quad:
@@ -168,6 +171,54 @@ class Hud:
         y = (1 - (pos[1] - top) / (height - 1)) * self.field.height
         return (x, y)
 
+    def _minimap_marker(self, regiment):
+        banner = self._sheet(regiment.banner)
+        return banner.frames[1] if banner is not None and len(banner.frames) > 1 else None
+
+    def _minimap_marker_origin(self, regiment):
+        width, height = MINIMAP_SIZE
+        x = round(regiment.x / self.field.width * (width - 1))
+        y = round((1 - regiment.y / self.field.height) * (height - 1))
+        marker = self._minimap_marker(regiment)
+        return x, y, marker
+
+    def _minimap_regiments(self):
+        """Active markers in persistent paint order; selecting a unit promotes it to the top."""
+        order = getattr(self, "_marker_order", [])
+        identifiers = list(self.battle.regiments)
+        order[:] = [identifier for identifier in order if identifier in self.battle.regiments]
+        order.extend(identifier for identifier in identifiers if identifier not in order)
+        self._marker_order = order
+        return [self.battle.regiments[identifier] for identifier in order
+                if self.battle.regiments[identifier].active]
+
+    def _promote_marker(self, identifier):
+        order = getattr(self, "_marker_order", [])
+        if self.battle is not None:
+            order.extend(regiment_id for regiment_id in self.battle.regiments if regiment_id not in order)
+        if identifier in order:
+            order.remove(identifier)
+        order.append(identifier)
+        self._marker_order = order
+
+    def minimap_regiment_at(self, pos):
+        """Return the active regiment whose visible minimap marker was clicked, if any."""
+        if self.battle is None or self.minimap_position(pos) is None:
+            return None
+        left, top, _, _ = self._minimap_rect(*self._draw_size)
+        pixel_x, pixel_y = pos[0] - left, pos[1] - top
+        for regiment in reversed(self._minimap_regiments()):
+            x, y, marker = self._minimap_marker_origin(regiment)
+            if marker is None:
+                if x - 2 <= pixel_x <= x + 2 and y - 2 <= pixel_y <= y + 2:
+                    return regiment.identifier
+                continue
+            marker_x, marker_y = pixel_x - (x - marker.width // 2), pixel_y - (y - marker.height + 1)
+            if (0 <= marker_x < marker.width and 0 <= marker_y < marker.height
+                    and marker.pixels[marker_y * marker.width + marker_x]):
+                return regiment.identifier
+        return None
+
     def hit_test(self, pos):
         """Return an enabled semantic command under *pos*, otherwise ``None``."""
         if self._draw_size is None:
@@ -219,16 +270,12 @@ class Hud:
                     pixels[offset:offset + 4] = bytes(color)
         if self.battle is None or not self.field.width or not self.field.height:
             return bytes(pixels)
-        for regiment in self.battle.regiments.values():
-            if not regiment.active:
-                continue
-            x = round(regiment.x / self.field.width * (width - 1))
-            y = round((1 - regiment.y / self.field.height) * (height - 1))
+        for regiment in self._minimap_regiments():
+            x, y, marker = self._minimap_marker_origin(regiment)
             color = (65, 139, 221, 255) if regiment.player else (205, 62, 54, 255)
-            banner = self._sheet(regiment.banner)
-            marker = banner.frames[1] if banner is not None and len(banner.frames) > 1 else None
             if regiment.identifier == self.selected:
-                fill(x - 3, y - 3, 7, (244, 231, 127, 255))
+                if marker is None:
+                    fill(x - 3, y - 3, 7, (255, 255, 255, 255))
             if marker is None:
                 fill(x - 2, y - 2, 5, color)
                 continue
@@ -243,6 +290,16 @@ class Hud:
                         if 0 <= offset_x < width and 0 <= offset_y < height:
                             offset = (offset_y * width + offset_x) * 4
                             pixels[offset:offset + 4] = bytes((*self.field.palette[index], 255))
+                    elif regiment.identifier == self.selected:
+                        # White outside rim for the selected marker, without repainting its artwork.
+                        neighbours = ((marker_x - 1, marker_y), (marker_x + 1, marker_y),
+                                     (marker_x, marker_y - 1), (marker_x, marker_y + 1))
+                        if any(0 <= nx < marker.width and 0 <= ny < marker.height
+                               and marker.pixels[ny * marker.width + nx] for nx, ny in neighbours):
+                            offset_x, offset_y = left + marker_x, top + marker_y
+                            if 0 <= offset_x < width and 0 <= offset_y < height:
+                                offset = (offset_y * width + offset_x) * 4
+                                pixels[offset:offset + 4] = b"\xff\xff\xff\xff"
         return bytes(pixels)
 
     def draw(self, width, height):

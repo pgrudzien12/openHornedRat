@@ -166,6 +166,7 @@ class BattleView(SceneView):
         self._right_down = None  # screen position of an unreleased right-button press, for click detection
         self.order_mode = None  # a HUD Move/Attack click changes how the next battlefield click is interpreted
         self.event_log = deque(maxlen=EVENT_LOG_LINES)  # recent whshr.engine.Battle.events, newest last
+        self._banner_order = []  # promoted selection order; persists after deselect like the original battle view
 
         ctx.includes["camera"] = CAMERA_BLOCK
         self.camera_buffer = ctx.buffer(size=CAMERA.size, uniform=True)
@@ -225,6 +226,10 @@ class BattleView(SceneView):
             return (("deselect",),)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.hud.set_pressed(None)
+            minimap_regiment = self.hud.minimap_regiment_at(event.pos)
+            if minimap_regiment is not None:
+                self.order_mode = None
+                return (("select", minimap_regiment),)
             minimap_position = self.hud.minimap_position(event.pos)
             if minimap_position is not None:
                 self.order_mode = None
@@ -305,6 +310,7 @@ class BattleView(SceneView):
 
     def _instances(self):
         field, yaw, selected_id, data = self.scene.field, self.camera.yaw, self.scene.selected_id, bytearray()
+        banner_instances = []
         for regiment in self.scene.battle.regiments.values():
             sheet = field.sprite_sheet(regiment.sprite)
             selected = 1.0 if regiment.identifier == selected_id else 0.0
@@ -332,10 +338,24 @@ class BattleView(SceneView):
             banner = field.ui_sheets.get((regiment.banner or "").casefold())
             if regiment.active and banner is not None and len(banner.frames) > 2 and banner.rects:
                 frame, rect = banner.frames[2], banner.rects[2]
-                data += INSTANCE.pack(regiment.x / WORLD_PER_MESH,
-                                      field.ground_height(regiment.x, regiment.y) + BANNER_MARKER_RAISE,
-                                      regiment.y / WORLD_PER_MESH,
-                                      *rect, frame.width / 2, frame.height, selected)
+                banner_instances.append((regiment.identifier, INSTANCE.pack(
+                    regiment.x / WORLD_PER_MESH,
+                    field.ground_height(regiment.x, regiment.y) + BANNER_MARKER_RAISE,
+                    regiment.y / WORLD_PER_MESH,
+                    *rect, frame.width / 2, frame.height, selected,
+                )))
+        # The original promotes the focused banner in z-order and leaves it promoted after deselecting.
+        order = getattr(self, "_banner_order", [])
+        identifiers = list(self.scene.battle.regiments)
+        order[:] = [identifier for identifier in order if identifier in self.scene.battle.regiments]
+        order.extend(identifier for identifier in identifiers if identifier not in order)
+        if selected_id in order:
+            order.remove(selected_id)
+            order.append(selected_id)
+        self._banner_order = order
+        rank = {identifier: index for index, identifier in enumerate(order)}
+        for _, instance in sorted(banner_instances, key=lambda pair: rank[pair[0]]):
+            data.extend(instance)
         return bytes(data[:self.capacity * INSTANCE.size])
 
     def draw(self):
