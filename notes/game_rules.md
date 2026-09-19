@@ -238,9 +238,53 @@ never use `AlwaysPursue`.
   10 × distance)` per segment, k at `0x100E61F8` = 1.5). An M4 I3 infantry unit covers about 9.8" per turn moving
   freely and 5.4" closing in. Pursuers and fugitives use the same factor, so only a higher `s_rlmv` closes the gap.
   **Terrain has no effect on speed.**
-- **Turning**: per tick `s_rlmv × (144 − s²)` scaled by state, with `s = frontage + ranks − min / 2`; units pivot on a
-  front corner (a real wheel), halt to turn beyond 45° and wheel at half speed beyond 7.7°. (For `s ≥ 12` the
+- **Turning** ✅ (`FUN_1002d500`, reached only through `FUN_1002c3d0`): facing is a **16.16 accumulator** at
+  `+0xCC` whose high word `+0xCE` is the integer facing in 1/512 turn. Per tick it advances by
+  `s_rlmv × (144 − s²) × 2^(scale − 9)` facing units, with `s = frontage + ranks − min(frontage, ranks) / 2`
+  and `scale` by state: **2 charging** (`FUN_10029a30`), **1** halted-turn or turn order, **0 wheeling**,
+  **−1** closing/redirect. The turn counts as finished once under 11/512 (≈ 7.7°) remains. (For `s ≥ 12` the
   formula stops working; no deployed unit reaches it.)
+  **Facing is never snapped to the travel bearing per tick**: the goal bearing lives in `+0x1DE` and the
+  amount still owed in `+0x1F4`, and the unit always translates along its **current** facing (`+0xD0/+0xD4`
+  = sin/cos of `+0xCE`), so a unit whose facing has not caught up walks off-axis and re-plans.
+  Thresholds (`FUN_10029e30`): required turn **> 45°** → halt and turn on the spot (`+0xBC |= 8`, no
+  translation that tick); **7.7°…45°** → wheel while moving (`+0xBC |= 4`, half speed); **< 7.7°** → absorbed.
+  A charge re-aims every segment and wheels above only 22.5°. Separately, **at the moment a move order is
+  issued** (`FUN_1002baf0` from `GotoTarget`) a required turn of **68.2°–135°** snaps instantly 90°
+  (`FUN_1002b510`) and **> 135°** snaps instantly 180° (`FUN_1002b660`); the residue is then wheeled.
+- **A turn always moves the unit position to keep the pivot still** ✅ — the rule an engine is most likely to
+  get wrong. In-place turns pivot about the **block centre**: the about-face displaces the anchor by
+  `(ranks − 1) × 12` backwards along the old facing (exactly twice the map-object offset, which holds the
+  block centre fixed under 180°), and the 90° turn moves it to the new front-rank centre while swapping
+  ranks and frontage (`+0x7D := +0x7E`). Wheels pivot about the **inner front corner**: `FUN_1002c3d0`
+  shifts the anchor by the rotation applied to the half-frontage vector `6 × (frontage − 1)`, halves the
+  translation speed `+0xD8` while wheeling and zeroes it while halted-turning. In both cases every model's
+  stored offset is counter-shifted (`FUN_1002bb30`, `FUN_1002d5f0`) so the soldiers do not teleport, and a
+  re-form is queued (`+0xBC |= 1`). **The unit position is never held fixed while the facing changes**, so a
+  turn cannot open a gap between two touching units.
+- **The footprint belongs to the map object, not to the unit position** ✅ (`FUN_1002c750`, `FUN_1002c840`):
+  the box is stored as half-extents `frontage × 6` by `ranks × 6` **symmetric about the map-object centre**
+  and independent of the facing; the four rotated corners live at `+0x312…+0x320`; the bounding radius at
+  `object+4` is the box half-diagonal and the diagonal angle at `+0x322`. Every collision query — the broad
+  circle and the narrow corner test — is expressed in object space and never touches the unit position.
+  Note the half-extents use the **raw** frontage and rank counts, not `count − 1`, which is where the
+  "half a cell to spare" comes from.
+- **Contact is resolved by rolling the tick back** ✅ (`FUN_10028ec0`): when a move would overlap an enemy,
+  the tick's translation **and** rotation are undone for both the unit and its map object (`+0xC4`, `+0xC8`,
+  `+0xCC`, ranks, and the object's centre and facing are all restored from saved copies), then
+  `FUN_1002b160` halts the unit and queues a re-form. The contact pose is simply the last pose that did not
+  overlap: there is no snap to a facing, no alignment to the target's edge and no stand-off distance.
+  A charge aims at the target's object centre pushed out by the target's bounding radius along the
+  **target's own** facing (`FUN_1001ee50`; the rear/flank variants add 0x100/±0x80), and is aborted without
+  engaging if it meets anything within ±45° of its front (`FUN_10028610` → `FUN_10029d80`).
+- **A unit in close combat does not move or turn at all** ✅: engaging clears every `+0xBC` movement state
+  bit, and the tick dispatcher `FUN_10029260` selects a handler purely from `+0xBC`, so a unit whose only
+  relevant flag is `+0xB4 & 0x200` runs no movement or turn code — it does not even set the idle flag. No
+  store to `+0xCE` exists anywhere in the melee path. (`A_close_combat.md`'s remark that a model is "made to
+  face an attacker" by the `0x44000` test is a misreading: that test is on a **model** record and only pairs
+  the defender with its attacker — no angle is touched.) The exceptions that still move an engaged unit are
+  the unconditional boundary repel and the push-apart of a *broken* unit; ordinary push-apart is disabled
+  for melee, being guarded by `& 0xA200` (pursuing | broken | in melee).
 - **Charge**: reaches at most `12 × (s_rlmv + 1)` units, re-aiming halfway (about 6" for infantry, 9.5" for
   horsemen).
 - **Boundaries**: region masks `0x20` = `BATTLEEDGE`, `0x90` = `INVSOLID|SOLID`, `0xB0` = `INVSOLID|BATTLEEDGE|SOLID`
@@ -737,12 +781,52 @@ vectors, owner unit `+0x20`, **tallies `+0x24` (side without `s_side` bit 7) and
 creation segment `+0x26`, turn of the last reset `+0x28`, and a **17 × 17 cell map** `+0x2A` (one cell =
 12 world units = one model; bits 0–2 cell type, bits 5–7 side).
 
+**What triggers engagement** ✅ (traced September 2026): contact is decided in `ResolveUnitCollisions`
+(`FUN_100289d0`), not in the contact handler, and it is a two-stage geometric test **between the two
+units' map objects** (see "Formations": a block's map object sits `(ranks − 1) × 6` behind the unit
+position):
+
+- **Broad phase**: `trunc(sqrt(dx² + dy²)) − r_a − r_b < 0` on the two map-object centres, where `r` is
+  the bounding radius at `object+4` (the box half-diagonal, `FUN_1002c750`).
+- **Narrow phase** (`FUN_10028890` → `FUN_100290f0`): at least one of the mover's four rotated footprint
+  corners (`unit+0x312…+0x320`, rebuilt by `FUN_1002c840`) must lie **strictly inside** the other unit's
+  rectangular footprint, after being rotated into that unit's object frame. So engagement needs real
+  **penetration**, not mere proximity: there is no "reach" constant and no facing or arc requirement.
+  (The 12 / 18 / 24 reach values belong to the contact attacks of section 7.7, not to engagement.)
+
+Engagement is then a **two-step handshake**, not instantaneous. On the first overlapping tick
+`FUN_100289d0` only records the opponent in `+0x220` and sends event 0x0D (gated by the fear/terror test
+`FUN_10009120` and by not being braced); a unit with no prior opponent gets event 0x07 ("you are being
+charged") and nothing more. `FUN_10029090` raises event 0x0B, which script 152 turns into `AIQuery 8`,
+which calls the contact handler `FUN_1002d700` — and only there, on a **later** contact tick once
+`+0x220` already names that unit, is `Engage`/`EngageCharging` called. A one-tick latch
+(`+0xB4 |= 0x1000000`, cleared on every refusal) stops the handler re-firing every tick of overlap.
+
+**Neither movement nor an order is required** ✅: nothing in the contact path reads a velocity, a
+destination or an order code, so two stationary touching enemies engage as well. A charge or pursuit
+order (`+0xB4 & 0x8080`) only decides *who* receives the `floor(1.5 × frontage)` charge counter and
+whether the defender gets the flank/rear event 8. A charging unit that bumps something that is **not**
+its target is redirected instead (`FUN_1002d9b0`: event 0x1A to the old target, 0x07 to the new one,
+`+0x220` updated) and engages only on a later tick.
+
+Engagement is refused when either unit is **broken** (`0x2000`, "Can't engage a broken unit"), when the
+target's collision record is **routing** (record bit `0x400`, set by `StartRout` and cleared by any
+re-form), when the target carries flag `0x10000000` (🟡 no writer found, R70), when the two are on the
+same side and the target is not the current opponent, or when the grid pool is exhausted (event 0x0C).
+
 **Creation and joining** (`GetOrCreateBattleGrid`, `FUN_100085a0`): when unit A engages B, A joins B's
 grid if B already has one (so several units share one combat and one pair of tallies); otherwise a
 new record is taken, B's models are written into the cells around the centre (one cell per model,
 or a full rectangle for war machines, rolling stock and monsters) and B becomes the owner. If the pool
 is exhausted the engagement fails (event 0x0C). Engaging clears the pairing of A's models, sets A's
 round counter to 0, stores the charge counter, attack direction and side, and sends event 0x0A to both.
+
+**A unit is never on two grids** ✅: `FUN_10007eb0` routes the engagement so that whichever side does
+*not* already have a grid is the one that joins, and `EngageCharging` refuses a second grid ("Allready
+has a BattleGrid") while still returning success, so no 0x0C is raised. Multi-unit fights are therefore
+always one shared record. The **attack direction** (`+0x22E`, `FUN_10008b00`) is computed once at
+engagement, from the attacker's unit position to the defender's object centre against the defender's
+box diagonal `+0x322`, and is never recomputed while the fight lasts.
 
 **Pairing** runs every tick (`EngageTroops`, `FUN_10005750`):
 - The joining unit places at most **frontage** free models per tick, each in a free cell orthogonally
@@ -761,9 +845,43 @@ There is no front-rank, supporting-rank or spear rule: contact on the square gri
 segments, well inside the first combat turn; the limit is the number of free cells next to enemy models (about
 `2 × (width + depth)`), so most models of both units fight by the first result.
 
-**Leaving** (`LeaveBattleGrid`, `FUN_10008290`; on destruction, rout, or when no enemy remains, event
-0x19): models are unpaired, ownership passes to another unit on the grid or the record is freed; a
-lone remaining unit with `s_side & 0xE0 == 0x20` leaves as well. Tallies are not reset on join or leave.
+**Leaving** (`LeaveBattleGrid`, `FUN_10008290`): models are unpaired, ownership passes to another unit
+on the grid or the record is freed; a lone remaining unit with `s_side & 0xE0 == 0x20` leaves as well.
+Tallies are **not** reset on join or leave.
+
+**Every caller, and the condition each represents** ✅ (traced September 2026; the earlier
+"destruction, rout, or no enemy remains" was correct but incomplete):
+
+| Caller | Condition |
+|---|---|
+| `FUN_10008eb0` `RemoveUnit` | the unit is destroyed or removed (unconditional) |
+| `FUN_10003210` | the unit walked off the battlefield (record flag `0x100`), after event 0x18 |
+| `FUN_1002a320` `StartRout` | it **routs** — but only `if +0xB5 & 2`, i.e. only if it was actually in melee |
+| `FUN_100060c0` / `FUN_100059c0` | per-tick pairing: `+0x220` is gone or has no grid **and** `FUN_100084c0` finds no other enemy → leave, event 0x19 |
+| `FUN_10017fd0` | removed from combat by a spell effect, then event 0x0F to the enemy side |
+| `FUN_1001f760` (opcode 0x56 `TargetGone`) | the event source was my target and no other enemy is found |
+| `FUN_100214b0` case 0x16/0x17 | "unit removed" / "leader killed" naming my opponent, and no other enemy → leave, event 0x19 |
+| `FUN_10008290` itself | recursion: the last unit on a grid whose `s_side & 0xE0 == 0x20` |
+| opcode 0x57 `LeaveSharedGrid` (`0x1001F830`) | script-driven; the **first instruction of the pursuit script 164** (🟡 absent from the decompiled dump, R71) |
+
+**There is no geometric disengagement** ✅ — the single most important consequence for an engine.
+Nothing in `LeaveBattleGrid`, in the per-tick pairing (`FUN_10005750`, `FUN_100059c0`, `FUN_100060c0`)
+or in their callers reads a position, distance, footprint or collision record in order to leave. A unit
+stays on the grid until one of the **state** conditions above fires. Two units that have engaged can
+never be pulled apart by drifting, by turning, or by their footprints shrinking as models die.
+
+The "no enemy remains" test `FUN_100084c0` is not geometric either: it walks **the unit's own models in
+model-list order** and returns the first unit that one of them is currently paired against, excluding
+the departing one, provided that unit still has a grid and is on the opposite side. There is no
+distance, threat or facing tiebreak.
+
+**When a model's own opponent dies but enemy models remain**, the survivor is *demoted in place*, never
+removed from the fight: `FUN_10001770` clears its `0x2/0x4/0x1000/0x4000/0x10000` flags but leaves
+`0x20000` (still holds a cell), so the ordinary per-tick pairing picks it up again next tick. Likewise
+when a whole enemy unit is removed, `FUN_10022900` unpairs only the affected models and turns any that
+still hold a cell into reserves (`0x8000`), the unit clears `0x400` (back to joiner pairing mode), zeroes
+`+0x22E` and sets `+0x220` to the new enemy. **A unit never idles permanently and never disengages
+because its particular opponent died.**
 
 Model flags: `0x1` alive, `0x2` dying, `0x4` timed turning/pause, `0x1000` at rest, `0x4000` has an
 opponent (`+0x48` model, `+0x4C` unit), `0x8000` reserve, `0x10000` in hand-to-hand, `0x20000` on the
@@ -941,6 +1059,41 @@ When a unit routs, every enemy unit receives event 0x0F, but only the routed uni
 0x53): a unit on a combat grid first looks for another opponent in the same fight and switches to it if
 there is one; otherwise it pursues. A unit not on a grid pursues only if it was charging. Player artillery,
 wizards and archers never pursue.
+
+**Opcode 0x53 in full** ✅ (`FUN_1001f560`, traced September 2026). Only opponents react because the
+opcode gates on `event sender == +0x220` (the unit's current opponent); a unit busy casting
+(`FUN_10014d10`) aborts first. Then, exactly:
+
+- **in melee** (`+0xB4 & 0x200`): call `FUN_100084c0`. If it finds another enemy on the grid, **switch to
+  it** — `FUN_10022900` unpairs the models that were fighting the router, `+0x22E` is zeroed, `0x400` is
+  cleared (back to joiner pairing mode) and `+0x220` is set to the new enemy — and the pursuit condition
+  is **false**. If it finds nobody, the condition is **true** and the unit pursues.
+- **not in melee**: pursue only if it was charging (`+0xB4 & 0x80`); otherwise send event 0x1B to self,
+  which script 152 turns into 0x19 ("target gone").
+
+**Pursuit is automatic for player and AI alike** ✅: the reaction is the behaviour script every unit runs,
+and neither `FUN_1001f560` nor scripts 151/153 test the player-controlled bit. What the player controls is
+*stopping* — the restraint test in `FUN_10029a30` is rolled only under order 0x14 (the Rally toggle).
+
+**Which classes never pursue is encoded in the behaviour scripts, not in C** ✅ (read from `BF001.DLL`):
+scripts **151** (generic) and **153** (melee) do an unconditional `IfSwitchScriptHigh 164`; script **155**
+(wizard) and **156** (shooter) switch to 148 / 127 instead — 127 keeps shooting the target — and only when
+flag `0x8000000` is set, else they just send event 25; script **154** (artillery / static) handles the
+event with the separate opcode 0x54 `EnemyRoutedStatic` and never enters 164 at all. Script 164 itself is
+`LeaveSharedGrid; ReformToScriptRanks; React 3 ("Destroy them!"); Query 1; IfThreatOutweighsWorth;
+SendEventSelfIfTrue 3; YieldIfTrue; StartPursuit`, and `StartPursuit` (`FUN_1002a0e0`) sets state `0x200`
+and flag `0x8000`, refused if `+0xB8 & 9`.
+
+**A pursuer can never re-engage its fugitive** ✅: the routing collision-record bit `0x400` removes the
+fleeing unit from the collision scan and from the contact handler's entry check. All damage during a chase
+comes from the contact attacks of section 7.7 — `FUN_10005170`, once per segment per attacker
+(`+0xB8` bit 5), against models within `2 × reach` where reach is **12 units, 18 cavalry, 24 monsters**
+(`FUN_10005380`), hitting automatically any model that lacks the `0x4` turning/braced flag. There is no
+instant kill, and no close combat.
+
+**No re-engage cooldown** ✅, but a re-form gate: `0x400` is cleared by `FUN_1002c750`, which every re-form
+calls, so a rallied unit becomes engageable again as soon as it re-forms. The only other bar is the broken
+flag `0x2000`.
 
 The pursuit script (164) shouts "Destroy them!", may attack a more attractive target instead (if its
 value exceeds the unit's worth `+0x33E`), and starts the pursuit (`StartPursuit`, `FUN_1002a0e0`: state
@@ -1505,6 +1658,14 @@ static analysis unless marked Wine.
 | R66 | **Footprint box and anchor** | ✅ resolved: for blocks the map object centre is `(ranks − 1) × 6` behind the unit position, the middle of the block; other kinds keep it at the unit position (section 4, Formations). | — | done |
 | R67 | **Formation spacing on screen** | ✅ resolved: both viewers use the traced 12-unit block (`whshr/formation.py`); the BF001 screenshot matches its rank sizes and offsets (section 4, Formations). | — | done |
 | R68 | **Troop sprite and scenery scale** | One troop sprite pixel ≈ 0.45 world units, measured on a screenshot and used by both viewers but not traced; against it, PBX pines in the 3D viewer look about twice as large as the trees in the screenshot. | Find the billboard scale in the 3D sprite renderer; compare scenery sizes with more screenshots. | low |
+
+| # | Open point (engagement lifecycle, September 2026) | What is known | How to resolve | Priority |
+|---|---|---|---|---|
+| R70 | **Unit flag `0x10000000`** | Tested on the target in `FUN_1002d700` and refuses engagement outright; no writer appears anywhere in the decompiled `GAMEF.DLL`. | Search the binary for the writer, or Wine: find a unit that cannot be engaged. | medium |
+| R71 | **Opcode 0x57 `LeaveSharedGrid`** | `0x1001F830`, missing from the decompiled dump; it is the **first instruction of pursuit script 164**, so it materially affects the lifecycle. Behaviour taken from an earlier agent report, not re-verified. | Disassemble `0x1001F830` directly. | medium |
+| R72 | **Bounding radius formula** | `FUN_1002c750` writes `object+4` through an `__ftol` whose operands Ghidra dropped. Context (the half-extents written two lines earlier, and the diagonal angle `fpatan(frontage×6, −ranks×6)` written just after) makes `sqrt((frontage×6)² + (ranks×6)²)` the only consistent value. Inferred, not verified. | Read the raw disassembly, or Wine: break and read `[obj+4]` for a known frontage/ranks. | low |
+| R73 | **Rally inside an enemy footprint** | `0x400` is cleared by any re-form, so a rallied unit is immediately engageable; whether one that rallies while still overlapping an enemy re-engages on the very next tick or is pushed out first depends on the order of `FUN_1002c750` and the collision pass within that frame. | Wine session. | low |
+| R74 | **`FUN_100084c0` ordering in practice** | The "another enemy on this grid" choice is the first match in **the unit's own model-list order**, with no distance or threat tiebreak, so a reimplementation that pairs models in a different order picks a different next opponent without being wrong about the rule. | Accept, or match the original pairing order. | low |
 
 ### 11.5 Hypotheses in this report to confirm
 
