@@ -186,6 +186,10 @@ class Regiment:
     def bounding_radius(self):
         return formation.bounding_radius(self.models, self.ranks)
 
+    def block(self):
+        """`(x, y, direction, models, ranks)`, the block description `whshr.formation` works from."""
+        return (self.x, self.y, self.direction, self.models, self.ranks)
+
     def footprint_corners(self):
         """The four world-space corners of this regiment's oriented block footprint, for
         `formation.footprint_gap` (close-combat contact, `whshr.combat.resolve_contacts`)."""
@@ -367,6 +371,7 @@ class Battle:
         combat.resolve_contacts(self)
         if self.tick_count % combat.SEGMENT_TICKS == 0:
             combat.resolve_melee(self)
+            combat.resolve_contact_attacks(self)  # game_rules.md 7.7, once per segment
             combat.resolve_rally(self)
         combat.resolve_shooting(self)
         self._update_result()
@@ -406,6 +411,23 @@ class Battle:
             regiment.animation_seconds = regiment.animation_seconds + seconds if regiment.walking else 0.0
 
     @staticmethod
+    def _turn_to(regiment, direction):
+        """Change a regiment's facing, moving its anchor so the turn pivots about the block centre.
+
+        game_rules.md, "A turn always moves the unit position to keep the pivot still": the original
+        displaces the unit position on every in-place turn so that the block centre -- which is what
+        the collision footprint is built around -- does not move. Turning the anchor in place instead
+        swings the footprint away and can break a contact that should have held.
+        """
+        if direction == regiment.direction:
+            return
+        shift_x, shift_y = formation.turn_pivot_shift(
+            regiment.direction, direction, regiment.models, regiment.ranks)
+        regiment.direction = direction
+        regiment.x += shift_x
+        regiment.y += shift_y
+
+    @staticmethod
     def _advance_toward(regiment, target, step, arrive):
         """Move `regiment`'s anchor by at most `step` toward `target`, turning to face travel direction.
 
@@ -421,7 +443,7 @@ class Battle:
                 regiment.target_x = regiment.target_y = None
             return False
         # 0 = north/+Y and directions increase clockwise.
-        regiment.direction = round(math.atan2(dx, dy) * 512 / math.tau) % 512
+        Battle._turn_to(regiment, round(math.atan2(dx, dy) * 512 / math.tau) % 512)
         if arrive and distance <= step:
             regiment.x, regiment.y = target
             regiment.target_x = regiment.target_y = None
@@ -523,7 +545,7 @@ class Battle:
                 if first.player != second.player:
                     # Opposite sides never push apart: a charging regiment must be free to close all
                     # the way to footprint contact (combat.resolve_contacts), not stop at circle
-                    # distance (see resolve_contacts' CONTACT_MARGIN docstring).
+                    # distance (see combat.resolve_contacts: contact needs real overlap).
                     continue
                 first_yields = first.moving or first.routing or first.attack_target is not None
                 second_yields = second.moving or second.routing or second.attack_target is not None

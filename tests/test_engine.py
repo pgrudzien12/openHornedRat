@@ -11,7 +11,7 @@ class BattleTests(unittest.TestCase):
         self.player = Regiment("player", "Player", 10, 10, 0, True, models=1, ranks=1,
                                speed_per_tick=self.speed)
         # Far enough apart that these plain movement-only scenarios never bring the two footprints into
-        # close-combat contact (whshr.combat.CONTACT_MARGIN); combat tests live in tests/test_combat.py.
+        # close-combat contact (whshr.formation.penetrates); combat tests live in tests/test_combat.py.
         self.enemy = Regiment("enemy", "Enemy", 90, 90, 0, False, models=1, ranks=1,
                               speed_per_tick=self.speed)
         self.battle = Battle(100, 100, [self.player, self.enemy])

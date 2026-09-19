@@ -183,6 +183,77 @@ class PursuitTests(unittest.TestCase):
         self.assertIsNone(archers.attack_target)
 
 
+class ContactAttackTests(unittest.TestCase):
+    """game_rules.md 7.7: a pursuer cannot re-engage a fleeing unit, so contact attacks are the only
+    damage a chase does -- automatic hits, to-wound and save only."""
+
+    def test_given_a_pursuer_in_reach_when_a_segment_passes_then_it_cuts_down_fugitives(self):
+        chaser = _regiment("c", 0, 0, True, strength=6, attacks=2, speed_per_tick=0.0)
+        fleeing = _regiment("f", 0, 6, False, toughness=2, armour=0, speed_per_tick=0.0)
+        fleeing.routing = True
+        battle = Battle(1000, 1000, [chaser, fleeing], seed=1)
+        chaser.attack_target = "f"
+
+        combat.resolve_contact_attacks(battle)
+
+        events = [e for e in battle.events if e.kind == "contact_attack"]
+        self.assertEqual(len(events), 1)
+        self.assertGreater(events[0].data["kills"], 0)
+        # Automatic hits: every roll records a wound roll and never a to-hit roll.
+        for roll in events[0].data["rolls"]:
+            self.assertIn("wound", roll)
+            self.assertNotIn("hit", roll)
+
+    def test_given_a_target_out_of_reach_when_a_segment_passes_then_nothing_happens(self):
+        chaser = _regiment("c", 0, 0, True, speed_per_tick=0.0)
+        fleeing = _regiment("f", 0, 600, False, speed_per_tick=0.0)
+        fleeing.routing = True
+        battle = Battle(1000, 1000, [chaser, fleeing], seed=1)
+        chaser.attack_target = "f"
+
+        combat.resolve_contact_attacks(battle)
+
+        self.assertEqual([e for e in battle.events if e.kind == "contact_attack"], [])
+
+    def test_given_a_standing_enemy_when_a_segment_passes_then_no_contact_attacks_are_made(self):
+        # Contact attacks are for fugitives; a standing enemy is fought in close combat instead.
+        chaser = _regiment("c", 0, 0, True, speed_per_tick=0.0)
+        standing = _regiment("s", 0, 6, False, speed_per_tick=0.0)
+        battle = Battle(1000, 1000, [chaser, standing], seed=1)
+        chaser.attack_target = "s"
+
+        combat.resolve_contact_attacks(battle)
+
+        self.assertEqual([e for e in battle.events if e.kind == "contact_attack"], [])
+
+
+class EngagementGeometryTests(unittest.TestCase):
+    """game_rules.md, "What triggers engagement": real footprint overlap, not proximity."""
+
+    def test_given_footprints_that_only_come_close_when_checked_then_they_do_not_engage(self):
+        first = _regiment("a", 0, 0, True, speed_per_tick=0.0)
+        second = _regiment("b", 0, 30, False, speed_per_tick=0.0)
+
+        self.assertFalse(formation.penetrates(first.block(), second.block()))
+
+    def test_given_overlapping_footprints_when_checked_then_they_engage(self):
+        first = _regiment("a", 0, 0, True, speed_per_tick=0.0)
+        second = _regiment("b", 0, 14, False, speed_per_tick=0.0)
+
+        self.assertTrue(formation.penetrates(first.block(), second.block()))
+
+    def test_given_a_regiment_in_contact_when_it_turns_then_the_contact_survives_the_turn(self):
+        # The footprint is built around the block centre, and the original moves the unit position on
+        # every turn so that centre stays put; turning the anchor in place would swing it away.
+        first = _regiment("a", 0, 0, True, models=20, ranks=4, speed_per_tick=0.0)
+        second = _regiment("b", 0, 40, False, models=20, ranks=4, speed_per_tick=0.0)
+        self.assertTrue(formation.penetrates(first.block(), second.block()))
+
+        Battle._turn_to(second, 256)
+
+        self.assertTrue(formation.penetrates(first.block(), second.block()))
+
+
 class RankAndDirectionBonusTests(unittest.TestCase):
     """game_rules.md 6.1: rank bonus (deep formations) and direction bonus (flank/rear attacks)."""
 
@@ -487,8 +558,8 @@ class ContactAndMeleeStateTests(unittest.TestCase):
 
         self.assertTrue(charger.in_melee)
         self.assertTrue(target.in_melee)
-        gap = formation.footprint_gap(charger.footprint_corners(), target.footprint_corners())
-        self.assertLessEqual(gap, combat.CONTACT_MARGIN)
+        # Engagement needs the footprints to really overlap, not merely to be close.
+        self.assertTrue(formation.penetrates(charger.block(), target.block()))
 
     def test_given_two_regiments_touching_one_enemy_when_they_clash_then_they_share_one_fight_and_both_strike(self):
         # No 2 vs 1: two player regiments touching the same lone enemy regiment must share a single

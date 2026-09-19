@@ -73,6 +73,46 @@ def footprint_corners(x, y, direction, models, ranks, spacing=MODEL_SPACING):
     return corners
 
 
+def penetrates(a, b, spacing=MODEL_SPACING):
+    """True when two blocks are in contact (game_rules.md, "What triggers engagement").
+
+    Each argument is a ``(x, y, direction, models, ranks)`` tuple. The point of this test, and the
+    reason it replaced a proximity margin, is that the original needs the two footprints to **really
+    overlap**: it has no "reach" constant and no facing requirement for engagement.
+
+    Broad phase is the original's own: the bounding circles of the two *map objects* must overlap.
+    For the narrow phase the original tests whether any of one block's four rotated corners lies
+    strictly inside the other's box; that is exact for the barely-touching poses its per-tick
+    rollback produces (contact is always the last pose before an overlap), but it misses deeper
+    overlaps that no corner witnesses -- two equally wide blocks meeting head on put their corners
+    exactly on each other's edge. This engine has no rollback yet, so blocks can reach those poses,
+    and a full separating-axis test is used instead: it agrees with the corner test wherever the
+    corner test is meaningful, and still answers "overlapping" where it is not.
+    """
+    a_frame = footprint_frame(*a, spacing)
+    b_frame = footprint_frame(*b, spacing)
+    distance = math.hypot(a_frame[0] - b_frame[0], a_frame[1] - b_frame[1])
+    if int(distance) - bounding_radius(a[3], a[4], spacing) - bounding_radius(b[3], b[4], spacing) >= 0:
+        return False  # broad phase: bounding circles do not overlap
+    return _polygons_overlap(footprint_corners(*a, spacing), footprint_corners(*b, spacing))
+
+
+def turn_pivot_shift(direction, new_direction, models, ranks, spacing=MODEL_SPACING):
+    """The offset a block's anchor must move by so that an in-place turn pivots about the **block
+    centre**, not about the anchor (game_rules.md, "A turn always moves the unit position to keep the
+    pivot still": `FUN_1002b510`, `FUN_1002b660`).
+
+    The anchor sits ``(ranks - 1) x 6`` in front of the block centre along the facing, so keeping the
+    centre fixed means putting the anchor back that far along the *new* facing. Without this a turning
+    block swings its own footprint away and can lose contact with a unit it is touching, which the
+    original never does.
+    """
+    _, _, offset = footprint(models, ranks, spacing)
+    old = (direction or 0) * math.tau / FULL_TURN
+    new = (new_direction or 0) * math.tau / FULL_TURN
+    return (offset * (math.sin(new) - math.sin(old)), offset * (math.cos(new) - math.cos(old)))
+
+
 def _point_segment_distance(px, py, ax, ay, bx, by):
     dx, dy = bx - ax, by - ay
     length2 = dx * dx + dy * dy

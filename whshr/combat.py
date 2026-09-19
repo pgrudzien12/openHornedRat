@@ -34,9 +34,9 @@ from .rules import EXPECTED_ARMOUR_SAVE, wfb_to_hit, wfb_to_wound
 SEGMENT_TICKS = 19  # game_rules.md, "Battle clock": 19 ticks per segment
 SEGMENTS_PER_TURN = 10  # game_rules.md 5.1: segments count down from 10 to 1 within a turn
 FLEE_SAFE_DISTANCE = 160.0  # game_rules.md 7.4: no rally attempt while an enemy is this close
-# Two footprints (formation.footprint_gap) are considered "in contact" once they are within about one
-# model spacing (game_rules.md, "Engagement": front ranks must actually touch, not just be close).
-CONTACT_MARGIN = formation.MODEL_SPACING
+# game_rules.md 7.7: a pursuing or charging unit makes automatic contact attacks on models within this
+# reach (18 for cavalry and 24 for monsters are not modelled: the engine has no unit class).
+CONTACT_REACH = 12.0
 SHOOT_ARC_HALF = 64  # +/- 45 degrees (of 512), game_rules.md 8.1 "Arc of fire"
 DIRECTION_BONUS = {0: 0, 1: 1, 2: 2, 3: 1}  # front, flank, rear, flank (game_rules.md 6.1)
 # Placeholder shooting to-hit chart by BS (game_rules.md 8.1 says shooting is geometric, not a WS-style
@@ -278,8 +278,7 @@ def resolve_contacts(battle):
         for second in active[i + 1:]:
             if second.player == first.player:
                 continue
-            gap = formation.footprint_gap(first.footprint_corners(), second.footprint_corners())
-            if gap <= CONTACT_MARGIN:
+            if formation.penetrates(first.block(), second.block()):
                 touching[first.identifier].add(second.identifier)
                 touching[second.identifier].add(first.identifier)
 
@@ -533,13 +532,79 @@ def _react_to_rout(routed, opponents, group_id, battle):
             for other in battle.regiments.values())
         if still_fighting:
             continue  # another enemy is still on this grid: keep fighting it, do not pursue
-        if opponent.player and opponent.missile_range:
-            continue  # missile troops hold instead of chasing
+        if opponent.missile_range:
+            # game_rules.md 7.5: which classes decline is encoded in the behaviour scripts and applies
+            # to both sides -- artillery never pursues, and shooters and wizards divert to scripts
+            # 127/148 (keep shooting, re-form) instead of the pursuit script. Missile troops stand in
+            # for that here, the engine having no unit class.
+            continue
         opponent.attack_target = routed.identifier
         opponent.target_x = opponent.target_y = None
         battle.events.append(BattleEvent(
             f"{opponent.name} pursues {routed.name}!", "pursuit_start",
             regiment=opponent.identifier, target=routed.identifier))
+
+
+def resolve_contact_attacks(battle):
+    """game_rules.md 7.7: a charging or pursuing unit makes **contact attacks** on the models of a unit
+    within `CONTACT_REACH`, once per segment.
+
+    This is the only damage a chase ever does: a pursuer can never re-engage its fugitive in close
+    combat, because a routing unit is excluded from engagement entirely. Each attacking model gets its
+    `attacks` tries spread over the target models in reach, and a fleeing model -- running with its back
+    turned -- is **hit automatically**: only the to-wound roll and the armour save are made, with no
+    to-hit roll (`ResolveAutoHits`).
+
+    Simplifications: the reach is the infantry 12 (the engine has no unit class for the cavalry 18 and
+    monster 24), and the original's timed "turning" state, in which a model still gets a to-hit roll, is
+    not modelled -- every target model here is taken to be running.
+    """
+    for attacker in sorted(battle.regiments.values(), key=lambda r: r.identifier):
+        if not attacker.active or attacker.routing or attacker.in_melee:
+            continue
+        target = battle.regiments.get(attacker.attack_target) if attacker.attack_target else None
+        if target is None or not target.active or not target.routing:
+            continue  # contact attacks only matter against a unit that cannot fight back
+        victims, rolls = _contact_attack_rolls(attacker, target, battle.rng)
+        if not rolls:
+            continue
+        killed = kill_models(target, victims, battle=battle)
+        battle.events.append(BattleEvent(
+            f"{attacker.name} cuts down {killed} fleeing {target.name}."
+            if killed else f"{attacker.name} reaches {target.name} but draws no blood.",
+            "contact_attack",
+            attacker=attacker.identifier, target=target.identifier, kills=killed,
+            reach=CONTACT_REACH, rolls=rolls))
+
+
+def _contact_attack_rolls(attacker, target, rng):
+    """Automatic hits from every attacking model against the target models within reach."""
+    attacker_positions = attacker.model_positions()
+    target_positions = target.model_positions()
+    strength = attacker.strength + attacker.strength_bonus
+    wound_need = wfb_to_wound(strength, target.toughness)
+    threshold = _armour_threshold(target.armour, strength)
+    victims, rolls = set(), []
+    if wound_need > 6:
+        return victims, rolls
+    for ax, ay in attacker_positions:
+        in_reach = [index for index, (tx, ty) in enumerate(target_positions)
+                    if index not in victims and math.hypot(tx - ax, ty - ay) <= CONTACT_REACH]
+        for index in in_reach[:max(1, attacker.attacks)]:
+            wound_roll = _d6(rng)
+            if wound_roll < wound_need:
+                rolls.append({"target_model": index, "wound": wound_roll, "save": None,
+                              "result": "no_wound"})
+                continue
+            save_roll = _d6(rng)
+            if save_roll >= threshold:
+                rolls.append({"target_model": index, "wound": wound_roll, "save": save_roll,
+                              "result": "saved"})
+                continue
+            rolls.append({"target_model": index, "wound": wound_roll, "save": save_roll,
+                          "result": "killed"})
+            victims.add(index)
+    return victims, rolls
 
 
 def _rally_modifier(regiment):
