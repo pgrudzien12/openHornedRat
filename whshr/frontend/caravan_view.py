@@ -17,15 +17,10 @@ class CaravanView(SceneView):
 
     NATIVE_SIZE = (640, 480)
     ART_DIR = Path(__file__).resolve().parents[2] / "extracted/pe_resources/BITMAP/bitmap"
-    CANDLE_POS = (184, 160)
-    LAMP_POS = (232, 96)
     HINT_BOTTOM_MARGIN = 10
     ANIMATION_FPS = 8
     PAGE_HOLD_SECONDS = 3.0
     BLINK_PERIOD_SECONDS = 2.0
-    SCROLLS = ((pygame.Rect(521, 271, 28, 28), "CARSCROLL1.png"),
-               (pygame.Rect(556, 279, 28, 28), "CARSCROLL2.png"),
-               (pygame.Rect(521, 314, 28, 28), "CARSCROLL3.png"))
     # WND resource target -> engine event. Rectangles and hint ids remain in
     # WND; only the bridge to implemented engine actions lives here.
     TARGET_ACTIONS = {
@@ -42,7 +37,18 @@ class CaravanView(SceneView):
         super().__init__(gpu, scene, options)
         self.read_background = self._load_quad(gpu, "READBACKGROUNDPIC.png")
         self.talk_background = self._load_quad(gpu, "TALKBACKGROUNDPIC.png")
-        self.scrolls = [self._load_quad(gpu, filename, colorkey=True) for _, filename in self.SCROLLS]
+        self.scroll_specs = tuple(sorted(
+            (bitmap for bitmap in scene.campaign.caravan_bitmaps
+             if bitmap.get("bitmap", "").casefold().startswith("carscroll")),
+            key=lambda bitmap: bitmap["bitmap"].casefold(),
+        ))
+        self.scrolls = [self._load_quad(gpu, f"{bitmap['bitmap'].upper()}.png", colorkey=True)
+                        for bitmap in self.scroll_specs]
+        bitmap_specs = {bitmap.get("bitmap", "").casefold(): bitmap for bitmap in scene.campaign.caravan_bitmaps}
+        self.candle_spec = bitmap_specs["carcandlecell"]
+        self.lamp_spec = bitmap_specs["carlampcell"]
+        self.read_book_spec = bitmap_specs["dietbookcell"]
+        self.read_eyes_spec = bitmap_specs["readeyescell"]
         self.candles = [self._load_quad(gpu, f"CARCANDLECELL{index}.png") for index in range(6)]
         self.lamps = [self._load_quad(gpu, f"CARLAMPCELL{index}.png") for index in range(6)]
         self.read_books = [self._load_quad(gpu, f"DIETBOOKCELL{index}.png") for index in range(12)]
@@ -155,10 +161,12 @@ class CaravanView(SceneView):
         if self.scene.dietrich_mode == "reading":
             self.read_background.draw(left, top, width, height)
             self.read_books[page_frame].draw(
-                left + 296 * scale, top + 260 * scale, 148 * scale, 108 * scale
+                left + self.read_book_spec["x"] * scale, top + self.read_book_spec["y"] * scale,
+                self.read_books[page_frame].size[0] * scale, self.read_books[page_frame].size[1] * scale,
             )
             self.read_eyes[eye_frame].draw(
-                left + 312 * scale, top + 208 * scale, 44 * scale, 16 * scale
+                left + self.read_eyes_spec["x"] * scale, top + self.read_eyes_spec["y"] * scale,
+                self.read_eyes[eye_frame].size[0] * scale, self.read_eyes[eye_frame].size[1] * scale,
             )
             return
         if self.scene.dietrich_mode == "talking":
@@ -172,22 +180,26 @@ class CaravanView(SceneView):
             return
         self.read_background.draw(left, top, width, height)
         self.read_books[page_frame].draw(
-            left + 296 * scale, top + 260 * scale, 148 * scale, 108 * scale
+            left + self.read_book_spec["x"] * scale, top + self.read_book_spec["y"] * scale,
+            self.read_books[page_frame].size[0] * scale, self.read_books[page_frame].size[1] * scale,
         )
         self.read_eyes[eye_frame].draw(
-            left + 312 * scale, top + 208 * scale, 44 * scale, 16 * scale
+            left + self.read_eyes_spec["x"] * scale, top + self.read_eyes_spec["y"] * scale,
+            self.read_eyes[eye_frame].size[0] * scale, self.read_eyes[eye_frame].size[1] * scale,
         )
         self.candles[frame % len(self.candles)].draw(
-            left + self.CANDLE_POS[0] * scale, top + self.CANDLE_POS[1] * scale, 24 * scale, 48 * scale
+            left + self.candle_spec["x"] * scale, top + self.candle_spec["y"] * scale,
+            self.candles[0].size[0] * scale, self.candles[0].size[1] * scale,
         )
         self.lamps[frame % len(self.lamps)].draw(
-            left + self.LAMP_POS[0] * scale, top + self.LAMP_POS[1] * scale, 8 * scale, 16 * scale
+            left + self.lamp_spec["x"] * scale, top + self.lamp_spec["y"] * scale,
+            self.lamps[0].size[0] * scale, self.lamps[0].size[1] * scale,
         )
-        # CarScroll3/2/1 appear at 2/3/4 offered missions (WND ``[BITMAP] set:depend``).
-        for index in range(len(self.SCROLLS) - 1, len(self.SCROLLS) - 1 - self.scene.scroll_count, -1):
-            rect = self.SCROLLS[index][0]
-            self.scrolls[index].draw(left + rect.x * scale, top + rect.y * scale,
-                                     rect.width * scale, rect.height * scale)
+        # WND ``[BITMAP] set:depend`` controls each scroll's visibility.
+        for bitmap, scroll in zip(self.scroll_specs, self.scrolls):
+            if bitmap.get("depend", 0) <= len(self.scene.missions):
+                scroll.draw(left + bitmap["x"] * scale, top + bitmap["y"] * scale,
+                            scroll.size[0] * scale, scroll.size[1] * scale)
         if self.hover:
             _, hint_height = self.hint.text_size
             self.hint.draw(left, top + height - (hint_height + self.HINT_BOTTOM_MARGIN) * scale,

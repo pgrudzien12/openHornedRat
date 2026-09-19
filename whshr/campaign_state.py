@@ -67,6 +67,7 @@ class CampaignState:
     completed: set[int] = field(default_factory=set)
     coffers: int = INITIAL_COFFERS
     hotspots: tuple[dict, ...] = ()
+    caravan_bitmaps: tuple[dict, ...] = ()
     hints: dict[int, str] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -127,8 +128,10 @@ class CampaignState:
         game = installation if isinstance(installation, Installation) else Installation(installation)
         wnd = load_wnd_rcdata(game.file_dir("DLL", "WND.DLL"))
         hints = module("pe_missions").load_strings(str(game.file_dir("DLL", "BRTXT.DLL")))
-        hotspots = tuple(parse_window_ui(wnd, "STARTCARAVAN")["hotspots"])
-        return cls(build_campaign_graph(str(game.root)), flow=initial_flow(hotspots), hotspots=hotspots, hints=hints)
+        caravan_ui = parse_window_ui(wnd, "STARTCARAVAN")
+        hotspots = tuple(caravan_ui["hotspots"])
+        return cls(build_campaign_graph(str(game.root)), flow=initial_flow(hotspots), hotspots=hotspots,
+                   caravan_bitmaps=tuple(caravan_ui["bitmaps"]), hints=hints)
 
     @classmethod
     def single_mission(cls, briefing):
