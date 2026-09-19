@@ -171,6 +171,21 @@ class PursuitTests(unittest.TestCase):
         self.assertIsNone(winner.attack_target)
         self.assertNotIn("pursuit_start", [e.kind for e in battle.events])
 
+    def test_given_a_pursuit_order_when_the_winner_leaves_the_fight_then_the_order_survives(self):
+        # Leaving a fight must not cancel the unit's order: the pursuit is granted on the tick the
+        # last enemy breaks, and `refresh_melee_state` releases the winner on the very next one.
+        winner = _regiment("w", 0, 0, True, initiative=5, speed_per_tick=1.0)
+        loser = _regiment("l", 0, 12, False, initiative=5, speed_per_tick=1.0)
+        battle = Battle(1000, 1000, [winner, loser], seed=0)
+        _join_fight(battle, "g", winner, loser)
+        combat._start_rout(loser, battle)
+        self.assertEqual(winner.attack_target, "l")
+
+        combat.refresh_melee_state(battle)
+
+        self.assertFalse(winner.in_melee)
+        self.assertEqual(winner.attack_target, "l")
+
     def test_given_player_missile_troops_when_their_opponent_routs_then_they_hold(self):
         archers = _regiment("a", 0, 0, True, initiative=5, speed_per_tick=1.0,
                             missile_code=2, missile_range=720.0)

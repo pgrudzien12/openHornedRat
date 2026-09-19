@@ -210,7 +210,10 @@ def refresh_melee_state(battle):
         regiment.in_melee = False
         regiment.melee_group = None
         regiment.melee_touching = frozenset()
-        regiment.attack_target = None
+        # The unit's *order* survives leaving a fight: `LeaveBattleGrid` never touches one, and the
+        # pursuit granted when the last enemy broke is issued on the very tick before this runs.
+        # Clearing it here cancelled every pursuit one tick after it started. A target that is gone
+        # is dropped by `Battle._advance_regiments` instead.
 
 
 def _fight_has_enemy(battle, regiment):
