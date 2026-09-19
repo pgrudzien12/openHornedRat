@@ -7,7 +7,7 @@ from whshr.briefing import load_briefing
 from whshr.campaign import (
     parse_mission_script, parse_mission_windows, parse_window_hotspots, parse_window_portrait, parse_window_ui,
 )
-from whshr.campaign_state import CampaignState, caravan_scroll_count, eligible_missions
+from whshr.campaign_state import CampaignState, caravan_scroll_count, eligible_missions, initial_flow
 
 
 class CampaignStateTests(unittest.TestCase):
@@ -95,6 +95,16 @@ class CampaignStateTests(unittest.TestCase):
 
     def test_given_offered_missions_then_scrolls_are_one_fewer_capped_at_three(self):
         self.assertEqual([caravan_scroll_count(n) for n in range(6)], [0, 0, 1, 2, 3, 3])
+
+    def test_given_start_caravan_hotspots_then_their_resource_selects_the_initial_flow(self):
+        self.assertEqual(initial_flow((
+            {"res": 150, "target_kind": "script", "target": "PopContext"},
+            {"res": 151, "target_kind": "res", "target": "FLOWSCRIPTBP03"},
+        )), "FLOWSCRIPTBP03")
+
+    def test_given_start_caravan_without_one_flow_target_then_initial_flow_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "exactly one flow"):
+            initial_flow(())
 
     def test_given_envoy_to_nuln_then_scrolls_follow_2_0_1_as_missions_are_taken(self):
         window = [{"name_id": 671}, {"name_id": 672, "depend": 671},

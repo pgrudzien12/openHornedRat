@@ -7,7 +7,7 @@ the current mission window, completed mission resource ids, and coffers.
 
 from dataclasses import dataclass, field
 
-from .campaign import build_campaign_graph, load_wnd_rcdata, parse_window_hotspots
+from .campaign import build_campaign_graph, load_wnd_rcdata, parse_window_ui
 from .legacy import module
 from .paths import Installation
 
@@ -45,6 +45,15 @@ def eligible_missions(missions, taken):
 def caravan_scroll_count(mission_count):
     """Scrolls on Dietrich's desk: ``CarScroll3/2/1`` carry ``depend`` 2/3/4 (section 7.4)."""
     return min(max(mission_count - 1, 0), 3)
+
+
+def initial_flow(hotspots):
+    """Return the flow resource selected by STARTCARAVAN's original hotspot."""
+    flows = [hotspot["target"].upper() for hotspot in hotspots
+             if hotspot.get("target_kind") == "res" and hotspot.get("target", "").upper().startswith("FLOWSCRIPT")]
+    if len(flows) != 1:
+        raise ValueError(f"STARTCARAVAN must select exactly one flow, found {flows!r}")
+    return flows[0]
 
 
 @dataclass
@@ -118,8 +127,8 @@ class CampaignState:
         game = installation if isinstance(installation, Installation) else Installation(installation)
         wnd = load_wnd_rcdata(game.file_dir("DLL", "WND.DLL"))
         hints = module("pe_missions").load_strings(str(game.file_dir("DLL", "BRTXT.DLL")))
-        return cls(build_campaign_graph(str(game.root)),
-                   hotspots=tuple(parse_window_hotspots(wnd, "STARTCARAVAN")), hints=hints)
+        hotspots = tuple(parse_window_ui(wnd, "STARTCARAVAN")["hotspots"])
+        return cls(build_campaign_graph(str(game.root)), flow=initial_flow(hotspots), hotspots=hotspots, hints=hints)
 
     @classmethod
     def single_mission(cls, briefing):
