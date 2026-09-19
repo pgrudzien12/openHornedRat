@@ -119,6 +119,9 @@ class Regiment:
     # The fight's own-side tally, breakdown and next break-test turn (6.1-6.2) live on
     # `Battle.fights[regiment.melee_group]`, shared by every regiment in that fight.
     original_models: int | None = None  # starting model count, for rally's casualties modifier
+    # game_rules.md 6.1: the formed frontage, which casualties never reduce (only a re-form would).
+    # The rank bonus divides the live model count by this, so it decays as the unit is worn down.
+    frontage: int | None = None
     # game_rules.md 5.5: floor(1.5 x frontage), set when the regiment charges into a fight and spent
     # one attacking model at a time, so only the first models to strike get the +1 S.
     charge_counter: int = 0
@@ -127,6 +130,9 @@ class Regiment:
     def __post_init__(self):
         if self.original_models is None:
             self.original_models = self.models
+        if self.frontage is None:
+            sizes = formation.rank_sizes(self.models, self.ranks)
+            self.frontage = sizes[0] if sizes else 0
 
     @property
     def moving(self):

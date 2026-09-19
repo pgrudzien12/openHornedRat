@@ -959,7 +959,11 @@ the two tallies of the shared battle grid (`+0x24`/`+0x25`, which one depends on
 The unit's own score also gets, when its enemy is a unit of classes 1–6:
 
 - **rank bonus**: if frontage `s_wdth > 3`, `size / width − 1` (full ranks behind the first),
-  **with no upper limit**;
+  **with no upper limit**. ✅ `size` is the unit's **live** model count (`+0x7C`) but `width` is the
+  **formed** frontage (`+0x7E`), which casualties never reduce — only a re-form recomputes it. The
+  bonus therefore **decays as the unit is worn down** and vanishes once it is below two full ranks.
+  Deriving the width from the current model count instead pins the bonus near `ranks − 1` for the
+  whole fight and inflates every result the unit is part of;
 - **direction bonus** from the attack direction code (`FUN_10008b00`, the angle of the attacker
   relative to the defender's facing): code 1 (behind) **+2**, codes 2–3 (sides) **+1**, 0 (front) 0.
 
@@ -978,6 +982,31 @@ after contact** (rank and direction bonuses, added at every strike, count twice 
 results come every 1 or 2 turns depending on the Initiatives involved; a unit that joins later cannot
 be broken in its first turn. Every unit of the losing side (`difference = own tally − enemy tally < 0`,
 not already broken) is tested separately against the same difference:
+
+**Timing and reset in detail** ✅ (traced September 2026; getting these wrong inflates every modifier):
+
+- **All break tests on a grid resolve before any unit strikes in that segment.** The tick loop runs
+  `BreakTest` over every unit in melee and only afterwards runs the melee pass, so the result is
+  evaluated on the tallies as they stood at the end of the previous turn.
+- The gate is `grid+0x26 == current segment`, the **grid's own creation segment** — identical for
+  every unit on the grid, and unique within a turn, so it fires once per turn for all of them at once.
+  Evaluating at a fixed segment (the turn's last, say) instead folds an extra turn of bonuses into
+  every modifier.
+- **The tallies are cleared lazily, per grid, by the first unit to strike after a result**, inside
+  `AddCombatResult`: it zeroes `+0x24`/`+0x25`, sets `+0x28 = turn − 1` and clears the armed bit, and
+  that same call's own contribution lands in the new window. The steady-state accumulation window is
+  therefore **one turn**; only the first window is two.
+- `+0x33C` counts the result segments a unit has seen on this grid; it is zeroed on every (re)engagement
+  and the test needs it `>= 2`, so **a unit cannot be broken by a result it was not present for**.
+- A unit joining an existing fight never zeroes the tallies and never moves the window.
+- The modifier is the **raw, uncapped** difference: no clamp, scale or table between the subtraction
+  and the test. The tallies are stored as signed chars read back as unsigned bytes, so the arithmetic
+  is mod 256 (a tally past 255 wraps — a real if rare hazard).
+- Since the roll is flat 2–12, **any modifier of `Ld − 1` or more is an automatic failure**: there is
+  no tail. A difference of 6 against Ld 7 is already certain death, which is why the accumulation
+  window matters so much. The main per-unit decorrelators are hatred (below), differing Leadership,
+  and the `+0x33C` exemption — several units of one side sharing a grid otherwise get the *same*
+  modifier in the *same* segment and tend to break together.
 
 ```
 if unit hates the enemy:   difference = Ld − 10         # the test becomes a roll of 10 or less
@@ -1001,6 +1030,13 @@ worse than on the tabletop. Callers: break test, panic, fear, rally, pursuit, ar
 and a scripted test `FUN_1001f990`.
 
 ### 7.2 Panic (`FUN_10008ca0` → `FUN_10017410`) ✅
+
+**There is no friendly-unit panic** ✅ (re-verified September 2026 over every caller of `FUN_10008ca0`
+and `FUN_10017410`): nothing makes a unit test morale because a *friendly* unit broke or was destroyed.
+The rout broadcast (event 0x0F) goes to enemies only and drives pursuit; events 0x0E and 0x16 only make
+other units drop the unit as a target. Panic is driven purely by a unit's **own** casualty thresholds
+plus area damage and two spell effects, so it is one of the engine's *decorrelators* of morale: adding
+it makes units break more often but **independently**, not in unison.
 
 When a model is killed (any cause), with `q = orgsize >> 2` (so only units of 4 or more models):
 if `floor(size_before / q) != floor(size_after / q)`, the unit tests with

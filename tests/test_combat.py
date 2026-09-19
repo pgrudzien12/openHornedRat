@@ -29,7 +29,10 @@ def _run(battle, ticks):
 def _join_fight(battle, group_id, *regiments, turn=0):
     """Test helper: put `regiments` into a fresh shared fight `group_id`, touching every regiment of
     the opposite side among them, without going through `combat.resolve_contacts`' geometry."""
-    battle.fights[group_id] = combat._new_fight(turn)
+    battle.fights[group_id] = combat._new_fight(turn, 1)
+    # These are established combatants, not newcomers: give them a result segment already seen, so
+    # game_rules.md 6.2's "cannot be broken in your first result segment" rule does not exempt them.
+    battle.fights[group_id]["rounds"] = {r.identifier: 1 for r in regiments}
     for regiment in regiments:
         regiment.in_melee = True
         regiment.melee_group = group_id
@@ -69,8 +72,10 @@ class BreakTestTimingTests(unittest.TestCase):
         self.battle = Battle(1000, 1000, [self.attacker, self.defender], seed=3)
 
     def test_given_a_fresh_contact_when_ticked_through_two_turns_then_no_break_test_happens_yet(self):
+        # The result is evaluated in the grid's own creation segment two turns on, so nothing can
+        # happen within the first two full turns.
         turn_ticks = combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN
-        events = _run(self.battle, turn_ticks * 2 + combat.SEGMENT_TICKS * 9)  # up to turn 2's segment 1
+        events = _run(self.battle, turn_ticks * 2)
 
         self.assertNotIn("leadership_test", [e.kind for e in events])
 

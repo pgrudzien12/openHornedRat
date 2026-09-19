@@ -132,8 +132,15 @@ def _unpair_dead(battle, regiment, dead_uids):
 
 
 def _rank_bonus(attacker):
-    """game_rules.md 6.1: if frontage > 3, size / width - 1 full ranks behind the first, uncapped."""
-    frontage = attacker.front_rank_models()
+    """game_rules.md 6.1: if frontage > 3, `size / width - 1` full ranks behind the first, uncapped.
+
+    `width` is the regiment's **formed** frontage, which the original does not reduce as models die
+    (only a re-form recomputes it), while `size` is the live model count. The bonus therefore decays
+    as a unit takes casualties and disappears once it is down to less than two full ranks. Deriving
+    the width from the current model count instead keeps it pinned near `ranks - 1` for the whole
+    fight, which inflates every combat result the unit is part of.
+    """
+    frontage = attacker.frontage
     if frontage <= 3:
         return 0
     return max(0, attacker.models // frontage - 1)
@@ -234,10 +241,14 @@ def _segment_state(tick_count):
     return absolute_segment, turn, SEGMENTS_PER_TURN - segment_in_turn
 
 
-def _new_fight(turn):
+def _new_fight(turn, segment):
     return {
         "grid": None,  # whshr.battle_grid.BattleGrid, seeded on the first tick of the fight
-        "next_test_turn": turn + 2,  # game_rules.md 6.2: the first result comes two turns after contact
+        # game_rules.md 6.2: the result is evaluated in the grid's own creation segment, so the fight
+        # remembers it; the first result comes two turns after contact, later ones every turn.
+        "segment": segment,
+        "next_test_turn": turn + 2,
+        "rounds": {},  # regiment id -> result segments it has seen on this grid (6.2's +0x33C)
         "tally": {True: 0.0, False: 0.0},
         "breakdown": {True: {"kills": 0, "rank": 0, "direction": 0},
                       False: {"kills": 0, "rank": 0, "direction": 0}},
@@ -272,7 +283,7 @@ def resolve_contacts(battle):
     fleeing units in close combat"). Recomputed every tick so a regiment that dies or a footprint that
     shrinks below contact range releases its neighbours, and a third regiment closing in joins the fight
     already in progress instead of starting a separate 1v1."""
-    _, turn, _ = _segment_state(battle.tick_count)
+    _, turn, segment = _segment_state(battle.tick_count)
     active = [r for r in battle.regiments.values() if r.active and not r.routing]
     by_id = {r.identifier: r for r in active}
     touching = {r.identifier: set() for r in active}
@@ -338,7 +349,7 @@ def resolve_contacts(battle):
                 _merge_fights(battle, group_id, existing_ids[1:])
         else:
             group_id = _new_fight_id(battle)
-            battle.fights[group_id] = _new_fight(turn)
+            battle.fights[group_id] = _new_fight(turn, segment)
         kept_groups.add(group_id)
         for identifier in members:
             regiment = by_id[identifier]
@@ -391,12 +402,15 @@ def resolve_melee(battle):
             groups.setdefault(regiment.melee_group, []).append(regiment)
     for group_id, members in groups.items():
         fight = battle.fights[group_id]
+        # game_rules.md 6.2: every break test on a grid resolves **before** any unit strikes in that
+        # segment, and only in the grid's own creation segment. Testing at the end of the turn instead
+        # folded a whole extra turn of rank and direction bonuses into every modifier.
+        if segment_number == fight["segment"]:
+            _resolve_group_break_test(group_id, members, turn, battle)
         for attacker in members:
             if attacker.initiative != segment_number:
                 continue
             _strike_with_models(attacker, group_id, fight, turn, segment_number, battle)
-        if segment_number == 1:
-            _resolve_group_break_test(group_id, members, turn, battle)
 
 
 def _strike_with_models(attacker, group_id, fight, turn, segment_number, battle):
@@ -449,8 +463,16 @@ def _strike_with_models(attacker, group_id, fight, turn, segment_number, battle)
 def _resolve_group_break_test(group_id, members, turn, battle):
     """Evaluate one fight's break test once it is due (game_rules.md 6.2): only the losing side (by
     accumulated tally) is tested, every active regiment on that side; the tally and its breakdown reset
-    and the next test is due next turn."""
+    and the next test is due next turn.
+
+    Each regiment also counts the result segments it has seen on this grid, and is exempt from the
+    first of them (the traced `+0x33C >= 2` rule), so a regiment that joins a fight late cannot be
+    broken by a result it was not present for.
+    """
     fight = battle.fights[group_id]
+    seen = fight["rounds"]
+    for regiment in members:
+        seen[regiment.identifier] = seen.get(regiment.identifier, 0) + 1
     if turn < fight["next_test_turn"]:
         return
     difference = fight["tally"][True] - fight["tally"][False]
@@ -459,7 +481,7 @@ def _resolve_group_break_test(group_id, members, turn, battle):
         modifier = abs(difference)
         breakdown = {True: dict(fight["breakdown"][True]), False: dict(fight["breakdown"][False])}
         for regiment in members:
-            if regiment.player == losing_side:
+            if regiment.player == losing_side and seen.get(regiment.identifier, 0) >= 2:
                 _break_test(regiment, modifier, group_id, breakdown, battle)
     fight["tally"] = {True: 0.0, False: 0.0}
     fight["breakdown"] = {True: {"kills": 0, "rank": 0, "direction": 0},
