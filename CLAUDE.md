@@ -74,7 +74,7 @@ CLAUDE.md          - this file
 FORMATS.md         - format reference: overview table, structures, hypotheses, open questions
 ROADMAP.md         - work plan: game file inventory, phases 0-5 with status, milestones, order of steps
 notes/             - full per-format reports (how each claim was verified, per-file tables, open questions)
-  animations.md, battle_viewer.md, btp_sprite_leftovers.md, campaign.md, fonts_glue.md, game_rules.md, music.md, pbx_rnc.md, research_plan.md,
+  animations.md, battle_viewer.md, btp_sprite_leftovers.md, campaign.md, data_driven_audit.md, mission_selection.md, fonts_glue.md, game_rules.md, music.md, pbx_rnc.md, research_plan.md,
   pe_resources.md, scene_scripts.md, sfx.md, si_omni.md, sprite_names.md, terrain_gd.md
 whshr/             - unified package and CLI: python3 -m whshr check|extract|catalog|engine|battle-replay|viewer|
                      viewer-web|viewer-2d|viewer-2d-web|terrain-check|rules|scripts (3D battle viewer: battle3d.py, 2D: battle2d.py,
@@ -160,6 +160,15 @@ section plus a row in the overview table of `FORMATS.md`.
   (see: 3/13 frames "matched" by accident under a wrong RLE hypothesis).
 - Game files (`.BOP`, `.PAL`, etc.) are not in this repo (they are the property of GOG/Games Workshop) —
   the scripts in `scripts/` take the path to the installed game as an argument.
+
+## Engine rule: read scene data, do not hardcode it
+
+The campaign has dozens of missions, portrait windows and caravan variants. Positions, bitmap names, hotspot
+rects and targets, animation frames and timing, text ids and portrait/background/panel numbers come from the
+`WND.DLL` glue scripts (and the string DLLs) at runtime. Only the *front-end's own* constants may live in code, and then
+as one documented table per concept (e.g. `controlpanel` → panel + button labels), each row citing its note; guessed
+values go in a `PROVISIONAL` block. Never key content by a non-unique id (battle ids repeat across mission records).
+Test on more than one mission/window. Audit and lessons: `notes/data_driven_audit.md`.
 
 ## Clean-room policy (all agents must follow this)
 
