@@ -5,7 +5,9 @@ import unittest
 from whshr.assets import AssetId, AssetLocator
 from whshr.battle_scene import BattleScene
 from whshr.cache import AssetCache
-from whshr.campaign_scenes import BriefingScene, IntroScene, MainMenuScene, briefing_asset_for
+from whshr.campaign_scenes import (
+    BriefingScene, IntroScene, MainMenuScene, OpeningNarrationScene, briefing_asset_for,
+)
 from whshr.catalog import build
 from whshr.scenes import SceneAssets, SceneMachine
 
@@ -18,6 +20,8 @@ class IntroSceneTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self._write("FILE/SCRIPT/BF001.BTS", b"[BATTLESCRIPT]\n[END]\n")
         self._write("FILE/BINARY/STANDARD.PAL", b"palette")
+        self._write("FILE/DLL/ANTXT.DLL", b"MZ")
+        self._write("FILE/BINARY/GLUE/SUBTEXT.FON", b"MZ")
         self._write("REMOTE/BINARY/ANIM/A1.SI", b"container")
         self._write("FILE/DLL/WND.DLL", b"MZ")
         self.container = {
@@ -27,6 +31,12 @@ class IntroSceneTests(unittest.TestCase):
             }
         }
         self.media = {"objects": {1: {"smk": {}, "blob": b"fake-smk"}}}
+        self.texts = {
+            1100: "Stormclouds gather over the Border Princes, ",
+            1101: "unnoticed by the reclusive Wizard engrossed in the study of his profound discovery - ",
+            1102: "an ancient crystal of Elven origin, together with something far more sinister...",
+        }
+        self.subtitle_font = object()
         self.briefing = {"battle": "BF001", "title": "Sven Carlsson", "lines": []}
         self.loaded = []
         self.context = SceneAssets(
@@ -34,6 +44,8 @@ class IntroSceneTests(unittest.TestCase):
             {
                 "omni-si": self._loader(self.container),
                 "omni-si-media": self._loader(self.media),
+                "pe-string-table": self._loader(self.texts),
+                "warhammer-fon": self._loader(self.subtitle_font),
                 "campaign-briefing": self._loader(self.briefing),
             },
         )
@@ -58,7 +70,27 @@ class IntroSceneTests(unittest.TestCase):
 
         self.assertEqual(intro.duration_seconds, 1.75)
         self.assertIs(intro.media, self.media)
-        self.assertEqual(self.loaded, [self.root / "REMOTE/BINARY/ANIM/A1.SI"] * 2)
+        self.assertIs(intro.texts, self.texts)
+        self.assertIs(intro.subtitle_font, self.subtitle_font)
+        self.assertEqual(self.loaded, [self.root / "REMOTE/BINARY/ANIM/A1.SI"] * 2 +
+                         [self.root / "FILE/DLL/ANTXT.DLL", self.root / "FILE/BINARY/GLUE/SUBTEXT.FON"])
+
+    def test_given_opening_narration_when_clicked_then_the_intro_cutscene_becomes_active(self):
+        machine = SceneMachine(OpeningNarrationScene(), self.context)
+
+        self.assertEqual(machine.active.text, "".join(self.texts[text_id] for text_id in (1100, 1101, 1102)))
+        machine.handle("continue")
+
+        self.assertIsInstance(machine.active, IntroScene)
+        self.assertEqual(machine.history[-1].reason, "opening narration dismissed")
+
+    def test_given_opening_narration_when_the_intro_is_skipped_then_the_menu_becomes_active(self):
+        machine = SceneMachine(OpeningNarrationScene(), self.context)
+
+        machine.handle("skip")
+
+        self.assertIsInstance(machine.active, MainMenuScene)
+        self.assertEqual(machine.history[-1].reason, "intro skipped")
 
     def test_given_intro_when_player_skips_then_main_menu_becomes_active(self):
         machine = SceneMachine(IntroScene(), self.context)

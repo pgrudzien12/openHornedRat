@@ -3,12 +3,16 @@
 from .assets import AssetId
 from .battle_scene import BattleScene, FIRST_BATTLE
 from .engine import DEFAULT_SEED
+from .legacy import module
 from .scenes import Quit, Scene, SceneManifest, Transition
 from .si import load_si, walk_objects
 
 INTRO_CUTSCENE = AssetId("vanilla", "cutscene", "a1")
 INTRO_MEDIA = AssetId("vanilla", "cutscene", "a1-media")
 MAIN_MENU = AssetId("vanilla", "ui", "main-menu")
+ANIMATION_TEXT = AssetId("vanilla", "text", "anim")
+SUBTITLE_FONT = AssetId("vanilla", "font", "subtext")
+OPENING_TEXT_IDS = (1100, 1101, 1102)
 
 
 def omni_duration_seconds(container):
@@ -27,10 +31,36 @@ def briefing_asset_for(battle_id):
     return AssetId("vanilla", "briefing", battle_id.name)
 
 
+class OpeningNarrationScene(Scene):
+    """The text-only prologue shown before the A1 opening cutscene."""
+
+    manifest = SceneManifest(immediate=(ANIMATION_TEXT, SUBTITLE_FONT),
+                             prefetch=(INTRO_CUTSCENE, INTRO_MEDIA))
+
+    def __init__(self, successor=None, log_dir=None, seed=DEFAULT_SEED):
+        self.successor = successor or IntroScene(log_dir=log_dir, seed=seed)
+        self.texts = None
+        self.subtitle_font = None
+        self.text = None
+
+    def enter(self, context):
+        self.texts = context.load(ANIMATION_TEXT)
+        self.subtitle_font = context.load(SUBTITLE_FONT)
+        self.text = "".join(self.texts[text_id] for text_id in OPENING_TEXT_IDS)
+
+    def handle(self, event, context):
+        if event == "continue":
+            return Transition(self.successor, "opening narration dismissed")
+        if event == "skip":
+            return Transition(self.successor.successor, "intro skipped")
+        return None
+
+
 class IntroScene(Scene):
     """Play the verified A1 game-intro timeline, then proceed to the main menu."""
 
-    manifest = SceneManifest(immediate=(INTRO_CUTSCENE, INTRO_MEDIA), prefetch=(MAIN_MENU,))
+    manifest = SceneManifest(immediate=(INTRO_CUTSCENE, INTRO_MEDIA, ANIMATION_TEXT, SUBTITLE_FONT),
+                             prefetch=(MAIN_MENU,))
 
     def __init__(self, successor=None, log_dir=None, seed=DEFAULT_SEED):
         self.successor = successor or MainMenuScene(log_dir=log_dir, seed=seed)
@@ -38,11 +68,15 @@ class IntroScene(Scene):
         self.duration_seconds = None
         self.container = None
         self.media = None
+        self.texts = None
+        self.subtitle_font = None
 
     def enter(self, context):
         self.container = context.load(INTRO_CUTSCENE)
         self.duration_seconds = omni_duration_seconds(self.container)
         self.media = context.load(INTRO_MEDIA)
+        self.texts = context.load(ANIMATION_TEXT)
+        self.subtitle_font = context.load(SUBTITLE_FONT)
 
     def handle(self, event, context):
         if event == "skip":
@@ -96,4 +130,8 @@ class BriefingScene(Scene):
 
 def default_scene_loaders():
     """Return loaders currently needed by the implemented campaign scenes."""
-    return {"omni-si": lambda _record, path: load_si(path)}
+    return {
+        "omni-si": lambda _record, path: load_si(path),
+        "pe-string-table": lambda _record, path: module("pe_missions").load_strings(str(path)),
+        "warhammer-fon": lambda _record, path: module("fon_parse").load_fon(str(path)).fonts[0],
+    }

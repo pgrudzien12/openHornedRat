@@ -11,7 +11,7 @@ import zengl  # noqa: E402
 
 from ..assets import AssetId  # noqa: E402
 from ..battle_scene import BattleScene  # noqa: E402
-from ..campaign_scenes import IntroScene  # noqa: E402
+from ..campaign_scenes import OpeningNarrationScene  # noqa: E402
 from ..clock import FixedStepClock  # noqa: E402
 from ..engine import DEFAULT_SEED  # noqa: E402
 from ..game import scene_context  # noqa: E402
@@ -77,7 +77,7 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
     # Wider debug overlay; unrelated to the battle HUD.
     overlay = gpu.text((820, 140))
     initial = (BattleScene(AssetId("vanilla", "battle", Path(battle).stem.casefold()), log_dir=log_dir, seed=seed)
-               if battle else IntroScene(log_dir=log_dir, seed=seed))
+               if battle else OpeningNarrationScene(log_dir=log_dir, seed=seed))
     machine = SceneMachine(initial, context)
     options = {"camera": camera}
     view = view_for(gpu, machine.active, options)

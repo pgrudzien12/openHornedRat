@@ -14,6 +14,8 @@ class CatalogTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self._write("FILE/SCRIPT/Bf001.BTS", b"[BATTLESCRIPT]\n[END]\n")
         self._write("REMOTE/BINARY/ANIM/Intro.SI", b"RIFF")
+        self._write("FILE/DLL/ANTXT.DLL", b"MZ")
+        self._write("FILE/BINARY/GLUE/SUBTEXT.FON", b"MZ")
         self._write("FILE/BINARY/STANDARD.PAL", b"file palette")
         self._write("UPDATE/BINARY/standard.pal", b"updated palette")
 
@@ -32,7 +34,7 @@ class CatalogTests(unittest.TestCase):
             [str(record.identifier) for record in assets.records],
             [
                 "vanilla:battle/bf001", "vanilla:cutscene/intro", "vanilla:cutscene/intro-media",
-                "vanilla:palette/standard",
+                "vanilla:font/subtext", "vanilla:palette/standard", "vanilla:text/anim",
             ],
         )
         self.assertEqual(assets.get("vanilla:cutscene/intro").decoder, "omni-si")

@@ -106,6 +106,20 @@ def build(installation):
             "campaign-briefing", source_fingerprint(wnd_dll),
         ))
 
+    antxt_dll = game.find("FILE", "DLL", "ANTXT.DLL")
+    if antxt_dll is not None:
+        records.append(AssetRecord(
+            AssetId("vanilla", "text", "anim"), "text", "file", "DLL/ANTXT.DLL",
+            "pe-string-table", source_fingerprint(antxt_dll),
+        ))
+
+    subtext_fon = game.find("FILE", "BINARY", "GLUE", "SUBTEXT.FON")
+    if subtext_fon is not None:
+        records.append(AssetRecord(
+            AssetId("vanilla", "font", "subtext"), "font", "file", "BINARY/GLUE/SUBTEXT.FON",
+            "warhammer-fon", source_fingerprint(subtext_fon),
+        ))
+
     standard = game.find("UPDATE", "BINARY", "STANDARD.PAL") or game.find("FILE", "BINARY", "STANDARD.PAL")
     if standard is not None:
         records.append(AssetRecord(

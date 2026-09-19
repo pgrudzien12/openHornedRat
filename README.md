@@ -101,8 +101,8 @@ python3 -m venv .venv && .venv/bin/pip install --only-binary=:all: -r requiremen
 ```
 
 It opens a window driven by the scene state machine, with a debug overlay (FPS, tick count, scene). The
-flow plays the original `A1.SI` intro inside the engine at the verified 8 fps with its WAV sound (any key
-or click skips it), then a simple main menu (New Campaign: N or Enter; Quit: Q or Escape), the BF001
+flow opens with the original text prologue, then plays the original `A1.SI` intro inside the engine at the
+verified 8 fps with its WAV sound (any key or click skips it), then a simple main menu (New Campaign: N or Enter; Quit: Q or Escape), the BF001
 mission briefing with its campaign text (Enter or a click starts the battle), and the BF001 battle, with
 a short fade after each scene change. Ctrl+Q or closing the window quits at any time.
 

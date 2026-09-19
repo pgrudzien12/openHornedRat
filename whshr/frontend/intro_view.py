@@ -11,6 +11,8 @@ import struct
 import pygame
 
 from ..smacker import Smacker, frame_index_at
+from ..cutscene import SubtitleTimeline
+from .bitmap_font import BitmapFont
 from .gpu import QUAD_VERTEX_SHADER
 from .scene_view import SceneView
 
@@ -98,6 +100,11 @@ class IntroView(SceneView):
         self.cues = sorted(self._find_cues(scene.media), key=lambda cue: cue[0]) if self.audio_ok else []
         self.next_cue = 0
         self.playing = 0
+        self.subtitles = SubtitleTimeline(scene.media, scene.texts)
+        self.subtitle_font = BitmapFont(scene.subtitle_font)
+        self.subtitle = gpu.text((620, 80), self.subtitle_font, color=(255, 250, 225),
+                                 background=None, padding=0)
+        self.subtitle_text = None
         self._sync(0.0)
 
     @staticmethod
@@ -128,6 +135,25 @@ class IntroView(SceneView):
             if self.cues[self.next_cue][1].play() is not None:
                 self.playing += 1
             self.next_cue += 1
+        text = self.subtitles.text_at(elapsed)
+        if text != self.subtitle_text:
+            self.subtitle.set_lines(self._wrap_subtitle(text))
+            self.subtitle_text = text
+
+    def _wrap_subtitle(self, text):
+        """Keep subtitle text in the original film's narrow lower strip."""
+        if not text:
+            return ()
+        words, lines, current = text.split(), [], ""
+        max_width = self.subtitle.size[0]
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if not current or self.subtitle_font.size(candidate)[0] <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        return (*lines, current) if current else tuple(lines)
 
     def animate(self, seconds):
         self._sync(self.scene.elapsed_seconds)
@@ -142,11 +168,21 @@ class IntroView(SceneView):
     def draw(self):
         super().draw()
         (screen_w, screen_h) = self.gpu.target.size
-        scale = min(screen_w / self.smk.w, screen_h / self.smk.h)
+        # Reserve the original subtitle strip under the 640x272 film before
+        # choosing a scale, so captions never obscure the video itself.
+        subtitle_strip = 32
+        scale = min(screen_w / self.smk.w, screen_h / (self.smk.h + subtitle_strip))
         width, height = self.smk.w * scale, self.smk.h * scale
-        self.video.draw((screen_w - width) / 2, (screen_h - height) / 2, width, height)
+        left = (screen_w - width) / 2
+        top = (screen_h - (self.smk.h + subtitle_strip) * scale) / 2
+        self.video.draw(left, top, width, height)
+        if self.subtitle_text:
+            text_width, text_height = self.subtitle.text_size
+            self.subtitle.draw((screen_w - text_width * scale) / 2, top + height + 5 * scale,
+                               text_width * scale, text_height * scale)
 
     def release(self):
         self.video.release()
+        self.subtitle.release()
         for _, sound in self.cues:
             sound.stop()
