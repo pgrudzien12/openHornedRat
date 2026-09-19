@@ -1,6 +1,6 @@
 import unittest
 
-from whshr.campaign import parse_mission_windows
+from whshr.campaign import parse_mission_windows, parse_window_hotspots
 from whshr.campaign_state import CampaignState, eligible_missions
 
 
@@ -65,6 +65,41 @@ class CampaignStateTests(unittest.TestCase):
 
         self.assertEqual(windows["MISSIONTESTWINDOW"], [{"name_id": 601, "name": "MISSION_601",
                           "depend": 600, "inactivedepend": 599}])
+
+    def test_given_caravan_includes_then_hotspots_keep_their_hint_ids_and_geometry(self):
+        wnd = {
+            "START": """
+                [WINDOW]
+                [HOTSPOT]
+                    set:x=1
+                    set:y=2
+                    set:vx=3
+                    set:vy=4
+                    set:res=150
+                    res:FlowScript
+                [END]
+                [INCLUDE]
+                    script:Common
+                [END]
+                [END]
+            """,
+            "COMMON": """
+                [WINDOW]
+                [HOTSPOT]
+                    set:x=5
+                    set:y=6
+                    set:vx=7
+                    set:vy=8
+                    set:res=-1
+                [END]
+                [END]
+            """,
+        }
+
+        self.assertEqual(parse_window_hotspots(wnd, "start"), [
+            {"x": 1, "y": 2, "vx": 3, "vy": 4, "res": 150},
+            {"x": 5, "y": 6, "vx": 7, "vy": 8, "res": -1},
+        ])
 
 
 if __name__ == "__main__":

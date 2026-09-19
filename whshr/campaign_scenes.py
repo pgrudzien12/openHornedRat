@@ -2,7 +2,6 @@
 
 from .assets import AssetId
 from .battle_scene import BattleScene, FIRST_BATTLE
-from .campaign import build_campaign_graph
 from .campaign_state import CampaignState
 from .engine import DEFAULT_SEED
 from .legacy import module
@@ -110,7 +109,7 @@ class MainMenuScene(Scene):
                 # briefing; a real installation derives the full initial flow.
                 self.campaign = (
                     CampaignState.single_mission(self.briefing) if self.briefing is not None
-                    else CampaignState(build_campaign_graph(str(context.locator.installation.root)))
+                    else CampaignState.from_installation(context.locator.installation)
                 )
             return Transition(CaravanScene(self.campaign), "new campaign started")
         if event == "quit":

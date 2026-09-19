@@ -67,32 +67,62 @@ class CaravanView(SceneView):
         left, top, scale = self._layout()
         return (pos[0] - left) / scale, (pos[1] - top) / scale
 
+    def _hotspot_rect(self, hint_id, fallback):
+        """Use the original WND hotspot geometry, retaining a test fallback."""
+        hotspot = self.scene.campaign.hotspot(hint_id)
+        if hotspot is None:
+            return fallback
+        return pygame.Rect(hotspot["x"], hotspot["y"], hotspot["vx"], hotspot["vy"])
+
+    def _hint(self, hint_id, *format_args):
+        text = self.scene.campaign.hint(hint_id, *format_args)
+        return text or ({150: "Click here to select mission.", 151: "Click here to view Troop Roster.",
+                         152: "Click here to view Battle Bestiary.", 157: "Click here to Save game.",
+                         158: "Click here to view Magic Book.", 159: "Click here to Abort Campaign.",
+                         160: "Click here to talk to Dietrich.",
+                         402: f"We have {self.scene.gold} gold crowns."}[hint_id])
+
     def _hub_action_at(self, pos):
         point = self._native_point(pos)
         for index, (rect, _filename) in enumerate(self.SCROLLS[:len(self.scene.missions)]):
             if rect.collidepoint(point):
                 return f"select_mission:{index}"
-        if self.MISSION_RECT.collidepoint(point):
+        if self._hotspot_rect(150, self.MISSION_RECT).collidepoint(point):
             return "select_mission:0" if self.scene.missions else None
-        if self.GOLD_RECT.collidepoint(point):
+        if self._hotspot_rect(-1, self.GOLD_RECT).collidepoint(point):
             return None
         for name, rect in self.BOOKS:
-            if rect.collidepoint(point):
+            hint_id = {"magic": 158, "troop roster": 151, "bestiary": 152}[name]
+            if self._hotspot_rect(hint_id, rect).collidepoint(point):
                 return f"browse_book:{name}"
-        if self.EXIT_RECT.collidepoint(point):
+        if self._hotspot_rect(159, self.EXIT_RECT).collidepoint(point):
             return "exit_campaign"
-        if self.SAVE_RECT.collidepoint(point):
+        if self._hotspot_rect(157, self.SAVE_RECT).collidepoint(point):
             return "save_campaign"
-        if self.DIETRICH_RECT.collidepoint(point):
+        if self._hotspot_rect(160, self.DIETRICH_RECT).collidepoint(point):
             return "speak_to_dietrich"
         return None
 
     def _set_hover(self, pos):
         point = self._native_point(pos)
-        if self.GOLD_RECT.collidepoint(point):
-            self.hover = f"Gold: {self.scene.gold}"
-        else:
-            self.hover = None
+        self.hover = None
+        if self._hotspot_rect(-1, self.GOLD_RECT).collidepoint(point):
+            self.hover = self._hint(402, self.scene.gold)
+        for index, (rect, _filename) in enumerate(self.SCROLLS[:len(self.scene.missions)]):
+            if rect.collidepoint(point):
+                self.hover = self._hint(150)
+        if self.hover is None:
+            for name, fallback in self.BOOKS:
+                hint_id = {"magic": 158, "troop roster": 151, "bestiary": 152}[name]
+                if self._hotspot_rect(hint_id, fallback).collidepoint(point):
+                    self.hover = self._hint(hint_id)
+                    break
+        if self.hover is None:
+            for hint_id, fallback in ((150, self.MISSION_RECT), (157, self.SAVE_RECT),
+                                      (159, self.EXIT_RECT), (160, self.DIETRICH_RECT)):
+                if self._hotspot_rect(hint_id, fallback).collidepoint(point):
+                    self.hover = self._hint(hint_id)
+                    break
         self.hint.set_lines((self.hover,) if self.hover else ())
 
     def events(self, event):

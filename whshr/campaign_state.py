@@ -7,6 +7,10 @@ the current mission window, completed mission resource ids, and coffers.
 
 from dataclasses import dataclass, field
 
+from .campaign import build_campaign_graph, load_wnd_rcdata, parse_window_hotspots
+from .legacy import module
+from .paths import Installation
+
 
 FIRST_FLOW = "FLOWSCRIPTBP01"
 INITIAL_COFFERS = 500
@@ -32,6 +36,8 @@ class CampaignState:
     mission_window: str = None
     completed: set[int] = field(default_factory=set)
     coffers: int = INITIAL_COFFERS
+    hotspots: tuple[dict, ...] = ()
+    hints: dict[int, str] = field(default_factory=dict)
 
     def __post_init__(self):
         if self.mission_window is None:
@@ -59,6 +65,22 @@ class CampaignState:
             self._open_next_window(0)
         else:
             self._open_next_window(self.flow_step + 1)
+
+    def hotspot(self, hint_id):
+        """Return the original hotspot that advertises ``hint_id``."""
+        return next((hotspot for hotspot in self.hotspots if hotspot.get("res") == hint_id), None)
+
+    def hint(self, hint_id, *format_args):
+        text = self.hints.get(hint_id, "")
+        return text % format_args if format_args else text
+
+    @classmethod
+    def from_installation(cls, installation):
+        game = installation if isinstance(installation, Installation) else Installation(installation)
+        wnd = load_wnd_rcdata(game.file_dir("DLL", "WND.DLL"))
+        hints = module("pe_missions").load_strings(str(game.file_dir("DLL", "BRTXT.DLL")))
+        return cls(build_campaign_graph(str(game.root)),
+                   hotspots=tuple(parse_window_hotspots(wnd, "STARTCARAVAN")), hints=hints)
 
     @classmethod
     def single_mission(cls, briefing):

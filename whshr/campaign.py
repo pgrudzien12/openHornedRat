@@ -97,6 +97,39 @@ def parse_mission_windows(wnd, brtxt=None):
     return windows
 
 
+def parse_window_hotspots(wnd, name, seen=()):
+    """Return a window's hotspots, expanding its original ``[INCLUDE]`` blocks.
+
+    ``set:res=<number>`` is the BRTXT hover-hint resource.  A later ``res:``
+    command is an action target and deliberately does not replace that hint.
+    """
+    name = name.upper()
+    if name in seen:
+        raise ValueError(f"cyclic window include: {' -> '.join((*seen, name))}")
+    try:
+        text = wnd[name]
+    except KeyError:
+        raise ValueError(f"window resource not found: {name}") from None
+    hotspots, section, current = [], None, None
+    for command, argument in parse_glue_lines(text):
+        if command.startswith("["):
+            if command == "[HOTSPOT]":
+                current = {}
+            elif command == "[END]" and section == "[HOTSPOT]" and current is not None:
+                if {"x", "y", "vx", "vy"} <= current.keys():
+                    hotspots.append(current)
+                current = None
+            section = command if command != "[END]" else None
+            continue
+        if section == "[HOTSPOT]" and command == "set" and "=" in argument:
+            key, value = argument.split("=", 1)
+            if key in ("x", "y", "vx", "vy", "res"):
+                current[key] = int(value)
+        elif section == "[INCLUDE]" and command == "script":
+            hotspots.extend(parse_window_hotspots(wnd, argument, (*seen, name)))
+    return hotspots
+
+
 def parse_mission_script(text, bktxt=None):
     """Analyze actions inside a mission runner script (e.g. BPMISSION1)."""
     bktxt = bktxt or {}
