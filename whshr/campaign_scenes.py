@@ -15,6 +15,7 @@ MAIN_MENU = AssetId("vanilla", "ui", "main-menu")
 ANIMATION_TEXT = AssetId("vanilla", "text", "anim")
 SUBTITLE_FONT = AssetId("vanilla", "font", "subtext")
 CARAVAN_FONT = AssetId("vanilla", "font", "pcsubt")
+PCTEXTA_FONT = AssetId("vanilla", "font", "pctexta")
 OPENING_TEXT_IDS = (1100, 1101, 1102)
 
 
@@ -29,9 +30,9 @@ def omni_duration_seconds(container):
     return end_ms / 1000
 
 
-def briefing_asset_for(battle_id):
-    """Return the logical asset ID of the campaign briefing text for one battle asset ID."""
-    return AssetId("vanilla", "briefing", battle_id.name)
+def briefing_asset_for(mission):
+    """Return the briefing asset for one exact campaign mission record."""
+    return AssetId("vanilla", "briefing", mission["briefing_key"])
 
 
 class OpeningNarrationScene(Scene):
@@ -190,13 +191,17 @@ class MissionMapScene(Scene):
     later troop-selection implementation accepts the briefing.
     """
 
+    manifest = SceneManifest(immediate=(PCTEXTA_FONT,))
+
     def __init__(self, campaign):
         self.campaign = campaign
         self.dietrich_portrait = None
         self.portrait_window = campaign.map_portrait_window
         self.selected_index = None
+        self.font = None
 
     def enter(self, context):
+        self.font = context.load(PCTEXTA_FONT)
         # Portrait FOL/BOP files are not required by the minimal test fixture
         # or every partial installation, so leave the panel absent if either
         # source file has not been extracted from an installed game.
@@ -235,7 +240,7 @@ class MissionMapScene(Scene):
             if mission is None:
                 return None
             briefing = mission.get("briefing") or BriefingScene(
-                AssetId("vanilla", "battle", mission["battle"].casefold())
+                mission
             )
             return Transition(briefing, f"campaign mission briefing opened: {mission['name']}")
         if event == "open_troop_select" and self.selected_mission is not None:
@@ -255,16 +260,19 @@ class TroopSelectScene(Scene):
 class BriefingScene(Scene):
     """Show one battle's campaign briefing text; Start Battle enters the battle itself."""
 
-    def __init__(self, battle, log_dir=None, seed=DEFAULT_SEED):
-        self.battle_id = battle
-        self.briefing_id = briefing_asset_for(battle)
-        self.manifest = SceneManifest(immediate=(self.briefing_id,), prefetch=(battle,))
+    def __init__(self, mission, log_dir=None, seed=DEFAULT_SEED):
+        self.mission = mission
+        self.battle_id = AssetId("vanilla", "battle", mission["battle"].casefold())
+        self.briefing_id = briefing_asset_for(mission)
+        self.manifest = SceneManifest(immediate=(self.briefing_id, PCTEXTA_FONT), prefetch=(self.battle_id,))
         self.briefing = None
+        self.font = None
         self.log_dir = log_dir
         self.seed = seed
 
     def enter(self, context):
         self.briefing = context.load(self.briefing_id)
+        self.font = context.load(PCTEXTA_FONT)
 
     def handle(self, event, context):
         if event == "start_battle":

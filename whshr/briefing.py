@@ -11,14 +11,13 @@ from .paths import Installation
 TEXT_COMMANDS = ("playtext", "queuetoplaytext")
 
 
-def _find_mission(campaign_graph, battle):
-    """Return the first mission window entry whose battle matches, case-insensitively."""
-    battle = battle.upper()
+def _find_mission(campaign_graph, briefing_key):
+    """Return the exact mission record named by its stable campaign-record key."""
     for mission_list in campaign_graph["mission_windows"].values():
         for mission in mission_list:
-            if (mission.get("battle") or "").upper() == battle:
+            if mission.get("briefing_key") == briefing_key:
                 return mission
-    raise ValueError(f"no campaign mission references battle {battle!r}")
+    raise ValueError(f"no campaign mission record has briefing key {briefing_key!r}")
 
 
 def _spoken_lines(glue_text, strings):
@@ -33,16 +32,16 @@ def _spoken_lines(glue_text, strings):
                 yield {"speaker_color": color, "text": text}
 
 
-def load_briefing(installation, battle):
-    """Build the title and spoken briefing lines for one battle from the original campaign scripts."""
+def load_briefing(installation, briefing_key):
+    """Build a briefing from the exact mission record that opened it."""
     game = installation if isinstance(installation, Installation) else Installation(installation)
     campaign_graph = build_campaign_graph(str(game.root))
-    mission = _find_mission(campaign_graph, battle)
+    mission = _find_mission(campaign_graph, briefing_key)
     wnd = load_wnd_rcdata(game.file_dir("DLL", "WND.DLL"))
     glue_text = wnd.get((mission.get("brief_script") or "").upper(), "")
     strings = module("pe_missions").load_strings(str(game.file_dir("DLL", "BRTXT.DLL")))
     return {
-        "battle": battle.upper(),
-        "title": mission.get("name") or battle.upper(),
+        "battle": mission.get("battle", "").upper(),
+        "title": mission.get("name") or mission.get("battle", "").upper(),
         "lines": list(_spoken_lines(glue_text, strings)),
     }

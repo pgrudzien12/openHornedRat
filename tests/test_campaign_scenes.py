@@ -23,6 +23,7 @@ class IntroSceneTests(unittest.TestCase):
         self._write("FILE/SCRIPT/BF001.BTS", b"[BATTLESCRIPT]\n[END]\n")
         self._write("FILE/BINARY/STANDARD.PAL", b"palette")
         self._write("FILE/BINARY/PCSUBT.FON", b"MZ")
+        self._write("FILE/BINARY/PCTEXTA.FON", b"MZ")
         self._write("FILE/DLL/ANTXT.DLL", b"MZ")
         self._write("FILE/BINARY/GLUE/SUBTEXT.FON", b"MZ")
         self._write("REMOTE/BINARY/ANIM/A1.SI", b"container")
@@ -128,7 +129,7 @@ class IntroSceneTests(unittest.TestCase):
         self.assertEqual(machine.history[-1].reason, "intro completed")
 
     def test_given_main_menu_when_new_campaign_is_chosen_then_the_caravan_becomes_active(self):
-        briefing_scene = BriefingScene(BF001)
+        briefing_scene = BriefingScene({"briefing_key": "test.0", "battle": "BF001"})
         machine = SceneMachine(MainMenuScene(briefing_scene), self.context)
 
         machine.handle("new_campaign")
@@ -138,7 +139,7 @@ class IntroSceneTests(unittest.TestCase):
         self.assertEqual(machine.history[0].reason, "new campaign started")
 
     def test_given_the_caravan_when_its_mission_is_chosen_then_the_map_opens_before_the_briefing(self):
-        briefing_scene = BriefingScene(BF001)
+        briefing_scene = BriefingScene({"briefing_key": "test.0", "battle": "BF001"})
         machine = SceneMachine(
             CaravanScene(CampaignState.single_mission(briefing_scene), continuation="open_mission_map"),
             self.context,
@@ -161,7 +162,7 @@ class IntroSceneTests(unittest.TestCase):
         self.assertEqual(machine.history[-1].reason, "campaign mission briefing opened: BF001")
 
     def test_given_a_selected_map_mission_when_accept_is_pressed_then_troop_selection_opens(self):
-        campaign = CampaignState.single_mission(BriefingScene(BF001))
+        campaign = CampaignState.single_mission(BriefingScene({"briefing_key": "test.0", "battle": "BF001"}))
         machine = SceneMachine(MissionMapScene(campaign), self.context)
         machine.handle("select_mission:0")
 
@@ -171,7 +172,7 @@ class IntroSceneTests(unittest.TestCase):
         self.assertEqual(machine.active.mission["battle"], "BF001")
 
     def test_given_the_mission_map_when_escape_is_pressed_then_the_caravan_returns(self):
-        campaign = CampaignState.single_mission(BriefingScene(BF001))
+        campaign = CampaignState.single_mission(BriefingScene({"briefing_key": "test.0", "battle": "BF001"}))
         machine = SceneMachine(MissionMapScene(campaign), self.context)
 
         machine.handle("return_to_caravan")
@@ -184,20 +185,20 @@ class IntroSceneTests(unittest.TestCase):
         self.assertIsInstance(machine.active, MissionMapScene)
 
     def test_given_a_resume_caravan_when_its_mission_hotspot_is_used_then_it_does_not_open_the_list(self):
-        caravan = CaravanScene(CampaignState.single_mission(BriefingScene(BF001)), mode="resume")
+        caravan = CaravanScene(CampaignState.single_mission(BriefingScene({"briefing_key": "test.0", "battle": "BF001"})), mode="resume")
 
         self.assertFalse(caravan.can_select_mission)
         self.assertIsNone(caravan.handle("open_mission_map", self.context))
 
     def test_given_the_caravan_when_dietrich_has_no_message_then_he_reads(self):
-        caravan = CaravanScene(CampaignState.single_mission(BriefingScene(BF001)))
+        caravan = CaravanScene(CampaignState.single_mission(BriefingScene({"briefing_key": "test.0", "battle": "BF001"})) )
 
         caravan.handle("speak_to_dietrich", self.context)
 
         self.assertEqual(caravan.dietrich_mode, "reading")
 
     def test_given_the_caravan_when_dietrich_has_a_message_then_he_talks(self):
-        caravan = CaravanScene(CampaignState.single_mission(BriefingScene(BF001)), has_message=True)
+        caravan = CaravanScene(CampaignState.single_mission(BriefingScene({"briefing_key": "test.0", "battle": "BF001"})), has_message=True)
 
         caravan.handle("speak_to_dietrich", self.context)
 
@@ -213,15 +214,16 @@ class IntroSceneTests(unittest.TestCase):
         self.assertEqual(machine.history, [])
 
     def test_given_mission_briefing_when_entered_then_its_campaign_text_is_loaded(self):
-        scene = BriefingScene(BF001)
+        mission = {"briefing_key": "test.0", "battle": "BF001"}
+        scene = BriefingScene(mission)
 
         SceneMachine(scene, self.context)
 
-        self.assertEqual(scene.briefing_id, briefing_asset_for(BF001))
+        self.assertEqual(scene.briefing_id, briefing_asset_for(mission))
         self.assertEqual(scene.briefing, self.briefing)
 
     def test_given_mission_briefing_when_battle_is_started_then_it_transitions_to_that_battle(self):
-        scene = BriefingScene(BF001)
+        scene = BriefingScene({"briefing_key": "test.0", "battle": "BF001"})
         SceneMachine(scene, self.context)
 
         transition = scene.handle("start_battle", self.context)

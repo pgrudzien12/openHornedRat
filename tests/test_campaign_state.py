@@ -1,5 +1,9 @@
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
+from whshr.briefing import load_briefing
 from whshr.campaign import parse_mission_script, parse_mission_windows, parse_window_hotspots, parse_window_portrait
 from whshr.campaign_state import CampaignState, caravan_scroll_count, eligible_missions
 
@@ -32,6 +36,29 @@ class CampaignStateTests(unittest.TestCase):
 
         self.assertEqual((state.flow, state.mission_window, state.coffers), ("FLOWSCRIPTBP01", "FIRST", 500))
         self.assertEqual([mission["battle"] for mission in state.missions], ["BF003"])
+
+    def test_given_duplicate_battle_ids_when_loading_a_briefing_then_the_mission_record_selects_its_own_script(self):
+        graph = {"mission_windows": {"FIRST": [
+            {"briefing_key": "first.0", "battle": "BF003", "name": "Placeholder", "brief_script": "FIRSTBRIEF"},
+            {"briefing_key": "first.1", "battle": "BF003", "name": "Actual mission", "brief_script": "SECONDBRIEF"},
+        ]}}
+        strings = MagicMock()
+        strings.load_strings.return_value = {902: "The selected record's briefing."}
+
+        with tempfile.TemporaryDirectory() as root, \
+             patch("whshr.briefing.build_campaign_graph", return_value=graph), \
+             patch("whshr.briefing.load_wnd_rcdata", return_value={"SECONDBRIEF": "playtext:res=902"}), \
+             patch("whshr.briefing.module", return_value=strings):
+            dll = Path(root) / "FILE/DLL"
+            dll.mkdir(parents=True)
+            (dll / "WND.DLL").touch()
+            (dll / "BRTXT.DLL").touch()
+            briefing = load_briefing(root, "first.1")
+
+        self.assertEqual(briefing, {
+            "battle": "BF003", "title": "Actual mission",
+            "lines": [{"speaker_color": None, "text": "The selected record's briefing."}],
+        })
 
     def test_given_a_completed_mission_then_its_dependency_gates_control_the_next_window(self):
         state = CampaignState(self.graph)

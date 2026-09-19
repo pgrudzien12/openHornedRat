@@ -1,6 +1,6 @@
 """Metadata-only catalog for lazily resolving assets in an original installation."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 
@@ -34,7 +34,17 @@ class AssetCatalog:
 
     def get(self, identifier):
         asset_id = AssetId.parse(identifier) if isinstance(identifier, str) else identifier
-        return self._by_identifier[asset_id]
+        record = self._by_identifier.get(asset_id)
+        if record is not None:
+            return record
+        # Briefings are keyed by the live mission record, which is only known
+        # after WND.DLL's flow has selected a mission. All use the same source
+        # and decoder contract; retain that record as a dynamic template.
+        if asset_id.kind == "briefing":
+            template = self._by_identifier.get(AssetId(asset_id.namespace, "briefing", "_campaign"))
+            if template is not None:
+                return replace(template, identifier=asset_id)
+        raise KeyError(asset_id)
 
     def resolve(self, installation, identifier):
         """Resolve an asset through the same original-install lookup policy as its decoder."""
@@ -100,13 +110,13 @@ def build(installation):
 
     wnd_dll = game.find("FILE", "DLL", "WND.DLL")
     if wnd_dll is not None:
-        # Any battle may be selected by the data-driven campaign mission window.
-        # They all share WND.DLL as their briefing source.
-        for battle in (record.identifier for record in records if record.kind == "battle"):
-            records.append(AssetRecord(
-                AssetId("vanilla", "briefing", battle.name), "briefing", "file", "DLL/WND.DLL",
-                "campaign-briefing", source_fingerprint(wnd_dll),
-            ))
+        # The active mission supplies the record-specific key at runtime.
+        # Keep one source template rather than inventing identities from the
+        # non-unique battle-script filename.
+        records.append(AssetRecord(
+            AssetId("vanilla", "briefing", "_campaign"), "briefing", "file", "DLL/WND.DLL",
+            "campaign-briefing", source_fingerprint(wnd_dll),
+        ))
 
     antxt_dll = game.find("FILE", "DLL", "ANTXT.DLL")
     if antxt_dll is not None:
@@ -127,6 +137,13 @@ def build(installation):
         records.append(AssetRecord(
             AssetId("vanilla", "font", "pcsubt"), "font", "file", "BINARY/PCSUBT.FON",
             "warhammer-fon", source_fingerprint(pcsubt_fon),
+        ))
+
+    pctexta_fon = game.find("FILE", "BINARY", "PCTEXTA.FON")
+    if pctexta_fon is not None:
+        records.append(AssetRecord(
+            AssetId("vanilla", "font", "pctexta"), "font", "file", "BINARY/PCTEXTA.FON",
+            "warhammer-fon", source_fingerprint(pctexta_fon),
         ))
 
     standard = game.find("UPDATE", "BINARY", "STANDARD.PAL") or game.find("FILE", "BINARY", "STANDARD.PAL")

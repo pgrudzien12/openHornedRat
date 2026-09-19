@@ -125,6 +125,6 @@ class CampaignState:
     def single_mission(cls, briefing):
         """Compatibility state for focused tests and development-only briefings."""
         mission = {"name_id": 0, "name": briefing.battle_id.name.upper(),
-                   "battle": briefing.battle_id.name.upper(), "briefing": briefing}
+                   "battle": briefing.battle_id.name.upper(), "briefing_key": "test.0", "briefing": briefing}
         return cls({"flow_scripts": {FIRST_FLOW: ({"action": "add_window", "window": "TEST"},)},
                     "mission_windows": {"TEST": [mission]}})

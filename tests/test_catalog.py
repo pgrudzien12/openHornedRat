@@ -16,6 +16,7 @@ class CatalogTests(unittest.TestCase):
         self._write("REMOTE/BINARY/ANIM/Intro.SI", b"RIFF")
         self._write("FILE/DLL/ANTXT.DLL", b"MZ")
         self._write("FILE/BINARY/GLUE/SUBTEXT.FON", b"MZ")
+        self._write("FILE/BINARY/PCTEXTA.FON", b"MZ")
         self._write("FILE/BINARY/STANDARD.PAL", b"file palette")
         self._write("UPDATE/BINARY/standard.pal", b"updated palette")
 
@@ -34,7 +35,7 @@ class CatalogTests(unittest.TestCase):
             [str(record.identifier) for record in assets.records],
             [
                 "vanilla:battle/bf001", "vanilla:cutscene/intro", "vanilla:cutscene/intro-media",
-                "vanilla:font/subtext", "vanilla:palette/standard", "vanilla:text/anim",
+                "vanilla:font/pctexta", "vanilla:font/subtext", "vanilla:palette/standard", "vanilla:text/anim",
             ],
         )
         self.assertEqual(assets.get("vanilla:cutscene/intro").decoder, "omni-si")
@@ -114,7 +115,7 @@ class CatalogTests(unittest.TestCase):
 
         assets = catalog.build(self.root)
 
-        record = assets.get("vanilla:briefing/bf001")
+        record = assets.get("vanilla:briefing/_campaign")
         self.assertEqual(record.decoder, "campaign-briefing")
         self.assertEqual(assets.resolve(self.root, record.identifier), self.root / "FILE/DLL/WND.DLL")
 

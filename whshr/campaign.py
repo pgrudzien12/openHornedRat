@@ -250,6 +250,12 @@ def build_campaign_graph(installation_path):
     gmtxt = pe_missions.load_strings(str(gmtxt_dll))
 
     windows = parse_mission_windows(wnd, brtxt)
+    # Battle script names are not unique: placeholder BF003 alone occurs in
+    # many mission records. Preserve the record identity used by UI assets
+    # and briefing lookup instead of treating ``battle`` as a key.
+    for window_name, missions in windows.items():
+        for index, mission in enumerate(missions):
+            mission["briefing_key"] = f"{window_name.casefold()}.{index}"
     portrait_windows = {name: result for name in wnd if (result := parse_window_portrait(wnd, name)) is not None}
 
     # Parse flow scripts
