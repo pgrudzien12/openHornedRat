@@ -110,7 +110,8 @@ class CaravanView(SceneView):
     def _set_hover(self, pos):
         hotspot = self._hotspot_at(self._native_point(pos))
         hint_id = 402 if hotspot and hotspot.get("res") == -1 else (hotspot or {}).get("res")
-        self.hover = self._hint(hint_id, self.scene.gold) if hint_id is not None else None
+        self.hover = (self._hint(hint_id, self.scene.gold) if hint_id == 402
+                      else self._hint(hint_id) if hint_id is not None else None)
         self.hint.set_lines((self.hover,) if self.hover else ())
 
     def events(self, event):

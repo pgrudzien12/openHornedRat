@@ -5,6 +5,7 @@ from pathlib import Path
 import pygame
 
 from .bitmap_font import BitmapFont
+from ..controlpanel import button_y, control_panel
 from .gpu import ScreenQuad
 from .scene_view import SceneView
 
@@ -22,24 +23,23 @@ class MissionMapView(SceneView):
     PORTRAIT_ORIGIN = (12, 12)
     PANEL_ORIGIN = (4, 164)
     BUTTON_X = 9
-    BUTTON_Y = (168, 188, 208)  # Brief, Accept, Caravan: panel slots top to bottom.
-    BUTTONS = (("Brief", "open_briefing"), ("Accept", "open_troop_select"),
-               ("Caravan", "return_to_caravan"))
 
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
         self.map = self._load_quad(gpu, "MAP.png")
         self.scrolls = (self._load_quad(gpu, "SCROLL0.png", colorkey=True),
                         self._load_quad(gpu, "SCROLL1.png", colorkey=True))
+        self.portrait_window = scene.portrait_window
+        self.panel = control_panel(self.portrait_window.get("controlpanel", 0) if self.portrait_window else 0)
         self.frame = {
             name: self._load_quad(gpu, f"{name}.png", colorkey=True)
-            for name in ("FRAMETOP", "FRAMELEFT", "FRAMERIGHT", "FRAMEBOTTOM", "FRAMEPANEL3")
+            for name in ("FRAMETOP", "FRAMELEFT", "FRAMERIGHT", self.panel.bitmap)
         }
         self.button_up = self._load_quad(gpu, "FRAMEBUTTONUP.png", colorkey=True)
         self.button_down = self._load_quad(gpu, "FRAMEBUTTONDN.png", colorkey=True)
         portrait = scene.dietrich_portrait
-        self.portrait_window = scene.portrait_window
-        self.map_panel = self.portrait_window is not None and self.portrait_window.get("controlpanel") in (2, 10)
+        self.map_panel = self.portrait_window is not None
+        self.button_slots = tuple(reversed(range(self.panel.slot_count)))
         # The map/list uses compact black PCTEXTA glyphs.  Keep the working
         # height at eight pixels until the original font-2 renderer is traced.
         self.button_color = (0, 0, 0)
@@ -59,7 +59,7 @@ class MissionMapView(SceneView):
                        for _ in scene.missions]
         self.button_labels = [gpu.text((119, self.TEXT_HEIGHT), self.text_font, color=self.button_color, background=None,
                                        padding=0, align="center", fixed_width=True)
-                              for _ in self.BUTTONS]
+                              for _ in self.button_slots]
         self._set_labels()
         self._button_selection = object()
         self._set_button_labels()
@@ -87,15 +87,16 @@ class MissionMapView(SceneView):
             label.set_lines((f"{mission['name']}{payment}",))
 
     def _set_button_labels(self):
-        for index, (label, (fallback, _action), resource_id) in enumerate(
-                zip(self.button_labels, self.BUTTONS, (313, 309, 333))):
+        for index, (label, slot) in enumerate(zip(self.button_labels, self.button_slots)):
             label.set_color(self.button_color if self._button_enabled(index) else (192, 192, 192))
-            label.set_lines((self.scene.campaign.hint(resource_id) or fallback,))
+            label.set_lines((self.scene.campaign.hint(self.panel.labels[slot]),))
         self._button_selection = self.scene.selected_index
 
     def _button_enabled(self, index):
-        """Caravan is always available; Brief/Accept require a current mission."""
-        return index == 2 or self.scene.selected_mission is not None
+        """Known slot actions need a selected mission except Caravan."""
+        slot = self.button_slots[index]
+        action = self.panel.actions[slot] if slot < len(self.panel.actions) else None
+        return action == "return_to_caravan" or (action is not None and self.scene.selected_mission is not None)
 
     def _layout(self):
         screen_width, screen_height = self.gpu.target.size
@@ -120,8 +121,8 @@ class MissionMapView(SceneView):
         left, top, scale = self._layout()
         point = ((pos[0] - left) / scale, (pos[1] - top) / scale)
         x, window_y = self.portrait_window["position"]["x"], self.portrait_window["position"]["y"]
-        for index, button_y in enumerate(self.BUTTON_Y):
-            if pygame.Rect(x + self.BUTTON_X, window_y + button_y,
+        for index, slot in enumerate(self.button_slots):
+            if pygame.Rect(x + self.BUTTON_X, window_y + button_y(self.portrait_window.get("controlpanel", 0), slot),
                            119, 20).collidepoint(point):
                 return index
         return None
@@ -148,7 +149,7 @@ class MissionMapView(SceneView):
             pressed, self.pressed = self.pressed, None
             button = self._button_at(event.pos)
             if pressed == button and button is not None and self._button_enabled(button):
-                return (self.BUTTONS[button][1],)
+                return (self.panel.actions[self.button_slots[button]],)
         return ()
 
     def status(self):
@@ -171,12 +172,13 @@ class MissionMapView(SceneView):
             self.frame["FRAMETOP"].draw(left + (x + 4) * scale, top + (y + 4) * scale, 136 * scale, 8 * scale)
             self.frame["FRAMELEFT"].draw(left + (x + 4) * scale, top + (y + 12) * scale, 8 * scale, 152 * scale)
             self.frame["FRAMERIGHT"].draw(left + (x + 132) * scale, top + (y + 12) * scale, 8 * scale, 152 * scale)
-            self.frame["FRAMEPANEL3"].draw(left + (x + 4) * scale, top + (y + 164) * scale, 136 * scale, 68 * scale)
-            self.frame["FRAMEBOTTOM"].draw(left + (x + 4) * scale, top + (y + 164) * scale, 136 * scale, 8 * scale)
-            for index, (button_y, label) in enumerate(zip(self.BUTTON_Y, self.button_labels)):
+            self.frame[self.panel.bitmap].draw(left + (x + 4) * scale, top + (y + 164) * scale,
+                                                136 * scale, self.panel.height * scale)
+            for index, (slot, label) in enumerate(zip(self.button_slots, self.button_labels)):
                 button = self.button_down if index == self.pressed else self.button_up
-                button.draw(left + (x + self.BUTTON_X) * scale, top + (y + button_y) * scale, 119 * scale, 20 * scale)
-                label.draw(left + (x + self.BUTTON_X) * scale, top + (y + button_y + 4) * scale,
+                y_pos = button_y(self.portrait_window.get("controlpanel", 0), slot)
+                button.draw(left + (x + self.BUTTON_X) * scale, top + (y + y_pos) * scale, 119 * scale, 20 * scale)
+                label.draw(left + (x + self.BUTTON_X) * scale, top + (y + y_pos + 4) * scale,
                            119 * scale, self.TEXT_HEIGHT * scale)
         for index, label in enumerate(self.labels):
             x, y = self.SCROLL_ORIGIN[0], self.SCROLL_ORIGIN[1] + index * self.ROW_PITCH
