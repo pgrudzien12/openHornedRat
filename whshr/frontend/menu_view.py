@@ -28,26 +28,20 @@ class MainMenuView(SceneView):
     """The original OPTIONSCREEN menu, with its paired round button sprites."""
 
     NATIVE_SIZE = (640, 480)
-    # These are the top-left origins of the five left/right pairs in the original
-    # 640x480 screen.  The artwork itself supplies the text and recessed wells.
-    BUTTON_ROWS = (181, 233, 285, 337, 389)
-    BUTTON_COLUMNS = (98, 501)
-    BUTTON_SIZE = (41, 41)
     MENU_ASSET_DIR = Path(__file__).resolve().parents[2] / "extracted/pe_resources/BITMAP/bitmap"
 
     # Only the campaign flow's New Campaign and Exit actions have scene
     # implementations today.  The other original controls still react visually.
-    BUTTONS = (("new_campaign", (pygame.K_n, pygame.K_RETURN, pygame.K_KP_ENTER)),
-               (None, ()),
-               (None, ()),
-               (None, ()),
-               ("quit", (pygame.K_q, pygame.K_ESCAPE)))
+    SHORTCUTS = {pygame.K_n: "new_campaign", pygame.K_RETURN: "new_campaign",
+                 pygame.K_KP_ENTER: "new_campaign", pygame.K_q: "quit", pygame.K_ESCAPE: "quit"}
+    TARGET_ACTIONS = {"newgame": "new_campaign", "exitprocess": "quit"}
 
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
         self.screen = self._load_quad(gpu, "OPTIONSCREEN.png")
         self.button_up = self._load_quad(gpu, "OPTIONBUTTONUP.png", transparent_blue=True)
         self.button_down = self._load_quad(gpu, "OPTIONBUTTONDOWN.png", transparent_blue=True)
+        self.hotspots = tuple((scene.menu_ui or {}).get("hotspots", ()))
         self.pressed = None
 
     @classmethod
@@ -84,23 +78,22 @@ class MainMenuView(SceneView):
     def _button_at(self, pos):
         left, top, scale = self._layout()
         native_x, native_y = ((pos[0] - left) / scale, (pos[1] - top) / scale)
-        for index, row in enumerate(self.BUTTON_ROWS):
-            for column in self.BUTTON_COLUMNS:
-                if pygame.Rect(column, row, *self.BUTTON_SIZE).collidepoint(native_x, native_y):
-                    return index
+        for index, hotspot in enumerate(self.hotspots):
+            if pygame.Rect(hotspot["x"], hotspot["y"], hotspot["vx"], hotspot["vy"]).collidepoint(native_x, native_y):
+                return index
         return None
 
     def events(self, event):
         if event.type == pygame.KEYDOWN:
-            for action, keys in self.BUTTONS:
-                if event.key in keys:
-                    return (action,)
+            action = self.SHORTCUTS.get(event.key)
+            if action:
+                return (action,)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.pressed = self._button_at(event.pos)
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             index, self.pressed = self.pressed, None
             if index is not None and index == self._button_at(event.pos):
-                action = self.BUTTONS[index][0]
+                action = self.TARGET_ACTIONS.get(self.hotspots[index].get("target", "").lower())
                 return (action,) if action else ()
         return ()
 
@@ -108,11 +101,10 @@ class MainMenuView(SceneView):
         super().draw()
         left, top, scale = self._layout()
         self.screen.draw(left, top, self.NATIVE_SIZE[0] * scale, self.NATIVE_SIZE[1] * scale)
-        for index, row in enumerate(self.BUTTON_ROWS):
+        for index, hotspot in enumerate(self.hotspots):
             sprite = self.button_down if index == self.pressed else self.button_up
-            for column in self.BUTTON_COLUMNS:
-                sprite.draw(left + column * scale, top + row * scale,
-                            self.BUTTON_SIZE[0] * scale, self.BUTTON_SIZE[1] * scale)
+            sprite.draw(left + hotspot["x"] * scale, top + hotspot["y"] * scale,
+                        hotspot["vx"] * scale, hotspot["vy"] * scale)
 
     def release(self):
         self.screen.release()

@@ -3,6 +3,7 @@
 from .assets import AssetId
 from .battle_scene import BattleScene, FIRST_BATTLE
 from .campaign_state import CampaignState
+from .campaign import load_wnd_rcdata, parse_window_ui
 from .engine import DEFAULT_SEED
 from .legacy import module
 from .portraits import dietrich_portrait
@@ -104,6 +105,20 @@ class MainMenuScene(Scene):
         self.briefing = briefing
         self.log_dir, self.seed = log_dir, seed
         self.campaign = campaign
+        self.menu_ui = None
+
+    def enter(self, context):
+        if context is None:
+            return
+        try:
+            wnd_path = context.locator.installation.file_dir("DLL", "WND.DLL")
+            if wnd_path.stat().st_size < 64:
+                return
+            wnd = load_wnd_rcdata(wnd_path)
+            self.menu_ui = parse_window_ui(wnd, "MAINMENU")
+        except (FileNotFoundError, OSError, ValueError):
+            # Focused scene tests can supply a minimal placeholder WND.DLL.
+            self.menu_ui = None
 
     def handle(self, event, context):
         if event == "new_campaign":
