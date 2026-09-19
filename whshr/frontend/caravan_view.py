@@ -192,7 +192,7 @@ class CaravanView(SceneView):
         if self.hover:
             _, hint_height = self.hint.text_size
             self.hint.draw(left, top + height - (hint_height + self.HINT_BOTTOM_MARGIN) * scale,
-                           width, hint_height * scale)
+                           width, self.hint.size[1] * scale)
 
     def release(self):
         for quad in (
