@@ -282,6 +282,19 @@ class Hud:
             # Frame 1 is the compact map marker. Its FOL anchor is not useful here:
             # centre it on X and put its bottom edge exactly at the regiment position.
             left, top = x - marker.width // 2, y - marker.height + 1
+            if regiment.identifier == self.selected:
+                # Paint a rim *outside* the opaque shape before the original pixels. Banner artwork often
+                # reaches its frame edge with a black border, so an in-frame transparent-pixel approach
+                # cannot make the selected outline visible.
+                for marker_y in range(marker.height):
+                    for marker_x in range(marker.width):
+                        if not marker.pixels[marker_y * marker.width + marker_x]:
+                            continue
+                        for offset_x, offset_y in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                            rim_x, rim_y = left + marker_x + offset_x, top + marker_y + offset_y
+                            if 0 <= rim_x < width and 0 <= rim_y < height:
+                                offset = (rim_y * width + rim_x) * 4
+                                pixels[offset:offset + 4] = b"\xff\xff\xff\xff"
             for marker_y in range(marker.height):
                 for marker_x in range(marker.width):
                     index = marker.pixels[marker_y * marker.width + marker_x]
@@ -290,16 +303,6 @@ class Hud:
                         if 0 <= offset_x < width and 0 <= offset_y < height:
                             offset = (offset_y * width + offset_x) * 4
                             pixels[offset:offset + 4] = bytes((*self.field.palette[index], 255))
-                    elif regiment.identifier == self.selected:
-                        # White outside rim for the selected marker, without repainting its artwork.
-                        neighbours = ((marker_x - 1, marker_y), (marker_x + 1, marker_y),
-                                     (marker_x, marker_y - 1), (marker_x, marker_y + 1))
-                        if any(0 <= nx < marker.width and 0 <= ny < marker.height
-                               and marker.pixels[ny * marker.width + nx] for nx, ny in neighbours):
-                            offset_x, offset_y = left + marker_x, top + marker_y
-                            if 0 <= offset_x < width and 0 <= offset_y < height:
-                                offset = (offset_y * width + offset_x) * 4
-                                pixels[offset:offset + 4] = b"\xff\xff\xff\xff"
         return bytes(pixels)
 
     def draw(self, width, height):

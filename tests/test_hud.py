@@ -59,8 +59,25 @@ class HudTests(unittest.TestCase):
         offset = (y * MINIMAP_SIZE[0] + x) * 4
         self.assertEqual(rgba[offset:offset + 4], bytes((12, 34, 56, 255)))
         self.assertEqual(self.hud.minimap_regiment_at((1024 + x, 16 + y)), "player")
-        self.assertEqual(rgba[(y * MINIMAP_SIZE[0] + x - 1) * 4:(y * MINIMAP_SIZE[0] + x) * 4],
-                         b"\xff\xff\xff\xff")
+        selected_rim = rgba[(y * MINIMAP_SIZE[0] + x - 1) * 4:(y * MINIMAP_SIZE[0] + x) * 4]
+        self.hud.selected = None
+        deselected = self.hud._minimap_rgba()
+        self.assertNotEqual(selected_rim, deselected[(y * MINIMAP_SIZE[0] + x - 1) * 4:(y * MINIMAP_SIZE[0] + x) * 4])
+
+    def test_given_a_selected_marker_with_art_at_its_frame_edge_when_drawn_then_selection_is_visually_distinguished(self):
+        marker = SpriteFrame(1, 1, 0, 1, bytes((1,)))
+        self.hud.field.ui_sheets["banner"] = SpriteSheet("BANNER", [marker, marker], [])
+        self.hud.battle.regiments["player"].banner = "banner"
+        self.hud._minimap_background = bytes((1, 2, 3, 255)) * (MINIMAP_SIZE[0] * MINIMAP_SIZE[1])
+
+        rgba = self.hud._minimap_rgba()
+
+        x = round(100 / 1000 * (MINIMAP_SIZE[0] - 1))
+        y = round((1 - 100 / 800) * (MINIMAP_SIZE[1] - 1))
+        selected_rim = rgba[(y * MINIMAP_SIZE[0] + x - 1) * 4:(y * MINIMAP_SIZE[0] + x) * 4]
+        self.hud.selected = None
+        deselected = self.hud._minimap_rgba()
+        self.assertNotEqual(selected_rim, deselected[(y * MINIMAP_SIZE[0] + x - 1) * 4:(y * MINIMAP_SIZE[0] + x) * 4])
 
     def test_given_overlapping_markers_when_one_is_selected_then_its_art_is_rendered_last(self):
         player, enemy = self.hud.battle.regiments.values()
