@@ -319,12 +319,16 @@ class SkirmishLogger:
             if not stuck:
                 self.reserve_since.pop(key, None)
                 continue
-            first = self.reserve_since.setdefault(key, absolute_segment)
-            if absolute_segment - first == STALE_RESERVE_SEGMENTS:
-                self._write(group_id,
-                            f"   note [tick {battle.tick_count} turn {turn} seg {segment}] "
-                            f"{regiment.identifier}: {stuck} of {regiment.models} models have had no "
-                            f"free cell for {STALE_RESERVE_SEGMENTS} segments (grid saturated)")
+            first, reported = self.reserve_since.setdefault(key, (absolute_segment, False))
+            # Once per streak, not once per tick: a segment spans many ticks, and the streak only
+            # ends when the unit gets its models placed (which resets the entry above).
+            if reported or absolute_segment - first < STALE_RESERVE_SEGMENTS:
+                continue
+            self.reserve_since[key] = (first, True)
+            self._write(group_id,
+                        f"   note [tick {battle.tick_count} turn {turn} seg {segment}] "
+                        f"{regiment.identifier}: {stuck} of {regiment.models} models have had no "
+                        f"free cell for {STALE_RESERVE_SEGMENTS} segments (grid saturated)")
 
     def _close(self, battle, group_id):
         opened = self.opened_tick.get(group_id)
