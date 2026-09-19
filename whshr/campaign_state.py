@@ -56,6 +56,12 @@ def initial_flow(hotspots):
     return flows[0]
 
 
+def start_caravan_continuation(hotspots):
+    """Translate STARTCARAVAN's flow-resource target into the implemented event."""
+    initial_flow(hotspots)  # Validate the original target before exposing it.
+    return "open_mission_map"
+
+
 @dataclass
 class CampaignState:
     """The portion of original campaign state needed to populate the caravan."""
@@ -68,6 +74,7 @@ class CampaignState:
     coffers: int = INITIAL_COFFERS
     hotspots: tuple[dict, ...] = ()
     caravan_bitmaps: tuple[dict, ...] = ()
+    caravan_continuation: str | None = None
     hints: dict[int, str] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -131,7 +138,8 @@ class CampaignState:
         caravan_ui = parse_window_ui(wnd, "STARTCARAVAN")
         hotspots = tuple(caravan_ui["hotspots"])
         return cls(build_campaign_graph(str(game.root)), flow=initial_flow(hotspots), hotspots=hotspots,
-                   caravan_bitmaps=tuple(caravan_ui["bitmaps"]), hints=hints)
+                   caravan_bitmaps=tuple(caravan_ui["bitmaps"]),
+                   caravan_continuation=start_caravan_continuation(hotspots), hints=hints)
 
     @classmethod
     def single_mission(cls, briefing):
@@ -139,4 +147,4 @@ class CampaignState:
         mission = {"name_id": 0, "name": briefing.battle_id.name.upper(),
                    "battle": briefing.battle_id.name.upper(), "briefing_key": "test.0", "briefing": briefing}
         return cls({"flow_scripts": {FIRST_FLOW: ({"action": "add_window", "window": "TEST"},)},
-                    "mission_windows": {"TEST": [mission]}})
+                    "mission_windows": {"TEST": [mission]}}, caravan_continuation="open_mission_map")

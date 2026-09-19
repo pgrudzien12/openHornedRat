@@ -110,6 +110,7 @@ class MainMenuScene(Scene):
     def enter(self, context):
         if context is None:
             return
+        self.installation = context.locator.installation
         try:
             wnd_path = context.locator.installation.file_dir("DLL", "WND.DLL")
             if wnd_path.stat().st_size < 64:
@@ -131,7 +132,7 @@ class MainMenuScene(Scene):
                 )
             # StartCaravan's resource starts the first parked flow script.
             # Later ``gocaravan`` calls must supply their own continuation.
-            return Transition(CaravanScene(self.campaign, continuation="open_mission_map"),
+            return Transition(CaravanScene(self.campaign, continuation=self.campaign.caravan_continuation),
                               "new campaign started")
         if event == "quit":
             return Quit("player quit from the main menu")
@@ -160,8 +161,10 @@ class CaravanScene(Scene):
         self.selected_book = None
         self.save_requested = False
         self.font = None
+        self.installation = None
 
     def enter(self, context):
+        self.installation = context.locator.installation
         self.font = context.load(CARAVAN_FONT)
 
     @property
@@ -213,9 +216,11 @@ class MissionMapScene(Scene):
         self.dietrich_portrait = None
         self.portrait_window = campaign.map_portrait_window
         self.selected_index = None
+        self.installation = None
         self.font = None
 
     def enter(self, context):
+        self.installation = context.locator.installation
         self.font = context.load(PCTEXTA_FONT)
         # Portrait FOL/BOP files are not required by the minimal test fixture
         # or every partial installation, so leave the panel absent if either

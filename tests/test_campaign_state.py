@@ -7,7 +7,7 @@ from whshr.briefing import load_briefing
 from whshr.campaign import (
     parse_mission_script, parse_mission_windows, parse_window_hotspots, parse_window_portrait, parse_window_ui,
 )
-from whshr.campaign_state import CampaignState, caravan_scroll_count, eligible_missions, initial_flow
+from whshr.campaign_state import CampaignState, caravan_scroll_count, eligible_missions, initial_flow, start_caravan_continuation
 
 
 class CampaignStateTests(unittest.TestCase):
@@ -101,6 +101,11 @@ class CampaignStateTests(unittest.TestCase):
             {"res": 150, "target_kind": "script", "target": "PopContext"},
             {"res": 151, "target_kind": "res", "target": "FLOWSCRIPTBP03"},
         )), "FLOWSCRIPTBP03")
+
+    def test_given_start_caravan_flow_target_then_it_continues_to_the_mission_map(self):
+        self.assertEqual(start_caravan_continuation((
+            {"target_kind": "res", "target": "FLOWSCRIPTBP03"},
+        )), "open_mission_map")
 
     def test_given_start_caravan_without_one_flow_target_then_initial_flow_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "exactly one flow"):

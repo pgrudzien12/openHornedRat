@@ -1,11 +1,10 @@
 """Main menu and mission briefing views."""
 
-from pathlib import Path
-
 import pygame
 
 from .bitmap_font import BitmapFont
 from .gpu import ScreenQuad
+from .glue_bitmap import load_bitmap
 from .scene_view import SceneView
 
 
@@ -28,7 +27,6 @@ class MainMenuView(SceneView):
     """The original OPTIONSCREEN menu, with its paired round button sprites."""
 
     NATIVE_SIZE = (640, 480)
-    MENU_ASSET_DIR = Path(__file__).resolve().parents[2] / "extracted/pe_resources/BITMAP/bitmap"
 
     # Only the campaign flow's New Campaign and Exit actions have scene
     # implementations today.  The other original controls still react visually.
@@ -44,19 +42,13 @@ class MainMenuView(SceneView):
         self.hotspots = tuple((scene.menu_ui or {}).get("hotspots", ()))
         self.pressed = None
 
-    @classmethod
-    def _load_quad(cls, gpu, filename, transparent_blue=False):
+    def _load_quad(self, gpu, filename, transparent_blue=False):
         """Read a cached extractor PNG into a GPU texture.
 
         The two button resources use pure blue as a legacy chroma key rather
         than PNG alpha, so turn that colour transparent before upload.
         """
-        path = cls.MENU_ASSET_DIR / filename
-        if not path.is_file():
-            raise FileNotFoundError(
-                f"main-menu artwork not found: {path}; run the resource extractor into extracted/"
-            )
-        surface = pygame.image.load(str(path))
+        surface = load_bitmap(self.scene.installation, filename.removesuffix(".png"))
         width, height = surface.get_size()
         rgba = bytearray(pygame.image.tobytes(surface, "RGBA"))
         if transparent_blue:

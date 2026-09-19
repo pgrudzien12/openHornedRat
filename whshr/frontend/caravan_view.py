@@ -1,11 +1,10 @@
 """Dietrich's caravan campaign hub and the reading/talking close-ups."""
 
-from pathlib import Path
-
 import pygame
 
 from .bitmap_font import BitmapFont
 from .gpu import ScreenQuad
+from .glue_bitmap import load_bitmap
 from .scene_view import SceneView
 
 
@@ -16,7 +15,6 @@ class CaravanView(SceneView):
     """Present the original caravan artwork at its native 640×480 composition."""
 
     NATIVE_SIZE = (640, 480)
-    ART_DIR = Path(__file__).resolve().parents[2] / "extracted/pe_resources/BITMAP/bitmap"
     HINT_BOTTOM_MARGIN = 10
     ANIMATION_FPS = 8
     PAGE_HOLD_SECONDS = 3.0
@@ -62,14 +60,8 @@ class CaravanView(SceneView):
         self.hint = gpu.text((640, 32), BitmapFont(scene.font), color=(220, 30, 30),
                              background=None, padding=0, align="center", fixed_width=True)
 
-    @classmethod
-    def _load_quad(cls, gpu, filename, colorkey=False):
-        path = cls.ART_DIR / filename
-        if not path.is_file():
-            raise FileNotFoundError(
-                f"caravan artwork not found: {path}; run the resource extractor into extracted/"
-            )
-        surface = pygame.image.load(str(path))
+    def _load_quad(self, gpu, filename, colorkey=False):
+        surface = load_bitmap(self.scene.installation, filename.removesuffix(".png"))
         if colorkey:
             surface = surface.convert()
             surface.set_colorkey(COLOR_KEY)

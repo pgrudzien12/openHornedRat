@@ -1,12 +1,11 @@
 """Campaign map and mission-scroll selection view."""
 
-from pathlib import Path
-
 import pygame
 
 from .bitmap_font import BitmapFont
 from ..controlpanel import button_y, control_panel
 from .gpu import ScreenQuad
+from .glue_bitmap import load_bitmap
 from .scene_view import SceneView
 
 
@@ -14,7 +13,6 @@ class MissionMapView(SceneView):
     """Present the original map artwork with data-driven selectable scrolls."""
 
     NATIVE_SIZE = (640, 480)
-    ART_DIR = Path(__file__).resolve().parents[2] / "extracted/pe_resources/BITMAP/bitmap"
     SCROLL_ORIGIN = (30, 15)
     SCROLL_SIZE = (144, 88)
     ROW_PITCH = 90  # The glue layout rounds the 88-pixel scroll artwork to 90 pixels.
@@ -64,12 +62,8 @@ class MissionMapView(SceneView):
         self._button_selection = object()
         self._set_button_labels()
 
-    @classmethod
-    def _load_quad(cls, gpu, filename, colorkey=False):
-        path = cls.ART_DIR / filename
-        if not path.is_file():
-            raise FileNotFoundError(f"map artwork not found: {path}; run the resource extractor into extracted/")
-        surface = pygame.image.load(str(path))
+    def _load_quad(self, gpu, filename, colorkey=False):
+        surface = load_bitmap(self.scene.installation, filename.removesuffix(".png"))
         if colorkey:
             surface = surface.convert()
             surface.set_colorkey((0, 0, 255))
