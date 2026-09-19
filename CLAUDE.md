@@ -170,6 +170,11 @@ as one documented table per concept (e.g. `controlpanel` → panel + button labe
 values go in a `PROVISIONAL` block. Never key content by a non-unique id (battle ids repeat across mission records).
 Test on more than one mission/window. Audit and lessons: `notes/data_driven_audit.md`.
 
+Assets follow the same rule: the engine and its tests load original data from the user's installation at runtime through
+`AssetId`/catalog/loader (`docs/asset_pipeline.md`), never from `extracted/` PNGs or other extractor output. `extracted/` is
+a debug/verification artefact only, absent on a fresh checkout. Glue bitmaps come from `BITMAP.DLL` via a `pe-bitmap`
+loader (design: `notes/data_driven_audit.md` §3.1); take sizes and frame counts from the asset, not from literals.
+
 ## Clean-room policy (all agents must follow this)
 
 The goal is **compatibility with a legally owned installation**, not reproduction of the

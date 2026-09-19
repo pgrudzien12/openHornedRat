@@ -110,11 +110,42 @@ fed by the `[ANIM]` block; keep the index -> sprite-set table separate and small
 3. **One `controlpanel` table module** (all 10 rows, with note references) and the frame-geometry rule, used by the portrait
    sub-window renderer. Add tests that the table matches `notes/mission_selection.md` §9.4 and that a 3-button panel gives the
    240 px window.
-4. **Assets from the installation**: one accessor for glue bitmaps (`AssetId("vanilla", "bitmap", name)`) replacing the three
-   copies of `ART_DIR`; sizes and frame counts from the assets.
+4. **Bitmaps from the installation, not from `extracted/` PNGs** (see §3.1 below): a `pe-bitmap` loader behind
+   `AssetId("vanilla", "bitmap", name)`, replacing the three copies of `ART_DIR`; sizes and frame counts from the assets.
 5. **Move remaining guesses into a `PROVISIONAL` block** with the open question they wait on, and delete the English fallbacks.
 6. Only then extend to further windows (briefing screen with the Commander portrait, troop select): they are new data, not
    new code.
+
+### 3.1 Bitmap loading design
+
+Problem: `caravan_view`, `menu_view` and `mission_map_view` load `extracted/pe_resources/BITMAP/bitmap/<NAME>.png`. That folder
+is gitignored output of `scripts/pe_extract.py`, so a fresh checkout fails with `FileNotFoundError`, the PNGs bake in the
+extractor's colour decisions, and it contradicts `docs/asset_pipeline.md` (original data is read directly from the user's
+`WARFB`, scenes use `AssetId`s, never raw paths). Fonts, string tables, cutscenes and `whshr/portraits.py` already load at
+runtime; bitmaps are the remaining gap.
+
+Source in the original: `FILE/DLL/BITMAP.DLL`, 717 named 8 bpp bitmap resources (`FRAMEPANEL3`, `CARAVAN`, `SCROLL0`, ...),
+each with its own colour table (`notes/fonts_glue.md`: rendering with the embedded table is correct for every image viewed).
+Whether the game instead realises one `GLUE` + `WIND` `.PAL` pair per screen (`[POSITION] palindex`) is a hypothesis; verify
+that the embedded table matches for the bitmap groups that use another pair before relying on it everywhere.
+
+Mechanism (same pattern as the existing `pe-string-table` and `warhammer-fon` loaders in `default_scene_loaders`):
+
+1. Catalog record `AssetId("vanilla", "bitmap", "<name>")`: source `FILE/DLL/BITMAP.DLL`, resource name, decoder `pe-bitmap`.
+2. Move the DIB / PE-resource parsing from `scripts/pe_extract.py` into the `whshr/` package; the script becomes a thin
+   wrapper (as `scripts/render_sprites.py` wraps `whshr/sprites.py`).
+3. The loader returns width, height, indexed pixels and the RGB palette, with palette index 0 flagged as the colour key. Views
+   convert to RGBA; the literal `(0, 0, 255)` key disappears.
+4. A scene lists its bitmaps in its `SceneManifest` and gets them with `context.load(id)` (as `CaravanScene` already does for
+   its font). The `AssetCache` keeps them by id and source fingerprint.
+5. Frame sets (`CarCandleCell0..5`, `DietBookCell0..11`, ...) are enumerated from the resource names, replacing `range(6)` and
+   `range(12)`.
+6. `extracted/` stays a debug and verification output only. Tests use a small synthetic bitmap or skip when no installation
+   is available; no test or view may depend on `extracted/`.
+
+Two separate questions: *how* a bitmap is loaded (this section) and *which* one (the audit in §2). The name comes from the
+window script (`setbitmap:Map`, `setbitmap:CarLampCell`); built-in widget art (`Scroll0`, `FrameTop`, `FrameButtonUp`) is a
+small documented table.
 
 ## 4. Test guidance
 
