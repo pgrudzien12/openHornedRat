@@ -19,7 +19,10 @@ class CaravanView(SceneView):
     ART_DIR = Path(__file__).resolve().parents[2] / "extracted/pe_resources/BITMAP/bitmap"
     CANDLE_POS = (184, 160)
     LAMP_POS = (232, 96)
-    HINT_BOTTOM_MARGIN = 28
+    HINT_BOTTOM_MARGIN = 10
+    ANIMATION_FPS = 8
+    PAGE_HOLD_SECONDS = 3.0
+    BLINK_PERIOD_SECONDS = 2.0
     BOOKS = (
         ("magic", pygame.Rect(0, 246, 164, 46)),
         ("troop roster", pygame.Rect(0, 299, 164, 47)),
@@ -148,17 +151,33 @@ class CaravanView(SceneView):
     def animate(self, seconds):
         self.elapsed += seconds
 
+    def _page_frame(self):
+        """Turn DIETBOOKCELL11 down to 0, then leave the new page visible."""
+        turn_seconds = len(self.read_books) / self.ANIMATION_FPS
+        phase = self.elapsed % (turn_seconds + self.PAGE_HOLD_SECONDS)
+        if phase < turn_seconds:
+            return len(self.read_books) - 1 - int(phase * self.ANIMATION_FPS)
+        return 0
+
+    def _read_eye_frame(self):
+        """READEYESCELL2 -> 1 -> 0 is one blink; the open-eye frame rests between blinks."""
+        phase = self.elapsed % self.BLINK_PERIOD_SECONDS
+        frame = int(phase * self.ANIMATION_FPS)
+        return len(self.read_eyes) - 1 - frame if frame < len(self.read_eyes) else 0
+
     def draw(self):
         super().draw()
         left, top, scale = self._layout()
         width, height = self.NATIVE_SIZE[0] * scale, self.NATIVE_SIZE[1] * scale
-        frame = int(self.elapsed * 8)
+        frame = int(self.elapsed * self.ANIMATION_FPS)
+        page_frame = self._page_frame()
+        eye_frame = self._read_eye_frame()
         if self.scene.dietrich_mode == "reading":
             self.read_background.draw(left, top, width, height)
-            self.read_books[frame % len(self.read_books)].draw(
+            self.read_books[page_frame].draw(
                 left + 296 * scale, top + 260 * scale, 148 * scale, 108 * scale
             )
-            self.read_eyes[frame % len(self.read_eyes)].draw(
+            self.read_eyes[eye_frame].draw(
                 left + 312 * scale, top + 208 * scale, 44 * scale, 16 * scale
             )
             return
@@ -172,10 +191,10 @@ class CaravanView(SceneView):
             )
             return
         self.read_background.draw(left, top, width, height)
-        self.read_books[frame % len(self.read_books)].draw(
+        self.read_books[page_frame].draw(
             left + 296 * scale, top + 260 * scale, 148 * scale, 108 * scale
         )
-        self.read_eyes[frame % len(self.read_eyes)].draw(
+        self.read_eyes[eye_frame].draw(
             left + 312 * scale, top + 208 * scale, 44 * scale, 16 * scale
         )
         self.candles[frame % len(self.candles)].draw(
