@@ -19,6 +19,7 @@ class CaravanView(SceneView):
     ART_DIR = Path(__file__).resolve().parents[2] / "extracted/pe_resources/BITMAP/bitmap"
     CANDLE_POS = (184, 160)
     LAMP_POS = (232, 96)
+    HINT_BOTTOM_MARGIN = 28
     BOOKS = (
         ("magic", pygame.Rect(0, 246, 164, 46)),
         ("troop roster", pygame.Rect(0, 299, 164, 47)),
@@ -188,7 +189,7 @@ class CaravanView(SceneView):
                                      rect.width * scale, rect.height * scale)
         if self.hover:
             _, hint_height = self.hint.text_size
-            self.hint.draw(left, top + height - (hint_height + 8) * scale,
+            self.hint.draw(left, top + height - (hint_height + self.HINT_BOTTOM_MARGIN) * scale,
                            width, hint_height * scale)
 
     def release(self):
