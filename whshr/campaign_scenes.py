@@ -92,7 +92,7 @@ class IntroScene(Scene):
 
 
 class MainMenuScene(Scene):
-    """The main menu: New Campaign enters the first mission briefing; Quit ends the application."""
+    """The main menu: New Campaign enters Dietrich's caravan; Quit ends the application."""
 
     manifest = SceneManifest(immediate=(MAIN_MENU,))
 
@@ -101,9 +101,40 @@ class MainMenuScene(Scene):
 
     def handle(self, event, context):
         if event == "new_campaign":
-            return Transition(self.briefing, "new campaign started")
+            return Transition(CaravanScene(self.briefing), "new campaign started")
         if event == "quit":
             return Quit("player quit from the main menu")
+        return None
+
+
+class CaravanScene(Scene):
+    """Campaign hub in Dietrich's caravan before the first mission is chosen.
+
+    The campaign economy and save slots are not modelled yet, but their UI state
+    belongs here so the frontend is not forced to invent campaign rules.
+    """
+
+    def __init__(self, briefing, gold=0, has_message=False):
+        self.briefing = briefing
+        self.gold = gold
+        self.has_message = has_message
+        self.dietrich_mode = None  # ``reading`` / ``talking`` while his close-up is open
+        self.selected_book = None
+        self.save_requested = False
+
+    def handle(self, event, context):
+        if event == "select_mission":
+            return Transition(self.briefing, "first campaign mission selected")
+        if event == "exit_campaign":
+            return Transition(MainMenuScene(), "campaign exited")
+        if event == "speak_to_dietrich":
+            self.dietrich_mode = "talking" if self.has_message else "reading"
+        elif event == "dismiss_dietrich":
+            self.dietrich_mode = None
+        elif event.startswith("browse_book:"):
+            self.selected_book = event.removeprefix("browse_book:")
+        elif event == "save_campaign":
+            self.save_requested = True
         return None
 
 

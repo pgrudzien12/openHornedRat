@@ -6,7 +6,7 @@ from whshr.assets import AssetId, AssetLocator
 from whshr.battle_scene import BattleScene
 from whshr.cache import AssetCache
 from whshr.campaign_scenes import (
-    BriefingScene, IntroScene, MainMenuScene, OpeningNarrationScene, briefing_asset_for,
+    BriefingScene, CaravanScene, IntroScene, MainMenuScene, OpeningNarrationScene, briefing_asset_for,
 )
 from whshr.catalog import build
 from whshr.scenes import SceneAssets, SceneMachine
@@ -124,15 +124,39 @@ class IntroSceneTests(unittest.TestCase):
         self.assertIsInstance(machine.active, MainMenuScene)
         self.assertEqual(machine.history[-1].reason, "intro completed")
 
-    def test_given_main_menu_when_new_campaign_is_chosen_then_the_mission_briefing_becomes_active(self):
+    def test_given_main_menu_when_new_campaign_is_chosen_then_the_caravan_becomes_active(self):
         briefing_scene = BriefingScene(BF001)
         machine = SceneMachine(MainMenuScene(briefing_scene), self.context)
 
         machine.handle("new_campaign")
 
+        self.assertIsInstance(machine.active, CaravanScene)
+        self.assertIs(machine.active.briefing, briefing_scene)
+        self.assertEqual(machine.history[0].reason, "new campaign started")
+
+    def test_given_the_caravan_when_its_mission_is_chosen_then_the_briefing_becomes_active(self):
+        briefing_scene = BriefingScene(BF001)
+        machine = SceneMachine(CaravanScene(briefing_scene), self.context)
+
+        machine.handle("select_mission")
+
         self.assertIs(machine.active, briefing_scene)
         self.assertEqual(machine.active.briefing, self.briefing)
-        self.assertEqual(machine.history[0].reason, "new campaign started")
+        self.assertEqual(machine.history[0].reason, "first campaign mission selected")
+
+    def test_given_the_caravan_when_dietrich_has_no_message_then_he_reads(self):
+        caravan = CaravanScene(BriefingScene(BF001))
+
+        caravan.handle("speak_to_dietrich", self.context)
+
+        self.assertEqual(caravan.dietrich_mode, "reading")
+
+    def test_given_the_caravan_when_dietrich_has_a_message_then_he_talks(self):
+        caravan = CaravanScene(BriefingScene(BF001), has_message=True)
+
+        caravan.handle("speak_to_dietrich", self.context)
+
+        self.assertEqual(caravan.dietrich_mode, "talking")
 
     def test_given_main_menu_when_quit_is_chosen_then_the_application_receives_a_quit_signal(self):
         machine = SceneMachine(MainMenuScene(), self.context)
