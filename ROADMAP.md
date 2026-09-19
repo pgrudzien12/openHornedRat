@@ -84,7 +84,7 @@ perspective battle scene.
 |---|---|---|---|---|
 | 3.1 | `.SI` container | ✅ | M | 30/30 files fully covered; films, sounds, MIDI, event tracks extracted |
 | 3.2 | Smacker playback | ✅ | S | pure-Python decoder; frames viewed; play at 125 ms per frame |
-| 3.3 | `.SR/.SM/.SN` and scene timeline | 🟡 | M | side files decoded; open: event (`EVT`) semantics (speaker, fade), verify by watching under Wine |
+| 3.3 | `.SR/.SM/.SN` and scene timeline | 🟡 | M | side files decoded; opening captions and movie assets are present across A1–A27. TODO: replace the A1-specific frontend with a generic `.SI` player that runs caption/prologue states plus event (`EVT`) semantics (speaker, fade); verify under Wine |
 | 3.4 | Speech ↔ texts ↔ scenes | 🟡 | M | `A*.WAV` ↔ `ANTXT` ids ↔ scenes done; open: `B*.WAV` lines ↔ portraits and missions |
 
 ## Phase 4 — game logic (hardest; disassembly)

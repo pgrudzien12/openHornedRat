@@ -11,7 +11,7 @@ import struct
 import pygame
 
 from ..smacker import Smacker, frame_index_at
-from ..cutscene import SubtitleTimeline
+from ..cutscene import SubtitleTimeline, subtitle_color
 from .bitmap_font import BitmapFont
 from .gpu import QUAD_VERTEX_SHADER
 from .scene_view import SceneView
@@ -102,7 +102,7 @@ class IntroView(SceneView):
         self.playing = 0
         self.subtitles = SubtitleTimeline(scene.media, scene.texts)
         self.subtitle_font = BitmapFont(scene.subtitle_font)
-        self.subtitle = gpu.text((620, 80), self.subtitle_font, color=(255, 250, 225),
+        self.subtitle = gpu.text((640, 80), self.subtitle_font, color=(255, 255, 255),
                                  background=None, padding=0)
         self.subtitle_text = None
         self._sync(0.0)
@@ -135,10 +135,14 @@ class IntroView(SceneView):
             if self.cues[self.next_cue][1].play() is not None:
                 self.playing += 1
             self.next_cue += 1
-        text = self.subtitles.text_at(elapsed)
-        if text != self.subtitle_text:
+        subtitle = self.subtitles.current(elapsed)
+        text = subtitle.text_at(elapsed) if subtitle else ""
+        style = (text, subtitle_color(subtitle.speaker) if subtitle else None)
+        if style != self.subtitle_text:
+            if subtitle:
+                self.subtitle.set_color(style[1])
             self.subtitle.set_lines(self._wrap_subtitle(text))
-            self.subtitle_text = text
+            self.subtitle_text = style
 
     def _wrap_subtitle(self, text):
         """Keep subtitle text in the original film's narrow lower strip."""
@@ -176,10 +180,11 @@ class IntroView(SceneView):
         left = (screen_w - width) / 2
         top = (screen_h - (self.smk.h + subtitle_strip) * scale) / 2
         self.video.draw(left, top, width, height)
-        if self.subtitle_text:
-            text_width, text_height = self.subtitle.text_size
-            self.subtitle.draw((screen_w - text_width * scale) / 2, top + height + 5 * scale,
-                               text_width * scale, text_height * scale)
+        if self.subtitle_text[0]:
+            # The video can scale up for a better presentation, but the
+            # original subtitle bitmap remains 1:1.  Its left edge is the
+            # left edge of the original centered 640-pixel film box.
+            self.subtitle.draw((screen_w - self.smk.w) / 2, top + height + 5 * scale)
 
     def release(self):
         self.video.release()

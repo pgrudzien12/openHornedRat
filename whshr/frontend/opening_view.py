@@ -9,13 +9,13 @@ from .scene_view import SceneView
 class OpeningNarrationView(SceneView):
     """Present the original ANTXT prologue in the original SUBTEXT face."""
 
-    NATIVE_WIDTH = 600
+    NATIVE_WIDTH = 500
 
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
         self.font = BitmapFont(scene.subtitle_font)
         self.body = gpu.text((self.NATIVE_WIDTH, 180), self.font, color=(255, 250, 225),
-                             background=None, padding=0)
+                             background=None, padding=0, align="center")
         self.body.set_lines(self._wrap(scene.text))
 
     def _wrap(self, text):

@@ -115,9 +115,13 @@ class ScreenQuad:
 class TextLabel(ScreenQuad):
     """Lines of text rendered with pygame's font once per change and uploaded as a texture."""
 
-    def __init__(self, gpu, size, font, color=(235, 230, 210), background=(0, 0, 0, 150), padding=6):
+    def __init__(self, gpu, size, font, color=(235, 230, 210), background=(0, 0, 0, 150), padding=6,
+                 align="left"):
         super().__init__(gpu, size)
+        if align not in ("left", "center"):
+            raise ValueError(f"unsupported text alignment: {align!r}")
         self.font, self.color, self.background, self.padding = font, color, background, padding
+        self.align = align
         self.text_size = (0, 0)
         self._lines = None
 
@@ -135,11 +139,19 @@ class TextLabel(ScreenQuad):
             surface.fill(self.background, (0, 0, width, height))
         top = self.padding
         for line in rendered:
-            surface.blit(line, (self.padding, top))
+            left = self.padding if self.align == "left" else (width - line.get_width()) // 2
+            surface.blit(line, (left, top))
             top += line.get_height()
         self.write(pygame.image.tobytes(surface, "RGBA"))
         self.text_size = (width, height)
         return self.text_size
+
+    def set_color(self, color):
+        """Change glyph color and invalidate the cached raster when needed."""
+        color = tuple(color)
+        if color != self.color:
+            self.color = color
+            self._lines = None
 
 
 class Gpu:

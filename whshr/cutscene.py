@@ -10,6 +10,17 @@ screen for a short reading hold.
 from dataclasses import dataclass
 
 
+# The event track's speaker field is a stable slot (2, 3 or 4), not a random
+# value.  The original subtitles use the corresponding primary display color.
+SPEAKER_COLORS = {3: (0, 255, 0), 4: (0, 0, 255), 2: (255, 0, 0)}
+DEFAULT_SUBTITLE_COLOR = (255, 255, 255)
+
+
+def subtitle_color(speaker):
+    """Return the original-style RGB subtitle color for an event speaker slot."""
+    return SPEAKER_COLORS.get(speaker, DEFAULT_SUBTITLE_COLOR)
+
+
 @dataclass(frozen=True)
 class SubtitleCue:
     """One line of cutscene text and its original 125 ms display interval."""

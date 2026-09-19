@@ -1,6 +1,6 @@
 import unittest
 
-from whshr.cutscene import SubtitleTimeline
+from whshr.cutscene import SubtitleTimeline, subtitle_color
 
 
 def _media(rows, fields=5):
@@ -8,6 +8,12 @@ def _media(rows, fields=5):
 
 
 class SubtitleTimelineTests(unittest.TestCase):
+    def test_given_a_speaker_slot_when_its_color_is_requested_then_it_uses_a_primary_rgb_color(self):
+        self.assertEqual(subtitle_color(2), (255, 0, 0))
+        self.assertEqual(subtitle_color(3), (0, 255, 0))
+        self.assertEqual(subtitle_color(4), (0, 0, 255))
+        self.assertEqual(subtitle_color(99), (255, 255, 255))
+
     def test_given_a_speech_event_when_its_interval_is_active_then_text_is_revealed_over_its_ticks(self):
         timeline = SubtitleTimeline(
             _media([[1000, 1010, 2, 8, 8, 10], [1125, 1010, 2, 8, 9, 10],
