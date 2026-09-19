@@ -27,7 +27,7 @@ Give each agent this context, then its own section below.
   `$R/extracted/agent_reports/` (A close combat, B morale and behaviour VM, C shooting, D flags and orders,
   E time and movement, F magic, and later G/H/I).
 - **Game installation** (read-only): `~/snap/steam/common/.local/share/Steam/steamapps/compatdata/3605483607/pfx/drive_c/GOG Games/Warhammer - Shadow of the Horned Rat/WARFB/`.
-- **Resources**:
+- **Resources** (research agents only; implementation agents must not read decompiled output, see CLAUDE.md clean-room policy):
   - `$R/extracted/decompiled/gamef_all.c` and `exe_all.c`: Ghidra decompilation of all functions of
     `GAMEF.DLL` and `WHSHR.EXE`, with a header per function (`// ==== FUN_x @ addr callers:`).
   - `$R/extracted/agent_reports/fn.py` prints whole functions; `D/gamef.asm` is a full objdump of `GAMEF.DLL`.

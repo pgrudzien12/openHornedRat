@@ -217,7 +217,7 @@ def refresh_melee_state(battle):
         regiment.in_melee = False
         regiment.melee_group = None
         regiment.melee_touching = frozenset()
-        # The unit's *order* survives leaving a fight: `LeaveBattleGrid` never touches one, and the
+        # The unit's *order* survives leaving a fight: leaving a grid never touches one (game_rules.md 5.7), and the
         # pursuit granted when the last enemy broke is issued on the very tick before this runs.
         # Clearing it here cancelled every pursuit one tick after it started. A target that is gone
         # is dropped by `Battle._advance_regiments` instead.
@@ -543,7 +543,7 @@ def _react_to_rout(routed, opponents, group_id, battle):
     orders it somewhere, which is not what the original does.
 
     Simplifications: the pursuit has no chase budget, restraint test or "more attractive target"
-    check (game_rules.md 7.5's `PursuingUnitUpdate`); it is an ordinary charge order at the fleeing
+    check (game_rules.md 7.5); it is an ordinary charge order at the fleeing
     unit, which `resolve_contacts` will not turn back into close combat while that unit is routing
     (7.7: "pursuers never engage fleeing units in close combat"). Player missile troops never pursue,
     standing in for the traced "player artillery, wizards and archers never pursue".
@@ -578,7 +578,7 @@ def resolve_contact_attacks(battle):
     combat, because a routing unit is excluded from engagement entirely. Each attacking model gets its
     `attacks` tries spread over the target models in reach, and a fleeing model -- running with its back
     turned -- is **hit automatically**: only the to-wound roll and the armour save are made, with no
-    to-hit roll (`ResolveAutoHits`).
+    to-hit roll (game_rules.md 5.2).
 
     Simplifications: the reach is the infantry 12 (the engine has no unit class for the cavalry 18 and
     monster 24), and the original's timed "turning" state, in which a model still gets a to-hit roll, is

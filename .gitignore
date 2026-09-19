@@ -25,3 +25,6 @@ logs/
 
 # Native build output.
 build/
+
+# Local renders of game art (root-level images) - do not distribute.
+/*.png

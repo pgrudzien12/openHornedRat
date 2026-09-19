@@ -17,7 +17,7 @@ INITIAL_COFFERS = 500
 
 
 def mission_visible(missions, mission, taken):
-    """The original ``FUN_0044c340``: is ``mission`` offered in its window right now?
+    """Is ``mission`` offered in its window right now?
 
     ``taken`` holds the name ids of missions already committed to.  ``depend`` and
     ``inactivedepend`` refer to other missions of the *same* window; an id that is not
@@ -82,7 +82,7 @@ class CampaignState:
         return caravan_scroll_count(len(self.missions))
 
     def complete(self, mission):
-        """Record a chosen mission (``FUN_0044c82f``).
+        """Record a chosen mission.
 
         A ``replacescript`` switches flow.  Otherwise the mission is marked taken and the
         player stays on the same map window, with one row fewer, unless the mission has

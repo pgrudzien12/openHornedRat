@@ -51,7 +51,7 @@ MISSILE_WEAPONS = {
     15: 'warpfire thrower', 16: 'spellcaster marker (Wyvern shaman)', 17: 'Gyrocopter bomb (Archers class) / steam gun',
     18: 'short bow (Goblin Archers)', 19: 'longbow (Keeler\'s Longbows)',
 }
-# Maximum ranges hard-coded in FUN_10024990, in BTS world units (24 units = 1 tabletop inch).
+# Maximum ranges hard-coded in GAMEF.DLL (game_rules.md, section 8), in BTS world units (24 units = 1 tabletop inch).
 MISSILE_RANGES = {1: 576, 2: 720, 5: 1440, 6: 768, 7: 576, 8: 1440, 9: 576, 11: 1152, 12: 1440,
                   14: 576, 15: 576, 17: 384, 18: 384, 19: 720}
 

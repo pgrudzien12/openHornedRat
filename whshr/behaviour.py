@@ -1,6 +1,6 @@
 """Unit behaviour bytecode of the mission DLLs (FILE/SCRIPT/BFxxx.DLL): loader, disassembler and checks.
 
-Every live unit runs a behaviour script each tick (RunUnitScript, GAMEF.DLL FUN_1001cae0). The scripts
+Every live unit runs a behaviour script each tick (game_rules.md, "Unit behaviour scripts and events"). The scripts
 are data inside the mission DLLs: DLLGetScriptPointer(id) returns a pointer to an array of 32-bit words,
 ids 0..N-1 are the mission's own unit scripts and ids 100..170 a shared library (identical in all DLLs).
 

@@ -1,34 +1,13 @@
-"""The close-combat battle grid traced in `GAMEF.DLL` (notes/game_rules.md 5.7).
+"""The close-combat battle grid, as specified in notes/game_rules.md 5.8.
 
 A fight is not "two footprints overlap": it is a shared 17 x 17 cell record (one cell = one model
 spacing) seeded around the first unit that was engaged, on which individual models are placed,
-paired with individual enemy models, and only then allowed to strike.
+paired with individual enemy models, and only then allowed to strike. Frame, seeding, joining,
+owner pairing, arrival and side-only cells are all defined in game_rules.md 5.8; the constants below
+are the ones named there.
 
-What is reproduced here, and where it comes from:
-
-- **Cell frame** (`FUN_10008a50`): the grid axes follow the owner's facing at creation and the cell
-  pitch is `formation.MODEL_SPACING`, so cell `(row, col)` maps back onto the owner's own block slots.
-- **Seeding** (`CreateGridTroops`, `FUN_100086d0`): the owner's models are written at
-  `col = file + (8 - frontage // 2)`, `row = rank + (8 - ranks // 2)`.
-- **Joining** (`PairJoiningModels`, `FUN_100060c0` -> `PlaceModelAdjacent`, `FUN_10007bb0`): at most
-  `frontage` free models per tick, each into a free cell orthogonally adjacent to its nearest enemy
-  model; only the cell facing the attacker plus one flank are offered while the model is more than
-  `NEAR_DISTANCE` away, all four closer in. Models that find no cell become reserves and are retried
-  on later ticks (the original defers them the same way; they are never written off after one failure).
-- **Owner pairing** (`PairOwnerModels`, `FUN_100059c0`): the owner's unpaired models take any enemy
-  model at Manhattan distance 1; the owner switches to the joining procedure once it outnumbers the
-  enemy by more than 1.5x.
-- **Arrival** (`ModelArrivedInCombat`, `FUN_10005450`): a model fights only once it holds an opponent
-  *and* has walked within `ARRIVAL_DISTANCE` of its cell.
-- **Cells carry only the side, never the unit** (`FUN_10007da0` stamps `s_side & 0xE1 | 1`), so allied
-  units sharing a grid fill one undivided pool of free cells, in a fixed per-tick unit order.
-- **Bounds**: candidate cells are range-checked to `0..GRID_SIZE-1` and an out-of-range model is simply
-  deferred, matching the traced per-tick placement. The original's *unchecked* initial footprint write
-  (game_rules.md 5.7, the out-of-bounds hazard) is deliberately not reproduced: seeding clamps instead.
-
-Deliberately not modelled (documented placeholders, as elsewhere in this engine): war machine, monster
-and wagon block layouts (every unit is seeded and placed as troops), `s_pntval` opponent stealing, and
-the original's exact per-tick model walking speed.
+Deviations from the specification: candidate cells are range-checked and seeding clamps instead of
+writing out of bounds (5.8 step 2), and the placeholders listed in 5.8 step 9 are not modelled.
 """
 
 import math
@@ -43,8 +22,8 @@ ARRIVAL_DISTANCE = 3.0  # a model counts as "in hand-to-hand" within this distan
 OWNER_SWITCH_RATIO = 1.5  # the owner pairs like a joiner once it outnumbers the enemy by more than this
 
 # Orthogonal neighbour offsets (row, col), ordered so that index 0 is the cell on the side the
-# attacker comes from and index 1 its first flank; `PlaceModelAdjacent` offers only those two while
-# the model is still far away.
+# attacker comes from and index 1 its first flank; only those two are offered while the model is
+# still far away (game_rules.md 5.8 step 3).
 _NEIGHBOURS = ((-1, 0), (0, -1), (0, 1), (1, 0))
 
 
@@ -75,7 +54,7 @@ class BattleGrid:
         return CENTRE - self._ranks // 2
 
     def seed(self, regiment):
-        """Write the grid-owning regiment's models into cells around the centre (`CreateGridTroops`)."""
+        """Write the grid-owning regiment's models into cells around the centre (game_rules.md 5.8 step 2)."""
         sizes = formation.rank_sizes(regiment.models, regiment.ranks)
         self.width = max(sizes) if sizes else 1
         self._ranks = len(sizes)
@@ -136,7 +115,7 @@ def _pick_owner(members):
 
 
 def update(battle, group_id, grid, members):
-    """One tick of placement and pairing for every unit on `grid` (`EngageTroops`, `FUN_10005750`)."""
+    """One tick of placement and pairing for every unit on `grid` (game_rules.md 5.8 steps 3-6)."""
     _drop_dead(battle, grid)
     for regiment in members:
         if regiment.identifier == grid.owner_id and not _owner_outnumbers(regiment, members):
@@ -149,7 +128,7 @@ def update(battle, group_id, grid, members):
 def _sync_arrival(grid, members):
     """Mark every placed model that already stands in its cell as arrived, so a model that is given a
     cell it is practically standing on fights in the same segment instead of waiting a tick for the
-    mover to notice (`ModelArrivedInCombat` runs off the same distance test)."""
+    mover to notice (game_rules.md 5.8 step 6)."""
     for regiment in members:
         positions = regiment.model_positions()
         for index, model in enumerate(regiment.melee_models):
@@ -285,7 +264,7 @@ def _pair_owner(battle, grid, regiment, members):
 
 
 def release(battle, regiment):
-    """Unpair and un-cell every model of a regiment that leaves a grid (`LeaveBattleGrid`).
+    """Unpair and un-cell every model of a regiment that leaves a grid (game_rules.md 5.7, "Leaving").
 
     Both directions of every pairing have to go: the models this regiment was fighting still hold a
     pointer back at it, and a regiment that later re-joins a fight is placed in fresh cells, so a

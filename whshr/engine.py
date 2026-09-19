@@ -477,11 +477,11 @@ class Battle:
         return regiment.x + math.sin(angle) * 1e4, regiment.y + math.cos(angle) * 1e4
 
     def _advance_models(self, regiment, step):
-        """Walk each model toward its target, never faster than the unit's speed (`MoveModels`).
+        """Walk each model toward its target, never faster than the unit's speed.
 
         The target is normally the model's formation slot, but a model that holds a cell on a battle
         grid walks to that cell instead and is marked `arrived` once it is within
-        `battle_grid.ARRIVAL_DISTANCE` of it (`ModelArrivedInCombat`): only then may it strike.
+        `battle_grid.ARRIVAL_DISTANCE` of it (game_rules.md 5.8 step 6): only then may it strike.
         """
         targets = formation.place(regiment.x, regiment.y, regiment.direction,
                                   formation.block_slots(regiment.models, regiment.ranks))
@@ -537,7 +537,7 @@ class Battle:
                 result="defeat", counts=self.side_counts()))
 
     def _resolve_collisions(self):
-        """Push regiments under orders out of the regiments they overlap (a simplified `PushApart`;
+        """Push regiments under orders out of the regiments they overlap (a simplified push-apart;
         game_rules.md, "Routes, collisions and visibility"), not the polygon obstruction routing (`Nav*`).
 
         Standing regiments never give way, so scripted deployments that already overlap (BF001's Grudgebringer

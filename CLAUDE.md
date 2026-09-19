@@ -160,3 +160,45 @@ section plus a row in the overview table of `FORMATS.md`.
   (see: 3/13 frames "matched" by accident under a wrong RLE hypothesis).
 - Game files (`.BOP`, `.PAL`, etc.) are not in this repo (they are the property of GOG/Games Workshop) —
   the scripts in `scripts/` take the path to the installed game as an argument.
+
+## Clean-room policy (all agents must follow this)
+
+The goal is **compatibility with a legally owned installation**, not reproduction of the
+original code or assets. Keep a hard boundary between two phases:
+
+1. **Research** (`notes/`, `tools/ghidra/`): original binary → disassembly/decompilation/
+   dynamic observation → written up as a **behavioral spec** in `notes/*.md` — formulas,
+   tables, byte layouts, state machines, file formats. Describe *what the game does*
+   ("WS vs WS is looked up in an 11×11 to-hit table"), not *how the original code expresses
+   it* ("FUN_00412340 does..."). Raw decompiler/assembly output stays only in
+   `tools/ghidra/` working files and is **never committed** (already a repo rule) and never
+   pasted into implementation-facing docs or prompts.
+2. **Implementation** (`whshr/`, `scripts/`): written from the `notes/*.md` spec only.
+   Never translate/rename decompiled or disassembled code into Python — same behavior is
+   fine (and often the point), same implementation structure is not. When implementing,
+   read the spec, decide the externally observable behavior, then write it independently.
+   Code comments/docstrings cite `notes/game_rules.md` sections, never original function names or
+   addresses (`FUN_*`). Any step-by-step procedure the code follows must be written up in the notes first.
+
+Practical rules:
+
+- **Don't feed decompiled/assembly code to an LLM as implementation context.** A research
+  agent may read it to produce a spec; a coding agent should only ever see the resulting
+  `notes/*.md`. If the only source available is raw decompiled code, say so and produce a
+  spec first instead of implementing from it directly.
+- **Prefer reading data from the user's own installation at runtime** over baking constants
+  into the repo, especially for anything closer to "content" than "fact" (e.g. a lookup
+  table of numbers is fine to record as a fact in `notes/`; large blocks of text/art/audio
+  are not). `extracted/`, `samples/`, `battles/` stay gitignored/local for this reason —
+  don't add game-derived binary data, art, text, audio or video to tracked files.
+- **Never commit original assets** (sprites, textures, models, music, SFX, voice, video,
+  maps, narrative text, fonts, the `.EXE`/`.DLL` files themselves). If new replacement art
+  is ever generated, base it on general descriptions of required properties (size, palette,
+  frame count), not on reproducing a specific original image.
+- **Don't copy strings verbatim** out of the executable into engine code/docs beyond what's
+  needed to *locate* data (e.g. a signature or field name is fine; flavor text, dialogue,
+  and lore strings should be loaded from the user's install, not embedded).
+- **No DRM/copy-protection circumvention.** If something can't be reached through the
+  normal installed game files, stop and flag it instead of working around protection.
+- When unsure whether something is a fact/interoperability requirement vs. copyrightable
+  expression, don't commit it — flag it for the user to review instead.

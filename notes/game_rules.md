@@ -950,6 +950,45 @@ real formation (given the formation-size caps in "Formations" above) can actuall
 not established from this code alone — a candidate for grepping the army/formation size caps or a
 Wine session forcing an oversized frontage.
 
+### 5.8 Battle grid procedure (implementation specification) ✅
+
+Self-contained, behavioral summary of 5.7 for implementers. Source: `GAMEF.DLL` static tracing of
+grid creation, per-tick pairing and arrival (verified against the sections above). Code in `whshr/`
+must cite this section, not the original routines. Constants: `GRID_SIZE = 17`, `CELL = 12` world
+units (one model), `NEAR_DISTANCE = 18`, `ARRIVAL_DISTANCE = 3`, `OWNER_SWITCH_RATIO = 1.5`.
+
+1. **Cell frame.** A grid is a 17 × 17 array of cells. Its axes are fixed at creation from the owner's
+   facing, with a pitch of one model spacing (12 units) per cell, so cell `(row, col)` maps back onto the
+   owner's own block slots. The frame is never recomputed while the fight lasts.
+2. **Seeding (owner's models).** The engaged unit (the grid owner) writes each model into the cell
+   `col = file + (8 − frontage / 2)`, `row = rank + (8 − ranks / 2)` (integer halves), where `file`
+   and `rank` are the model's slot in its own formation block. Cells record only the occupying
+   *side* (plus an "occupied" bit), never the unit or model. The original does not range-check this
+   write (see the hazard at the end of 5.7); a reimplementation should clamp.
+3. **Joining unit, every tick.** Each unit that is not the owner (or the owner once it outnumbers the
+   enemy, step 5) places at most `frontage` of its free models per tick. For each model: find the nearest
+   enemy model that already holds a cell; try the free cells orthogonally adjacent to it. While the placing
+   model is farther than `NEAR_DISTANCE` from that enemy only two candidates are offered — the cell on the
+   side the attacker comes from and its first flank; closer than that all four are offered. Candidates
+   outside `0..16` are skipped. A model that finds no cell becomes a **reserve** and is retried on later
+   ticks; it is never discarded after one failure.
+4. **Pairing.** A placed model takes the enemy model it is adjacent to as its opponent (Manhattan
+   distance 1 on the grid). Units on the same side share one pool of free cells; the fixed per-tick
+   unit order decides who claims cells first.
+5. **Owner, every tick.** The owner's unpaired models take any enemy model at Manhattan distance 1,
+   otherwise move next to an engaged comrade. When the owner has more than `OWNER_SWITCH_RATIO` times the
+   enemy's models it uses the joining procedure of step 3 instead.
+6. **Arrival.** A placed, paired model walks toward its cell. It **fights only once it holds an
+   opponent and its remaining distance to the cell is below `ARRIVAL_DISTANCE`**. A model that is
+   already that close when it receives a cell counts as arrived immediately.
+7. **Retargeting** happens once, at arrival, as described in 5.7 (`s_pntval` comparison, war machines).
+8. **Death and leaving.** A dead model frees its cell and unpairs its opponent; the survivor stays
+   on the grid and is re-paired on a later tick. A unit leaves the grid only on the state conditions
+   listed in 5.7, never because of distance.
+9. **Not modelled by `whshr/`** (documented placeholders): war machine, monster and wagon block
+   layouts (every unit is seeded as troops), opponent stealing by `s_pntval`, the original's exact
+   per-tick model walking speed.
+
 ## 6. Combat resolution and break tests
 
 ### 6.1 Result (`FUN_10004470`) ✅

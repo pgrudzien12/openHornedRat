@@ -1,7 +1,6 @@
-"""Block formation layout traced in GAMEF.DLL: model positions relative to the unit position.
+"""Block formation layout: model positions relative to the unit position.
 
-Rank sizes follow `ComputeFormationSize` (FUN_1002c9e0) and slot offsets the block layout (FUN_1002cf50);
-see notes/game_rules.md, "Formations". War machine, monster and wagon layouts are not modelled here.
+Rank sizes and slot offsets follow notes/game_rules.md, "Formations". War machine, monster and wagon layouts are not modelled here.
 """
 
 import math
@@ -38,7 +37,7 @@ def place(x, y, direction, slots):
 def footprint(models, ranks, spacing=MODEL_SPACING):
     """Local block half-extents (side, forward) and the footprint centre's forward offset behind the unit
     position: a box of half-extents ``frontage x 6`` and ``ranks x 6``, centred ``(ranks - 1) x 6`` units
-    behind the unit position (game_rules.md, "Formations" / `FUN_1002c750`, `FUN_1002c510`).
+    behind the unit position (game_rules.md, "Formations").
     """
     sizes = rank_sizes(models, ranks)
     if not sizes:
@@ -100,7 +99,7 @@ def penetrates(a, b, spacing=MODEL_SPACING):
 def turn_pivot_shift(direction, new_direction, models, ranks, spacing=MODEL_SPACING):
     """The offset a block's anchor must move by so that an in-place turn pivots about the **block
     centre**, not about the anchor (game_rules.md, "A turn always moves the unit position to keep the
-    pivot still": `FUN_1002b510`, `FUN_1002b660`).
+    pivot still").
 
     The anchor sits ``(ranks - 1) x 6`` in front of the block centre along the facing, so keeping the
     centre fixed means putting the anchor back that far along the *new* facing. Without this a turning
