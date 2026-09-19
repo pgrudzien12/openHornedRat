@@ -1,6 +1,6 @@
 import unittest
 
-from whshr.campaign import parse_mission_windows, parse_window_hotspots
+from whshr.campaign import parse_mission_script, parse_mission_windows, parse_window_hotspots, parse_window_portrait
 from whshr.campaign_state import CampaignState, caravan_scroll_count, eligible_missions
 
 
@@ -105,10 +105,48 @@ class CampaignStateTests(unittest.TestCase):
         self.assertEqual(windows["MISSIONTESTWINDOW"], [{"name_id": 601, "name": "MISSION_601",
                           "depend": 600, "inactivedepend": 599}])
 
+    def test_given_a_speaker_window_then_its_position_and_anim_settings_are_data_driven(self):
+        portrait = parse_window_portrait({"SCRIBEMWINDOW": """
+            [WINDOW]
+            [POSITION]
+                set:x=450
+                set:y=25
+                set:vx=144
+                set:vy=240
+            [END]
+            [ANIM]
+                set:index=4
+                set:bkindex=15
+                set:controlpanel=2
+                settextcolor:red
+                name:Dietrich
+            [END]
+            [END]
+        """}, "scribemwindow")
+
+        self.assertEqual(portrait, {
+            "window": "SCRIBEMWINDOW", "position": {"x": 450, "y": 25, "vx": 144, "vy": 240},
+            "index": 4, "bkindex": 15, "controlpanel": 2, "text_color": "red", "speaker": "Dietrich",
+        })
+
     def test_given_a_release_flag_in_a_mission_window_then_it_is_parsed(self):
         windows = parse_mission_windows({"MISSIONTESTWINDOW": "[MISSION]\nset:res=601\nset:releaseflag=1\n[END]"})
 
         self.assertEqual(windows["MISSIONTESTWINDOW"][0]["releaseflag"], 1)
+
+    def test_given_a_mission_script_then_its_caravan_modes_conditions_and_endgame_are_retained(self):
+        parsed = parse_mission_script("""
+            gocaravan:resume
+            iftruegocaravan:infoREC
+            iffalsegocaravan:select
+            endgame:
+        """)
+
+        self.assertEqual(parsed["summary"]["caravan_entries"], [
+            {"mode": "resume"}, {"mode": "inforec", "condition": "true"},
+            {"mode": "select", "condition": "false"},
+        ])
+        self.assertTrue(parsed["summary"]["ends_game"])
 
     def test_given_caravan_includes_then_hotspots_keep_their_hint_ids_and_geometry(self):
         wnd = {

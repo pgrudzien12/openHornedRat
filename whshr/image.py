@@ -6,7 +6,8 @@ import zlib
 
 def load_rgb_palette(path):
     """Read the game's four-byte indexed RGB palette."""
-    data = open(path, 'rb').read()
+    with open(path, 'rb') as source:
+        data = source.read()
     palette = [(255, 0, 255)] * 256
     for i in range(0, len(data) - 3, 4):
         palette[data[i]] = tuple(data[i + 1:i + 4])

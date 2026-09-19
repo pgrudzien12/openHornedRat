@@ -81,6 +81,15 @@ class CampaignState:
     def scroll_count(self):
         return caravan_scroll_count(len(self.missions))
 
+    @property
+    def map_portrait_window(self):
+        """The data-defined portrait sub-window opened by the active flow."""
+        steps = self.graph["flow_scripts"].get(self.flow, ())[:self.flow_step + 1]
+        for step in reversed(steps):
+            if step["action"] == "open_subwindow":
+                return self.graph.get("portrait_windows", {}).get(step["window"])
+        return None
+
     def complete(self, mission):
         """Record a chosen mission.
 

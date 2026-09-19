@@ -100,7 +100,7 @@ class CaravanView(SceneView):
     def _hub_action_at(self, pos):
         point = self._native_point(pos)
         if self._hotspot_rect(150, self.MISSION_RECT).collidepoint(point):
-            return "select_mission:0" if self.scene.missions else None
+            return "open_mission_map" if self.scene.can_select_mission and self.scene.missions else None
         if self._hotspot_rect(-1, self.GOLD_RECT).collidepoint(point):
             return None
         for name, rect in self.BOOKS:

@@ -5,6 +5,7 @@ from .battle_scene import BattleScene, FIRST_BATTLE
 from .campaign_state import CampaignState
 from .engine import DEFAULT_SEED
 from .legacy import module
+from .portraits import dietrich_portrait
 from .scenes import Quit, Scene, SceneManifest, Transition
 from .si import load_si, walk_objects
 
@@ -112,7 +113,10 @@ class MainMenuScene(Scene):
                     CampaignState.single_mission(self.briefing) if self.briefing is not None
                     else CampaignState.from_installation(context.locator.installation)
                 )
-            return Transition(CaravanScene(self.campaign), "new campaign started")
+            # StartCaravan's resource starts the first parked flow script.
+            # Later ``gocaravan`` calls must supply their own continuation.
+            return Transition(CaravanScene(self.campaign, continuation="open_mission_map"),
+                              "new campaign started")
         if event == "quit":
             return Quit("player quit from the main menu")
         return None
@@ -127,9 +131,15 @@ class CaravanScene(Scene):
 
     manifest = SceneManifest(immediate=(CARAVAN_FONT,))
 
-    def __init__(self, campaign, has_message=False):
+    def __init__(self, campaign, has_message=False, mode="start", continuation=None):
         self.campaign = campaign
         self.has_message = has_message
+        self.mode = mode.lower()
+        # This is deliberately supplied by the glue-script runner.  A caravan
+        # does not itself imply that the parked map/list should open: ``resume``
+        # and recruit modes continue their mission, while info modes unwind to
+        # whatever their enclosing script specifies next.
+        self.continuation = continuation
         self.dietrich_mode = None  # ``reading`` / ``talking`` while his close-up is open
         self.selected_book = None
         self.save_requested = False
@@ -150,14 +160,14 @@ class CaravanScene(Scene):
     def scroll_count(self):
         return self.campaign.scroll_count
 
+    @property
+    def can_select_mission(self):
+        """Whether this caravan's hotspot has resolved to the map/list."""
+        return self.continuation == "open_mission_map"
+
     def handle(self, event, context):
-        if event.startswith("select_mission:"):
-            index = int(event.removeprefix("select_mission:"))
-            mission = self.missions[index]
-            briefing = mission.get("briefing") or BriefingScene(
-                AssetId("vanilla", "battle", mission["battle"].casefold())
-            )
-            return Transition(briefing, f"campaign mission selected: {mission['name']}")
+        if event == "open_mission_map" and self.can_select_mission:
+            return Transition(MissionMapScene(self.campaign), "campaign map opened")
         if event == "exit_campaign":
             return Transition(MainMenuScene(), "campaign exited")
         if event == "speak_to_dietrich":
@@ -169,6 +179,77 @@ class CaravanScene(Scene):
         elif event == "save_campaign":
             self.save_requested = True
         return None
+
+
+class MissionMapScene(Scene):
+    """The parked campaign map and its interactive mission-scroll list.
+
+    In the original glue flow this window remains alive while the briefing,
+    troop selection, and battle are pushed above it.  This scene represents
+    that parked choice point; campaign state remains uncommitted until the
+    later troop-selection implementation accepts the briefing.
+    """
+
+    def __init__(self, campaign):
+        self.campaign = campaign
+        self.dietrich_portrait = None
+        self.portrait_window = campaign.map_portrait_window
+        self.selected_index = None
+
+    def enter(self, context):
+        # Portrait FOL/BOP files are not required by the minimal test fixture
+        # or every partial installation, so leave the panel absent if either
+        # source file has not been extracted from an installed game.
+        try:
+            if self.portrait_window is not None and self.portrait_window.get("index") == 4:
+                self.dietrich_portrait = dietrich_portrait(
+                    context.locator.installation, self.portrait_window.get("bkindex", 15)
+                )
+        except FileNotFoundError:
+            self.dietrich_portrait = None
+
+    @property
+    def missions(self):
+        return self.campaign.missions
+
+    @property
+    def selected_mission(self):
+        if self.selected_index is None or self.selected_index >= len(self.missions):
+            return None
+        return self.missions[self.selected_index]
+
+    def handle(self, event, context):
+        if event == "return_to_caravan":
+            # Esc only closes the list view; it does not change the parked
+            # StartCaravan continuation that opened it.
+            return Transition(CaravanScene(self.campaign, continuation="open_mission_map"),
+                              "campaign map dismissed")
+        if event.startswith("select_mission:"):
+            index = int(event.removeprefix("select_mission:"))
+            if not 0 <= index < len(self.missions):
+                return None
+            self.selected_index = index
+            return None
+        if event == "open_briefing":
+            mission = self.selected_mission
+            if mission is None:
+                return None
+            briefing = mission.get("briefing") or BriefingScene(
+                AssetId("vanilla", "battle", mission["battle"].casefold())
+            )
+            return Transition(briefing, f"campaign mission briefing opened: {mission['name']}")
+        if event == "open_troop_select" and self.selected_mission is not None:
+            return Transition(TroopSelectScene(self.campaign, self.selected_mission),
+                              f"campaign troop selection opened: {self.selected_mission['name']}")
+        return None
+
+
+class TroopSelectScene(Scene):
+    """Built-in troop-selection window placeholder, reached by the map's Accept control."""
+
+    def __init__(self, campaign, mission):
+        self.campaign = campaign
+        self.mission = mission
 
 
 class BriefingScene(Scene):

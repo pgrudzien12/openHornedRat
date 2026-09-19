@@ -132,6 +132,31 @@ def parse_window_hotspots(wnd, name, seen=()):
     return hotspots
 
 
+def parse_window_portrait(wnd, name):
+    """Parse a window's data-defined position and speaker portrait settings."""
+    text = wnd.get(name.upper())
+    if text is None:
+        return None
+    position, portrait, section = {}, {}, None
+    for command, argument in parse_glue_lines(text):
+        if command.startswith("["):
+            section = command if command != "[END]" else None
+        elif section == "[POSITION]" and command == "set" and "=" in argument:
+            key, value = argument.split("=", 1)
+            if key in ("x", "y", "vx", "vy"):
+                position[key] = int(value)
+        elif section == "[ANIM]":
+            if command == "set" and "=" in argument:
+                key, value = argument.split("=", 1)
+                if key in ("index", "bkindex", "controlpanel", "sequence", "frame"):
+                    portrait[key] = int(value)
+            elif command == "settextcolor":
+                portrait["text_color"] = argument.lower()
+            elif command == "name":
+                portrait["speaker"] = argument
+    return {"window": name.upper(), "position": position, **portrait} if position and portrait else None
+
+
 def parse_mission_script(text, bktxt=None):
     """Analyze actions inside a mission runner script (e.g. BPMISSION1)."""
     bktxt = bktxt or {}
@@ -146,6 +171,8 @@ def parse_mission_script(text, bktxt=None):
         "debriefs": [],
         "subscripts": [],
         "objectives_tested": [],
+        "caravan_entries": [],
+        "ends_game": False,
     }
     for cmd, arg in parse_glue_lines(text):
         if cmd in ("playgame", "playgamewithdebrief", "encounterplaygame", "encounterplaygamewithdebrief", "setbattlescript"):
@@ -196,6 +223,15 @@ def parse_mission_script(text, bktxt=None):
         elif cmd == "testobjective":
             summary["objectives_tested"].append(arg.upper())
             actions.append({"action": "testobjective", "letter": arg.upper()})
+        elif cmd in ("gocaravan", "iftruegocaravan", "iffalsegocaravan"):
+            entry = {"mode": arg.lower()}
+            if cmd != "gocaravan":
+                entry["condition"] = "true" if cmd == "iftruegocaravan" else "false"
+            summary["caravan_entries"].append(entry)
+            actions.append({"action": "caravan", **entry})
+        elif cmd == "endgame":
+            summary["ends_game"] = True
+            actions.append({"action": "endgame"})
     return {"actions": actions, "summary": summary}
 
 
@@ -214,6 +250,7 @@ def build_campaign_graph(installation_path):
     gmtxt = pe_missions.load_strings(str(gmtxt_dll))
 
     windows = parse_mission_windows(wnd, brtxt)
+    portrait_windows = {name: result for name in wnd if (result := parse_window_portrait(wnd, name)) is not None}
 
     # Parse flow scripts
     flow_scripts = {}
@@ -225,6 +262,8 @@ def build_campaign_graph(installation_path):
             if cmd == "addobject" and "res=" in arg.lower():
                 obj_res = arg.split("=", 1)[1].strip().upper()
                 steps.append({"action": "add_window", "window": obj_res})
+            elif cmd == "opensubwindow" and "res=" in arg.lower():
+                steps.append({"action": "open_subwindow", "window": arg.split("=", 1)[1].strip().upper()})
             elif cmd == "set" and arg.startswith("tentpos="):
                 steps.append({"action": "set_tentpos", "pos": int(arg[8:])})
             elif cmd == "waitforrelease":
@@ -301,6 +340,7 @@ def build_campaign_graph(installation_path):
         "flow_scripts": flow_scripts,
         "mission_windows": windows,
         "mission_scripts": mission_scripts,
+        "portrait_windows": portrait_windows,
         "graph": {
             "nodes": nodes,
             "edges": edges,

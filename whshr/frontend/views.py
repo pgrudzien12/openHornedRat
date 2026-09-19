@@ -1,12 +1,16 @@
 """Scene view registry: which view presents which scene type."""
 
 from ..battle_scene import BattleScene
-from ..campaign_scenes import BriefingScene, CaravanScene, IntroScene, MainMenuScene, OpeningNarrationScene
+from ..campaign_scenes import (
+    BriefingScene, CaravanScene, IntroScene, MainMenuScene, MissionMapScene, OpeningNarrationScene,
+    TroopSelectScene,
+)
 from ..result_scene import ResultScene
 from .battle_view import BattleView
 from .caravan_view import CaravanView
 from .intro_view import IntroView
 from .menu_view import BriefingView, MainMenuView
+from .mission_map_view import MissionMapView
 from .opening_view import OpeningNarrationView
 from .result_view import ResultView
 from .scene_view import PlaceholderView
@@ -16,6 +20,8 @@ VIEWS = {
     IntroScene: IntroView,
     MainMenuScene: MainMenuView,
     CaravanScene: CaravanView,
+    MissionMapScene: MissionMapView,
+    TroopSelectScene: PlaceholderView,
     BriefingScene: BriefingView,
     BattleScene: BattleView,
     ResultScene: ResultView,
