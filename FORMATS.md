@@ -38,7 +38,7 @@ from game data; they are not part of the repository.
 | Cutscenes | `ANIM/*.SI/.SN/.SM/.SR` | ✅ containers, 🟡 event semantics | Cutscenes | `notes/si_omni.md`, `notes/scene_scripts.md` |
 | Game rules: unit stats, combat, morale, shooting | `GAMEF.DLL` code and tables, `setstats` | ✅ stat layout, close combat, morale; 🟡 missile constants, some flags | Unit stat fields, Game rules | `notes/game_rules.md` |
 | Mission logic, unit behaviour | `SCRIPT/BFxxx.DLL` | ✅ bytecode scripts, interpreter, all 232 opcodes, disassembler (`whshr scripts`); 🟡 per-mission semantics | Mission logic, Game rules | `notes/game_rules.md` |
-| Save games, campaign files | `SAVE/savegame.*`, `ARMY/PLAY/MARCH.MRC`, `debrief.dbf` | ✅ RIFF `WHSV` container, regiment roster, embedded army files; 🟡 some `Result:` values | Save games and campaign files | `notes/campaign.md` |
+| Save games, campaign files | `SAVE/savegame.*`, `ARMY/PLAY/MARCH.MRC`, `debrief.dbf` | ✅ RIFF `WHSV` container, regiment roster, embedded army files, mission availability and caravan scroll rules; 🟡 some `Result:` values | Save games and campaign files | `notes/campaign.md` |
 
 ## `.PAL` — two different formats under the same extension
 
@@ -804,6 +804,21 @@ Scripts: `scripts/pe_resources.py` (PE resource directory parser), `scripts/pe_e
   ```
 
   `python3 scripts/pe_missions.py <WARFB>` prints the full mission ↔ battle ↔ briefing table.
+
+  **Which missions a window offers** (`FUN_0044c340`, full account in `notes/campaign.md` section 7): a
+  window holds at most 5 `[MISSION]` records of `0x110` bytes each (the `MISS` layout). A record is shown
+  unless it is already taken (`+0xA4`, set on troop-selection confirm); `set:depend=<res>` shows it only once
+  the mission with that name id **in the same window** has been taken; `set:inactivedepend=<res>` shows it
+  only while that mission is **not itself on offer** (recursive on visibility, not on completion). A name id
+  absent from the window makes the gate a no-op. `set:releaseflag=1` marks the missions that resume the flow
+  script — picking any other mission rebuilds the list one row shorter and leaves the player on the same map
+  window.
+
+  **The caravan scrolls**: `CARAVANCOMMON1` draws `CarScroll1/2/3` with `set:depend=4/3/2`, which on a
+  `[BITMAP]` means "draw while at least N missions are on offer" (`FUN_004565d6` against the cached count
+  `DAT_00473e0c`). So the desk shows **visible missions − 1 scrolls, capped at 3**, filling in the order
+  3, 2, 1. One more scroll is baked into the background, so the shelf shows as many scrolls as missions on offer (max 4). These are the only `[BITMAP] set:depend=` in
+  `WND.DLL`.
 
 ## Front-end fonts and palettes
 

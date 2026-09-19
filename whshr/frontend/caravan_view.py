@@ -9,6 +9,9 @@ from .gpu import ScreenQuad
 from .scene_view import SceneView
 
 
+COLOR_KEY = (0, 0, 255)  # palette index 0: the transparent colour of glue sprites
+
+
 class CaravanView(SceneView):
     """Present the original caravan artwork at its native 640×480 composition."""
 
@@ -34,7 +37,7 @@ class CaravanView(SceneView):
         super().__init__(gpu, scene, options)
         self.read_background = self._load_quad(gpu, "READBACKGROUNDPIC.png")
         self.talk_background = self._load_quad(gpu, "TALKBACKGROUNDPIC.png")
-        self.scrolls = [self._load_quad(gpu, filename) for _, filename in self.SCROLLS]
+        self.scrolls = [self._load_quad(gpu, filename, colorkey=True) for _, filename in self.SCROLLS]
         self.candles = [self._load_quad(gpu, f"CARCANDLECELL{index}.png") for index in range(6)]
         self.lamps = [self._load_quad(gpu, f"CARLAMPCELL{index}.png") for index in range(6)]
         self.read_books = [self._load_quad(gpu, f"DIETBOOKCELL{index}.png") for index in range(12)]
@@ -47,13 +50,17 @@ class CaravanView(SceneView):
                              background=None, padding=0, align="center")
 
     @classmethod
-    def _load_quad(cls, gpu, filename):
+    def _load_quad(cls, gpu, filename, colorkey=False):
         path = cls.ART_DIR / filename
         if not path.is_file():
             raise FileNotFoundError(
                 f"caravan artwork not found: {path}; run the resource extractor into extracted/"
             )
         surface = pygame.image.load(str(path))
+        if colorkey:
+            surface = surface.convert()
+            surface.set_colorkey(COLOR_KEY)
+            surface = surface.convert_alpha()
         quad = ScreenQuad(gpu, surface.get_size())
         quad.write(pygame.image.tobytes(surface, "RGBA"))
         return quad
@@ -86,9 +93,6 @@ class CaravanView(SceneView):
 
     def _hub_action_at(self, pos):
         point = self._native_point(pos)
-        for index, (rect, _filename) in enumerate(self.SCROLLS[:len(self.scene.missions)]):
-            if rect.collidepoint(point):
-                return f"select_mission:{index}"
         if self._hotspot_rect(150, self.MISSION_RECT).collidepoint(point):
             return "select_mission:0" if self.scene.missions else None
         if self._hotspot_rect(-1, self.GOLD_RECT).collidepoint(point):
@@ -110,9 +114,6 @@ class CaravanView(SceneView):
         self.hover = None
         if self._hotspot_rect(-1, self.GOLD_RECT).collidepoint(point):
             self.hover = self._hint(402, self.scene.gold)
-        for index, (rect, _filename) in enumerate(self.SCROLLS[:len(self.scene.missions)]):
-            if rect.collidepoint(point):
-                self.hover = self._hint(150)
         if self.hover is None:
             for name, fallback in self.BOOKS:
                 hint_id = {"magic": 158, "troop roster": 151, "bestiary": 152}[name]
@@ -180,7 +181,9 @@ class CaravanView(SceneView):
         self.lamps[frame % len(self.lamps)].draw(
             left + self.LAMP_POS[0] * scale, top + self.LAMP_POS[1] * scale, 8 * scale, 16 * scale
         )
-        for index, (rect, _filename) in enumerate(self.SCROLLS[:len(self.scene.missions)]):
+        # CarScroll3/2/1 appear at 2/3/4 offered missions (WND ``[BITMAP] set:depend``).
+        for index in range(len(self.SCROLLS) - 1, len(self.SCROLLS) - 1 - self.scene.scroll_count, -1):
+            rect = self.SCROLLS[index][0]
             self.scrolls[index].draw(left + rect.x * scale, top + rect.y * scale,
                                      rect.width * scale, rect.height * scale)
         if self.hover:

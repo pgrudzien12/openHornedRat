@@ -146,6 +146,10 @@ class CaravanScene(Scene):
     def missions(self):
         return self.campaign.missions
 
+    @property
+    def scroll_count(self):
+        return self.campaign.scroll_count
+
     def handle(self, event, context):
         if event.startswith("select_mission:"):
             index = int(event.removeprefix("select_mission:"))

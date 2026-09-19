@@ -88,6 +88,8 @@ def parse_mission_windows(wnd, brtxt=None):
                     cur_mission["cash"] = parse_cash_field(arg)
                 elif cmd == "set" and arg.startswith("depend="):
                     cur_mission["depend"] = int(arg[7:])
+                elif cmd == "set" and arg.startswith("releaseflag="):
+                    cur_mission["releaseflag"] = int(arg[12:])
                 elif cmd == "set" and arg.startswith("inactivedepend="):
                     cur_mission["inactivedepend"] = int(arg[15:])
                 elif cmd == "replacescript":

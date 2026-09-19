@@ -6,7 +6,7 @@ Roadmap 4.4, milestone M6. Research batch 4, agent K (September 2026), static an
 Verification: the stdlib reader prototype `extracted/agent_reports/K/whsv.py` (local, not in git) checks every
 chunk size formula and the header checksum; both real saves (`savegame.0`, `savegame.5`) pass, re-run when this
 report was merged. No save after a completed debriefing exists, so promotions, healing and the end-of-mission
-payment rest on the code and on arithmetic (section 7).
+payment rest on the code and on arithmetic (section 8).
 
 ## Per-question summary
 
@@ -16,6 +16,7 @@ payment rest on the code and on arithmetic (section 7).
 | 2. Economy | ✅ | Coffers start at 500. Each `cash` type is a balance-sheet program in the EXE (19 opcode lists at `0x5BCF98`); the labels are `BKTXT` 5000–5024/5040–5042 and the amounts come from the `cash` line (initial, completion, rate A, rate B, required letters) and the `Result:` values in `debrief.dbf`. The initial payment is credited when troop selection is confirmed. Every regiment deployed costs price-per-model × models, and every hired regiment left behind costs 10 % of that ("Retainer"). Prices are static per regiment ×200 % (`cost` option). Worked check: 500 + 100 − 320 = 280, as in `savegame.5`. |
 | 3. Troops and items | ✅ / 🟡 | `whoami` is the persistent regiment id (0–37, name `BKTXT 300+id`, index into the roster table). `PLAY.MRC` holds all regiments; `unitjoinmission` copies one into `ARMY.MRC`/`MARCH.MRC`, `unitleavemission` removes it. `addtroop` adds reinforcements that the player takes in the caravan. Routed models always return; of the killed models 65 % are wounded and come back a mission later, 35 % die. A regiment below 20 % strength is disbanded unless it is the commander's or a story regiment. No code awards magic items between battles; items move with their regiments 🟡. |
 | 4. Files | ✅ | `savegame.N` (slots 0–5, slot 5 = `autosave`) is a RIFF `WHSV` file: `SHDR` header (description, battle, window, coffers, glue status, stack counts), `STAX` (glue interpreter stacks), three book-page flag lists, `RMYI` (39 × 52-byte regiment roster: flags, experience baseline, reinforcements, prices, wounded), verbatim copies of `ARMY.MRC`, `PLAY.MRC`, `MARCH.MRC` and `debrief.dbf`, and `MISS` (current mission and `cash` line). A stdlib reader validates both real saves. |
+| 6. Mission availability | ✅ | A mission window offers up to 5 `[MISSION]` records; one predicate (`FUN_0044c340`) decides per record whether it is drawn: already taken (`+0xA4`) hides it, `set:depend=<res>` requires that mission to be taken, `set:inactivedepend=<res>` requires that mission *not* to be on offer (recursive, not "not done"). The visible count is cached in `DAT_00473e0c` and drives both the mission list on the map and the scroll pile on Dietrich's desk, which draws `CarScroll3/2/1` at thresholds 2/3/4 — that is, **visible − 1 scrolls, capped at 3**. Choosing a mission without `set:releaseflag=1` leaves the player on the same map window with that mission removed. |
 | 5. Debrief flow | ✅ | `GAMEF.DLL` writes `debrief.dbf` (`Result:` lines + surviving and dead/routed units). `WHSHR.EXE` then runs the campaign-over check, wounded bookkeeping and the merge into `PLAY.MRC`, shows the balance sheet, and on Done adds the payment, applies armour rewards, doubled XP and promotions, then merges, heals and disbands in `ARMY.MRC` (and `MARCH.MRC`). |
 
 ## Summary of evidence sources
@@ -150,7 +151,11 @@ mission (glue keywords `set:res=`, `res`, `script`, `setbattlescript`, `setmissi
 | `0x24` | char[32] | briefing glue script | `BPBrief1` |
 | `0x44` | char[32] | battle script | `bf003` |
 | `0x64` | char[32] | mission glue script | `BPMission1` |
-| `0x84`–`0xB3` | u32 × 12 | ⬜ (`+0xA4` is 1 in `savegame.5`) | |
+| `0x84` | char[32] | `replacescript`: the flow script that replaces the current one when this mission is chosen (`FUN_0044c82f` → `FUN_0044e7bf`) ✅ | empty |
+| `0xA4` | u32 | **mission taken** ✅: 0 when the `[MISSION]` block is parsed, set to 1 by `FUN_0044cffe` (`_DAT_004962d4 = 1`) when the player commits to the mission; hides it in its window (section 7) | 1 |
+| `0xA8` | u32 | `set:releaseflag=` ✅: 1 = choosing this mission resumes the flow script instead of staying on the same map window (section 7) | 0 |
+| `0xAC` | u32 | `set:depend=<res>` ✅: offer this mission only once the mission with that name id in the same window has been taken (section 7) | 0 |
+| `0xB0` | u32 | `set:inactivedepend=<res>` ✅: offer this mission only while the mission with that name id is *not* itself on offer (section 7) | 0 |
 | `0xB4` | u32 | debrief evaluator index = `n − 1` of `setdebrief:n`/`debrief:n` (`FUN_0040bb27`; `FUN_004469b3` runs entry `n − 1` of the table at `0x5BC9CC`) ✅ | 1 (`BPMission1` has `setdebrief:2`) |
 | `0xB8` | u32 | `cash` type = balance sheet program (3.1) | 1 |
 | `0xBC` | u32 | initial payment | 100 |
@@ -559,9 +564,196 @@ and `[UNITS]` surviving and dead/routed units). Reader prototype: `extracted/age
 pass `--check`).
 
 
-## 7. Open questions
+## 7. Mission availability and the caravan scrolls ✅
 
-- ⬜ `SHDR+0xC8` (`DAT_005bb340`), `MISS+0x84…+0xB3` (one flag at `+0xA4`) and the two `u32` per script in `STAX`.
+How many missions a mission window offers, and how many scrolls lie on Dietrich's desk in the caravan.
+All of this lives in `WHSHR.EXE`; `GAMEF.DLL` is not involved.
+
+### 7.1 Where the missions live
+
+A mission window resource (`MISSIONBP01WINDOW`, `MISSIONENWINDOW`, …) is attached to the map window by
+`addobject:res=<name>` in a flow script. The glue interpreter (`FUN_0040bd2c`, token `0x0A` with key `res`)
+loads it through `FUN_0040961c`, which parses the `[MISSION]` blocks into a window object at
+`0x474130 + w × 0x4314` (`w` = window slot, 0–7):
+
+| Offset in the window object | Contents |
+|---|---|
+| `+0x24` | number of parsed `[MISSION]` records |
+| `+0x28` | the records themselves, `0x110` bytes each, **at most 5** (`FUN_0044c66a` zeroes `0x578` = `0x28 + 5 × 0x110`) |
+| `+0x14` | index of the currently selected record |
+
+Each record has exactly the `MISS` layout of section 4.6 — that is the same struct the chosen mission is
+copied into. The four fields that control availability are parsed by `FUN_0040961c` from `set:<key>=<value>`,
+where the key is an index into the shared field-name table (`0x5A94B8` in `WHSHR.EXE`, the same table
+`GAMEF.DLL` uses, see `notes/game_rules.md`):
+
+| Key | Index | Record offset | Meaning |
+|---|---|---|---|
+| `res` | 48 | `+0x00` | mission name id (`BRTXT`); **this is also the identity `depend` refers to** |
+| `releaseflag` | 72 | `+0xA8` | choosing this mission resumes the flow script |
+| `depend` | 76 | `+0xAC` | gate: another mission must have been taken |
+| `inactivedepend` | 82 | `+0xB0` | gate: another mission must not be on offer |
+
+The indices are confirmed by the rest of the same switch: `animstartframe` = 60 → `+0x11C`,
+`animstopframe` = 67 → `+0x120` and `animrestartframe` = 69 → `+0x124` land in adjacent fields, and
+`inactivedepend` = 82 matches the value already recorded in `notes/game_rules.md`.
+
+`+0xA4` is the **taken flag**: `FUN_0040961c` clears it while parsing a `[MISSION]` block, and
+`FUN_0044cffe` (`_DAT_004962d4 = 1`, i.e. `MISS+0xA4`) sets it on the *current* mission. Its callers are
+`FUN_004320fe` ("DoTroopSelectionDone" — the player has confirmed troop selection and is committed) and the
+map window procedure `FUN_00429c4c` (`WM_COMMAND` 0x101, command ids 6/7/10). `FUN_0044c82f` then copies the
+`MISS` struct back over the selected record, so the flag lands in the window's own record.
+
+Independent confirmation: `savegame.5` was autosaved right after troop selection (section 2.2), and its
+`MISS+0xA4` is 1.
+
+### 7.2 The visibility predicate `FUN_0044c340` ✅
+
+One predicate decides everything — it is called by the row painter, the hit test, the height calculation and
+the counter:
+
+```
+visible(window, m):
+    if m[0xA4]:                       return False          # already taken
+    if m[0xAC]:                                             # depend
+        d = first record in this window with res == m[0xAC]
+        return bool(d[0xA4]) if d else True                 # visible once the dependency is taken
+    if m[0xB0]:                                             # inactivedepend
+        d = first record in this window with res == m[0xB0]
+        return (not visible(window, d)) if d else True      # visible while the other is NOT on offer
+    return True
+```
+
+Three things are easy to get wrong:
+
+- `inactivedepend` is **recursive on visibility, not on completion**. "Show me while that mission is not being
+  offered" is not the same as "show me while that mission is not done": a mission that is still locked behind
+  its own `depend` also counts as not on offer.
+- Both lookups scan **only the current window's own records**, and a name id that is not in the window makes
+  the mission unconditionally visible. `MISSIONL3WINDOW` relies on this: its single mission carries
+  `set:depend=682`, but 682 is not in that window, so the gate is a no-op. (The search loop leaves its index
+  at `count` and then compares one record past the parsed ones; `closewindow` zeroes the first five records,
+  so that slot reads as name id 0 and does not match.)
+- `depend` and `inactivedepend` are checked in that order and `depend` wins — no shipped mission sets both
+  (the one `[MISSION]` that would, `MISSIONENWINDOW` 628, has its `set:depend=662` commented out).
+
+### 7.3 The mission list on the map ✅
+
+`FUN_0044c51e(w)` counts the visible records and caches the result in `DAT_00473e0c`. The list itself is a
+`MissionWindow` child window at `[MISSIONWINDOW] set:x/y` (always 30,15):
+
+- `FUN_0044cf05` sets the row height to the height of the `Scroll0` bitmap **rounded up to a multiple of 5**,
+  and the window height to row height × visible count.
+- `FUN_0044d499` paints one row per visible record, in record order, skipping hidden ones: bitmap `Scroll0`
+  for the selected row, `Scroll1` for the others.
+- `FUN_0044d2b2` writes the label: the `BRTXT` mission name, followed by `" (<initial>, <completion>)"` when
+  either payment is non-zero, or by `BRTXT 612` when the `cash` type is 15.
+- `FUN_0044d013` maps a click's y coordinate to the *k*-th visible row, so hidden rows never take clicks.
+
+### 7.4 The caravan scrolls ✅
+
+`CARAVANCOMMON1`, included by every caravan screen (`STARTCARAVAN`, `CARAVANSELECTMISSION`,
+`CARAVANAFTERMISSION`, the `INFOCARAVAN*` variants, …), declares three scroll bitmaps:
+
+| Bitmap | Position | `set:depend` |
+|---|---|---|
+| `CarScroll1` | 521, 271 | 4 |
+| `CarScroll2` | 556, 279 | 3 |
+| `CarScroll3` | 521, 314 | 2 |
+
+`set:depend` on a `[BITMAP]` is a completely different field from `set:depend` on a `[MISSION]`: the bitmap
+parser stores it at bitmap record `+0xD0` (window `+0x154 + i × 0xD4`). The window painter `FUN_004565d6`
+draws bitmap *i* when
+
+```
+bitmap[i].depend == 0  or  bitmap[i].depend <= DAT_00473e0c
+```
+
+where `DAT_00473e0c` is the cached count of **visible** missions from `FUN_0044c51e`. Hence:
+
+| Missions on offer | Scrolls drawn |
+|---|---|
+| 0 | – |
+| 1 | – |
+| 2 | `CarScroll3` |
+| 3 | `CarScroll3`, `CarScroll2` |
+| ≥ 4 | all three |
+
+**The number of scrolls is `min(max(visible − 1, 0), 3)`, and they fill in reverse order (3, then 2, then 1).**
+The shelf has four cubbyholes (verified by compositing the three sprites onto `READBACKGROUNDPIC`): the
+bottom-right one (about 557,325) is a scroll **baked into the background art** and always present, and
+`CarScroll1` (521,271) top-left, `CarScroll2` (556,279) top-right and `CarScroll3` (521,314) bottom-left are
+the three sprites. So the scrolls a player sees equal the missions on offer, up to 4 — a window with a single
+mission, including `MISSIONBP01WINDOW`, shows just the baked one. The sprites are 28×28 with palette index 0
+(pure blue) as the colour key; drawing them without keying that out gives a blue box.
+
+These three are the only `[BITMAP] set:depend=` in all 535 `WND.DLL` resources, so this mechanism exists
+solely for the scroll pile. `DAT_00473e0c` is written only by `FUN_0044c51e` (the setter `FUN_0044c50b` has no
+callers), which runs on `addobject:res=<window>` and after every mission-window release — so while the player
+is in the caravan the value is simply the last count taken on the map.
+
+### 7.5 Why the count changes while you stay in the same place ✅
+
+After the player picks a row, `FUN_0044c82f` runs:
+
+```
+release = selected[0xA8]                  # releaseflag
+copy MISS (0x110 bytes) over the selected record   # writes the taken flag back
+n = FUN_0044c51e(w)                       # recount, refreshes DAT_00473e0c
+if not visible(MISS): select the first visible record
+if n: window height = row height × n; destroy and recreate the MissionWindow; FUN_0044c6a2
+if release == 0 and n != 0: return        # stay on this map window
+FUN_0040dae2()                            # otherwise resume the flow script
+```
+
+So a mission **without** `set:releaseflag=1` does not advance the campaign: the flow script stays parked on
+`waitforrelease`, the map window and its mission window stay up, and the window is merely rebuilt one row
+shorter because the mission just played is now marked taken. That is the "I finished a mission but I am still
+in the same place on the map" case, and it is exactly when the caravan scroll pile shrinks. The flow script
+resumes only when the chosen mission carries `set:releaseflag=1` (typically the "March to…"/"To Loren"
+travel missions, which also carry `replacescript`) or when nothing visible is left.
+
+### 7.6 Worked examples ✅
+
+`MISSIONENWINDOW` (Envoy to Nuln) — 671 Decoy, 672 Bandit's Hideout (`depend=671`), 673 Capture Guy Gourard
+(`inactivedepend=672`), 628 To Loren (`inactivedepend=672`, `releaseflag=1`):
+
+| State | Visible | Count | Scrolls |
+|---|---|---|---|
+| start | 671, 673, 628 | 3 | 2 |
+| 671 taken | 672 only (673 and 628 hide because 672 is now on offer) | 1 | 0 |
+| 671, 672 taken | 673, 628 | 2 | 1 |
+
+Playing Decoy therefore takes the desk from two scrolls to none, then back to one — a good regression case,
+since a naive "`inactivedepend` = not completed" reading gives 3/2/2 instead.
+
+`MISSIONSZWINDOW` (Siege of Zhufbar) — 661 Rat Trap, 662 Slave Assault, 663 The Iron Fort, 665 Escort Engrol
+Goldtongue (`depend=662`, `releaseflag=1`):
+
+| State | Visible | Count | Scrolls |
+|---|---|---|---|
+| start | 661, 662, 663 | 3 | 2 |
+| 662 taken | 661, 663, 665 | 3 | 2 |
+| 661, 662 taken | 663, 665 | 2 | 1 |
+| 661, 662, 663 taken | 665 | 1 | 0 |
+
+Only Escort Engrol releases the flow script, so the player works through the other three in any order while
+the scroll pile counts down.
+
+## 8. Open questions
+
+- ⬜ `SHDR+0xC8` (`DAT_005bb340`) and the two `u32` per script in `STAX`.
+- 🟡 Whether the taken flags (`+0xA4`) of the *other* missions in a window survive a save/load. `STAX` stores
+  window objects as `nObjects × 0xA0`, far too small for the `0x4314`-byte window blocks, and a reloaded flow
+  script re-runs `addobject:res=…`, which re-parses the `[MISSION]` blocks with `+0xA4 = 0`. Only the selected
+  mission's record is restored (from the `MISS` chunk, and only on the next release in `FUN_0044c82f`). This
+  predicts that saving and reloading inside a multi-mission window makes already-completed missions reappear
+  (and the caravan scroll count jump back up). Needs a Wine session in `MISSIONSZWINDOW` or `MISSIONENWINDOW`
+  to confirm; if it reproduces, it is an original bug rather than a rule to copy.
+- 🟡 `DAT_00473e0c` is never reset: `closewindow`/`removeobject:mission` frees the mission window without
+  clearing the cached count, so a caravan drawn between a `closewindow` and the next `addobject` would show a
+  stale scroll pile. Every shipped flow script issues the two in that order inside one script run, so this was
+  not observed — worth a check if the scroll count ever looks wrong by one step.
 - 🟡 The meaning of the four `Result:` values per objective type (written by `GAMEF.DLL` objective code; only
   `bf003` is available as a real file). Needed to reproduce penalties exactly.
 - 🟡 Whether the debrief payment can be added twice in modes 4/7 (window callback `FUN_0044d8df` and
