@@ -770,6 +770,68 @@ opponent (`+0x48` model, `+0x4C` unit), `0x8000` reserve, `0x10000` in hand-to-h
 grid, `0x40000` war machine. Unit flags: `0x200` in melee, `0x400` owner pairing mode, `0x800` has a
 grid, `0x1000` grid owner, `0x2000` broken.
 
+**Cell ownership is per side, not per unit** ✅ (`FUN_10007da0`, the routine that stamps a cell):
+`*cell = placing_model's_unit.s_side & 0xE1 | 1` keeps only the side bits (5–7) and the "occupied"
+bit — nothing identifies *which* unit on that side placed the model. So when several units of one
+side share a grid against a common enemy, their models fill one undivided pool of free cells: there
+is no reservation of "this flank is unit A's, that one is unit B's". Whichever joining unit is
+processed first in a tick (`BattleTick`'s fixed unit-array order) claims the free cells nearest the
+enemy; a second, later-processed friendly unit's excess models fall through to the reserve queue
+exactly like an overflow from a single deep unit would.
+
+**Grid ownership handover** (`LeaveBattleGrid` → `FindOwnerCandidate`, `FUN_10008550`) is a linear
+scan of the whole unit array for the first unit still pointing at this grid, **with no side filter**
+— the new owner can be an ally or an enemy of the departing owner, decided purely by array order, not
+by any tactical criterion.
+
+**Retargeting** (`OpponentRetarget`, `FUN_10005640`) is a one-shot comparison made only when a model
+first arrives at its cell (distance to target < 3 units): it keeps its assigned opponent unless that
+opponent has none, or the arriving attacker's own unit has a higher `s_pntval` than the current
+attacker's unit, or the current target is a war machine — in which case it steals the pairing.
+A single model never re-polls this once `0x10000` (in hand-to-hand) is set, but across several ticks,
+with two enemy units sharing a grid, a defending model's recorded "primary attacker" can flip more
+than once as higher-`s_pntval` attackers arrive later — driven by arrival order, not stability.
+
+**Result accounting for a pile-on** (`AddCombatResult`, `FUN_10004470`): rank and direction bonus are
+computed **per attacking unit**, from that unit's own frontage/ranks and its own recorded attack
+direction — there is no reference to which enemy unit or model it actually fought. Both attacking
+units' bonuses (which can differ, e.g. one gets a flank bonus the other doesn't) add into the *same*
+single shared side tally with no cap or diminishing return: a multi-unit pile-on onto one grid is
+strictly additive.
+
+**Grid pool and its limits** ✅: allocated once per battle as `total_battle_units / 2` records
+(`FUN_1000e180`), the hard cap on the number of *simultaneous, separate* close-combat grids (each
+needs ≥ 2 distinct units) — ordinary battles never approach it. Exhaustion sends event `0x0C` only on
+the "new contact" engage path (`FUN_1002d700` → `FUN_10007eb0`/`FUN_10008050`); the "re-engage the
+same opponent" path (`FUN_10007ee0`) fails **silently**, with no event, if the pool happens to be
+exhausted at that moment.
+
+**No spatial awareness between separate grids or with terrain** ✅: `GetOrCreateBattleGrid` decides
+join-vs-create purely from a per-unit "already has a grid" flag — there is no proximity check against
+*other* grid records. Two unrelated fights can freely overlap in world space with zero interaction:
+each grid's cell array, model placement, movement and `AddCombatResult` accounting only ever indexes
+its own record. Likewise, grid creation and per-tick pairing never call the region/boundary functions
+(`InRegion`/`NotInRegion`/`RegionCrossings`) or the scenery obstruction check (`ObjectsOnPath`) that
+ordinary movement respects (see "Routes, collisions and visibility"): a grid can be seeded on top of
+impassable scenery or straddling `BATTLEEDGE`, and per-tick pairing will place and walk models into
+such cells unconditionally. The only terrain interaction any unit gets, combat or not, is
+`ResolveUnitCollisions`'s unconditional per-tick boundary repel (`FUN_10028400`, mask `SOLID |
+INVSOLID | BATTLEEDGE`), which shoves the whole unit back over the boundary regardless of melee state
+and does not reconcile the resulting displacement with the unit's assigned grid cell — a unit already
+fighting can still be jostled off its nominal cell position by ordinary scenery push-apart
+(`FUN_10028610`) resolved in the same neighbour scan, with nothing detecting or correcting the drift.
+
+🟡 **Grid-footprint overflow at creation is unchecked**: per-tick reinforcement placement
+(`FUN_10007bb0`/`FUN_10007a50`) bounds-checks every candidate cell to `0..16` and simply defers an
+out-of-range model to a later tick (it stays free, is retried, and can end up a permanent
+non-fighter if the geometry never changes — not written off after one failure). But the *initial*
+footprint written when a grid is first created (`CreateGridTroops`/`CreateGridBlock`) computes cell
+indices as `8 − frontage/2`, `8 − ranks/2` with **no clamp at all**; a unit with frontage or ranks
+above roughly 16 would write outside the 17×17 array into adjacent grid-record memory. Whether any
+real formation (given the formation-size caps in "Formations" above) can actually reach that width is
+not established from this code alone — a candidate for grepping the army/formation size caps or a
+Wine session forcing an oversized frontage.
+
 ## 6. Combat resolution and break tests
 
 ### 6.1 Result (`FUN_10004470`) ✅
@@ -1374,8 +1436,8 @@ static analysis unless marked Wine.
 | R32 | **Charge and pursuit orders** | ✅ order table and flag setters (Player orders). | — | done |
 | R33 | **Charging monster keeps +1 S** | ✅ confirmed; engine decision (reproduce or fix). | Owner decision. | decision |
 | R34 | **Early release of reserves** | ✅ set by every model death, so gaps in the line refill at once. | — | done |
-| R35 | **Grid edge cases** | ✅ `s_side & 0xE0 == 0x20` = fake units for placed buildings/furniture (Madness keeps it); formation flag 0x80 = furniture footprint bit; ⬜ placements outside 17 × 17 not re-examined. | Low value. | low |
-| R36 | **Models fighting in practice** | 🟡 wrap-around completes within 2–4 segments; limited by free cells (section 5.7). | Simulate or observe under Wine. | low |
+| R35 | **Grid edge cases** | ✅ `s_side & 0xE0 == 0x20` = fake units for placed buildings/furniture (Madness keeps it); formation flag 0x80 = furniture footprint bit. ✅ resolved further: per-tick placement bounds-checks to 0..16 and defers overflow to later ticks (section 5.7); 🟡 initial grid-footprint creation (`CreateGridTroops`/`CreateGridBlock`) has no such clamp — an out-of-range write is possible for frontage/ranks > ~16, reachability from real formation caps unconfirmed. | Grep formation-size caps, or Wine session with an oversized formation. | low |
+| R36 | **Models fighting in practice** | 🟡 wrap-around completes within 2–4 segments; limited by free cells (section 5.7). ✅ resolved: cell ownership is per side not per unit (allied units on one grid share one undivided cell pool); pile-on rank/direction bonuses are strictly additive with no cap; separate grids never check proximity to each other and can freely overlap in world space with no interaction; grid placement/pairing never consults terrain or map-boundary code, only the generic always-on per-unit boundary repel applies, uncoordinated with grid cells (section 5.7). | Simulate or observe under Wine for real fight-population numbers. | low |
 
 ### 11.2 Combat resolution and morale
 
