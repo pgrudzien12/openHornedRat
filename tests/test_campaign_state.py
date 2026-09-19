@@ -4,7 +4,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from whshr.briefing import load_briefing
-from whshr.campaign import parse_mission_script, parse_mission_windows, parse_window_hotspots, parse_window_portrait
+from whshr.campaign import (
+    parse_mission_script, parse_mission_windows, parse_window_hotspots, parse_window_portrait, parse_window_ui,
+)
 from whshr.campaign_state import CampaignState, caravan_scroll_count, eligible_missions
 
 
@@ -154,6 +156,58 @@ class CampaignStateTests(unittest.TestCase):
         self.assertEqual(portrait, {
             "window": "SCRIBEMWINDOW", "position": {"x": 450, "y": 25, "vx": 144, "vy": 240},
             "index": 4, "bkindex": 15, "controlpanel": 2, "text_color": "red", "speaker": "Dietrich",
+        })
+
+    def test_given_a_window_with_included_controls_then_its_render_data_and_targets_are_preserved(self):
+        wnd = {
+            "MAP": """
+                [WINDOW]
+                [POSITION]
+                    set:x=0
+                    set:y=0
+                    set:vx=640
+                    set:vy=480
+                    set:palindex=2
+                [END]
+                [BITMAP]
+                    setbitmap:MAP
+                    set:x=4
+                    set:y=5
+                    set:animstartframe=2
+                    set:animstopframe=8
+                    set:timecnt=90
+                [END]
+                [INCLUDE]
+                    script:CONTROLS
+                [END]
+                [END]
+            """,
+            "CONTROLS": """
+                [WINDOW]
+                [HOTSPOT]
+                    set:x=1
+                    set:y=2
+                    set:vx=3
+                    set:vy=4
+                    set:res=150
+                    script:PopContext
+                [END]
+                [ANIM]
+                    set:index=4
+                    set:bkindex=15
+                    set:controlpanel=2
+                    settextcolor:red
+                    name:Dietrich
+                [END]
+                [END]
+            """,
+        }
+
+        self.assertEqual(parse_window_ui(wnd, "map"), {
+            "window": "MAP", "position": {"x": 0, "y": 0, "vx": 640, "vy": 480, "palindex": 2},
+            "bitmaps": [{"bitmap": "MAP", "x": 4, "y": 5, "animstartframe": 2, "animstopframe": 8, "timecnt": 90}],
+            "hotspots": [{"x": 1, "y": 2, "vx": 3, "vy": 4, "res": 150, "target": "PopContext", "target_kind": "script"}],
+            "anims": [{"index": 4, "bkindex": 15, "controlpanel": 2, "text_color": "red", "name": "Dietrich"}],
         })
 
     def test_given_a_release_flag_in_a_mission_window_then_it_is_parsed(self):

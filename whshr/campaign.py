@@ -105,6 +105,18 @@ def parse_window_hotspots(wnd, name, seen=()):
     ``set:res=<number>`` is the BRTXT hover-hint resource.  A later ``res:``
     command is an action target and deliberately does not replace that hint.
     """
+    fields = ("x", "y", "vx", "vy", "res")
+    return [{key: hotspot[key] for key in fields if key in hotspot}
+            for hotspot in parse_window_ui(wnd, name, seen)["hotspots"]
+            if {"x", "y", "vx", "vy"} <= hotspot.keys()]
+
+
+def parse_window_ui(wnd, name, seen=()):
+    """Parse one glue window into presentation data, expanding ``[INCLUDE]`` blocks.
+
+    This deliberately preserves targets as glue-resource names. Mapping those
+    names to engine events belongs to the view/controller, not the parser.
+    """
     name = name.upper()
     if name in seen:
         raise ValueError(f"cyclic window include: {' -> '.join((*seen, name))}")
@@ -112,49 +124,65 @@ def parse_window_hotspots(wnd, name, seen=()):
         text = wnd[name]
     except KeyError:
         raise ValueError(f"window resource not found: {name}") from None
-    hotspots, section, current = [], None, None
+
+    result = {"window": name, "position": {}, "bitmaps": [], "hotspots": [], "anims": []}
+    section, current = None, None
     for command, argument in parse_glue_lines(text):
         if command.startswith("["):
-            if command == "[HOTSPOT]":
-                current = {}
-            elif command == "[END]" and section == "[HOTSPOT]" and current is not None:
-                if {"x", "y", "vx", "vy"} <= current.keys():
-                    hotspots.append(current)
-                current = None
-            section = command if command != "[END]" else None
+            if command == "[POSITION]":
+                section, current = command, result["position"]
+            elif command == "[BITMAP]":
+                section, current = command, {}
+            elif command == "[HOTSPOT]":
+                section, current = command, {}
+            elif command == "[ANIM]":
+                section, current = command, {}
+            elif command == "[INCLUDE]":
+                section, current = command, None
+            elif command == "[END]":
+                if section == "[BITMAP]" and current:
+                    result["bitmaps"].append(current)
+                elif section == "[HOTSPOT]" and current:
+                    result["hotspots"].append(current)
+                elif section == "[ANIM]" and current:
+                    result["anims"].append(current)
+                section, current = None, None
             continue
-        if section == "[HOTSPOT]" and command == "set" and "=" in argument:
+        if section == "[INCLUDE]" and command == "script":
+            included = parse_window_ui(wnd, argument, (*seen, name))
+            result["bitmaps"].extend(included["bitmaps"])
+            result["hotspots"].extend(included["hotspots"])
+            result["anims"].extend(included["anims"])
+            continue
+        if current is None:
+            continue
+        if command == "set" and "=" in argument:
             key, value = argument.split("=", 1)
-            if key in ("x", "y", "vx", "vy", "res"):
+            try:
                 current[key] = int(value)
-        elif section == "[INCLUDE]" and command == "script":
-            hotspots.extend(parse_window_hotspots(wnd, argument, (*seen, name)))
-    return hotspots
+            except ValueError:
+                current[key] = value
+        elif section == "[BITMAP]" and command in ("setbitmap", "setmask"):
+            current[command.removeprefix("set")] = argument
+        elif section == "[HOTSPOT]" and command in ("res", "script"):
+            current["target"] = argument
+            current["target_kind"] = command
+        elif section == "[ANIM]" and command == "settextcolor":
+            current["text_color"] = argument.lower()
+        elif section == "[ANIM]" and command == "name":
+            current["name"] = argument
+    return result
 
 
 def parse_window_portrait(wnd, name):
     """Parse a window's data-defined position and speaker portrait settings."""
-    text = wnd.get(name.upper())
-    if text is None:
+    ui = parse_window_ui(wnd, name)
+    if not ui["position"] or not ui["anims"]:
         return None
-    position, portrait, section = {}, {}, None
-    for command, argument in parse_glue_lines(text):
-        if command.startswith("["):
-            section = command if command != "[END]" else None
-        elif section == "[POSITION]" and command == "set" and "=" in argument:
-            key, value = argument.split("=", 1)
-            if key in ("x", "y", "vx", "vy"):
-                position[key] = int(value)
-        elif section == "[ANIM]":
-            if command == "set" and "=" in argument:
-                key, value = argument.split("=", 1)
-                if key in ("index", "bkindex", "controlpanel", "sequence", "frame"):
-                    portrait[key] = int(value)
-            elif command == "settextcolor":
-                portrait["text_color"] = argument.lower()
-            elif command == "name":
-                portrait["speaker"] = argument
-    return {"window": name.upper(), "position": position, **portrait} if position and portrait else None
+    portrait = ui["anims"][0].copy()
+    if "name" in portrait:
+        portrait["speaker"] = portrait.pop("name")
+    return {"window": ui["window"], "position": ui["position"], **portrait}
 
 
 def parse_mission_script(text, bktxt=None):
