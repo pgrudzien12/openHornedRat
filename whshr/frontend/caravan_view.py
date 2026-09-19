@@ -23,19 +23,20 @@ class CaravanView(SceneView):
     ANIMATION_FPS = 8
     PAGE_HOLD_SECONDS = 3.0
     BLINK_PERIOD_SECONDS = 2.0
-    BOOKS = (
-        ("magic", pygame.Rect(0, 246, 164, 46)),
-        ("troop roster", pygame.Rect(0, 299, 164, 47)),
-        ("bestiary", pygame.Rect(0, 349, 180, 42)),
-    )
-    GOLD_RECT = pygame.Rect(235, 360, 95, 55)
-    MISSION_RECT = pygame.Rect(480, 250, 160, 110)
-    DIETRICH_RECT = pygame.Rect(270, 150, 95, 110)
-    EXIT_RECT = pygame.Rect(0, 0, 244, 171)
-    SAVE_RECT = pygame.Rect(450, 85, 190, 180)
     SCROLLS = ((pygame.Rect(521, 271, 28, 28), "CARSCROLL1.png"),
                (pygame.Rect(556, 279, 28, 28), "CARSCROLL2.png"),
                (pygame.Rect(521, 314, 28, 28), "CARSCROLL3.png"))
+    # WND resource target -> engine event. Rectangles and hint ids remain in
+    # WND; only the bridge to implemented engine actions lives here.
+    TARGET_ACTIONS = {
+        "abortgame": "exit_campaign",
+        "armybook": "browse_book:troop roster",
+        "encyclopediabook": "browse_book:bestiary",
+        "loadsavewindow": "save_campaign",
+        "magicbook": "browse_book:magic",
+        "popcontext": "open_mission_map",
+    }
+    NO_TARGET_ACTIONS = {155: "speak_to_dietrich"}
 
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
@@ -82,52 +83,34 @@ class CaravanView(SceneView):
         left, top, scale = self._layout()
         return (pos[0] - left) / scale, (pos[1] - top) / scale
 
-    def _hotspot_rect(self, hint_id, fallback):
-        """Use the original WND hotspot geometry, retaining a test fallback."""
-        hotspot = self.scene.campaign.hotspot(hint_id)
-        if hotspot is None:
-            return fallback
-        return pygame.Rect(hotspot["x"], hotspot["y"], hotspot["vx"], hotspot["vy"])
+    def _hotspot_at(self, point):
+        """Return the topmost WND-defined caravan hotspot under a native point."""
+        for hotspot in reversed(self.scene.campaign.hotspots):
+            if {"x", "y", "vx", "vy"} <= hotspot.keys() and pygame.Rect(
+                    hotspot["x"], hotspot["y"], hotspot["vx"], hotspot["vy"]
+            ).collidepoint(point):
+                return hotspot
+        return None
 
     def _hint(self, hint_id, *format_args):
         """Read tooltip text from BRTXT; presentation never embeds original English."""
         return self.scene.campaign.hint(hint_id, *format_args)
 
     def _hub_action_at(self, pos):
-        point = self._native_point(pos)
-        if self._hotspot_rect(150, self.MISSION_RECT).collidepoint(point):
-            return "open_mission_map" if self.scene.can_select_mission and self.scene.missions else None
-        if self._hotspot_rect(-1, self.GOLD_RECT).collidepoint(point):
+        hotspot = self._hotspot_at(self._native_point(pos))
+        if hotspot is None:
             return None
-        for name, rect in self.BOOKS:
-            hint_id = {"magic": 158, "troop roster": 151, "bestiary": 152}[name]
-            if self._hotspot_rect(hint_id, rect).collidepoint(point):
-                return f"browse_book:{name}"
-        if self._hotspot_rect(159, self.EXIT_RECT).collidepoint(point):
-            return "exit_campaign"
-        if self._hotspot_rect(157, self.SAVE_RECT).collidepoint(point):
-            return "save_campaign"
-        if self._hotspot_rect(160, self.DIETRICH_RECT).collidepoint(point):
-            return "speak_to_dietrich"
-        return None
+        target = hotspot.get("target", "").lower()
+        action = ("open_mission_map" if target.startswith("flowscript")
+                  else self.TARGET_ACTIONS.get(target, self.NO_TARGET_ACTIONS.get(hotspot.get("res"))))
+        if action == "open_mission_map" and (not self.scene.can_select_mission or not self.scene.missions):
+            return None
+        return action
 
     def _set_hover(self, pos):
-        point = self._native_point(pos)
-        self.hover = None
-        if self._hotspot_rect(-1, self.GOLD_RECT).collidepoint(point):
-            self.hover = self._hint(402, self.scene.gold)
-        if self.hover is None:
-            for name, fallback in self.BOOKS:
-                hint_id = {"magic": 158, "troop roster": 151, "bestiary": 152}[name]
-                if self._hotspot_rect(hint_id, fallback).collidepoint(point):
-                    self.hover = self._hint(hint_id)
-                    break
-        if self.hover is None:
-            for hint_id, fallback in ((150, self.MISSION_RECT), (157, self.SAVE_RECT),
-                                      (159, self.EXIT_RECT), (160, self.DIETRICH_RECT)):
-                if self._hotspot_rect(hint_id, fallback).collidepoint(point):
-                    self.hover = self._hint(hint_id)
-                    break
+        hotspot = self._hotspot_at(self._native_point(pos))
+        hint_id = 402 if hotspot and hotspot.get("res") == -1 else (hotspot or {}).get("res")
+        self.hover = self._hint(hint_id, self.scene.gold) if hint_id is not None else None
         self.hint.set_lines((self.hover,) if self.hover else ())
 
     def events(self, event):
