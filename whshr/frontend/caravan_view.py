@@ -47,7 +47,9 @@ class CaravanView(SceneView):
         self.talk_eyes = [self._load_quad(gpu, f"TALKEYESCELL{index}.png") for index in range(3)]
         self.elapsed = 0.0
         self.hover = None
-        self.hint = gpu.text((640, 16), BitmapFont(scene.font), color=(220, 30, 30),
+        # PCSUBT is taller than the old temporary tooltip canvas; leave room
+        # for its entire descender row before scaling it with the artwork.
+        self.hint = gpu.text((640, 32), BitmapFont(scene.font), color=(220, 30, 30),
                              background=None, padding=0, align="center", fixed_width=True)
 
     @classmethod
