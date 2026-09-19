@@ -149,13 +149,26 @@ class CasualtyIdentityTests(unittest.TestCase):
     def test_given_a_casualty_when_it_is_removed_then_enemies_stop_pointing_at_it(self):
         grid = _grid(self.battle, self.defender)
         owner = self.battle.regiments[grid.owner_id]
+        dead_uid = owner.melee_models[0].uid
 
         combat.kill_models(owner, [0], battle=self.battle)
 
+        self.assertIsNone(owner.index_of(dead_uid))
         for regiment in self.battle.regiments.values():
             for model in regiment.melee_models:
                 if model.opponent and model.opponent[0] == owner.identifier:
-                    self.assertLess(model.opponent[1], owner.models)
+                    self.assertIsNotNone(owner.index_of(model.opponent[1]))
+
+    def test_given_a_casualty_when_survivors_shift_down_then_their_pairings_still_name_the_same_models(self):
+        # Pairings are stored by identity, not by list position, so removing an early model must not
+        # silently re-point a survivor's pairing at its neighbour.
+        grid = _grid(self.battle, self.defender)
+        owner = self.battle.regiments[grid.owner_id]
+        before = {model.uid: model.opponent for model in owner.melee_models[1:]}
+
+        combat.kill_models(owner, [0], battle=self.battle)
+
+        self.assertEqual({model.uid: model.opponent for model in owner.melee_models}, before)
 
 
 class SeparateGridTests(unittest.TestCase):

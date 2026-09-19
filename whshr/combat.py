@@ -88,9 +88,10 @@ def apply_casualties(regiment, count, rng, battle=None):
 def kill_models(regiment, indices, battle=None):
     """Remove the named models, leaving corpses where they stood and freeing any grid cells they held.
 
-    Unlike a whole-formation reseed, the surviving models keep their identity and their position, so
-    a model's pairing on the battle grid stays valid across a casualty (the survivors then walk to the
-    smaller formation's slots, or to their own cells, on the following ticks).
+    Unlike a whole-formation reseed, the surviving models keep their identity (`ModelState.uid`) and
+    their position, so every pairing and cell on the battle grid still names exactly the model it
+    named before: nothing has to be renumbered, and a death can never silently re-point a surviving
+    pairing at a different model.
     """
     if not indices or regiment.models <= 0 or "CantDie" in regiment.psychology:
         return 0
@@ -99,16 +100,18 @@ def kill_models(regiment, indices, battle=None):
     if not victims:
         return 0
     grid = _grid_of(battle, regiment) if battle is not None else None
+    dead_uids = set()
     for index in victims:
         regiment.corpses.append((*positions[index], regiment.direction))
         model = regiment.melee_models[index]
+        dead_uids.add(model.uid)
         if grid is not None and model.cell is not None:
             grid.clear(model.cell)
         del regiment.positions[index]
         del regiment.melee_models[index]
     regiment.models -= len(victims)
     if battle is not None:
-        _reindex_pairings(battle, regiment, victims, grid)
+        _unpair_dead(battle, regiment, dead_uids)
     return len(victims)
 
 
@@ -117,29 +120,15 @@ def _grid_of(battle, regiment):
     return fight.get("grid") if fight else None
 
 
-def _reindex_pairings(battle, regiment, removed, grid):
-    """Deleting models shifts the indices of the survivors, so every reference to this regiment's
-    models -- its own grid cells and the opponents recorded by enemy models -- has to follow."""
-    def shifted(index):
-        if index in removed:
-            return None
-        return index - sum(1 for gone in removed if gone < index)
-
-    if grid is not None:
-        for cell, (owner_id, index) in list(grid.cells.items()):
-            if owner_id != regiment.identifier:
-                continue
-            moved = shifted(index)
-            if moved is None:
-                grid.clear(cell)
-            else:
-                grid.cells[cell] = (owner_id, moved)
+def _unpair_dead(battle, regiment, dead_uids):
+    """Release every enemy model that was fighting one of the models just killed."""
     for other in battle.regiments.values():
         for model in other.melee_models:
             if model.opponent is None or model.opponent[0] != regiment.identifier:
                 continue
-            moved = shifted(model.opponent[1])
-            model.opponent = None if moved is None else (regiment.identifier, moved)
+            if model.opponent[1] in dead_uids:
+                model.opponent = None
+                model.arrived = False
 
 
 def _rank_bonus(attacker):
@@ -326,6 +315,11 @@ def resolve_contacts(battle):
             regiment = by_id[identifier]
             regiment.melee_touching = frozenset(touching[identifier])
             if regiment.melee_group != group_id:
+                # game_rules.md 5.7: "engaging clears the pairing of A's models", so every new
+                # engagement re-pairs from scratch. This matters when fights merge or a regiment moves
+                # between them: its cells belong to the grid it is leaving, and would otherwise be
+                # read against the new grid's frame.
+                battle_grid.release(battle, regiment)
                 # game_rules.md 5.5: the moving side with a charge/pursuit order is the charger and gets
                 # +1 S on its first strike after joining a fight (whether the fight is brand new or a
                 # third regiment joining one already under way). The counter is spent one attacking
@@ -362,7 +356,9 @@ def resolve_melee(battle):
     _, turn, segment_number = _segment_state(battle.tick_count)
     groups = {}
     for regiment in battle.regiments.values():
-        if regiment.in_melee and regiment.melee_group:
+        # A regiment that was destroyed or fled mid-fight is dropped from `resolve_contacts`' active
+        # set, so it keeps `in_melee` and its group id after the fight record itself is gone.
+        if regiment.in_melee and regiment.melee_group in battle.fights and regiment.active:
             groups.setdefault(regiment.melee_group, []).append(regiment)
     for group_id, members in groups.items():
         fight = battle.fights[group_id]
@@ -388,14 +384,14 @@ def _strike_with_models(attacker, group_id, fight, turn, segment_number, battle)
         defender_model = defender.melee_models[defender_index]
         # game_rules.md 5.2: the defender's designated opponent fights at its own WS; every further
         # attacker on that same model gets the ganging-up +1 WS.
-        gang_bonus = 0 if defender_model.opponent == (attacker.identifier, index) else 1
+        gang_bonus = 0 if defender_model.opponent == (attacker.identifier, model.uid) else 1
         charge_bonus = 1 if attacker.charge_counter > 0 else 0
         if attacker.charge_counter > 0:
             attacker.charge_counter -= 1  # spent one attacking model at a time (5.5)
         killed, detail = _roll_model_attacks(attacker, defender, battle.rng,
                                              charge_bonus=charge_bonus, gang_bonus=gang_bonus)
-        detail.update({"model": index, "target": defender.identifier,
-                       "target_model": defender_index, "charge_bonus": charge_bonus})
+        detail.update({"model": model.uid, "target": defender.identifier,
+                       "target_model": defender_model.uid, "charge_bonus": charge_bonus})
         rolls.append(detail)
         if killed and defender_index not in victims.get(defender.identifier, ()):
             victims.setdefault(defender.identifier, set()).add(defender_index)

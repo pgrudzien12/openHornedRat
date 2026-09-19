@@ -87,6 +87,8 @@ whshr/             - unified package and CLI: python3 -m whshr check|extract|cat
                      screen-to-ground picking: picking.py, Smacker decoder: smacker.py, mission briefings: briefing.py,
                      simplified combat, morale and shooting: combat.py, enemy AI: ai.py, win/lose: result_scene.py,
                      structured battle events: battle_events.py, JSON Lines battle log recorder: battle_log.py,
+                     one readable log per close combat, with an ASCII cell map and grid invariant
+                     checks: skirmish_log.py,
                      deterministic replay and comparison (python3 -m whshr battle-replay): battle_replay.py)
   frontend/        - runtime frontend, the ONLY third-party-dependent code (pygame-ce + zengl, requirements-engine.txt,
                      local .venv/); imported solely by `engine`: app.py (window, loop, overlay), views.py (registry),

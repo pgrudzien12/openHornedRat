@@ -1,6 +1,6 @@
 """Battle scene: owns one loaded battlefield and advances its deterministic simulation."""
 
-from . import battle_log, combat
+from . import battle_log, combat, skirmish_log
 from .assets import AssetId
 from .battlefield import sprite_files
 from .clock import FixedStepClock
@@ -31,6 +31,7 @@ class BattleScene(Scene):
         self.log_dir = log_dir
         self.seed = seed
         self.logger = None
+        self.skirmishes = None  # whshr.skirmish_log.SkirmishLogger, one file per close combat
         self._log_closed = True
 
     def enter(self, context):
@@ -39,6 +40,7 @@ class BattleScene(Scene):
         self.initial_models = {identifier: regiment.models for identifier, regiment in self.battle.regiments.items()}
         path = battle_log.default_log_path(self.log_dir, self.battle_id.name) if self.log_dir is not None else None
         self.logger = battle_log.BattleLogger(path)
+        self.skirmishes = skirmish_log.SkirmishLogger(self.log_dir, self.battle_id.name)
         self._log_closed = False
         if self.logger.enabled:
             try:
@@ -60,6 +62,8 @@ class BattleScene(Scene):
         an early frontend shutdown (the player closing the window mid-battle) can safely call it."""
         if self.logger is not None and not self._log_closed:
             self.logger.write_end(self.battle.tick_count if self.battle is not None else 0, reason)
+            if self.skirmishes is not None:
+                self.skirmishes.close(self.battle)
             self._log_closed = True
 
     def handle(self, event, context):
@@ -105,6 +109,8 @@ class BattleScene(Scene):
                     self.logger.write_event(tick_number, battle_event)
                 if self.battle.tick_count % combat.SEGMENT_TICKS == 0:
                     self.logger.write_snapshot(self.battle.tick_count, self.battle)
+            if self.skirmishes is not None:
+                self.skirmishes.observe(self.battle)
             if self.battle.result is not None:
                 break
         if self.battle.result is not None:

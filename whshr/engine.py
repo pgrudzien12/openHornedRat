@@ -59,8 +59,9 @@ class ModelState:
     for movement and rendering.
     """
 
+    uid: int = 0  # identity within its regiment, stable across casualties (never an index)
     cell: tuple | None = None  # (row, col) this model holds on the grid, or None when not placed
-    opponent: tuple | None = None  # (regiment identifier, model index) this model is paired with
+    opponent: tuple | None = None  # (regiment identifier, model uid) this model is paired with
     arrived: bool = False  # has walked into its cell, so it may strike (model flag 0x10000)
     reserve: bool = False  # found no free cell this tick and waits for one (model flag 0x8000)
 
@@ -85,6 +86,7 @@ class Regiment:
     speed_per_tick: float = DEFAULT_SPEED_PER_TICK  # BTS world units per 100 ms tick, moving freely
     positions: list = field(default_factory=list)  # current per-model (x, y); lazily seeded in formation
     melee_models: list = field(default_factory=list)  # ModelState, index-parallel with `positions`
+    _next_uid: int = 0  # next free model identity (see ModelState.uid)
     walking: bool = False  # true while the anchor or any model is still travelling
     animation_seconds: float = 0.0  # elapsed time while walking, for the frontend's frame-rate placeholder
 
@@ -150,8 +152,20 @@ class Regiment:
             self.positions = formation.place(self.x, self.y, self.direction,
                                               formation.block_slots(self.models, self.ranks, spacing))
         if len(self.melee_models) != len(self.positions):
-            self.melee_models = [ModelState() for _ in self.positions]
+            # Reseeding the formation renews every model's identity. Identities are drawn from a
+            # counter that never restarts, so a pairing left over from before the reseed can never be
+            # mistaken for one of the new models: it simply refers to a model that no longer exists.
+            self.melee_models = [ModelState(uid=self._next_uid + offset)
+                                 for offset in range(len(self.positions))]
+            self._next_uid += len(self.positions)
         return self.positions
+
+    def index_of(self, uid):
+        """Position of the model with this identity, or None once it has been killed."""
+        for index, model in enumerate(self.melee_models):
+            if model.uid == uid:
+                return index
+        return None
 
     def front_rank_models(self):
         """Model count of the front rank, the attackers/shooters counted in a combat or volley round."""

@@ -49,8 +49,10 @@ _NEIGHBOURS = ((-1, 0), (0, -1), (0, 1), (1, 0))
 
 
 class BattleGrid:
-    """One fight's shared cell map. Cells hold `(regiment_id, model_index)`; a model's side is implied
-    by its regiment, mirroring the original's side-only cell stamp."""
+    """One fight's shared cell map. Cells hold `(regiment_id, model_uid)`; a model's side is implied
+    by its regiment, mirroring the original's side-only cell stamp. Cells and pairings name a model by
+    its stable `ModelState.uid`, never by its list index, so a casualty cannot silently re-point a
+    surviving pairing at a different model."""
 
     def __init__(self, owner_id, x, y, direction, width):
         self.owner_id = owner_id
@@ -82,9 +84,10 @@ class BattleGrid:
             for file_index in range(size):
                 row = _clamp(rank + self._row_base())
                 col = _clamp(file_index + self._col_base())
-                if (row, col) not in self.cells:
-                    self.cells[(row, col)] = (regiment.identifier, index)
-                    regiment.melee_models[index].cell = (row, col)
+                if (row, col) not in self.cells and index < len(regiment.melee_models):
+                    model = regiment.melee_models[index]
+                    self.cells[(row, col)] = (regiment.identifier, model.uid)
+                    model.cell = (row, col)
                 index += 1
 
     _ranks = 1
@@ -95,8 +98,8 @@ class BattleGrid:
     def free(self, row, col):
         return in_bounds(row, col) and (row, col) not in self.cells
 
-    def place(self, row, col, regiment_id, model_index):
-        self.cells[(row, col)] = (regiment_id, model_index)
+    def place(self, row, col, regiment_id, model_uid):
+        self.cells[(row, col)] = (regiment_id, model_uid)
 
     def clear(self, cell):
         self.cells.pop(cell, None)
@@ -165,17 +168,17 @@ def _owner_outnumbers(owner, members):
 
 def _drop_dead(battle, grid):
     """Free the cells of models that died, and unpair whoever was fighting them."""
-    for cell, (regiment_id, index) in list(grid.cells.items()):
+    for cell, (regiment_id, uid) in list(grid.cells.items()):
         regiment = battle.regiments.get(regiment_id)
-        if regiment is None or not regiment.active or index >= len(regiment.melee_models):
+        if regiment is None or not regiment.active or regiment.index_of(uid) is None:
             grid.clear(cell)
     for regiment in battle.regiments.values():
         for model in regiment.melee_models:
             if model.opponent is None:
                 continue
-            enemy_id, enemy_index = model.opponent
+            enemy_id, enemy_uid = model.opponent
             enemy = battle.regiments.get(enemy_id)
-            if enemy is None or not enemy.active or enemy_index >= len(enemy.melee_models):
+            if enemy is None or not enemy.active or enemy.index_of(enemy_uid) is None:
                 model.opponent = None
                 model.arrived = False
 
@@ -205,7 +208,7 @@ def _pair_joiner(battle, grid, regiment, members):
         if model.cell is not None:
             continue
         px, py = positions[index]
-        placed = _place_next_to_enemy(grid, regiment, index, model, px, py, enemies)
+        placed = _place_next_to_enemy(grid, regiment, model, px, py, enemies)
         if placed:
             budget -= 1
             model.reserve = False
@@ -213,7 +216,7 @@ def _pair_joiner(battle, grid, regiment, members):
             model.reserve = True  # no free cell this tick; retried on a later tick
 
 
-def _place_next_to_enemy(grid, regiment, index, model, px, py, enemies):
+def _place_next_to_enemy(grid, regiment, model, px, py, enemies):
     ordered = sorted(enemies, key=lambda item: (
         math.hypot(*_delta(px, py, item[0], item[1])), item[0].identifier, item[1]))
     for enemy, enemy_index, enemy_model in ordered:
@@ -224,12 +227,12 @@ def _place_next_to_enemy(grid, regiment, index, model, px, py, enemies):
         for row, col in candidates:
             if not grid.free(row, col):
                 continue
-            grid.place(row, col, regiment.identifier, index)
+            grid.place(row, col, regiment.identifier, model.uid)
             model.cell = (row, col)
             model.arrived = False
-            model.opponent = (enemy.identifier, enemy_index)
+            model.opponent = (enemy.identifier, enemy_model.uid)
             if enemy_model.opponent is None:
-                enemy_model.opponent = (regiment.identifier, index)
+                enemy_model.opponent = (regiment.identifier, model.uid)
                 enemy_model.arrived = False
             return True
     return False
@@ -258,7 +261,7 @@ def _candidate_cells(grid, enemy_cell, px, py, distance):
 
 def _pair_owner(battle, grid, regiment, members):
     """The owner's unpaired models take any enemy model orthogonally adjacent on the grid."""
-    for index, model in enumerate(regiment.melee_models):
+    for model in regiment.melee_models:
         if model.opponent is not None or model.cell is None:
             continue
         row, col = model.cell
@@ -266,20 +269,28 @@ def _pair_owner(battle, grid, regiment, members):
             occupant = grid.occupant(row + d_row, col + d_col)
             if occupant is None:
                 continue
-            enemy_id, enemy_index = occupant
+            enemy_id, enemy_uid = occupant
             enemy = battle.regiments.get(enemy_id)
             if enemy is None or enemy.player == regiment.player or not enemy.active:
                 continue
+            enemy_index = enemy.index_of(enemy_uid)
+            if enemy_index is None:
+                continue
             enemy_model = enemy.melee_models[enemy_index]
-            model.opponent = (enemy_id, enemy_index)
+            model.opponent = (enemy_id, enemy_uid)
             if enemy_model.opponent is None:
-                enemy_model.opponent = (regiment.identifier, index)
+                enemy_model.opponent = (regiment.identifier, model.uid)
                 enemy_model.arrived = False
             break
 
 
 def release(battle, regiment):
-    """Unpair and un-cell every model of a regiment that leaves a grid (`LeaveBattleGrid`)."""
+    """Unpair and un-cell every model of a regiment that leaves a grid (`LeaveBattleGrid`).
+
+    Both directions of every pairing have to go: the models this regiment was fighting still hold a
+    pointer back at it, and a regiment that later re-joins a fight is placed in fresh cells, so a
+    surviving back-pointer would name the right model in the wrong place.
+    """
     grid = _grid_of(battle, regiment)
     for model in regiment.melee_models:
         if grid is not None and model.cell is not None:
@@ -288,6 +299,13 @@ def release(battle, regiment):
         model.opponent = None
         model.arrived = False
         model.reserve = False
+    for other in battle.regiments.values():
+        if other.identifier == regiment.identifier:
+            continue
+        for model in other.melee_models:
+            if model.opponent is not None and model.opponent[0] == regiment.identifier:
+                model.opponent = None
+                model.arrived = False
 
 
 def _grid_of(battle, regiment):
@@ -301,9 +319,12 @@ def fighting_models(battle, regiment):
     for index, model in enumerate(regiment.melee_models):
         if model.opponent is None or not model.arrived:
             continue
-        enemy_id, enemy_index = model.opponent
+        enemy_id, enemy_uid = model.opponent
         enemy = battle.regiments.get(enemy_id)
-        if enemy is None or not enemy.active or enemy_index >= len(enemy.melee_models):
+        if enemy is None or not enemy.active:
+            continue
+        enemy_index = enemy.index_of(enemy_uid)
+        if enemy_index is None:
             continue
         found.append((index, model, enemy, enemy_index))
     return found
