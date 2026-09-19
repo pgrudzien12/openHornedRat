@@ -82,6 +82,7 @@ whshr/             - unified package and CLI: python3 -m whshr check|extract|cat
                      behaviour bytecode disassembler: behaviour.py, traced block formation layout: formation.py,
                      scenes and lazy assets: scenes.py, campaign_scenes.py, assets.py, catalog.py, cache.py,
                      battle simulation: engine.py, fixed-step clock: clock.py, battle scene: battle_scene.py,
+                     per-model close-combat battle grid (17x17 cells, pairing, arrival): battle_grid.py,
                      decoded battle data shared by viewers and engine: battlefield.py, battle camera: camera.py,
                      screen-to-ground picking: picking.py, Smacker decoder: smacker.py, mission briefings: briefing.py,
                      simplified combat, morale and shooting: combat.py, enemy AI: ai.py, win/lose: result_scene.py,

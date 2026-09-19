@@ -169,8 +169,14 @@ class CombatEventLoggingTests(unittest.TestCase):
         self.assertIn("rank_bonus", strike)
         self.assertIn("direction_bonus", strike)
         self.assertIn("tally", strike)
-        self.assertEqual(len(strike["attacks"]["rolls"]), strike["attacks"]["attacks"])
-        first_roll = strike["attacks"]["rolls"][0]
+        # "attacks" is now one entry per fighting model (game_rules.md 5.7: models pair off on the
+        # battle grid), each carrying that model's own target numbers and rolls.
+        self.assertEqual(len(strike["attacks"]), strike["fighting"])
+        first_model = strike["attacks"][0]
+        self.assertIn("target_model", first_model)
+        self.assertIn("gang_bonus", first_model)
+        self.assertEqual(len(first_model["rolls"]), first_model["attacks"])
+        first_roll = first_model["rolls"][0]
         self.assertIn("hit", first_roll)
         self.assertIn("result", first_roll)
 

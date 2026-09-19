@@ -265,18 +265,32 @@ class CloseCombatStrikeTests(unittest.TestCase):
                                   initiative=10, speed_per_tick=1.5)
         self.battle = Battle(1000, 1000, [self.attacker, self.defender], seed=1)
 
-    def test_given_two_touching_regiments_with_matching_initiative_when_ticked_then_they_clash_and_strike_once_each(self):
+    def test_given_two_touching_regiments_when_ticked_then_they_clash_and_the_engaged_unit_strikes(self):
+        # The grid is seeded around the unit that was engaged, so its models already stand in their
+        # cells and fight at once; the joining unit's models still have to walk in (game_rules.md 5.7).
         self.battle.tick()
 
-        self.assertEqual(self.defender.models, 6)
-        self.assertEqual(self.attacker.models, 9)
         kinds = [e.kind for e in self.battle.events]
-        self.assertEqual(kinds, ["clash", "melee_strike", "melee_strike"])
+        self.assertEqual(kinds, ["clash", "melee_strike"])
         # No break test yet: the first one is due two turns after contact (game_rules.md 6.2).
         self.assertNotIn("leadership_test", kinds)
         self.assertFalse(self.defender.routing)
-        strike = next(e for e in self.battle.events if e.data.get("attacker") == "att")
-        self.assertEqual(strike.data["kills"], 4)
+        strike = self.battle.events[1]
+        self.assertEqual(strike.data["attacker"], "att")
+        # Only the models that hold a cell next to an enemy model fight, not the whole front rank.
+        self.assertGreater(strike.data["fighting"], 0)
+        self.assertLessEqual(strike.data["fighting"], self.attacker.models)
+        self.assertEqual(self.defender.models, 10 - strike.data["kills"])
+
+    def test_given_a_joining_unit_when_its_models_have_walked_in_then_it_strikes_back(self):
+        # The joining unit's models start outside their cells and must walk in before they may fight.
+        strikers = set()
+        for _ in range(combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN * 2):
+            self.battle.tick()
+            strikers.update(e.data["attacker"] for e in self.battle.events if e.kind == "melee_strike")
+
+        self.assertTrue(any(model.arrived for model in self.defender.melee_models))
+        self.assertEqual(strikers, {"att", "def"})
 
     def test_given_more_casualties_than_models_when_applied_then_it_is_clamped_to_the_current_size(self):
         removed = combat.apply_casualties(self.defender, 999, self.battle.rng)
@@ -390,18 +404,24 @@ class ContactAndMeleeStateTests(unittest.TestCase):
     def test_given_two_regiments_touching_one_enemy_when_they_clash_then_they_share_one_fight_and_both_strike(self):
         # No 2 vs 1: two player regiments touching the same lone enemy regiment must share a single
         # fight (game_rules.md 5.7's battle grid), and both get to strike it in their own segment.
-        left = _regiment("left", 0, 0, True, initiative=10, speed_per_tick=0.0)
-        right = _regiment("right", 10, 12, True, initiative=10, speed_per_tick=0.0)
-        enemy = _regiment("enemy", 10, -10, False, initiative=10, models=40, ranks=8, speed_per_tick=0.0)
+        left = _regiment("left", 0, 0, True, initiative=10, speed_per_tick=1.5)
+        right = _regiment("right", 10, 12, True, initiative=10, speed_per_tick=1.5)
+        enemy = _regiment("enemy", 10, -10, False, initiative=10, models=40, ranks=8, speed_per_tick=1.5)
         battle = Battle(2000, 2000, [left, right, enemy], seed=0)
 
-        battle.tick()
+        strikers = set()
+        for _ in range(combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN * 2):
+            battle.tick()
+            strikers.update(e.data["attacker"] for e in battle.events if e.kind == "melee_strike")
 
         self.assertTrue(left.in_melee and right.in_melee and enemy.in_melee)
         self.assertEqual(left.melee_group, right.melee_group)
         self.assertEqual(left.melee_group, enemy.melee_group)
-        strikes = [e for e in battle.events if e.kind == "melee_strike"]
-        self.assertEqual({e.data["attacker"] for e in strikes}, {"left", "right", "enemy"})
+        # One grid, one cell pool: every unit's models are placed on the same record.
+        grid = battle.fights[left.melee_group]["grid"]
+        self.assertEqual({identifier for identifier, _ in grid.cells.values()},
+                         {"left", "right", "enemy"})
+        self.assertEqual(strikers, {"left", "right", "enemy"})
         fight = battle.fights[left.melee_group]
         self.assertGreater(fight["tally"][True], 0)  # left and right's kills/bonuses share one tally
 

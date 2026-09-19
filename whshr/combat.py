@@ -4,12 +4,13 @@ Called from `whshr.engine.Battle.tick`. Rules are simplified from `notes/game_ru
 5-8 (see the module docstring of each function for what is skipped); this is not meant to reproduce
 the original byte-for-byte, only to give a deterministic, documented first playable battle.
 
+Close combat is resolved model by model on the shared battle grid (`whshr.battle_grid`,
+game_rules.md 5.7): a model strikes only once it holds a cell orthogonally next to an enemy model and
+has walked into it, and it strikes that one model, so there is no front-rank rule and a deep unit
+wraps around over several ticks.
+
 Simplifications common to this module (documented placeholders, not traced values):
-- No ganging-up WS bonus, hatred re-rolls, magic items, mounts or monsters (game_rules.md 5.2, 5.4-5.6).
-- Only front-rank models attack (game_rules.md 5.2/5.7's per-model battle-grid pairing is not modelled);
-  not capped by the opponent's frontage.
-- The charge bonus (+1 S, game_rules.md 5.5) is granted once, to a regiment's whole first strike after
-  joining a fight, instead of decrementing per attacking model.
+- No hatred re-rolls, magic items, mounts or monster return blows (game_rules.md 5.2, 5.4-5.6).
 - Multi-wound models die on their first failed save (no per-model wound tracking).
 - Shooting hit chance is a documented BS-based placeholder (`SHOOT_TO_HIT`), not the original's
   geometric scatter/flight simulation (game_rules.md 8.1-8.3); only basic bow-type missile codes are
@@ -26,7 +27,7 @@ Leadership tests, rout/rally, shooting) is emitted here as a `whshr.battle_event
 """
 import math
 
-from . import formation
+from . import battle_grid, formation
 from .battle_events import BattleEvent
 from .rules import EXPECTED_ARMOUR_SAVE, wfb_to_hit, wfb_to_wound
 
@@ -64,24 +65,81 @@ def _armour_threshold(armour, strength):
     return save + max(0, strength - 3)
 
 
-def apply_casualties(regiment, count, rng):
-    """Remove up to `count` models, turning them into corpses at their current positions.
+def apply_casualties(regiment, count, rng, battle=None):
+    """Remove up to `count` randomly chosen models, turning them into corpses at their positions.
+
+    Used where the original does not single out a victim (shooting, spells). Close combat kills the
+    specific model that was struck instead, through `kill_models`.
 
     game_rules.md 7.6: `CantDie` models are never removed by wounds. The combat result score still
-    counts every wound rolled against them regardless (`resolve_melee` scores `_roll_attacks`' raw
-    `kills`, not this function's return value): the notes do not say whether a `CantDie` model's
-    wounds count toward the break-test tally, so this is a documented placeholder that they do.
+    counts every wound rolled against them regardless (the callers score the raw wound count, not
+    this function's return value): the notes do not say whether a `CantDie` model's wounds count
+    toward the break-test tally, so this is a documented placeholder that they do.
     """
     if count <= 0 or regiment.models <= 0 or "CantDie" in regiment.psychology:
         return 0
     count = min(count, regiment.models)
-    positions = list(regiment.model_positions())
-    indices = rng.sample(range(len(positions)), count) if count < len(positions) else range(len(positions))
-    for index in indices:
+    positions = regiment.model_positions()
+    indices = (rng.sample(range(len(positions)), count) if count < len(positions)
+               else list(range(len(positions))))
+    return kill_models(regiment, indices, battle=battle)
+
+
+def kill_models(regiment, indices, battle=None):
+    """Remove the named models, leaving corpses where they stood and freeing any grid cells they held.
+
+    Unlike a whole-formation reseed, the surviving models keep their identity and their position, so
+    a model's pairing on the battle grid stays valid across a casualty (the survivors then walk to the
+    smaller formation's slots, or to their own cells, on the following ticks).
+    """
+    if not indices or regiment.models <= 0 or "CantDie" in regiment.psychology:
+        return 0
+    positions = regiment.model_positions()
+    victims = sorted({index for index in indices if 0 <= index < len(positions)}, reverse=True)
+    if not victims:
+        return 0
+    grid = _grid_of(battle, regiment) if battle is not None else None
+    for index in victims:
         regiment.corpses.append((*positions[index], regiment.direction))
-    regiment.models -= count
-    regiment.positions = []  # force the next model_positions() call to reseed the smaller formation
-    return count
+        model = regiment.melee_models[index]
+        if grid is not None and model.cell is not None:
+            grid.clear(model.cell)
+        del regiment.positions[index]
+        del regiment.melee_models[index]
+    regiment.models -= len(victims)
+    if battle is not None:
+        _reindex_pairings(battle, regiment, victims, grid)
+    return len(victims)
+
+
+def _grid_of(battle, regiment):
+    fight = battle.fights.get(regiment.melee_group)
+    return fight.get("grid") if fight else None
+
+
+def _reindex_pairings(battle, regiment, removed, grid):
+    """Deleting models shifts the indices of the survivors, so every reference to this regiment's
+    models -- its own grid cells and the opponents recorded by enemy models -- has to follow."""
+    def shifted(index):
+        if index in removed:
+            return None
+        return index - sum(1 for gone in removed if gone < index)
+
+    if grid is not None:
+        for cell, (owner_id, index) in list(grid.cells.items()):
+            if owner_id != regiment.identifier:
+                continue
+            moved = shifted(index)
+            if moved is None:
+                grid.clear(cell)
+            else:
+                grid.cells[cell] = (owner_id, moved)
+    for other in battle.regiments.values():
+        for model in other.melee_models:
+            if model.opponent is None or model.opponent[0] != regiment.identifier:
+                continue
+            moved = shifted(model.opponent[1])
+            model.opponent = None if moved is None else (regiment.identifier, moved)
 
 
 def _rank_bonus(attacker):
@@ -105,24 +163,27 @@ def _direction_bonus(attacker, defender):
     return DIRECTION_BONUS[sector]
 
 
-def _roll_attacks(attacker, defender, rng, charge_bonus=0):
-    """Casualties `attacker`'s front rank inflicts on `defender` in one strike (game_rules.md 5.2).
+def _roll_model_attacks(attacker, defender, rng, charge_bonus=0, gang_bonus=0):
+    """One model's attacks against the one enemy model it is paired with (game_rules.md 5.2).
 
-    Returns `(kills, detail)`, where `detail` documents every individual attack for the battle log:
-    `hit_need`/`wound_need`/`save_need` (the target numbers) and, per attack, the hit/wound/save rolls
-    actually made and the result ("missed", "no_wound", "saved" or "killed"; a roll stops early on a
-    miss or failure to wound, so `save_roll` is `None` unless the attack reached the save).
+    Returns `(killed, detail)`: `killed` is True once any wound gets past the save, because this
+    engine still tracks one wound per model (the module's documented multi-wound simplification).
+    `detail` records the target numbers and every roll made, for the battle log.
+
+    `gang_bonus` is the ganging-up +1 WS every attacker after the defender's designated opponent
+    gets; `charge_bonus` is the +1 S spent one attacking model at a time from the unit's charge
+    counter.
     """
-    attacks = attacker.front_rank_models() * max(1, attacker.attacks)
-    hit_need = wfb_to_hit(attacker.ws, defender.ws)
+    attacks = max(1, attacker.attacks)
+    hit_need = wfb_to_hit(attacker.ws + gang_bonus, defender.ws)
     strength = attacker.strength + attacker.strength_bonus + charge_bonus
     wound_need = wfb_to_wound(strength, defender.toughness)
     threshold = _armour_threshold(defender.armour, strength)
-    detail = {"attacks": attacks, "hit_need": hit_need, "wound_need": wound_need, "save_need": threshold,
-              "rolls": []}
+    detail = {"attacks": attacks, "hit_need": hit_need, "wound_need": wound_need,
+              "save_need": threshold, "gang_bonus": gang_bonus, "rolls": []}
     if wound_need > 6:
-        return 0, detail
-    kills = 0
+        return False, detail
+    killed = False
     for _ in range(attacks):
         hit_roll = _d6(rng)
         if hit_roll < hit_need:
@@ -137,8 +198,8 @@ def _roll_attacks(attacker, defender, rng, charge_bonus=0):
             detail["rolls"].append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "saved"})
             continue
         detail["rolls"].append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "killed"})
-        kills += 1
-    return min(kills, defender.models), detail
+        killed = True
+    return killed, detail
 
 
 def refresh_melee_state(battle):
@@ -149,6 +210,7 @@ def refresh_melee_state(battle):
         if not regiment.in_melee:
             continue
         if not any(_touching_enemy_active(battle, enemy_id) for enemy_id in regiment.melee_touching):
+            battle_grid.release(battle, regiment)
             regiment.in_melee = False
             regiment.melee_group = None
             regiment.melee_touching = frozenset()
@@ -170,6 +232,7 @@ def _segment_state(tick_count):
 
 def _new_fight(turn):
     return {
+        "grid": None,  # whshr.battle_grid.BattleGrid, seeded on the first tick of the fight
         "next_test_turn": turn + 2,  # game_rules.md 6.2: the first result comes two turns after contact
         "tally": {True: 0.0, False: 0.0},
         "breakdown": {True: {"kills": 0, "rank": 0, "direction": 0},
@@ -265,15 +328,22 @@ def resolve_contacts(battle):
             if regiment.melee_group != group_id:
                 # game_rules.md 5.5: the moving side with a charge/pursuit order is the charger and gets
                 # +1 S on its first strike after joining a fight (whether the fight is brand new or a
-                # third regiment joining one already under way).
+                # third regiment joining one already under way). The counter is spent one attacking
+                # model at a time, so only the first 1.5 x frontage models to strike get the bonus.
                 if regiment.attack_target in touching[identifier]:
-                    regiment.melee_charging = True
+                    regiment.charge_counter = int(1.5 * regiment.front_rank_models())
                 regiment.melee_group = group_id
                 regiment.target_x = regiment.target_y = None
             regiment.in_melee = True
+        fight = battle.fights[group_id]
+        group = [by_id[identifier] for identifier in sorted(members)]
+        if fight.get("grid") is None:
+            fight["grid"] = battle_grid.create(battle, group_id, group)
+        battle_grid.update(battle, group_id, fight["grid"], group)
 
     for identifier, regiment in by_id.items():
         if not touching[identifier] and regiment.in_melee:
+            battle_grid.release(battle, regiment)
             regiment.in_melee = False
             regiment.melee_group = None
             regiment.melee_touching = frozenset()
@@ -283,26 +353,12 @@ def resolve_contacts(battle):
             battle.fights.pop(group_id, None)
 
 
-def _pick_melee_target(attacker, battle):
-    """The nearest active enemy `attacker` is footprint-touching right now (game_rules.md 5.7: an
-    attacker strikes whichever touching opponent it is engaged with); ties break on identifier for a
-    deterministic replay."""
-    candidates = []
-    for enemy_id in attacker.melee_touching:
-        enemy = battle.regiments.get(enemy_id)
-        if enemy is not None and enemy.active:
-            candidates.append(enemy)
-    if not candidates:
-        return None
-    return min(candidates, key=lambda e: (math.hypot(e.x - attacker.x, e.y - attacker.y), e.identifier))
-
-
 def resolve_melee(battle):
-    """A unit strikes only in its own Initiative segment, once per turn (game_rules.md 5.1), at whichever
-    touching enemy `_pick_melee_target` selects; kills plus rank and direction bonus accumulate into its
-    fight's own-side tally (6.1). At each turn's last segment, every fight's losing side (by tally
-    difference) takes a break test, timed by that fight's `next_test_turn` (6.2, simplified: every turn
-    once due, instead of varying with Initiative)."""
+    """A unit strikes only in its own Initiative segment, once per turn (game_rules.md 5.1); each of its
+    paired, arrived models strikes the one enemy model it faces on the grid (5.7), and the kills plus
+    the unit's rank and direction bonus accumulate into its fight's own-side tally (6.1). At each turn's
+    last segment, every fight's losing side (by tally difference) takes a break test, timed by that
+    fight's `next_test_turn` (6.2, simplified: every turn once due, instead of varying with Initiative)."""
     _, turn, segment_number = _segment_state(battle.tick_count)
     groups = {}
     for regiment in battle.regiments.values():
@@ -313,30 +369,56 @@ def resolve_melee(battle):
         for attacker in members:
             if attacker.initiative != segment_number:
                 continue
-            defender = _pick_melee_target(attacker, battle)
-            if defender is None:
-                continue
-            charge_bonus = 1 if attacker.melee_charging else 0
-            attacker.melee_charging = False
-            kills, detail = _roll_attacks(attacker, defender, battle.rng, charge_bonus=charge_bonus)
-            apply_casualties(defender, kills, battle.rng)
-            rank_bonus = _rank_bonus(attacker)
-            direction_bonus = _direction_bonus(attacker, defender)
-            fight["tally"][attacker.player] += kills + rank_bonus + direction_bonus
-            breakdown = fight["breakdown"][attacker.player]
-            breakdown["kills"] += kills
-            breakdown["rank"] += rank_bonus
-            breakdown["direction"] += direction_bonus
-            battle.events.append(BattleEvent(
-                f"{attacker.name} strikes {defender.name} in segment {segment_number} (turn {turn}): "
-                f"{kills} casualties, side tally {fight['tally'][attacker.player]:.0f} "
-                f"(+{rank_bonus} rank, +{direction_bonus} dir{', +1 charge' if charge_bonus else ''}).",
-                "melee_strike",
-                attacker=attacker.identifier, defender=defender.identifier, fight=group_id, turn=turn,
-                segment=segment_number, kills=kills, rank_bonus=rank_bonus, direction_bonus=direction_bonus,
-                charge_bonus=charge_bonus, tally=dict(fight["tally"]), attacks=detail))
+            _strike_with_models(attacker, group_id, fight, turn, segment_number, battle)
         if segment_number == 1:
             _resolve_group_break_test(group_id, members, turn, battle)
+
+
+def _strike_with_models(attacker, group_id, fight, turn, segment_number, battle):
+    """Every one of `attacker`'s paired, arrived models strikes the single enemy model it faces
+    (game_rules.md 5.2/5.7). Kills are applied to the specific models that were struck, and the
+    unit's own rank and direction bonus are added once to its side's tally (6.1)."""
+    pairs = battle_grid.fighting_models(battle, attacker)
+    if not pairs:
+        return
+    victims = {}  # defending regiment id -> set of model indices killed this strike
+    rolls = []
+    kills = 0
+    for index, model, defender, defender_index in pairs:
+        defender_model = defender.melee_models[defender_index]
+        # game_rules.md 5.2: the defender's designated opponent fights at its own WS; every further
+        # attacker on that same model gets the ganging-up +1 WS.
+        gang_bonus = 0 if defender_model.opponent == (attacker.identifier, index) else 1
+        charge_bonus = 1 if attacker.charge_counter > 0 else 0
+        if attacker.charge_counter > 0:
+            attacker.charge_counter -= 1  # spent one attacking model at a time (5.5)
+        killed, detail = _roll_model_attacks(attacker, defender, battle.rng,
+                                             charge_bonus=charge_bonus, gang_bonus=gang_bonus)
+        detail.update({"model": index, "target": defender.identifier,
+                       "target_model": defender_index, "charge_bonus": charge_bonus})
+        rolls.append(detail)
+        if killed and defender_index not in victims.get(defender.identifier, ()):
+            victims.setdefault(defender.identifier, set()).add(defender_index)
+            kills += 1
+    for defender_id, indices in victims.items():
+        kill_models(battle.regiments[defender_id], indices, battle=battle)
+    defender = battle.regiments[max(victims, key=lambda key: len(victims[key]))] if victims else pairs[0][2]
+    rank_bonus = _rank_bonus(attacker)
+    direction_bonus = _direction_bonus(attacker, defender)
+    fight["tally"][attacker.player] += kills + rank_bonus + direction_bonus
+    breakdown = fight["breakdown"][attacker.player]
+    breakdown["kills"] += kills
+    breakdown["rank"] += rank_bonus
+    breakdown["direction"] += direction_bonus
+    battle.events.append(BattleEvent(
+        f"{attacker.name} strikes {defender.name} in segment {segment_number} (turn {turn}): "
+        f"{len(pairs)} models fighting, {kills} casualties, side tally "
+        f"{fight['tally'][attacker.player]:.0f} (+{rank_bonus} rank, +{direction_bonus} dir).",
+        "melee_strike",
+        attacker=attacker.identifier, defender=defender.identifier, fight=group_id, turn=turn,
+        segment=segment_number, kills=kills, fighting=len(pairs), rank_bonus=rank_bonus,
+        direction_bonus=direction_bonus, charge_counter=attacker.charge_counter,
+        tally=dict(fight["tally"]), attacks=rolls))
 
 
 def _resolve_group_break_test(group_id, members, turn, battle):
@@ -385,6 +467,7 @@ def _break_test(regiment, modifier, group_id, breakdown, battle):
 
 def _start_rout(regiment, battle):
     flee_x, flee_y = battle._flee_point(regiment)
+    battle_grid.release(battle, regiment)
     regiment.routing = True
     regiment.in_melee = False
     regiment.melee_group = None

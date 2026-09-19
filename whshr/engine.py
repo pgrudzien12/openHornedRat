@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import math
 import random
 
-from . import ai, combat, formation
+from . import ai, battle_grid, combat, formation
 from .battle_events import BattleEvent
 from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, stat_fields
 from .script import load_battle, resource_name
@@ -52,6 +52,20 @@ DEFAULT_SPEED_PER_TICK = speed_per_tick(None, None)
 
 
 @dataclass
+class ModelState:
+    """One model's close-combat state on its fight's battle grid (game_rules.md 5.7, whshr.battle_grid).
+
+    Kept index-parallel with `Regiment.positions`, which stays the authoritative per-model position
+    for movement and rendering.
+    """
+
+    cell: tuple | None = None  # (row, col) this model holds on the grid, or None when not placed
+    opponent: tuple | None = None  # (regiment identifier, model index) this model is paired with
+    arrived: bool = False  # has walked into its cell, so it may strike (model flag 0x10000)
+    reserve: bool = False  # found no free cell this tick and waits for one (model flag 0x8000)
+
+
+@dataclass
 class Regiment:
     """A regiment anchor in BTS coordinates; its models walk to formation slots around that anchor."""
 
@@ -70,6 +84,7 @@ class Regiment:
     portrait: str | None = None  # leader portrait resource
     speed_per_tick: float = DEFAULT_SPEED_PER_TICK  # BTS world units per 100 ms tick, moving freely
     positions: list = field(default_factory=list)  # current per-model (x, y); lazily seeded in formation
+    melee_models: list = field(default_factory=list)  # ModelState, index-parallel with `positions`
     walking: bool = False  # true while the anchor or any model is still travelling
     animation_seconds: float = 0.0  # elapsed time while walking, for the frontend's frame-rate placeholder
 
@@ -102,7 +117,9 @@ class Regiment:
     # The fight's own-side tally, breakdown and next break-test turn (6.1-6.2) live on
     # `Battle.fights[regiment.melee_group]`, shared by every regiment in that fight.
     original_models: int | None = None  # starting model count, for rally's casualties modifier
-    melee_charging: bool = False  # true until this regiment's first strike after joining a charge (5.5)
+    # game_rules.md 5.5: floor(1.5 x frontage), set when the regiment charges into a fight and spent
+    # one attacking model at a time, so only the first models to strike get the +1 S.
+    charge_counter: int = 0
     rally_next_segment: int | None = None  # absolute segment index of the next scheduled rally attempt (7.4)
 
     def __post_init__(self):
@@ -132,6 +149,8 @@ class Regiment:
         if len(self.positions) != self.models:
             self.positions = formation.place(self.x, self.y, self.direction,
                                               formation.block_slots(self.models, self.ranks, spacing))
+        if len(self.melee_models) != len(self.positions):
+            self.melee_models = [ModelState() for _ in self.positions]
         return self.positions
 
     def front_rank_models(self):
@@ -294,6 +313,12 @@ class Battle:
                 "in_melee": regiment.in_melee, "melee_group": regiment.melee_group,
                 "melee_touching": sorted(regiment.melee_touching),
                 "attack_target": regiment.attack_target, "reload_ticks": regiment.reload_ticks,
+                # Battle-grid occupancy (game_rules.md 5.7): how many models hold a cell, how many
+                # have walked into it and are paired, and how many are waiting for a cell to free up.
+                "placed": sum(1 for m in regiment.melee_models if m.cell is not None),
+                "fighting": len(battle_grid.fighting_models(self, regiment)),
+                "reserves": sum(1 for m in regiment.melee_models if m.reserve),
+                "charge_counter": regiment.charge_counter,
             }
             for identifier, regiment in self.regiments.items()
         }
@@ -409,15 +434,24 @@ class Battle:
         angle = regiment.direction * math.tau / formation.FULL_TURN
         return regiment.x + math.sin(angle) * 1e4, regiment.y + math.cos(angle) * 1e4
 
-    @staticmethod
-    def _advance_models(regiment, step):
-        """Walk each model toward its formation slot, never faster than the unit's speed (`MoveModels`)."""
+    def _advance_models(self, regiment, step):
+        """Walk each model toward its target, never faster than the unit's speed (`MoveModels`).
+
+        The target is normally the model's formation slot, but a model that holds a cell on a battle
+        grid walks to that cell instead and is marked `arrived` once it is within
+        `battle_grid.ARRIVAL_DISTANCE` of it (`ModelArrivedInCombat`): only then may it strike.
+        """
         targets = formation.place(regiment.x, regiment.y, regiment.direction,
                                   formation.block_slots(regiment.models, regiment.ranks))
         updated, still_moving = [], False
-        for (px, py), (tx, ty) in zip(regiment.positions, targets):
+        for index, ((px, py), slot) in enumerate(zip(regiment.positions, targets)):
+            model = regiment.melee_models[index] if index < len(regiment.melee_models) else None
+            cell = battle_grid.cell_target(self, regiment, index) if model is not None else None
+            tx, ty = cell if cell is not None else slot
             dx, dy = tx - px, ty - py
             distance = math.hypot(dx, dy)
+            if cell is not None and model is not None:
+                model.arrived = distance <= battle_grid.ARRIVAL_DISTANCE
             if distance <= SETTLE_EPSILON:
                 updated.append((tx, ty))
                 continue
