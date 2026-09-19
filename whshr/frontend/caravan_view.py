@@ -90,12 +90,8 @@ class CaravanView(SceneView):
         return pygame.Rect(hotspot["x"], hotspot["y"], hotspot["vx"], hotspot["vy"])
 
     def _hint(self, hint_id, *format_args):
-        text = self.scene.campaign.hint(hint_id, *format_args)
-        return text or ({150: "Click here to select mission.", 151: "Click here to view Troop Roster.",
-                         152: "Click here to view Battle Bestiary.", 157: "Click here to Save game.",
-                         158: "Click here to view Magic Book.", 159: "Click here to Abort Campaign.",
-                         160: "Click here to talk to Dietrich.",
-                         402: f"We have {self.scene.gold} gold crowns."}[hint_id])
+        """Read tooltip text from BRTXT; presentation never embeds original English."""
+        return self.scene.campaign.hint(hint_id, *format_args)
 
     def _hub_action_at(self, pos):
         point = self._native_point(pos)

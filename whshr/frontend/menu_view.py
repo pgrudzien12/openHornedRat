@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pygame
 
+from .bitmap_font import BitmapFont
 from .gpu import ScreenQuad
 from .scene_view import SceneView
 
@@ -128,15 +129,16 @@ class BriefingView(SceneView):
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
         briefing = scene.briefing
-        self.title = gpu.text((900, 60), gpu.title_font, background=None)
+        self.font = BitmapFont(scene.font)
+        self.title = gpu.text((900, 24), self.font, background=None)
         self.title.set_lines((briefing["title"],))
         wrapped = []
         for line in briefing["lines"]:
-            wrapped.extend(_wrap(gpu.small_font, line["text"], self.BODY_WIDTH))
+            wrapped.extend(_wrap(self.font, line["text"], self.BODY_WIDTH))
             wrapped.append("")
-        self.body = gpu.text(self.BODY_SIZE, gpu.small_font)
+        self.body = gpu.text(self.BODY_SIZE, self.font)
         self.body.set_lines(wrapped)
-        self.hint = gpu.text((640, 40), gpu.small_font, background=None)
+        self.hint = gpu.text((640, 20), self.font, background=None)
         self.hint.set_lines(("Press Enter or click to start the battle",))
 
     def events(self, event):

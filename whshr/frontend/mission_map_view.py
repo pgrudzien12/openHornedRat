@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pygame
 
+from .bitmap_font import BitmapFont
 from .gpu import ScreenQuad
 from .scene_view import SceneView
 
@@ -16,6 +17,7 @@ class MissionMapView(SceneView):
     SCROLL_ORIGIN = (30, 15)
     SCROLL_SIZE = (144, 88)
     ROW_PITCH = 90  # The glue layout rounds the 88-pixel scroll artwork to 90 pixels.
+    TEXT_HEIGHT = 12
     FRAME_ORIGIN = (4, 4)
     PORTRAIT_ORIGIN = (12, 12)
     PANEL_ORIGIN = (4, 164)
@@ -23,7 +25,6 @@ class MissionMapView(SceneView):
     BUTTON_Y = (168, 188, 208)  # Brief, Accept, Caravan: panel slots top to bottom.
     BUTTONS = (("Brief", "open_briefing"), ("Accept", "open_troop_select"),
                ("Caravan", "return_to_caravan"))
-    GLUE_COLORS = {"red": (210, 30, 30), "green": (30, 180, 45), "black": (15, 15, 15)}
 
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
@@ -39,9 +40,10 @@ class MissionMapView(SceneView):
         portrait = scene.dietrich_portrait
         self.portrait_window = scene.portrait_window
         self.map_panel = self.portrait_window is not None and self.portrait_window.get("controlpanel") in (2, 10)
-        self.button_color = self.GLUE_COLORS.get(
-            self.portrait_window.get("text_color") if self.portrait_window else None, (210, 30, 30)
-        )
+        # The map/list uses compact black PCTEXTA glyphs.  Keep the working
+        # height at eight pixels until the original font-2 renderer is traced.
+        self.button_color = (0, 0, 0)
+        self.text_font = BitmapFont(scene.font)
         self.dietrich = None
         if portrait is not None:
             width, height, rgba = portrait
@@ -52,10 +54,12 @@ class MissionMapView(SceneView):
         # Mission-window scripts define their origin but no text placement or
         # colour.  The original executable owns those values; retain this
         # deliberately isolated approximation until that renderer is traced.
-        self.labels = [gpu.text((120, 28), gpu.small_font, color=(28, 20, 12), background=None,
-                                padding=0, align="center", fixed_width=True) for _ in scene.missions]
-        self.button_labels = [gpu.text((119, 20), gpu.small_font, color=self.button_color, background=None,
-                                       padding=0, align="center", fixed_width=True) for _ in self.BUTTONS]
+        self.labels = [gpu.text((120, self.TEXT_HEIGHT), self.text_font, color=(0, 0, 0), background=None,
+                                padding=0, align="center", fixed_width=True)
+                       for _ in scene.missions]
+        self.button_labels = [gpu.text((119, self.TEXT_HEIGHT), self.text_font, color=self.button_color, background=None,
+                                       padding=0, align="center", fixed_width=True)
+                              for _ in self.BUTTONS]
         self._set_labels()
         self._button_selection = object()
         self._set_button_labels()
@@ -172,12 +176,14 @@ class MissionMapView(SceneView):
             for index, (button_y, label) in enumerate(zip(self.BUTTON_Y, self.button_labels)):
                 button = self.button_down if index == self.pressed else self.button_up
                 button.draw(left + (x + self.BUTTON_X) * scale, top + (y + button_y) * scale, 119 * scale, 20 * scale)
-                label.draw(left + (x + self.BUTTON_X) * scale, top + (y + button_y) * scale, 119 * scale, 20 * scale)
+                label.draw(left + (x + self.BUTTON_X) * scale, top + (y + button_y + 4) * scale,
+                           119 * scale, self.TEXT_HEIGHT * scale)
         for index, label in enumerate(self.labels):
             x, y = self.SCROLL_ORIGIN[0], self.SCROLL_ORIGIN[1] + index * self.ROW_PITCH
             self.scrolls[index == self.scene.selected_index].draw(left + x * scale, top + y * scale,
                                                        self.SCROLL_SIZE[0] * scale, self.SCROLL_SIZE[1] * scale)
-            label.draw(left + (x + 12) * scale, top + (y + 30) * scale, 120 * scale, 28 * scale)
+            label.draw(left + (x + 12) * scale, top + (y + 38) * scale,
+                       120 * scale, self.TEXT_HEIGHT * scale)
 
     def release(self):
         for quad in (self.map, *self.scrolls, *self.frame.values(), self.button_up, self.button_down):
