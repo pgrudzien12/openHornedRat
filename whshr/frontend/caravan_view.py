@@ -16,21 +16,24 @@ class CaravanView(SceneView):
     CANDLE_POS = (184, 160)
     LAMP_POS = (232, 96)
     BOOKS = (
-        ("magic", pygame.Rect(0, 190, 166, 51)),
-        ("troop roster", pygame.Rect(0, 244, 166, 48)),
-        ("bestiary", pygame.Rect(0, 292, 166, 56)),
+        ("magic", pygame.Rect(0, 246, 164, 46)),
+        ("troop roster", pygame.Rect(0, 299, 164, 47)),
+        ("bestiary", pygame.Rect(0, 349, 180, 42)),
     )
-    GOLD_RECT = pygame.Rect(240, 360, 132, 48)
-    MISSION_RECT = pygame.Rect(296, 323, 150, 56)  # the open campaign ledger on the desk
-    DIETRICH_RECT = pygame.Rect(208, 140, 205, 190)
-    EXIT_RECT = pygame.Rect(55, 56, 84, 184)  # the hourglass
-    SAVE_RECT = pygame.Rect(560, 270, 60, 45)  # scroll on the lower-right shelf
+    GOLD_RECT = pygame.Rect(235, 360, 95, 55)
+    MISSION_RECT = pygame.Rect(480, 250, 160, 110)
+    DIETRICH_RECT = pygame.Rect(270, 150, 95, 110)
+    EXIT_RECT = pygame.Rect(0, 0, 244, 171)
+    SAVE_RECT = pygame.Rect(450, 85, 190, 180)
+    SCROLLS = ((pygame.Rect(521, 271, 28, 28), "CARSCROLL1.png"),
+               (pygame.Rect(556, 279, 28, 28), "CARSCROLL2.png"),
+               (pygame.Rect(521, 314, 28, 28), "CARSCROLL3.png"))
 
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
-        self.hub = self._load_quad(gpu, "CARAVAN.png")
         self.read_background = self._load_quad(gpu, "READBACKGROUNDPIC.png")
         self.talk_background = self._load_quad(gpu, "TALKBACKGROUNDPIC.png")
+        self.scrolls = [self._load_quad(gpu, filename) for _, filename in self.SCROLLS]
         self.candles = [self._load_quad(gpu, f"CARCANDLECELL{index}.png") for index in range(6)]
         self.lamps = [self._load_quad(gpu, f"CARLAMPCELL{index}.png") for index in range(6)]
         self.read_books = [self._load_quad(gpu, f"DIETBOOKCELL{index}.png") for index in range(12)]
@@ -66,8 +69,11 @@ class CaravanView(SceneView):
 
     def _hub_action_at(self, pos):
         point = self._native_point(pos)
+        for index, (rect, _filename) in enumerate(self.SCROLLS[:len(self.scene.missions)]):
+            if rect.collidepoint(point):
+                return f"select_mission:{index}"
         if self.MISSION_RECT.collidepoint(point):
-            return "select_mission"
+            return "select_mission:0" if self.scene.missions else None
         if self.GOLD_RECT.collidepoint(point):
             return None
         for name, rect in self.BOOKS:
@@ -129,20 +135,29 @@ class CaravanView(SceneView):
                 left + 300 * scale, top + 200 * scale, 44 * scale, 16 * scale
             )
             return
-        self.hub.draw(left, top, width, height)
+        self.read_background.draw(left, top, width, height)
+        self.read_books[frame % len(self.read_books)].draw(
+            left + 296 * scale, top + 260 * scale, 148 * scale, 108 * scale
+        )
+        self.read_eyes[frame % len(self.read_eyes)].draw(
+            left + 312 * scale, top + 208 * scale, 44 * scale, 16 * scale
+        )
         self.candles[frame % len(self.candles)].draw(
             left + self.CANDLE_POS[0] * scale, top + self.CANDLE_POS[1] * scale, 24 * scale, 48 * scale
         )
         self.lamps[frame % len(self.lamps)].draw(
             left + self.LAMP_POS[0] * scale, top + self.LAMP_POS[1] * scale, 8 * scale, 16 * scale
         )
+        for index, (rect, _filename) in enumerate(self.SCROLLS[:len(self.scene.missions)]):
+            self.scrolls[index].draw(left + rect.x * scale, top + rect.y * scale,
+                                     rect.width * scale, rect.height * scale)
         if self.hover:
             mouse_x, mouse_y = pygame.mouse.get_pos()
             self.hint.draw(mouse_x + 12, mouse_y + 12)
 
     def release(self):
         for quad in (
-            self.hub, self.read_background, self.talk_background, *self.candles, *self.lamps,
+            self.read_background, self.talk_background, *self.scrolls, *self.candles, *self.lamps,
             *self.read_books, *self.read_eyes, *self.talk_mouths, *self.talk_eyes,
         ):
             quad.release()

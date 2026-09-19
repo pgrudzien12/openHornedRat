@@ -100,11 +100,13 @@ def build(installation):
 
     wnd_dll = game.find("FILE", "DLL", "WND.DLL")
     if wnd_dll is not None:
-        # Phase 1 only needs the first campaign battle's briefing; extend this per known mission.
-        records.append(AssetRecord(
-            AssetId("vanilla", "briefing", "bf001"), "briefing", "file", "DLL/WND.DLL",
-            "campaign-briefing", source_fingerprint(wnd_dll),
-        ))
+        # Any battle may be selected by the data-driven campaign mission window.
+        # They all share WND.DLL as their briefing source.
+        for battle in (record.identifier for record in records if record.kind == "battle"):
+            records.append(AssetRecord(
+                AssetId("vanilla", "briefing", battle.name), "briefing", "file", "DLL/WND.DLL",
+                "campaign-briefing", source_fingerprint(wnd_dll),
+            ))
 
     antxt_dll = game.find("FILE", "DLL", "ANTXT.DLL")
     if antxt_dll is not None:

@@ -2,6 +2,8 @@
 
 from .assets import AssetId
 from .battle_scene import BattleScene, FIRST_BATTLE
+from .campaign import build_campaign_graph
+from .campaign_state import CampaignState
 from .engine import DEFAULT_SEED
 from .legacy import module
 from .scenes import Quit, Scene, SceneManifest, Transition
@@ -96,12 +98,21 @@ class MainMenuScene(Scene):
 
     manifest = SceneManifest(immediate=(MAIN_MENU,))
 
-    def __init__(self, briefing=None, log_dir=None, seed=DEFAULT_SEED):
-        self.briefing = briefing or BriefingScene(FIRST_BATTLE, log_dir=log_dir, seed=seed)
+    def __init__(self, briefing=None, log_dir=None, seed=DEFAULT_SEED, campaign=None):
+        self.briefing = briefing
+        self.log_dir, self.seed = log_dir, seed
+        self.campaign = campaign
 
     def handle(self, event, context):
         if event == "new_campaign":
-            return Transition(CaravanScene(self.briefing), "new campaign started")
+            if self.campaign is None:
+                # Tests and development callers may still inject one focused
+                # briefing; a real installation derives the full initial flow.
+                self.campaign = (
+                    CampaignState.single_mission(self.briefing) if self.briefing is not None
+                    else CampaignState(build_campaign_graph(str(context.locator.installation.root)))
+                )
+            return Transition(CaravanScene(self.campaign), "new campaign started")
         if event == "quit":
             return Quit("player quit from the main menu")
         return None
@@ -110,21 +121,33 @@ class MainMenuScene(Scene):
 class CaravanScene(Scene):
     """Campaign hub in Dietrich's caravan before the first mission is chosen.
 
-    The campaign economy and save slots are not modelled yet, but their UI state
-    belongs here so the frontend is not forced to invent campaign rules.
+    Coffers and mission availability are data-driven; save slots and book-page
+    browsing remain presentation hooks until their persistence/views are added.
     """
 
-    def __init__(self, briefing, gold=0, has_message=False):
-        self.briefing = briefing
-        self.gold = gold
+    def __init__(self, campaign, has_message=False):
+        self.campaign = campaign
         self.has_message = has_message
         self.dietrich_mode = None  # ``reading`` / ``talking`` while his close-up is open
         self.selected_book = None
         self.save_requested = False
 
+    @property
+    def gold(self):
+        return self.campaign.coffers
+
+    @property
+    def missions(self):
+        return self.campaign.missions
+
     def handle(self, event, context):
-        if event == "select_mission":
-            return Transition(self.briefing, "first campaign mission selected")
+        if event.startswith("select_mission:"):
+            index = int(event.removeprefix("select_mission:"))
+            mission = self.missions[index]
+            briefing = mission.get("briefing") or BriefingScene(
+                AssetId("vanilla", "battle", mission["battle"].casefold())
+            )
+            return Transition(briefing, f"campaign mission selected: {mission['name']}")
         if event == "exit_campaign":
             return Transition(MainMenuScene(), "campaign exited")
         if event == "speak_to_dietrich":

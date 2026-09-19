@@ -8,6 +8,7 @@ from whshr.cache import AssetCache
 from whshr.campaign_scenes import (
     BriefingScene, CaravanScene, IntroScene, MainMenuScene, OpeningNarrationScene, briefing_asset_for,
 )
+from whshr.campaign_state import CampaignState
 from whshr.catalog import build
 from whshr.scenes import SceneAssets, SceneMachine
 
@@ -131,28 +132,28 @@ class IntroSceneTests(unittest.TestCase):
         machine.handle("new_campaign")
 
         self.assertIsInstance(machine.active, CaravanScene)
-        self.assertIs(machine.active.briefing, briefing_scene)
+        self.assertEqual(machine.active.missions[0]["battle"], "BF001")
         self.assertEqual(machine.history[0].reason, "new campaign started")
 
     def test_given_the_caravan_when_its_mission_is_chosen_then_the_briefing_becomes_active(self):
         briefing_scene = BriefingScene(BF001)
-        machine = SceneMachine(CaravanScene(briefing_scene), self.context)
+        machine = SceneMachine(CaravanScene(CampaignState.single_mission(briefing_scene)), self.context)
 
-        machine.handle("select_mission")
+        machine.handle("select_mission:0")
 
         self.assertIs(machine.active, briefing_scene)
         self.assertEqual(machine.active.briefing, self.briefing)
-        self.assertEqual(machine.history[0].reason, "first campaign mission selected")
+        self.assertEqual(machine.history[0].reason, "campaign mission selected: BF001")
 
     def test_given_the_caravan_when_dietrich_has_no_message_then_he_reads(self):
-        caravan = CaravanScene(BriefingScene(BF001))
+        caravan = CaravanScene(CampaignState.single_mission(BriefingScene(BF001)))
 
         caravan.handle("speak_to_dietrich", self.context)
 
         self.assertEqual(caravan.dietrich_mode, "reading")
 
     def test_given_the_caravan_when_dietrich_has_a_message_then_he_talks(self):
-        caravan = CaravanScene(BriefingScene(BF001), has_message=True)
+        caravan = CaravanScene(CampaignState.single_mission(BriefingScene(BF001)), has_message=True)
 
         caravan.handle("speak_to_dietrich", self.context)
 
