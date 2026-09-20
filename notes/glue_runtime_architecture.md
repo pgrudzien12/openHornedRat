@@ -370,11 +370,11 @@ Exit criteria:
 - Caravan → map → caravan restores the same interpreter/window state.
 - No special case names `FLOWSCRIPTBP01`, `STARTCARAVAN` or `MISSIONBP01WINDOW` in runtime control flow.
 
-### Phase 5 — Shared animation, dialogue and audio
+### Phase 5 — Shared animation, dialogue and audio (bitmap-animator foundation implemented)
 
 Deliverables:
 
-- Generic `[BITMAP]` animator using script frame ranges and timing fields.
+- Generic headless `[BITMAP]` animator using script frame ranges and timing fields is implemented and drives the caravan's candle, lamp, page and eye cells.
 - Portrait animator using the established sequence tables.
 - Dialogue buffer with `playtext`/`queuetoplaytext`, speech-on/off behavior, timing, click drain and pause.
 - Music/speech effects with pause/resume/stop semantics.

@@ -1,7 +1,9 @@
 """Dietrich's caravan campaign hub and the reading/talking close-ups."""
 
 import pygame
+import re
 
+from ..glue_animation import GlueBitmapAnimator
 from .bitmap_font import BitmapFont
 from .gpu import ScreenQuad
 from .glue_bitmap import load_bitmap
@@ -15,9 +17,6 @@ class CaravanView(NativeScreenView):
     """Present the original caravan artwork at its native 640×480 composition."""
 
     HINT_BOTTOM_MARGIN = 10
-    ANIMATION_FPS = 8
-    PAGE_HOLD_SECONDS = 3.0
-    BLINK_PERIOD_SECONDS = 2.0
     # WND resource target -> engine event. Rectangles and hint ids remain in
     # WND; only the bridge to implemented engine actions lives here.
     TARGET_ACTIONS = {
@@ -49,6 +48,12 @@ class CaravanView(NativeScreenView):
         self.lamp_spec = bitmap_specs["carlampcell"]
         self.read_book_spec = bitmap_specs["dietbookcell"]
         self.read_eyes_spec = bitmap_specs["readeyescell"]
+        self.animators = {
+            "candle": GlueBitmapAnimator(self.candle_spec),
+            "lamp": GlueBitmapAnimator(self.lamp_spec),
+            "book": GlueBitmapAnimator(self.read_book_spec),
+            "eyes": GlueBitmapAnimator(self.read_eyes_spec),
+        }
         self.candles = [self._load_quad(gpu, f"CARCANDLECELL{index}", colorkey=True) for index in range(6)]
         self.lamps = [self._load_quad(gpu, f"CARLAMPCELL{index}", colorkey=True) for index in range(6)]
         self.read_books = [self._load_quad(gpu, f"DIETBOOKCELL{index}", colorkey=True) for index in range(12)]
@@ -123,28 +128,25 @@ class CaravanView(NativeScreenView):
 
     def animate(self, seconds):
         self.elapsed += seconds
+        milliseconds = round(seconds * 1000)
+        for animator in self.animators.values():
+            animator.tick(milliseconds)
 
-    def _page_frame(self):
-        """Turn DIETBOOKCELL11 down to 0, then leave the new page visible."""
-        turn_seconds = len(self.read_books) / self.ANIMATION_FPS
-        phase = self.elapsed % (turn_seconds + self.PAGE_HOLD_SECONDS)
-        if phase < turn_seconds:
-            return len(self.read_books) - 1 - int(phase * self.ANIMATION_FPS)
-        return 0
-
-    def _read_eye_frame(self):
-        """READEYESCELL2 -> 1 -> 0 is one blink; the open-eye frame rests between blinks."""
-        phase = self.elapsed % self.BLINK_PERIOD_SECONDS
-        frame = int(phase * self.ANIMATION_FPS)
-        return len(self.read_eyes) - 1 - frame if frame < len(self.read_eyes) else 0
+    @staticmethod
+    def _frame_index(animator, spec):
+        """Use the configured start frame until the animator has first painted one."""
+        match = re.search(r"(\d+)$", animator.drawn_name)
+        return int(match.group(1)) if match else spec.get("animstartframe", 0)
 
     def draw(self):
         super().draw()
         left, top, scale = self._layout()
         width, height = self.NATIVE_SIZE[0] * scale, self.NATIVE_SIZE[1] * scale
-        frame = int(self.elapsed * self.ANIMATION_FPS)
-        page_frame = self._page_frame()
-        eye_frame = self._read_eye_frame()
+        frame = int(self.elapsed * 8)
+        page_frame = self._frame_index(self.animators["book"], self.read_book_spec)
+        eye_frame = self._frame_index(self.animators["eyes"], self.read_eyes_spec)
+        candle_frame = self._frame_index(self.animators["candle"], self.candle_spec)
+        lamp_frame = self._frame_index(self.animators["lamp"], self.lamp_spec)
         if self.scene.dietrich_mode == "reading":
             self.read_background.draw(left, top, width, height)
             self.read_books[page_frame].draw(
@@ -174,11 +176,11 @@ class CaravanView(NativeScreenView):
             left + self.read_eyes_spec["x"] * scale, top + self.read_eyes_spec["y"] * scale,
             self.read_eyes[eye_frame].size[0] * scale, self.read_eyes[eye_frame].size[1] * scale,
         )
-        self.candles[frame % len(self.candles)].draw(
+        self.candles[candle_frame].draw(
             left + self.candle_spec["x"] * scale, top + self.candle_spec["y"] * scale,
             self.candles[0].size[0] * scale, self.candles[0].size[1] * scale,
         )
-        self.lamps[frame % len(self.lamps)].draw(
+        self.lamps[lamp_frame].draw(
             left + self.lamp_spec["x"] * scale, top + self.lamp_spec["y"] * scale,
             self.lamps[0].size[0] * scale, self.lamps[0].size[1] * scale,
         )
