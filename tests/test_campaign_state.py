@@ -31,6 +31,13 @@ class CampaignStateTests(unittest.TestCase):
         self.assertEqual(state.hotspots[0]["res"], 151)
         self.assertFalse(state.activate_caravan_mode("unknown"))
 
+    def test_active_caravan_background_is_the_first_window_bitmap(self):
+        state = CampaignState(self.graph, caravan_bitmaps=(
+            {"bitmap": "TalkBackgroundPic"}, {"bitmap": "CarLampCell"},
+        ))
+
+        self.assertEqual(state.caravan_background, "TalkBackgroundPic")
+
     def test_window_ui_expands_every_script_in_one_include_block_in_source_order(self):
         content = GlueContent.from_data(resources={
             "ROOT": "[WINDOW]\n[INCLUDE]\nscript:ONE\nscript:TWO\n[END]",

@@ -138,6 +138,11 @@ class CampaignState:
         specs.update({bitmap.get("bitmap", "").casefold(): bitmap for bitmap in self.caravan_bitmaps})
         return specs
 
+    @property
+    def caravan_background(self):
+        """The active caravan window's first bitmap is its painted backdrop."""
+        return next((bitmap["bitmap"] for bitmap in self.caravan_bitmaps if "bitmap" in bitmap), None)
+
     def activate_caravan_mode(self, mode):
         """Install the selected caravan window's projected controls and artwork."""
         window = caravan_window_for_mode(mode)

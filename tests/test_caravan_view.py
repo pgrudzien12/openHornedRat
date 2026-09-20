@@ -46,6 +46,9 @@ class CaravanViewTests(unittest.TestCase):
 
         self.assertEqual(self.view.hover, "151:()")
 
+    def test_backdrop_texture_does_not_replace_the_scene_clear_colour(self):
+        self.assertEqual(self.view.background, (18, 18, 24))
+
 
 if __name__ == "__main__":
     unittest.main()

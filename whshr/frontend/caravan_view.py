@@ -34,6 +34,7 @@ class CaravanView(NativeScreenView):
 
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
+        self.background_quad = self._load_quad(gpu, scene.campaign.caravan_background or "READBACKGROUNDPIC")
         self.read_background = self._load_quad(gpu, "READBACKGROUNDPIC")
         self.talk_background = self._load_quad(gpu, "TALKBACKGROUNDPIC")
         self.scroll_specs = tuple(sorted(
@@ -164,7 +165,7 @@ class CaravanView(NativeScreenView):
                 left + 300 * scale, top + 200 * scale, 44 * scale, 16 * scale
             )
             return
-        self.read_background.draw(left, top, width, height)
+        self.background_quad.draw(left, top, width, height)
         self.read_books[page_frame].draw(
             left + self.read_book_spec["x"] * scale, top + self.read_book_spec["y"] * scale,
             self.read_books[page_frame].size[0] * scale, self.read_books[page_frame].size[1] * scale,
@@ -193,7 +194,7 @@ class CaravanView(NativeScreenView):
 
     def release(self):
         for quad in (
-            self.read_background, self.talk_background, *self.scrolls, *self.candles, *self.lamps,
+            self.background_quad, self.read_background, self.talk_background, *self.scrolls, *self.candles, *self.lamps,
             *self.read_books, *self.read_eyes, *self.talk_mouths, *self.talk_eyes,
         ):
             quad.release()
