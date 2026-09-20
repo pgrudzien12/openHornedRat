@@ -10,7 +10,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 from .glue_animation import GlueBitmapAnimator
-from .glue import BitmapRecord, GlueInstruction
+from .glue import BitmapRecord, GlueInstruction, MissionRecord, MissionRef
 
 
 @dataclass(frozen=True)
@@ -174,6 +174,7 @@ class GlueRuntimeState:
     variables: dict[str, int] = field(default_factory=lambda: {"animseq": 1, "textlines": 1, "tentpos": 0})
     current_window_name: str = ""
     current_battle: str = ""
+    selected_mission: MissionRef | None = None
     debrief_index: int = 0
     palette_id: int = 0
     context_stack: list[ContextSnapshot] = field(default_factory=list)
@@ -247,6 +248,11 @@ class GlueRuntime:
         """Resume a parked script when its explicit wait event arrives."""
         if not isinstance(input_, GlueInput):
             raise TypeError("handle expects GlueInput")
+        if input_.kind == "mission-select":
+            selected = self._visible_mission(input_.target)
+            if selected is not None:
+                self.state.selected_mission = selected
+            return ()
         if input_.kind == "dialogue-drain" and self.state.pending is not None and self.state.pending.kind == "dialogue":
             self.state.pending = None
             return (StopSpeech(), *self.step_until_blocked())
@@ -257,6 +263,22 @@ class GlueRuntime:
         if self.state.current is not None:
             self.state.current.parked = False
         return self.step_until_blocked()
+
+    def _visible_mission(self, key):
+        """Find a mission advertised by an active window without reparsing glue."""
+        if key is None:
+            return None
+        for window in reversed(self.state.windows):
+            for name in (window.name, *reversed(window.objects)):
+                try:
+                    records = self.content.window(name).records
+                except (KeyError, TypeError):
+                    continue
+                for record in records:
+                    if isinstance(record, MissionRecord) and record.mission_ref is not None:
+                        if record.mission_ref.key == str(key).casefold():
+                            return record.mission_ref
+        return None
 
     def resume(self, result):
         """Complete one host activity; values never implicitly set glue status."""

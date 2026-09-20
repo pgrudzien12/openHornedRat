@@ -33,6 +33,8 @@ class GlueRuntimeTests(unittest.TestCase):
             "ANIM_FINITE": "[RUN]\n[START]\nopenwindow:res=MAIN\nsetcurwindow:res=MAIN\naddanimobject:res=FINITE\nendgame:\n[END]",
             "MOVIE_CONTEXT": "[RUN]\n[START]\nopenwindow:res=MAIN\nplaymovie:A2\nwaitforrelease:\n[END]",
             "DEBRIEF": "[RUN]\n[START]\nsetdebrief:5\ndebriefwithsummary:0\nendgame:\n[END]",
+            "MISSIONS": "[WINDOW]\n[MISSION]\nset:res=601\n[END]\n[END]",
+            "MISSION_FLOW": "[RUN]\n[START]\nopenwindow:res=MISSIONS\nwaitforrelease:\n[END]",
         })
 
     def test_given_a_waiting_flow_when_mission_release_arrives_then_it_runs_the_subroutine_and_ends(self):
@@ -150,6 +152,16 @@ class GlueRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.tick(50), ())
         self.assertEqual(runtime.tick(50), (EndGame(),))
         self.assertIsNone(runtime.state.current)
+
+    def test_mission_selection_accepts_only_rows_from_active_windows(self):
+        runtime = GlueRuntime(self.content)
+        runtime.start("MISSION_FLOW")
+
+        runtime.handle(GlueInput("mission-select", "missions.0"))
+        self.assertEqual(runtime.state.selected_mission.key, "missions.0")
+
+        runtime.handle(GlueInput("mission-select", "other.0"))
+        self.assertEqual(runtime.state.selected_mission.key, "missions.0")
 
 
 if __name__ == "__main__":
