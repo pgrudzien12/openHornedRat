@@ -34,6 +34,11 @@ class AppPaletteTests(unittest.TestCase):
 
         self.assertEqual(palette.rgba(bytes((0, 10))), bytes((0, 0, 0, 0, 1, 2, 3, 255)))
 
+    def test_rgba_accepts_any_indexed_bitmap_stream_without_its_embedded_table(self):
+        palette = AppPalette.select(2, self.tables)
+
+        self.assertEqual(palette.rgba(bytes((105, 106))), bytes((23, 24, 25, 255, 30, 31, 32, 255)))
+
 
 if __name__ == "__main__":
     unittest.main()

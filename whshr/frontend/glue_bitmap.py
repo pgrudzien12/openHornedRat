@@ -21,11 +21,20 @@ def bitmap_frame_name(spec, frame=None):
     return re.sub(r"\d+$", "", spec["bitmap"]) + str(frame)
 
 
-def load_bitmap(content, name):
-    """Return an RGBA surface for a bitmap already owned by ``GlueContent``."""
+def load_bitmap(content, name, *, app_palette=None):
+    """Return an RGBA surface for a bitmap already owned by ``GlueContent``.
+
+    Existing compatibility views retain the bitmap's embedded table until they
+    opt into an ``AppPalette``.  The generic glue view will pass that palette,
+    which maps every source index through one application-wide colour table
+    and makes index zero transparent.
+    """
     bitmap = content.bitmap_data(name)
-    rgba = bytearray(bitmap.width * bitmap.height * 4)
-    for offset, palette_index in enumerate(bitmap.pixels):
-        red, green, blue = bitmap.palette[palette_index]
-        rgba[offset * 4:offset * 4 + 4] = bytes((red, green, blue, 255))
+    if app_palette is not None:
+        rgba = app_palette.rgba(bitmap.pixels)
+    else:
+        rgba = bytearray(bitmap.width * bitmap.height * 4)
+        for offset, palette_index in enumerate(bitmap.pixels):
+            red, green, blue = bitmap.palette[palette_index]
+            rgba[offset * 4:offset * 4 + 4] = bytes((red, green, blue, 255))
     return pygame.image.frombuffer(rgba, (bitmap.width, bitmap.height), "RGBA").copy()
