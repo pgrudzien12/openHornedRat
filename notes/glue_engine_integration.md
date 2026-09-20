@@ -7,6 +7,8 @@
 - [Proposed order of steps](#proposed-order-of-steps)
 - [Open questions](#open-questions)
 - [Implementation milestones](#implementation-milestones)
+- [Current implementation status](#current-implementation-status)
+- [Current implementation gaps](#current-implementation-gaps)
 - [Migration rules](#migration-rules)
 
 Plan record: where the generic `GlueScene`/`GlueView` pipeline stands after the M1-M5 work
@@ -157,6 +159,48 @@ old campaign-chain construction and unused imports.
 Exercise menu-to-battle and return-to-campaign flows through the normal entry point. Remove any
 remaining bespoke campaign scenes, views, tests, imports, and compatibility-only code once no live
 path uses them.
+
+## Current implementation status
+
+| Area | Status | Available behavior |
+|---|---|---|
+| Generic window presentation | Implemented | Bitmap windows, text, portraits, dialogue timing, bitmap animation, music, and control-panel drawing are presented by `GlueView`. |
+| Control panels | Partial | Pause/Resume and briefing Abort work. Accept and the other activity-launching actions do not. |
+| Campaign runtime interface | Partial | `CampaignState` supplies coffers, army/march membership, reinforcements, selected generic mission identity, and an in-memory autosave snapshot. |
+| Campaign commands | Partial | `testforunitinarmy`, `testforunitinmarch`, `addcash`, `iftrueaddcash`, `addtroop`, `unitjoinmission`, and `unitleavemission` call the campaign runtime. |
+| Battle activity | Implemented | `StartBattle` transitions to `BattleScene`; completing the battle resumes the same parked `GlueScene` with an `ActivityResult`. |
+| Other activities | Not implemented | Movie, debrief, caravan, and troop-selection effects are emitted by the runtime but do not yet have scene routes. |
+| Normal entry point | Not switched | `--glue-program <NAME>` starts a generic program directly. Main-menu New Campaign still uses the bespoke caravan/map/briefing chain. |
+| Persistent saves | Deferred | `autosave` captures a runtime snapshot in memory. It does not write or load save files. |
+
+## Current implementation gaps
+
+### Scene and activity routing
+
+1. Route `StartMovie` to a reusable movie scene and resume the requesting glue runtime when playback completes.
+2. Implement debrief presentation and its payment/result handling before routing `StartDebrief`.
+3. Implement caravan and troop-selection activities before routing `EnterCaravan` and briefing Accept through the normal campaign path.
+4. Consume `EndGame` at the scene boundary and return to the main menu.
+5. Preserve run configuration such as battle logging and seed when glue starts a battle.
+
+### Campaign behavior
+
+1. Implement troop-selection confirmation: mission costs, roster updates, mission-taken state, and continuation into a mission script or battle.
+2. Implement `addunit`, `cash`, bonus counters, book flags, `testmission`, `testobjective`, and `gomissionselect` through the campaign runtime.
+3. Replace the in-memory autosave snapshot with defined persistence and load behavior when save/load is in scope.
+
+### Glue interpreter behavior
+
+1. Implement `setbattlescript` and the panel actions that use it for encounter battles.
+2. Implement `replacescript`, the mission-release path, and the remaining built-in object behavior.
+3. Correct the documented deferred `goto` behavior; conditional gotos remain a separately scoped, unused case.
+4. Implement or explicitly reject the remaining reachable commands reported by `python3 -m whshr glue-spec`.
+
+### Migration prerequisites
+
+1. Confirm the first flow resource selected by New Campaign from installation data.
+2. Verify a real generic briefing script through the existing map selection path before replacing `BriefingScene`.
+3. Delete each bespoke scene and view only after its generic replacement covers its live entry, exit, and return path.
 
 ## Migration rules
 
