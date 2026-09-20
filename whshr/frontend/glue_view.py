@@ -20,6 +20,7 @@ MIXER_CHANNELS = 8  # matches intro_view's cutscene mixer; music runs on pygame'
 MUSIC_VOLUME = 0.01  # engine-level mix setting, not game data: setmidivolume/setwavvolume are unused by any
                      # script (notes/briefing_dialogue.md §2.1) and default 100, so there is no data value to read
 MISSION_ROW_HEIGHT = 88
+MISSION_TEXT_INSET = 12
 
 
 def _ensure_mixer():
@@ -244,13 +245,13 @@ class GlueView(NativeScreenView):
                 width, height = surface.get_size()
             else:
                 width, height = 320, MISSION_ROW_HEIGHT
-            lines = _wrap(font, title, max(1, width - 12))
+            lines = _wrap(font, title, max(1, width - 2 * MISSION_TEXT_INSET))
             if payment:
                 lines.append(payment)
-            text = self.gpu.text((max(1, width - 12), max(1, height - 8)), font, color=(0, 0, 0),
+            text = self.gpu.text((max(1, width - 2 * MISSION_TEXT_INSET), max(1, height - 8)), font, color=(0, 0, 0),
                                  background=None, padding=0, fixed_width=True)
             text.set_lines(tuple(lines))
-            self.mission_labels.append((text, (x + 6, y + 4 + font.font.height // 2)))
+            self.mission_labels.append((text, (x + MISSION_TEXT_INSET, y + 4 + font.font.height // 2)))
             self.mission_rows.append((pygame.Rect(x, y, width, height), reference))
 
     def _add_panel_bitmap(self, content, name, position, palette):
