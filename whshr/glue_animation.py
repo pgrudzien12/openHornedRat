@@ -25,6 +25,7 @@ class GlueBitmapAnimator:
         self.period = int(spec.get("timecnt", 0))
         self.loop_delay = int(spec.get("looptimecnt", 0))
         self.delay = self.period
+        self._millisecond_remainder = 0
         self._timer_remainder = 0
         self.drawn_name = self.base
 
@@ -36,7 +37,9 @@ class GlueBitmapAnimator:
         """Apply one original-style animation step at most, returning its update."""
         if milliseconds < 0:
             raise ValueError("tick duration must not be negative")
-        self._timer_remainder += int(milliseconds) // 25
+        elapsed = self._millisecond_remainder + int(milliseconds)
+        self._timer_remainder += elapsed // 25
+        self._millisecond_remainder = elapsed % 25
         if self._timer_remainder < 2:
             return AnimationUpdate(self.drawn_name, False)
         self._timer_remainder &= 1  # Late timer messages do not catch up multiple frames.

@@ -43,6 +43,15 @@ class GlueBitmapAnimatorTests(unittest.TestCase):
         self.assertEqual(animator.tick(200).bitmap, "Cell2")
         self.assertEqual(animator.current, 1)
 
+    def test_sub_timer_frame_durations_accumulate_into_one_animation_step(self):
+        animator = GlueBitmapAnimator({"bitmap": "Cell", "animstartframe": 2,
+                                       "animstopframe": -1, "timecnt": 0})
+
+        updates = [animator.tick(16) for _ in range(4)]
+
+        self.assertEqual([update.redrawn for update in updates], [False, False, False, True])
+        self.assertEqual(updates[-1].bitmap, "Cell2")
+
 
 if __name__ == "__main__":
     unittest.main()
