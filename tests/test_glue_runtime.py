@@ -1,8 +1,10 @@
 import unittest
 
+from whshr.campaign_state import CampaignState
 from whshr.glue_content import GlueContent
 from whshr.glue_runtime import (
     ActivityResult,
+    Autosave,
     EndGame,
     EnterCaravan,
     GlueInput,
@@ -41,6 +43,9 @@ class GlueRuntimeTests(unittest.TestCase):
             "DEBRIEF": "[RUN]\n[START]\nsetdebrief:5\ndebriefwithsummary:0\nendgame:\n[END]",
             "MISSIONS": "[WINDOW]\n[MISSION]\nset:res=601\n[END]\n[END]",
             "MISSION_FLOW": "[RUN]\n[START]\nopenwindow:res=MISSIONS\nwaitforrelease:\n[END]",
+            "CAMPAIGN": ("[RUN]\n[START]\nsetgluestatusmask:4\ntestforunitinarmy:3\n"
+                         "iftrueaddcash:20\ntestforunitinmarch:7\niftrueaddcash:30\n"
+                         "addtroop:3=2\nunitjoinmission:5\nunitleavemission:7\nautosave:\nendgame:\n[END]"),
         })
 
     def test_given_a_waiting_flow_when_mission_release_arrives_then_it_runs_the_subroutine_and_ends(self):
@@ -268,6 +273,36 @@ class GlueRuntimeTests(unittest.TestCase):
 
         runtime.handle(GlueInput("mission-select", "other.0"))
         self.assertEqual(runtime.state.selected_mission.key, "missions.0")
+
+    def test_campaign_commands_update_campaign_state_and_autosave_after_the_command(self):
+        campaign = CampaignState(
+            {"flow_scripts": {"FLOW": ({"action": "add_window", "window": "MISSIONS"},)},
+             "mission_windows": {"MISSIONS": ()}},
+            flow="FLOW", army_units={3}, march_units={7}, coffers=500,
+        )
+        runtime = GlueRuntime(self.content, campaign)
+
+        effects = runtime.start("CAMPAIGN")
+
+        self.assertEqual(effects, (Autosave(), EndGame()))
+        self.assertEqual(campaign.coffers, 550)
+        self.assertEqual(campaign.reinforcements, {3: 2})
+        self.assertEqual(campaign.march_units, {5})
+        self.assertEqual(runtime.state.status_bits, 4)
+        self.assertIsNotNone(campaign.autosave_state)
+        self.assertEqual(campaign.autosave_state.current.pc, 9)
+
+    def test_mission_selection_is_shared_with_campaign_state(self):
+        campaign = CampaignState(
+            {"flow_scripts": {"FLOW": ({"action": "add_window", "window": "MISSIONS"},)},
+             "mission_windows": {"MISSIONS": ()}}, flow="FLOW",
+        )
+        runtime = GlueRuntime(self.content, campaign)
+        runtime.start("MISSION_FLOW")
+
+        runtime.handle(GlueInput("mission-select", "missions.0"))
+
+        self.assertEqual(campaign.selected_mission, runtime.state.selected_mission)
 
 
 if __name__ == "__main__":

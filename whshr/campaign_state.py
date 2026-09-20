@@ -5,9 +5,11 @@ chunk.  The engine keeps the same useful pieces explicitly: the active flow,
 the current mission window, completed mission resource ids, and coffers.
 """
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 from .campaign import build_campaign_graph, parse_window_ui
+from .glue import MissionRef
 from .glue_content import GlueContent
 from .paths import Installation
 
@@ -100,6 +102,12 @@ class CampaignState:
     mission_window: str = None
     completed: set[int] = field(default_factory=set)
     coffers: int = INITIAL_COFFERS
+    army_units: set[int] = field(default_factory=set)
+    march_units: set[int] = field(default_factory=set)
+    reinforcements: dict[int, int] = field(default_factory=dict)
+    selected_mission: MissionRef | None = None
+    taken_missions: set[MissionRef] = field(default_factory=set)
+    autosave_state: object = field(default=None, repr=False, compare=False)
     tentpos: int = 0
     hotspots: tuple[dict, ...] = ()
     caravan_bitmaps: tuple[dict, ...] = ()
@@ -111,6 +119,34 @@ class CampaignState:
     def __post_init__(self):
         if self.mission_window is None:
             self._open_next_window(0)
+
+    def add_cash(self, amount):
+        self.coffers += int(amount)
+
+    def is_unit_in_army(self, unit_id):
+        return int(unit_id) in self.army_units
+
+    def is_unit_in_march(self, unit_id):
+        return int(unit_id) in self.march_units
+
+    def add_reinforcements(self, unit_id, count):
+        unit_id = int(unit_id)
+        self.reinforcements[unit_id] = self.reinforcements.get(unit_id, 0) + int(count)
+
+    def join_mission(self, unit_id):
+        self.march_units.add(int(unit_id))
+
+    def leave_mission(self, unit_id):
+        self.march_units.discard(int(unit_id))
+
+    def select_mission(self, mission):
+        self.selected_mission = mission
+
+    def mark_mission_taken(self, mission):
+        self.taken_missions.add(mission)
+
+    def autosave(self, runtime_state):
+        self.autosave_state = deepcopy(runtime_state)
 
     @property
     def missions(self):

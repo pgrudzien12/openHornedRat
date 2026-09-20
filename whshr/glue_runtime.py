@@ -9,6 +9,7 @@ calls :meth:`GlueRuntime.resume`.
 from copy import deepcopy
 from dataclasses import dataclass, field
 
+from .campaign_runtime import CampaignRuntime
 from .glue_animation import GlueBitmapAnimator
 from .glue import AnimRecord, BitmapRecord, GlueInstruction, MissionRecord, MissionRef
 from .portraits import PortraitAnimator
@@ -216,7 +217,7 @@ class GlueRuntime:
     MAX_WINDOWS = 8
     MAX_CONTEXT_DEPTH = 16
 
-    def __init__(self, content, campaign=None, speech_enabled=True):
+    def __init__(self, content, campaign: CampaignRuntime | None = None, speech_enabled=True):
         self.content = content
         self.campaign = campaign
         self.speech_enabled = speech_enabled
@@ -303,6 +304,8 @@ class GlueRuntime:
             selected = self._visible_mission(input_.target)
             if selected is not None:
                 self.state.selected_mission = selected
+                if self.campaign is not None:
+                    self.campaign.select_mission(selected)
             return ()
         if input_.kind == "dialogue-drain" and self.state.pending is not None and self.state.pending.kind == "dialogue":
             self.state.dialogue_typed = len(self.state.dialogue_text)  # fast-forward, §3.6.2
@@ -334,6 +337,51 @@ class GlueRuntime:
                         if record.mission_ref.key == str(key).casefold():
                             return record.mission_ref
         return None
+
+    def _test_unit_membership(self, command, argument, effects):
+        unit_id = self._parse_int(argument, None)
+        if unit_id is None:
+            effects.append(Diagnostic(command, f"invalid unit id {argument!r}"))
+            return
+        method = "is_unit_in_army" if command == "testforunitinarmy" else "is_unit_in_march"
+        if self.campaign is None:
+            effects.append(Diagnostic(command, "campaign runtime is unavailable"))
+            self.state.status_bits &= ~self.state.status_mask
+            return
+        if getattr(self.campaign, method)(unit_id):
+            self.state.status_bits |= self.state.status_mask
+        else:
+            self.state.status_bits &= ~self.state.status_mask
+
+    def _add_cash(self, argument, effects):
+        amount = self._parse_int(argument, None)
+        if amount is None:
+            effects.append(Diagnostic("addcash", f"invalid amount {argument!r}"))
+        elif self.campaign is None:
+            effects.append(Diagnostic("addcash", "campaign runtime is unavailable"))
+        else:
+            self.campaign.add_cash(amount)
+
+    def _add_reinforcements(self, argument, effects):
+        unit_id, count = self._parse_assignment(argument)
+        if unit_id is None or count is None:
+            effects.append(Diagnostic("addtroop", f"invalid reinforcement {argument!r}"))
+        elif self.campaign is None:
+            effects.append(Diagnostic("addtroop", "campaign runtime is unavailable"))
+        else:
+            self.campaign.add_reinforcements(unit_id, count)
+
+    def _change_mission_unit(self, argument, joins, effects):
+        command = "unitjoinmission" if joins else "unitleavemission"
+        unit_id = self._parse_int(argument, None)
+        if unit_id is None:
+            effects.append(Diagnostic(command, f"invalid unit id {argument!r}"))
+        elif self.campaign is None:
+            effects.append(Diagnostic(command, "campaign runtime is unavailable"))
+        elif joins:
+            self.campaign.join_mission(unit_id)
+        else:
+            self.campaign.leave_mission(unit_id)
 
     def resume(self, result):
         """Complete one host activity; values never implicitly set glue status."""
@@ -450,7 +498,20 @@ class GlueRuntime:
         elif command == "stopmidi":
             effects.append(StopMusic())
         elif command == "autosave":
+            if self.campaign is not None:
+                self.campaign.autosave(self.snapshot())
             effects.append(Autosave())
+        elif command in ("testforunitinarmy", "testforunitinmarch"):
+            self._test_unit_membership(command, argument, effects)
+        elif command in ("addcash", "iftrueaddcash"):
+            if command == "addcash" or self._condition():
+                self._add_cash(argument, effects)
+        elif command == "addtroop":
+            self._add_reinforcements(argument, effects)
+        elif command == "unitjoinmission":
+            self._change_mission_unit(argument, True, effects)
+        elif command == "unitleavemission":
+            self._change_mission_unit(argument, False, effects)
         elif command == "setdebrief":
             self._set_debrief(argument)
         elif command in ("debrief", "debriefwithsummary", "iftruedebrief", "iffalsedebrief",
@@ -675,6 +736,13 @@ class GlueRuntime:
             return int(str(value), 10)
         except ValueError:
             return default
+
+    @staticmethod
+    def _parse_assignment(value):
+        if "=" not in value:
+            return None, None
+        unit_id, count = value.split("=", 1)
+        return GlueRuntime._parse_int(unit_id.strip(), None), GlueRuntime._parse_int(count.strip(), None)
 
     @staticmethod
     def _parse_hex(value):
