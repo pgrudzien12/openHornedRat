@@ -364,7 +364,16 @@ Argument `res=<id>` (glue string table id). Text is appended to the ring buffer 
   of the dialogue, no suspend).
 
 A dialogue completion (all queued text shown and speech finished, or a click that fast-forwards the queue) calls `resume()`.
-Details of timing, ring buffer and click drain: `notes/briefing_dialogue.md` §3. `loadanimstringintocache:<id>` (~20 uses)
+Details of timing, ring buffer and click drain: `notes/briefing_dialogue.md` §3.
+
+**Click during a voiced line** ✅ (code reading): the drain runs on the left mouse button **release** (not the press), in a window that
+still has dialogue pending (text queued or lines still being shown). If the release did not launch a hotspot action, the dialogue
+step is run repeatedly with every per-line delay forced to zero until the whole queue is consumed, so all remaining text of that
+`playtext`/`queue*` batch appears at once (not just the current line). If the text queue is then empty but the speech clip is still
+playing, the clip is stopped. If the queue ended a wait, `resume()` follows immediately. A release over a hotspot while text is pending
+does **not** launch the hotspot (it only drains); a hotspot that has a `clickres` line plays that canned speech instead and does not
+drain. Keyboard keys and the right button do nothing. Consequence for the engine: one click always finishes the current voiced line
+*and* any lines queued behind it, and the script continues in the same event. `loadanimstringintocache:<id>` (~20 uses)
 only warms a 16-entry string cache and has **no observable effect**; an engine may ignore it.
 
 ### 8.5 `endgame:` ✅ (2/2)

@@ -47,8 +47,21 @@ setbitmap:Late
 
         self.assertEqual((model.x, model.y, model.width, model.height, model.palette_id), (2, 3, 640, 480, 2))
         self.assertEqual([bitmap.name for bitmap in model.bitmaps], ["Base", "Decoration", "Late"])
+        self.assertEqual([bitmap.object_name for bitmap in model.bitmaps], [None, None, "OBJECT"])
         self.assertEqual((model.texts[0].string_id, model.texts[0].font), (12, "4"))
         self.assertEqual((model.hotspots[0].hint_id, model.hotspots[0].target), (99, "Next"))
+
+    def test_objects_sharing_a_base_sprite_keep_distinct_identity_for_frame_tracking(self):
+        content = GlueContent.from_data(resources={
+            "BASE": "[WINDOW]\n[END]",
+            "MARKER_A": "[WINDOW]\n[BITMAP]\nset:x=10\nset:y=20\nsetbitmap:Cell\n[END]",
+            "MARKER_B": "[WINDOW]\n[BITMAP]\nset:x=30\nset:y=40\nsetbitmap:Cell\n[END]",
+        })
+
+        model = build_render_model(content, WindowInstance("BASE", None, 2, ["MARKER_A", "MARKER_B"]))
+
+        self.assertEqual([(bitmap.object_name, bitmap.x, bitmap.y) for bitmap in model.bitmaps],
+                         [("MARKER_A", 10, 20), ("MARKER_B", 30, 40)])
 
     def test_cyclic_include_is_a_diagnostic_error_not_an_unbounded_projection(self):
         content = GlueContent.from_data(resources={

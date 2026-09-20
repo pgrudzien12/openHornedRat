@@ -18,6 +18,10 @@ class RenderBitmap:
     y: int = 0
     mask: str | None = None
     animation: tuple[tuple[str, int | str], ...] = ()
+    # The addanimobject/addobject resource that owns this bitmap (None for the window's own
+    # [BITMAP] records); distinguishes objects that reuse the same base sprite (e.g. several
+    # trail markers on one cell base) so each keeps its own current animation frame.
+    object_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -80,8 +84,11 @@ class GlueRenderModel:
 
 
 def _integer(value, default=0):
+    # A ``set:res=<id>`` argument may carry a whitespace-separated human-readable label after the id
+    # (e.g. ``691\t\t"The Final Battle"``), kept in the source as a comment; only the id is data.
+    token = value.split(None, 1)[0] if isinstance(value, str) else value
     try:
-        return int(value)
+        return int(token)
     except (TypeError, ValueError):
         return default
 
@@ -111,21 +118,28 @@ def _included_records(content, name, seen=()):
             yield record
 
 
-def build_render_model(content, window):
-    """Project one runtime ``WindowInstance`` into ordered, native UI primitives."""
-    records = list(_included_records(content, window.name))
+def build_render_model(content, window, positions=None):
+    """Project one runtime ``WindowInstance`` into ordered, native UI primitives.
+
+    ``positions`` overrides an object's (x, y) by ``(window.name, object_name)`` — used for
+    ``gettentpos`` objects, whose position is resolved once when added, from campaign state that
+    lives outside the window's own static ``[BITMAP]`` record (notes/campaign_tent.md §3).
+    """
+    positions = positions or {}
+    records = [(None, record) for record in _included_records(content, window.name)]
     for object_name in window.objects:
-        records.extend(_included_records(content, object_name))
+        records.extend((object_name, record) for record in _included_records(content, object_name))
     position, bitmaps, texts, hotspots, animations, music, mission_lists, missions = {}, [], [], [], [], [], [], []
-    for record in records:
+    for object_name, record in records:
         values = _fields(record)
         if isinstance(record, PositionRecord):
             position = values
         elif isinstance(record, BitmapRecord) and values.get("setbitmap"):
             animation = tuple((key, value) for key, value in values.items()
                               if key not in {"setbitmap", "setmask", "x", "y"})
-            bitmaps.append(RenderBitmap(values["setbitmap"], _integer(values.get("x")), _integer(values.get("y")),
-                                        values.get("setmask") or None, animation))
+            x, y = positions.get((window.name, object_name), (values.get("x"), values.get("y")))
+            bitmaps.append(RenderBitmap(values["setbitmap"], _integer(x), _integer(y),
+                                        values.get("setmask") or None, animation, object_name))
         elif isinstance(record, TextRecord):
             texts.append(RenderText(
                 _integer(values.get("res"), None) if values.get("res") is not None else None,

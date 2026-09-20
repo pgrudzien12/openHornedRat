@@ -21,7 +21,15 @@ class GlueBitmapAnimator:
         self.base = spec["bitmap"]
         self.current = int(spec.get("animstartframe", -1))
         self.restart = int(spec.get("animrestartframe", self.current))
-        self.stop = int(spec.get("animstopframe", self.current))
+        if "animstopframe" in spec:
+            self.stop = int(spec["animstopframe"])
+        elif "animstartframe" in spec:
+            # A start frame with no stop frame (e.g. the Mark*Object cross markers, Cross8 S=7)
+            # reveals that one frame on its first step and then holds it (notes/campaign_tent.md
+            # §5.3): it is not the same as an explicit S == E, which is static from the start.
+            self.stop = self.current - 1
+        else:
+            self.stop = self.current  # both absent: S = E, static, draws the literal base name
         self.period = int(spec.get("timecnt", 0))
         self.loop_delay = int(spec.get("looptimecnt", 0))
         self.delay = self.period

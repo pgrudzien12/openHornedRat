@@ -4,11 +4,7 @@ import re
 
 import pygame
 
-
-# Glue's gettentpos position table; notes/campaign_tent.md §3.
-TENT_POSITIONS = ((405, 332), (405, 332), (405, 332), (452, 316), (405, 332), (410, 346), (415, 349),
-                  (367, 288), (367, 288), (508, 215), (351, 309), (416, 243), (462, 209), (493, 194),
-                  (505, 195), (285, 187), (261, 159), (285, 187), (276, 238), (192, 214), (244, 269))
+from ..glue_runtime import TENT_POSITIONS  # noqa: F401 (re-exported for the legacy compatibility view)
 
 
 def bitmap_frame_name(spec, frame=None):
@@ -38,3 +34,16 @@ def load_bitmap(content, name, *, app_palette=None):
             red, green, blue = bitmap.palette[palette_index]
             rgba[offset * 4:offset * 4 + 4] = bytes((red, green, blue, 255))
     return pygame.image.frombuffer(rgba, (bitmap.width, bitmap.height), "RGBA").copy()
+
+
+def load_optional_bitmap(content, name, *, app_palette=None):
+    """Load a glue bitmap, treating an unresolved dynamic base as transparent.
+
+    Window paint uses the stored ``setbitmap`` name before an animation's first
+    timer step.  Many animated bases (for example ``Tent4``) are deliberately
+    not bitmap resources; their numbered frame is the first drawable image.
+    """
+    try:
+        return load_bitmap(content, name, app_palette=app_palette)
+    except FileNotFoundError:
+        return None

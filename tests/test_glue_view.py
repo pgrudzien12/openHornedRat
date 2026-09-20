@@ -33,6 +33,70 @@ class GlueViewTests(unittest.TestCase):
         self.assertEqual(resolve_text(content, RenderText(7, None)), "default")
         self.assertEqual(resolve_text(content, RenderText(7, "BKTXT")), "book")
 
+    def test_dynamic_animation_base_without_a_bitmap_resource_is_transparent(self):
+        from whshr.frontend.glue_bitmap import load_optional_bitmap
+
+        self.assertIsNone(load_optional_bitmap(GlueContent.from_data(), "Tent4"))
+
+    def test_format_1_text_centres_in_vx_and_uses_vy_as_a_y_offset_not_a_box_height(self):
+        from whshr.frontend.glue_view import _place_text
+
+        gpu, font = _FakeGpu(), _FakeFont(12)
+        model = GlueRenderModel("MAP", 0, 0, 640, 480, 0, (), (), (), (), ())
+        text = RenderText(672, None, x=210, y=20, width=219, height=5, format=1)
+
+        label, (x, y) = _place_text(gpu, font, "Decoy", text, model)
+
+        self.assertEqual(gpu.last_size, (219, 12))
+        self.assertEqual((label.align, label.fixed_width), ("center", True))
+        self.assertEqual((x, y), (210, 25))
+
+    def test_format_6_text_is_not_clipped_by_a_small_vx_it_does_not_use_as_a_width(self):
+        from whshr.frontend.glue_view import _place_text
+
+        gpu, font = _FakeGpu(), _FakeFont(12)
+        model = GlueRenderModel("MAP", 0, 0, 640, 480, 0, (), (), (), (), ())
+        text = RenderText(863, None, x=401, y=111, width=10, height=15, format=6)
+
+        _place_text(gpu, font, "Karak-Hirn", text, model)
+
+        self.assertEqual(gpu.last_size[0], 640)
+
+    def test_format_8_text_centres_vertically_in_vy_without_clipping_the_label_to_it(self):
+        from whshr.frontend.glue_view import _place_text
+
+        gpu, font = _FakeGpu(), _FakeFont(12)
+        model = GlueRenderModel("WIN", 0, 0, 640, 480, 0, (), (), (), (), ())
+        text = RenderText(1, None, x=10, y=100, width=0, height=40, format=8)
+
+        label, (x, y) = _place_text(gpu, font, "Option", text, model)
+
+        self.assertEqual(gpu.last_size[1], 12)
+        self.assertEqual((x, y), (10, 100 + (40 - label.text_size[1]) // 2))
+
+
+class _FakeFont:
+    def __init__(self, height):
+        self.font = type("Font", (), {"height": height})()
+
+
+class _FakeLabel:
+    def __init__(self, size, align="left", fixed_width=False, **_options):
+        self.size, self.align, self.fixed_width = size, align, fixed_width
+        self.text_size = (len("Decoy") * 6, size[1])
+
+    def set_lines(self, lines):
+        pass
+
+
+class _FakeGpu:
+    def __init__(self):
+        self.last_size = None
+
+    def text(self, size, font, **options):
+        self.last_size = size
+        return _FakeLabel(size, **options)
+
 
 if __name__ == "__main__":
     unittest.main()

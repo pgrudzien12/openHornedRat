@@ -93,6 +93,30 @@ class GlueRuntimeTests(unittest.TestCase):
         self.assertIsNone(runtime.state.pending)
         self.assertIsNone(runtime.state.current)
 
+    def test_given_a_pending_dialogue_a_tick_types_it_then_resumes_the_script_on_its_own(self):
+        # notes/briefing_dialogue.md §3.5: a 25 ms timer types the text and resumes the script by
+        # itself once typing and its hold finish - no click is required. Previously nothing drove
+        # this at all, so any script with dialogue before further work (e.g. a trail marker placed
+        # afterwards) would park forever without a synthetic drain.
+        content = self.content.overlay(strings={"BRTXT": {7: "Hi"}})
+        runtime = GlueRuntime(content)
+        runtime.start("TALK")
+        self.assertEqual(runtime.state.dialogue_text, "Hi")
+
+        self.assertEqual(runtime.tick(40), ())  # under one char step, still typing
+        self.assertEqual(runtime.state.dialogue_typed, 0)
+        self.assertEqual(runtime.tick(10), ())  # first character typed (40 + 10 = 50 ms)
+        self.assertEqual(runtime.state.dialogue_typed, 1)
+        self.assertEqual(runtime.tick(50), ())  # second (last) character typed, hold starts
+        self.assertEqual(runtime.state.dialogue_typed, 2)
+        self.assertIsNotNone(runtime.state.pending)
+
+        self.assertEqual(runtime.tick(700), ())  # under the hold
+        self.assertIsNotNone(runtime.state.pending)
+        self.assertEqual(runtime.tick(50), (StopSpeech(), EndGame()))
+        self.assertIsNone(runtime.state.pending)
+        self.assertIsNone(runtime.state.current)
+
     def test_given_a_caravan_request_when_started_then_it_remains_suspended_until_its_host_resumes_it(self):
         runtime = GlueRuntime(self.content)
 
@@ -152,6 +176,22 @@ class GlueRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.tick(50), ())
         self.assertEqual(runtime.tick(50), (EndGame(),))
         self.assertIsNone(runtime.state.current)
+
+    def test_a_finished_animation_keeps_its_held_last_frame_available_to_a_renderer(self):
+        # notes/campaign_tent.md §5.3: a finite animation ends holding its last frame. A renderer
+        # looks the current frame up by the object's identity in state.animations; if the entry
+        # were dropped once finished, the object would fall back to its (non-bitmap) base name and
+        # disappear instead of staying drawn where it was placed.
+        runtime = GlueRuntime(self.content)
+        runtime.start("ANIM_FINITE")
+
+        runtime.tick(50)
+        runtime.tick(50)
+        self.assertEqual(len(runtime.state.animations), 1)
+        self.assertTrue(runtime.state.animations[0].animator.finished)
+
+        runtime.tick(50)  # further ticks must not drop or re-fire the held animation
+        self.assertEqual(len(runtime.state.animations), 1)
 
     def test_mission_selection_accepts_only_rows_from_active_windows(self):
         runtime = GlueRuntime(self.content)

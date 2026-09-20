@@ -116,13 +116,18 @@ class TextLabel(ScreenQuad):
     """Lines of text rendered with pygame's font once per change and uploaded as a texture."""
 
     def __init__(self, gpu, size, font, color=(235, 230, 210), background=(0, 0, 0, 150), padding=6,
-                 align="left", fixed_width=False):
-        super().__init__(gpu, size)
+                 align="left", fixed_width=False, outline=False):
+        # An outline stroke needs 1 px of room outside the glyph box on every side, or the top row
+        # of the first line (and either edge) gets clipped by the surface bounds; reserve it here
+        # so callers can size a label to the text they actually want visible.
+        self._margin = 1 if outline else 0
+        super().__init__(gpu, (size[0] + 2 * self._margin, size[1] + 2 * self._margin))
         if align not in ("left", "center"):
             raise ValueError(f"unsupported text alignment: {align!r}")
         self.font, self.color, self.background, self.padding = font, color, background, padding
         self.align = align
         self.fixed_width = fixed_width
+        self.outline = outline
         self.text_size = (0, 0)
         self._lines = None
 
@@ -132,20 +137,30 @@ class TextLabel(ScreenQuad):
         if lines == self._lines:
             return self.text_size
         self._lines = lines
-        rendered = [self.font.render(line, True, self.color) for line in lines if line]
+        texts = [line for line in lines if line]
+        rendered = [self.font.render(line, True, self.color) for line in texts]
         content_width = max((line.get_width() for line in rendered), default=0) + 2 * self.padding
-        width = self.size[0] if self.fixed_width else min(self.size[0], content_width)
-        height = min(self.size[1], sum(line.get_height() for line in rendered) + 2 * self.padding)
+        box_width, box_height = self.size[0] - 2 * self._margin, self.size[1] - 2 * self._margin
+        width = box_width if self.fixed_width else min(box_width, content_width)
+        height = min(box_height, sum(line.get_height() for line in rendered) + 2 * self.padding)
         surface = pygame.Surface(self.size, pygame.SRCALPHA)
         if rendered and self.background:
-            surface.fill(self.background, (0, 0, width, height))
-        top = self.padding
-        for line in rendered:
-            left = self.padding if self.align == "left" else (width - line.get_width()) // 2
+            surface.fill(self.background, (self._margin, self._margin, width, height))
+        top = self.padding + self._margin
+        for text, line in zip(texts, rendered):
+            left = self._margin + (self.padding if self.align == "left" else (width - line.get_width()) // 2)
+            if self.outline:
+                # A 1 px black outline in every direction approximates the original's 5x5 stamped
+                # outline (notes/briefing_dialogue.md §3.3) without rendering 24 extra offsets.
+                black = self.font.render(text, True, (0, 0, 0))
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        if dx or dy:
+                            surface.blit(black, (left + dx, top + dy))
             surface.blit(line, (left, top))
             top += line.get_height()
         self.write(pygame.image.tobytes(surface, "RGBA"))
-        self.text_size = (width, height)
+        self.text_size = (width + 2 * self._margin, height + 2 * self._margin)
         return self.text_size
 
     def set_color(self, color):

@@ -12,6 +12,17 @@ from dataclasses import dataclass, field
 from .glue_animation import GlueBitmapAnimator
 from .glue import BitmapRecord, GlueInstruction, MissionRecord, MissionRef
 
+# notes/briefing_dialogue.md §3.5, "no speech / no audio device" fallback path (§7 point 9): the
+# engine has no WAV playback yet, so dialogue always uses the fixed no-speech pacing rather than
+# following a speech clip's playback position.
+DIALOGUE_CHAR_MILLISECONDS = 50  # 1 character / 2 ticks at the nominal 25 ms tick
+DIALOGUE_HOLD_MILLISECONDS = 750  # 30 ticks held after typing completes, no speech
+
+# Glue's gettentpos position table; notes/campaign_tent.md §3.
+TENT_POSITIONS = ((405, 332), (405, 332), (405, 332), (452, 316), (405, 332), (410, 346), (415, 349),
+                  (367, 288), (367, 288), (508, 215), (351, 309), (416, 243), (462, 209), (493, 194),
+                  (505, 195), (285, 187), (261, 159), (285, 187), (276, 238), (192, 214), (244, 269))
+
 
 @dataclass(frozen=True)
 class GlueInput:
@@ -142,6 +153,8 @@ class RuntimeAnimation:
     window_name: str
     animator: GlueBitmapAnimator
     notify_on_stop: bool = False
+    object_name: str = ""
+    notified: bool = False
 
 
 @dataclass
@@ -183,6 +196,13 @@ class GlueRuntimeState:
     pending: PendingRequest | None = None
     next_request_id: int = 1
     trace: list[InstructionTrace] = field(default_factory=list)
+    dialogue_window_name: str = ""
+    dialogue_lines: tuple[str, ...] = ()
+    dialogue_text: str = ""
+    dialogue_typed: int = 0
+    dialogue_ms: int = 0
+    dialogue_colour: str = "black"
+    object_positions: dict = field(default_factory=dict)
 
 
 class GlueRuntime:
@@ -229,20 +249,42 @@ class GlueRuntime:
             raise ValueError("tick duration must not be negative")
         effects = []
         completed = False
-        remaining = []
         for animation in self.state.animations:
             update = animation.animator.tick(milliseconds)
-            if update.finished and animation.notify_on_stop:
+            # A finite animation ends holding its last frame (notes/campaign_tent.md §5.3); the
+            # RuntimeAnimation stays in state.animations so a renderer keeps finding that held
+            # frame under the object's identity, instead of falling back to its (non-bitmap) base
+            # name once the object stops needing per-tick updates. `notified` fires the parked
+            # script's wait-release exactly once, so an old completed animation cannot later
+            # masquerade as the completion of a different, still-running one.
+            if update.finished and animation.notify_on_stop and not animation.notified:
+                animation.notified = True
                 completed = True
-                continue
-            remaining.append(animation)
-        self.state.animations = remaining
         if completed and self.state.wait_reason == "animation-finished":
             self.state.wait_reason = None
             if self.state.current is not None:
                 self.state.current.parked = False
             effects.extend(self.step_until_blocked())
+        if self.state.pending is not None and self.state.pending.kind == "dialogue":
+            effects.extend(self._advance_dialogue(milliseconds))
         return tuple(effects)
+
+    def _advance_dialogue(self, milliseconds):
+        """Type the pending line, hold it, then resolve the dialogue and resume (§3.5)."""
+        text = self.state.dialogue_text
+        self.state.dialogue_ms += milliseconds
+        if self.state.dialogue_typed < len(text):
+            while self.state.dialogue_typed < len(text) and self.state.dialogue_ms >= DIALOGUE_CHAR_MILLISECONDS:
+                self.state.dialogue_ms -= DIALOGUE_CHAR_MILLISECONDS
+                self.state.dialogue_typed += 1
+            if self.state.dialogue_typed < len(text):
+                return ()
+            self.state.dialogue_ms = min(self.state.dialogue_ms, DIALOGUE_HOLD_MILLISECONDS)
+        if self.state.dialogue_ms < DIALOGUE_HOLD_MILLISECONDS:
+            return ()
+        self.state.dialogue_ms = 0
+        self.state.pending = None
+        return (StopSpeech(), *self.step_until_blocked())
 
     def handle(self, input_):
         """Resume a parked script when its explicit wait event arrives."""
@@ -254,6 +296,8 @@ class GlueRuntime:
                 self.state.selected_mission = selected
             return ()
         if input_.kind == "dialogue-drain" and self.state.pending is not None and self.state.pending.kind == "dialogue":
+            self.state.dialogue_typed = len(self.state.dialogue_text)  # fast-forward, §3.6.2
+            self.state.dialogue_ms = 0
             self.state.pending = None
             return (StopSpeech(), *self.step_until_blocked())
         expected = self.state.wait_reason
@@ -400,6 +444,8 @@ class GlueRuntime:
                          "iftruedebriefwithsummary", "iffalsedebriefwithsummary"):
             if self._conditional(command):
                 self._request_debrief(command, argument, effects)
+        elif command == "settextcolor":
+            self.state.dialogue_colour = argument.strip().casefold()
         elif command in ("playtext", "queuetoplaytext"):
             self._dialogue(argument, command == "queuetoplaytext", effects)
         elif command in ("playmovie", "playmoviewithfade", "iftrueplaymovie", "iffalseplaymovie"):
@@ -473,10 +519,15 @@ class GlueRuntime:
         effects.append(UpdateWindow(target.name))
         last_bitmap = next((record for record in reversed(definition.records) if isinstance(record, BitmapRecord)), None)
         stop_frame = last_bitmap.values.get("animstopframe", -1) if last_bitmap is not None else -1
+        if last_bitmap is not None and "gettentpos" in last_bitmap.values:
+            # Resolved once, here, not re-evaluated later if tentpos changes (notes/campaign_tent.md §3).
+            index = self._parse_int(self.state.variables.get("tentpos", 0), 0)
+            if 0 <= index < len(TENT_POSITIONS):
+                self.state.object_positions[(target.name, name)] = TENT_POSITIONS[index]
         if animated and last_bitmap is not None:
             spec = {"bitmap": last_bitmap.values.get("setbitmap", ""), **last_bitmap.values}
             self.state.animations.append(RuntimeAnimation(target.name, GlueBitmapAnimator(spec),
-                                                          self._parse_int(stop_frame, -1) >= 0))
+                                                          self._parse_int(stop_frame, -1) >= 0, name))
         if animated and self._parse_int(stop_frame, -1) >= 0:
             self.state.wait_reason = "animation-finished"
             self.state.current.parked = True
@@ -495,7 +546,22 @@ class GlueRuntime:
             return
         if queued and not self.speech_enabled:
             return
+        self._queue_dialogue_line(string_id)
         self._request("dialogue", effects, string_id=string_id, queued=queued)
+
+    def _queue_dialogue_line(self, string_id):
+        """Scroll the previous line into history and start typing the next one (§3.3 ring buffer)."""
+        try:
+            text = self.content.string("BRTXT", string_id)
+        except KeyError:
+            text = ""
+        limit = max(1, self._parse_int(self.state.variables.get("textlines", 1), 1))
+        history = (*self.state.dialogue_lines, self.state.dialogue_text) if self.state.dialogue_text else self.state.dialogue_lines
+        self.state.dialogue_lines = history[-(limit - 1):] if limit > 1 else ()
+        self.state.dialogue_window_name = self.state.current_window_name
+        self.state.dialogue_text = text
+        self.state.dialogue_typed = 0
+        self.state.dialogue_ms = 0
 
     def _request_movie(self, argument, fade, effects):
         self._request("movie", effects, restore_context=True, movie=argument, fade=fade)

@@ -68,6 +68,12 @@ position when the block is parsed. Consequences:
 | 5 | 410 | 346 | 12 | 462 | 209 | 19 | 192 | 214 |
 | 6 | 415 | 349 | 13 | 493 | 194 | 20 | 244 | 269 |
 
+**Decision (project owner):** the table stays **hardcoded** in the engine as one documented table (`TENT_POSITIONS` in
+`whshr/glue_runtime.py`, citing this section). It is 22 small coordinate pairs, recorded here as a fact; reading it back out of
+`WHSHR.EXE` at run time was judged too close to extracting content from the executable for the clean-room policy. Do not add an
+executable-table loader for it. This is a deliberate exception to the "read scene data, do not hardcode it" rule of `CLAUDE.md`,
+because the values exist only inside the executable, not in any glue script or data file.
+
 (21 = 100, 100, unused.) Duplicates (0-2 and 4, 7 = 8, 15 = 17) are as stored. The campaign route runs from the Border Princes
 (south-east, 0-6) through the Black Mountains and Worlds Edge (7-14) to Nuln, Loren and Karak Norn (15-20).
 
@@ -143,8 +149,13 @@ Consequences: frames are `S, S-1, ..., E+1` (down to `0` when looping); each fra
 of a loop, which is on screen `T + L + 1` steps; a finite animation ends holding frame `E + 1`. `S = E` (both absent) is static and
 never ticks. `S = -1` draws the literal name every step (harmless: `SmallCross`). Cell numbering differs per family: caravan,
 Dietrich and tent cells are `0..N-1`, trail cells `1..N`; the rule only asks for `base + n`. All 160 animated blocks resolve.
-A bitmap is not drawn before its first tick (its stored name is still the unresolved base), so the first frame appears
-`T + 1` steps after the object is added 🟡 (inferred from the initial paint using the stored name).
+**First-frame delay** ✅ (code): `set:timecnt=T` initialises **both** the period `T` and the initial delay to `T` (a block without
+`timecnt` has both 0), so the first step-drawn frame `S` appears on step `T + 1` after the object is added (step 1, at most 50 ms, when
+`timecnt` is absent: 36 of the 185 animated blocks). Before that step the window paint draws the **stored base name** as written:
+for 153 animated blocks it is not a bitmap (`CarLampCell`, `Tent4`, `TrailBP1a`, ...), so nothing is drawn until the first step; for 32
+blocks it is a real bitmap (`Cross8` with `S = 7`, used by the `Mark*Object` cross markers) and that picture (the extra frame 8) is visible
+from the moment the object is added until step `T + 1` replaces it with frame 7. A looping animation's delay after the wrap is `T + L`
+(§5.2), not the initial value.
 
 ### 5.3 Timing and pausing ✅
 
