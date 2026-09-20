@@ -38,8 +38,11 @@ Sources: glue scripts in `WND.DLL` (all 535 resources), the front-end executable
 | `setwavvolume:<n>` | sets the speech/effects volume (0-100, initialised to 100); **no script uses it** | ✅ |
 | `pause` | no-op in the interpreter; no script uses it | ✅ |
 
-The current-tune name (set by `playmidi`, cleared by `stopmidi` and by the panel's Abort handler) is only used to replay the
-tune after the Options dialog closes. 🟡
+The **current-tune name** is set by `playmidi` and cleared by `stopmidi` and by the panel buttons that leave a screen for good
+(Abort, Accept, and Accept of panels 6/7/10: `notes/mission_selection.md` §4.2). While it is set, `PopContext` and
+`PopContextCheckResume` (leaving a caravan) and `OptionsDialogDone` (closing the Options dialog) **restart that tune from the beginning**
+(looping, paused if the game is paused); panel 9's Options button discards the running tune but keeps the name, so it comes back after the
+dialog. Abort discards the tune and clears the name, so nothing restarts it. ✅ (code)
 
 ### 2.2 Name to file
 
@@ -51,8 +54,8 @@ tune after the Options dialog closes. 🟡
   hypothesis in `notes/music.md`. ✅
 - **Looping**: the front end always calls the repeat setter with 0. The library maps `n <= 0` to a sentinel that means "restart
   when the tune ends, forever"; `n >= 1` means that many extra repeats. So **every glue tune loops until replaced or stopped**. ✅
-  (`notes/troop_selection.md` says the troop-selection tune is "played once, repeat semantics unverified": it uses the same
-  call, so it loops too.)
+  This includes the built-in tunes of the troop-selection, marching-order and debrief pages (`tactical`, `win`, `lose`): the same
+  repeat setter with 0 is called before each of them (`notes/troop_selection.md` was corrected accordingly). ✅
 - Loading a new tune first discards the previous one, so a `playmidi` over a playing tune is a hard cut. The library exports a
   fade-and-discard function, but neither the front end nor the game DLL ever calls it. ✅
 
@@ -81,7 +84,7 @@ tune after the Options dialog closes. 🟡
 | Main menu | `title` | window `[MIDI]` | ✅ |
 | Options | `intro3` | window `[MIDI]` | ✅ |
 | Caravan (all variants) | `scribe` | window `[MIDI]`, restarted on every entry | ✅ |
-| Map with mission list | none of its own, except the very first map (`looking`); whatever played before keeps playing | no `[MIDI]` on `MapWindow`; only `FlowScriptBP01` calls `addmidiobject` | ✅ (data) / 🟡 (continues) |
+| Map with mission list | none of its own, except the very first map (`looking`); whatever played before keeps playing. After a caravan visit that is the caravan's `scribe` tune (`UnwindMission` and `PopAndResume` never touch the music; `PopContext` restarts a remembered tune only if one is set). After **Abort** from a briefing the map is silent | no `[MIDI]` on `MapWindow`; only `FlowScriptBP01` calls `addmidiobject`; Abort stops and discards the tune; restoring a saved window does not restart window music | ✅ (data, code) / 🟡 (first map after Abort; `scribe` carrying over is inferred from the absence of any stop) |
 | Briefing | `sighted` | `playmidi` at `[START]` of the briefing script | ✅ |
 | Troop selection / marching order | `tactical` | built in | ✅ |
 | Debrief | `win` or `lose` | built in | ✅ |
@@ -188,11 +191,14 @@ proportionally slower. The numbers are the designed rate. 🟡 (reading of the t
    fast-forwarded (pauses are skipped) until the next wrap or the end, the speech clip is stopped once all text is
    typed, and the script resumes if the block completed. A click on a hotspot (panel button) does not skip. ✅ / 🟡: for a
    one-line block the completion path itself waits for the clip to end, so the click may not cut the audio short there.
-3. **Keyboard**: the glue window's key handler only records a hidden cheat key sequence. Keys do not advance dialogue. ✅ (this
-   window only; a global handler was not searched) 🟡
+3. **Keyboard**: the glue window's key handler only records a hidden cheat key sequence. Keys do not advance dialogue. The
+   application-level key input is an accelerator table (Ctrl+X, F2 in the test table) plus two start-up waits that Enter or a click
+   ends. There is no Enter/Esc/Space handling for dialogue anywhere. ✅ (`notes/mission_selection.md` §4.3)
 4. **Pause** (panel, `controlpanel=1`): §2.5. While paused the timer handler does nothing: no typing, no animation.
-5. **Abort** (panel): stops music and speech, tears down the briefing script and returns to the previous window. 🟡
-6. **Accept** (panel): opens troop selection (`notes/troop_selection.md`, `notes/mission_selection.md` §9.4). ✅
+5. **Abort** (panel): stops speech, discards the music and forgets its name, ends the briefing script, destroys the briefing windows
+   and pops the context stack back to the parked map (silent). ✅ (`notes/mission_selection.md` §4.2, §5, §8.1)
+6. **Accept** (panel): drains (skips) any text still pending, stops speech and music, and opens troop selection; the briefing script is not
+   resumed. ✅ (`notes/troop_selection.md`, `notes/mission_selection.md` §4.2)
 7. **`setdemodefault:res=<name>`** (last command of every briefing, value `troopselect` or `BPBrief1`): the name, an enable
    flag and a "last activity" time are stored on the window (the time is refreshed on mouse movement), **but nothing in the
    executable reads them**: it is an inert leftover of a demo / attract mode. So a briefing does **not** auto-continue and
@@ -200,79 +206,20 @@ proportionally slower. The numbers are the designed rate. 🟡 (reading of the t
 
 ## 4. Portrait animation during dialogue
 
-(Answers the "mouth / blink timing" open item in the portrait notes.)
+The mouth and blink sequences, frame roles, tick length and the meaning of `animseq` / `applyseq` are specified in
+**`notes/glue_portraits.md` §3** (sequence tables: §3.3, frame roles: §3.1); they are not repeated here. What matters for dialogue:
 
-Each `[ANIM]` portrait draws its base frame 0 plus two overlays. For the ordinary talking portraits (animation kind 5;
-kind 3 is a separate table used only by glue index 3) the executable holds four sequences per channel; the script's
-`animseq` selects the row (1 = talking, 2 = stopped). A sequence is a list of `(frame, duration)` pairs, played in steps
-of one timer message; a pair lasts `duration + 1` steps, then the list loops.
+- The portrait that talks is the window named by the last `applyseq` with `animseq=1`; all other portraits in the scene are `animseq=2`.
+  Talking is **scripted, not driven by the audio**: the scripts start and stop it explicitly around `queuetoplaytext`/`playtext`.
+- "Stopped" shows base frame 0 plus the closed-mouth overlay and the blinking eyes, not frame 0 alone.
+- Frame 2 is the open-eyes pose and frame 7 the closed (blink) pose (`glue_portraits.md` §3.1, verified visually).
+- One animation step per glue timer message (25 ms nominal); with this timing a talking mouth frame lasts 75 ms and the blink flash 50 ms.
 
-| Sequence | Overlay | Content (`frame:steps`) | Total steps |
-|---|---|---|---|
-| mouth 2 (stopped) | mouth frame 1 | `1:2` | 2 (static) |
-| mouth 1 (talking) | mouth frames 1, 3, 4, 5, 6 | `1:3 4:3 6:2 5:3 3:3 4:3 1:3 4:3 3:3 4:3 1:3 4:3 6:2 4:3 1:3 3:3 5:3 3:3 1:3 6:2 1:3 3:3 1:3 3:3 5:3 3:3 1:3 4:3 1:3 3:3 4:3 5:3 1:3 6:2 4:3 3:3` | 104 (2.6 s) |
-| mouth 0 | same frames | `1:3 5:3 4:3 5:3 6:2 4:3 3:3 4:3 1:3 3:3 4:3 1:3 4:3 3:3 1:3 4:3 1:3 6:2 3:3 4:3 5:3 6:2 3:3 4:3 1:3 5:3 3:3` | 78 |
-| mouth 3 | same frames | `1:3 6:2 4:3 5:3 4:3 5:3 4:3 1:3 3:3 4:3 1:3 3:3 4:3 1:3 6:2 3:3 4:3 1:3 4:3 3:3 1:3 3:3 6:2 5:3 3:3 1:3 4:3 1:3 3:3 4:3 3:3 4:3 1:3 3:3 6:2 1:3 5:3 3:3 5:3 3:3 1:3 3:3` | 122 |
-| eyes 1, 2, 3 | eye frames 2 and 7 | `2:50 7:2 2:37 7:2 2:41 7:2 2:47 7:2 2:23 7:2 2:45 7:2` | 255 (6.4 s) |
-| eyes 0, 4 | eye frames 2 and 7 | `2:50 7:2 2:42 7:2 2:45 7:2` | 143 |
+## 5. Portrait `index` -> sprite set
 
-- At 25 ms per step: talking mouth frames change every 75 ms (50 ms for frame 6); the eyes stay on frame 2 for about
-  0.6-1.25 s and flash frame 7 for 50 ms. The talking sequences are pre-baked pseudo-random lip flaps, not driven by the
-  audio. The eyes keep blinking while the portrait is stopped (the eye row for 2 is the same as for 1). ✅ (tables) / 🟡
-  (step = 25 ms)
-- Overlay position: the frame record's stored x/y (`notes/animations.md`); e.g. `SCRI` mouth overlays 44x26 at (40,84), eye
-  overlays 32x5 at (47,69). Which of frames 2 and 7 is the closed-eye pose is not checked; 7 is the 2-step flash, so it is
-  presumably the closed one. 🟡
-- "Stopped" therefore shows base frame 0 **plus** mouth frame 1 and eye frame 2 (with blinks), not frame 0 alone. ✅
-
-## 5. Portrait `index` -> sprite set (found while tracing the animation)
-
-`[ANIM] set:index=N` is an index into a 12-byte-per-entry table in the executable; the **first field is the entry number in
-the 220-entry sprite-name table** (`notes/sprite_names.md`). It confirms the two guesses and gives every other speaker.
-`bkindex` is a frame of the `AllBGs` -> `BACKALL` entry (entry 123, glue index 36). The other two fields are unknown.
-
-| Glue index | Sprite entry | File | Frames | Speakers in scripts | Anim kind |
-|---|---|---|---|---|---|
-| 0 | 79 `Ceridan1` | `CER1` | 8 | Ceridan, Ilmarin | 5 |
-| 1 | 83 `Carlsson` | `CARL` | 8 | Carlsson | 5 |
-| 2 | 84 `Commander` | `COMM` | 8 | Commander | 5 |
-| 3 | 102 `EshinAss` | `SKA4` | 6 | - | 3 |
-| **4** | **98 `Scribe`** | **`SCRI`** | 8 | **Dietrich**, Scribe | 5 |
-| 5 | 92 `lieutenant1` | `MER1` | 8 | Lt Godber | 5 |
-| 6 | 85 `Dwarf1` | `DWA1` | 7 | Harkon | 5 |
-| 7 | 86 `Dwarf2` | `DWA2` | 8 | Dargrimm | 5 |
-| 8 | 87 `Dwarf3` | `DWA3` | 8 | - | 5 |
-| 9 | 88 `Dwarf4` | `DWA4` | 8 | - | 5 |
-| 10 | 91 `Gotrek` | `GOTR` | 8 | Gotrek, Ungrunn | 5 |
-| 11 | 89 `Elf1` | `ELF1` | 8 | Galed | 5 |
-| 12 | 82 `FlameStrike` | `BRIW` | 8 | Luther Flamestrike | 5 |
-| 13 | 93 `Merc2` | `MER2` | 8 | - | 5 |
-| 14 | 97 `Reiks` | `REIK` | 8 | - | 5 |
-| 15 | 95 `Orc2` | `ORC2` | 8 | - | 5 |
-| 16 | 90 `Goblin1` | `GOB1` | 8 | - | 5 |
-| 17 | 103 `Bernard` | `BERN` | 8 | Cpt Bernard | 5 |
-| 18 | 80 `Ceridan2` | `CER2` | 8 | Ceridan | 5 |
-| 19 | 106 `Bernardi` | `BERI` | 8 | Cpt Bernard | 5 |
-| 20 | 107 `Holger` | `HOLG` | 8 | Holger | 5 |
-| 21 | 108 `Engrol` | `ENGR` | 8 | Engrol | 5 |
-| 22 | 109 `Azguz` | `AZGU` | 8 | Azguz | 5 |
-| 23 | 117 `Allor` | `AMBE` | 8 | Allor | 5 |
-| 24 | 116 `Schepke` | `GINF` | 8 | - | 5 |
-| 25 | 115 `Ramon` | `RAMO` | 8 | - | 5 |
-| 26 | 111 `Carrowburg` | `CARO` | 8 | - | 5 |
-| 27 | 81 `Artill1` | `ART1` | 8 | - | 5 |
-| 28 | 110 `Marius` | `CELE` | 8 | Marius | 5 |
-| 29 | 113 `NulnHalb` | `HALB` | 8 | - | 5 |
-| 30 | 112 `Keeler` | `KEEL` | 8 | - | 5 |
-| 31 | 118 `Fletcher` | `XBOW` | 8 | - | 5 |
-| 32 | 121 `Treeman` | `TREE` | 6 | - | 5 |
-| 33 | 120 `Hammer` | `HAMM` | 8 | - | 5 |
-| 34 | 122 `Iron` | `IRON` | 8 | - | 5 |
-| 35 | 119 `King` | `KING` | 8 | Ungrunn | 5 |
-| 36 | 123 `AllBGs` | `BACKALL` | 21 | (backdrops for `bkindex`) | none |
-
-Two glue names share a sprite set (`Ceridan` uses index 0 and 18, `Cpt Bernard` 17 and 19). `Treeman` and `Dwarf1` have 6-7
-frames, so their overlay frame numbers need checking against the kind-5 sequences before use. ✅ (table) / 🟡 (those two)
+The table (glue index -> sprite set -> speaker, 37 entries, plus the `BACKALL` backdrop entry) is in **`notes/glue_portraits.md` §1**.
+That note is authoritative; this section previously held a copy with the sprite-name-table entry numbers, which are
+the same records seen from the other side (each record holds a sprite-table index, `notes/sprite_names.md`).
 
 ## 6. Data versus front-end constants
 
@@ -289,8 +236,8 @@ frames, so their overlay frame numbers need checking against the kind-5 sequence
 | Text font slot, bottom anchoring, 5 % / 90 % margins, 1.5 x and 1.10 x line spacing, 2 px outline; `settextalign` (default left) | TABLE + DATA | §3.1, §3.3 |
 | Colour names -> RGB | TABLE | §3.4 |
 | Typing rate (1 char / 2 ticks), scroll gap 4, hold 30 / 8, tick = 25 ms | TABLE | §3.5 |
-| Portrait mouth / eye sequences | TABLE | §4 |
-| Glue index -> sprite set | TABLE | §5 |
+| Portrait mouth / eye sequences | TABLE | `notes/glue_portraits.md` §3 |
+| Glue index -> sprite set | TABLE | `notes/glue_portraits.md` §1 |
 | `setdemodefault`, `[DEMODEFAULT]` | DATA, unused | §3.6 |
 
 ## 7. What `whshr/briefing.py` and the briefing scene / view should read
@@ -306,8 +253,8 @@ Per the current tree it should additionally take from data:
    §3.4 table; keep the name, not just an RGB, in the data).
 3. **Speaker**: the portrait that talks is the window named by the last `applyseq` with `animseq=1`; every other portrait in the
    scene is `animseq=2`. Both keep blinking.
-4. **Portrait art**: resolve `index` with the §5 table (not a per-speaker constant), draw base frame 0, then the two overlay
-   channels from the §4 sequences; `bkindex` selects the `BACKALL` frame.
+4. **Portrait art**: resolve `index` with the table in `notes/glue_portraits.md` §1 (not a per-speaker constant), draw base frame 0,
+   then the two overlay channels from its §3 sequences; `bkindex` selects the `BACKALL` frame (palette: its §2.1).
 5. **Font**: the briefing text uses glue font slot **4** (`glue_font_asset(4)`, `SUBTEXT`). The scene currently loads the
    battle font `PCTEXTA`; that is not the original's choice.
 6. **Pacing**: replace "click or Enter advances" by the original model: type at 1 character / 2 ticks, hold 30 ticks
@@ -321,13 +268,15 @@ Per the current tree it should additionally take from data:
 
 ## 8. Open questions
 
+Resolved since the first version: music after Abort (silent, §2.1/§2.4), a global keyboard handler (none for dialogue, §3.6), which eye
+frame is closed (7, `glue_portraits.md`), what the remembered tune name is used for (§2.1). Full register: `ROADMAP.md`.
+
 - 🟡 Effective step rate: designed 25 ms, but the timer code steps once per message; the original ran at whatever the OS timer gave
   (about 55 ms on Windows 9x). A runtime capture (Wine, timing a briefing) would settle what the original felt like.
 - 🟡 Click during a single-line block with audio: the completion path waits for the clip to end; check whether the audio can
   be cut by a click in the real game.
-- 🟡 Music that keeps playing across a window that has no `[MIDI]`, and what the map plays after Abort from a briefing.
-- ⬜ Meaning of the two remaining fields of the glue-index table (values such as 26/6 for the Commander).
-- ⬜ Which eye frame (2 or 7) is the closed pose, and the overlay frames of the 6- and 7-frame portraits.
-- ⬜ Whether a global keyboard handler (outside the glue window) advances or skips dialogue.
+- 🟡 Music on the first campaign map after Abort (its window carries its own tune).
+- ⬜ Meaning of the two remaining fields of the glue-index table (`glue_portraits.md` §6).
+- ⬜ Overlay frames of the 6- and 7-frame portraits (`Dwarf1`, `Treeman`, ...) against the kind-5 sequences.
 - ⬜ Default music option on a fresh install (no saved options string): GM is a guess.
 - ⬜ Whether `setdemodefault` is read by an out-of-tree demo build; it is inert here.

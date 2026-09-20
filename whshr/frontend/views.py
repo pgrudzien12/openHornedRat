@@ -9,7 +9,8 @@ from ..result_scene import ResultScene
 from .battle_view import BattleView
 from .caravan_view import CaravanView
 from .intro_view import IntroView
-from .menu_view import BriefingView, MainMenuView
+from .briefing_view import BriefingView
+from .menu_view import MainMenuView
 from .mission_map_view import MissionMapView
 from .opening_view import OpeningNarrationView
 from .result_view import ResultView

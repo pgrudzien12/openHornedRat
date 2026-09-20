@@ -7,13 +7,25 @@ the current mission window, completed mission resource ids, and coffers.
 
 from dataclasses import dataclass, field
 
-from .campaign import build_campaign_graph, load_wnd_rcdata, parse_window_ui
-from .legacy import module
+from .campaign import build_campaign_graph, parse_window_ui
+from .glue_content import GlueContent
 from .paths import Installation
 
 
 FIRST_FLOW = "FLOWSCRIPTBP01"
 INITIAL_COFFERS = 500
+
+# These animation objects are created by the caravan built-in, not declared by
+# STARTCARAVAN. CARAVANCOMMON3 supplies the reading positions; the talking
+# positions come from the built-in routine.
+CARAVAN_BUILTIN_BITMAPS = (
+    {"bitmap": "DietBookCell", "x": 296, "y": 260, "animstartframe": 11,
+     "animstopframe": -1, "timecnt": 1, "looptimecnt": 90, "mask": "Mask"},
+    {"bitmap": "ReadEyesCell", "x": 312, "y": 208, "animstartframe": 2,
+     "animstopframe": -1, "timecnt": 1, "looptimecnt": 30, "mask": "Mask"},
+    {"bitmap": "DietMouthCell", "x": 288, "y": 220},
+    {"bitmap": "TalkEyesCell", "x": 300, "y": 200},
+)
 
 
 def mission_visible(missions, mission, taken):
@@ -72,10 +84,12 @@ class CampaignState:
     mission_window: str = None
     completed: set[int] = field(default_factory=set)
     coffers: int = INITIAL_COFFERS
+    tentpos: int = 0
     hotspots: tuple[dict, ...] = ()
     caravan_bitmaps: tuple[dict, ...] = ()
     caravan_continuation: str | None = None
     hints: dict[int, str] = field(default_factory=dict)
+    content: object = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
         if self.mission_window is None:
@@ -88,6 +102,8 @@ class CampaignState:
     def _open_next_window(self, start):
         steps = self.graph["flow_scripts"].get(self.flow, ())
         for index in range(start, len(steps)):
+            if steps[index]["action"] == "set_tentpos":
+                self.tentpos = steps[index]["pos"]
             if steps[index]["action"] == "add_window":
                 self.flow_step = index
                 self.mission_window = steps[index]["window"]
@@ -97,6 +113,13 @@ class CampaignState:
     @property
     def scroll_count(self):
         return caravan_scroll_count(len(self.missions))
+
+    @property
+    def caravan_bitmap_specs(self):
+        """Window data plus the animation objects created by the caravan built-in."""
+        specs = {bitmap["bitmap"].casefold(): bitmap for bitmap in CARAVAN_BUILTIN_BITMAPS}
+        specs.update({bitmap.get("bitmap", "").casefold(): bitmap for bitmap in self.caravan_bitmaps})
+        return specs
 
     @property
     def map_portrait_window(self):
@@ -131,15 +154,18 @@ class CampaignState:
         return text % format_args if format_args else text
 
     @classmethod
-    def from_installation(cls, installation):
+    def from_installation(cls, installation, content=None):
         game = installation if isinstance(installation, Installation) else Installation(installation)
-        wnd = load_wnd_rcdata(game.file_dir("DLL", "WND.DLL"))
-        hints = module("pe_missions").load_strings(str(game.file_dir("DLL", "BRTXT.DLL")))
+        content = content or GlueContent(game)
+        wnd = content.resources
+        tables = {name: content.strings(name) for name in ("BRTXT", "BKTXT", "GMTXT")}
+        hints = tables["BRTXT"]
         caravan_ui = parse_window_ui(wnd, "STARTCARAVAN")
         hotspots = tuple(caravan_ui["hotspots"])
-        return cls(build_campaign_graph(str(game.root)), flow=initial_flow(hotspots), hotspots=hotspots,
+        return cls(build_campaign_graph(str(game.root), wnd=wnd, string_tables=tables),
+                   flow=initial_flow(hotspots), hotspots=hotspots,
                    caravan_bitmaps=tuple(caravan_ui["bitmaps"]),
-                   caravan_continuation=start_caravan_continuation(hotspots), hints=hints)
+                   caravan_continuation=start_caravan_continuation(hotspots), hints=hints, content=content)
 
     @classmethod
     def single_mission(cls, briefing):

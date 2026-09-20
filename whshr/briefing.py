@@ -1,47 +1,105 @@
-"""Mission briefing text: title and spoken lines for one battle, from the campaign glue scripts.
+"""Mission briefing projection from the shared typed glue-content repository.
 
-Reuses whshr.campaign's WND.DLL glue-script parser rather than re-deriving the campaign flow.
-Stdlib-only; the briefing scene presents this data without opening any original file itself.
+Stdlib-only; the briefing scene presents this data without opening original files.
 """
 
-from .campaign import build_campaign_graph, load_wnd_rcdata, parse_glue_lines
-from .legacy import module
+from .campaign import build_campaign_graph, parse_window_portrait, parse_window_ui
+from .glue import GlueProgram, MissionRef, parse_glue_resource, parse_glue_resources
 from .paths import Installation
 
 TEXT_COMMANDS = ("playtext", "queuetoplaytext")
 
 
-def _find_mission(campaign_graph, briefing_key):
+def _find_mission(campaign_graph, mission_ref):
     """Return the exact mission record named by its stable campaign-record key."""
+    briefing_key = mission_ref.key if isinstance(mission_ref, MissionRef) else mission_ref
     for mission_list in campaign_graph["mission_windows"].values():
         for mission in mission_list:
-            if mission.get("briefing_key") == briefing_key:
+            if mission.get("mission_ref") == mission_ref or mission.get("briefing_key") == briefing_key:
                 return mission
     raise ValueError(f"no campaign mission record has briefing key {briefing_key!r}")
 
 
-def _spoken_lines(glue_text, strings):
-    """Yield {speaker_color, text} for every playtext/queuetoplaytext command, in script order."""
-    color = None
-    for command, argument in parse_glue_lines(glue_text):
-        if command == "settextcolor":
+def _briefing_layout(wnd, glue_text, strings):
+    """Interpret the display-only part of one briefing glue program.
+
+    This is intentionally a small, explicit subset of the glue interpreter:
+    the commands which create its map, speakers, dialogue batches, and map
+    overlays.  Battle/troop-selection commands stay scene transitions.
+    """
+    resources = (wnd if all(not isinstance(value, str) for value in wnd.values())
+                 else parse_glue_resources(wnd))
+    program = glue_text if isinstance(glue_text, GlueProgram) else parse_glue_resource("<briefing>", glue_text)
+    map_ui, portraits, objects, turns = None, [], [], []
+    color, speaker, queued = None, None, []
+    text_lines, midi, tentpos, animseq = 1, [], None, 1
+    for instruction in program.instructions:
+        command, argument = instruction.command, instruction.argument
+        if command == "openwindow" and argument.lower().startswith("res="):
+            map_ui = parse_window_ui(resources, argument[4:])
+        elif command == "opensubwindow" and argument.lower().startswith("res="):
+            name = argument[4:]
+            portrait = parse_window_portrait(resources, name)
+            if portrait is not None:
+                portraits.append(portrait)
+        elif command == "settextcolor":
             color = argument
+        elif command == "playmidi":
+            midi.append(argument)
+        elif command == "set" and argument.startswith("textlines="):
+            text_lines = int(argument[10:])
+        elif command == "set" and argument.startswith("tentpos="):
+            tentpos = int(argument[8:])
+        elif command == "set" and argument.startswith("animseq="):
+            animseq = int(argument[8:])
+        elif command == "applyseq" and argument.lower().startswith("res="):
+            # The preceding ``set:animseq=1`` tells the original renderer who
+            # is talking.  The dialogue's own colour is still authoritative.
+            speaker = argument[4:].upper()
+        elif command == "addanimobject" and argument.lower().startswith("res="):
+            overlay = parse_window_ui(resources, argument[4:])
+            objects.append({"after_turn": len(turns), "bitmaps": overlay["bitmaps"]})
         elif command in TEXT_COMMANDS and argument.startswith("res="):
-            text = strings.get(int(argument[4:]))
+            text_id = int(argument[4:])
+            text = strings.get(text_id)
             if text is not None:
-                yield {"speaker_color": color, "text": text}
+                queued.append((text_id, text))
+            if command == "playtext" and queued:
+                # ``queuetoplaytext`` schedules individual BRTXT strings;
+                # ``playtext`` starts that queue.  They are not one large
+                # caption: scripts set ``textlines=2`` and the strings are
+                # often complete, paragraph-length sentences.
+                turns.extend({"speaker": speaker, "speaker_color": color, "lines": [line],
+                              "text_id": text_id, "text_lines": text_lines, "animseq": animseq}
+                             for text_id, line in queued)
+                queued = []
+    if map_ui is not None:
+        for text in map_ui["texts"]:
+            if isinstance(text.get("res"), int):
+                text["text"] = strings.get(text["res"], "")
+    return {"map": map_ui, "portraits": portraits, "objects": objects, "turns": turns,
+            "midi": midi, "tentpos": tentpos, "text_lines": text_lines,
+            "strings": strings}
 
 
-def load_briefing(installation, briefing_key):
+def load_briefing(installation, briefing_key, content=None):
     """Build a briefing from the exact mission record that opened it."""
     game = installation if isinstance(installation, Installation) else Installation(installation)
-    campaign_graph = build_campaign_graph(str(game.root))
+    if content is None:
+        from .glue_content import GlueContent
+        content = GlueContent(game)
+    wnd = content.resources
+    tables = {name: content.strings(name) for name in ("BRTXT", "BKTXT", "GMTXT")}
+    campaign_graph = build_campaign_graph(str(game.root), wnd=wnd, string_tables=tables)
     mission = _find_mission(campaign_graph, briefing_key)
-    wnd = load_wnd_rcdata(game.file_dir("DLL", "WND.DLL"))
-    glue_text = wnd.get((mission.get("brief_script") or "").upper(), "")
-    strings = module("pe_missions").load_strings(str(game.file_dir("DLL", "BRTXT.DLL")))
+    glue_text = wnd.get((mission.get("brief_script") or "").upper(), parse_glue_resource("<empty>", ""))
+    strings = tables["BRTXT"]
+    layout = _briefing_layout(wnd, glue_text, strings)
     return {
         "battle": mission.get("battle", "").upper(),
         "title": mission.get("name") or mission.get("battle", "").upper(),
-        "lines": list(_spoken_lines(glue_text, strings)),
+        # Keep the flattened form for callers which only need a transcript.
+        "lines": [{"speaker_color": turn["speaker_color"], "text": line}
+                  for turn in layout["turns"] for line in turn["lines"]],
+        **layout,
     }

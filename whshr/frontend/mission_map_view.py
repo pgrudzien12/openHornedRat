@@ -6,16 +6,17 @@ from .bitmap_font import BitmapFont
 from ..controlpanel import button_y, control_panel
 from .gpu import ScreenQuad
 from .glue_bitmap import load_bitmap
-from .scene_view import SceneView
+from .scene_view import NativeScreenView
 
 
-class MissionMapView(SceneView):
+class MissionMapView(NativeScreenView):
     """Present the original map artwork with data-driven selectable scrolls."""
 
-    NATIVE_SIZE = (640, 480)
     SCROLL_ORIGIN = (30, 15)
     SCROLL_SIZE = (144, 88)
     ROW_PITCH = 90  # The glue layout rounds the 88-pixel scroll artwork to 90 pixels.
+    SCROLL_TEXT_X = 10  # FUN_0044d2b2: row label x offset inside Scroll0/Scroll1.
+    SCROLL_TEXT_WIDTH = SCROLL_SIZE[0] - 2 * SCROLL_TEXT_X
     TEXT_HEIGHT = 12
     FRAME_ORIGIN = (4, 4)
     PORTRAIT_ORIGIN = (12, 12)
@@ -23,7 +24,7 @@ class MissionMapView(SceneView):
     BUTTON_X = 9
 
     @staticmethod
-    def _wrap_mission_name(font, name, width=120):
+    def _wrap_mission_name(font, name, width=SCROLL_TEXT_WIDTH):
         """Wrap BRTXT's one-line mission name inside a scroll's text column."""
         words, lines, current = name.split(), [], ""
         for word in words:
@@ -39,22 +40,20 @@ class MissionMapView(SceneView):
 
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
-        self.map = self._load_quad(gpu, "MAP.png")
-        self.scrolls = (self._load_quad(gpu, "SCROLL0.png", colorkey=True),
-                        self._load_quad(gpu, "SCROLL1.png", colorkey=True))
+        self.map = self._load_quad(gpu, "MAP")
+        self.scrolls = (self._load_quad(gpu, "SCROLL0", colorkey=True), self._load_quad(gpu, "SCROLL1", colorkey=True))
         self.portrait_window = scene.portrait_window
         self.panel = control_panel(self.portrait_window.get("controlpanel", 0) if self.portrait_window else 0)
         self.frame = {
-            name: self._load_quad(gpu, f"{name}.png", colorkey=True)
+            name: self._load_quad(gpu, name, colorkey=True)
             for name in ("FRAMETOP", "FRAMELEFT", "FRAMERIGHT", self.panel.bitmap)
         }
-        self.button_up = self._load_quad(gpu, "FRAMEBUTTONUP.png", colorkey=True)
-        self.button_down = self._load_quad(gpu, "FRAMEBUTTONDN.png", colorkey=True)
+        self.button_up = self._load_quad(gpu, "FRAMEBUTTONUP", colorkey=True)
+        self.button_down = self._load_quad(gpu, "FRAMEBUTTONDN", colorkey=True)
         portrait = scene.speaker_portrait
         self.map_panel = self.portrait_window is not None
         self.button_slots = tuple(reversed(range(self.panel.slot_count)))
-        # The map/list uses compact black PCTEXTA glyphs.  Keep the working
-        # height at eight pixels until the original font-2 renderer is traced.
+        # The map/list uses compact black PCTEXT glyphs from glue font 2.
         self.button_color = (0, 0, 0)
         self.text_font = BitmapFont(scene.font)
         self.dietrich = None
@@ -67,8 +66,8 @@ class MissionMapView(SceneView):
         # Mission-window scripts define their origin but no text placement or
         # colour.  The original executable owns those values; retain this
         # deliberately isolated approximation until that renderer is traced.
-        self.labels = [gpu.text((120, 64), self.text_font, color=(0, 0, 0), background=None,
-                                padding=0, align="center", fixed_width=True)
+        self.labels = [gpu.text((self.SCROLL_TEXT_WIDTH, 64), self.text_font, color=(0, 0, 0), background=None,
+                                padding=0, align="left", fixed_width=True)
                        for _ in scene.missions]
         self.button_labels = [gpu.text((119, self.TEXT_HEIGHT), self.text_font, color=self.button_color, background=None,
                                        padding=0, align="center", fixed_width=True)
@@ -77,8 +76,8 @@ class MissionMapView(SceneView):
         self._button_selection = object()
         self._set_button_labels()
 
-    def _load_quad(self, gpu, filename, colorkey=False):
-        surface = load_bitmap(self.scene.installation, filename.removesuffix(".png"))
+    def _load_quad(self, gpu, resource_name, colorkey=False):
+        surface = load_bitmap(self.scene.content, resource_name)
         if colorkey:
             surface = surface.convert()
             surface.set_colorkey((0, 0, 255))
@@ -113,13 +112,6 @@ class MissionMapView(SceneView):
         slot = self.button_slots[index]
         action = self.panel.actions[slot] if slot < len(self.panel.actions) else None
         return action == "return_to_caravan" or (action is not None and self.scene.selected_mission is not None)
-
-    def _layout(self):
-        screen_width, screen_height = self.gpu.target.size
-        native_width, native_height = self.NATIVE_SIZE
-        scale = min(screen_width / native_width, screen_height / native_height)
-        return ((screen_width - native_width * scale) / 2,
-                (screen_height - native_height * scale) / 2, scale)
 
     def _mission_at(self, pos):
         left, top, scale = self._layout()
@@ -200,7 +192,8 @@ class MissionMapView(SceneView):
             x, y = self.SCROLL_ORIGIN[0], self.SCROLL_ORIGIN[1] + index * self.ROW_PITCH
             self.scrolls[index == self.scene.selected_index].draw(left + x * scale, top + y * scale,
                                                        self.SCROLL_SIZE[0] * scale, self.SCROLL_SIZE[1] * scale)
-            label.draw(left + (x + 12) * scale, top + (y + 10) * scale, 120 * scale, 64 * scale)
+            label.draw(left + (x + self.SCROLL_TEXT_X) * scale, top + (y + 10) * scale,
+                       self.SCROLL_TEXT_WIDTH * scale, 64 * scale)
 
     def release(self):
         for quad in (self.map, *self.scrolls, *self.frame.values(), self.button_up, self.button_down):

@@ -26,7 +26,7 @@ these contracts directly.
 - A catalog indexes metadata only. It never imports game bytes or becomes a second
   source of asset truth.
 - Assets load on demand and are cached by stable logical ID and source fingerprint.
-- A coarse scene declares predictable immediate assets and optional next-scene prefetches. Interpreted glue programs request dynamically discovered resource assets through the same catalog and cache.
+- A coarse scene declares predictable immediate assets. `SceneManifest.prefetch` records safe future candidates but no scheduler acts on it yet. Interpreted glue programs request dynamically discovered resource assets through the same catalog and cache.
 - Caches have explicit ownership. Transitioning away from a battle can release its
   terrain, scenery, and unit resources without evicting reusable campaign UI assets.
 - Original mission DLLs are not native plugins and must never be executed as code.
@@ -40,9 +40,15 @@ these contracts directly.
 | `AssetCatalog` | Metadata mapping from an `AssetId` to source path/resource ID, decoder, dependencies, and source fingerprint. |
 | `AssetLoader` | Loads and decodes a requested typed asset from the original installation. |
 | `AssetCache` | Holds decoded CPU data and uploaded GPU resources, keyed by `AssetId` and invalidated when the source changes. |
-| `SceneManifest` | Predictable immediate and prefetch dependencies for one coarse scene. |
+| `SceneManifest` | Predictable immediate dependencies plus inactive hints for a future measured prefetch scheduler. |
 | `Scene` | Owns a coarse application mode such as the intro, glue front end, movie or battle. |
 | `GlueContent` | Resolves programs, windows and their dynamic resource references through catalog IDs. |
+
+`GlueContent` is implemented as the shared lazy repository owned by `SceneAssets`. It
+indexes each PE container once, keeps indexed bitmap decoding headless, caches portrait
+sources, and supports overlay repositories for later mod precedence. Runtime-discovered
+catalog entries can be retained with `SceneAssets.acquire(identifier, owner)` and released
+together with `release_owner(owner)`.
 
 ## Logical asset catalog
 
@@ -119,8 +125,8 @@ installation and repository, be safely invalidated, and never replace original f
 ### 1. Intro cutscene
 
 Load one Omni `.SI` container and its video, WAV, MIDI, and event-track objects.
-Play the confirmed 8 fps video timing. While the video is playing, prefetch the main
-menu manifest. Skipping the video transitions directly to the menu.
+Play the confirmed 8 fps video timing. Skipping the video transitions directly to the menu.
+The manifest identifies the menu as safe to prefetch, but the current engine loads it on transition.
 
 Implemented reference behaviour: `IntroScene` loads the verified game-intro container
 `vanilla:cutscene/a1` (`A1.SI`) through `SceneAssets` and `AssetCache`. Its timeline
@@ -140,12 +146,13 @@ For a battle, load the selected `.BTS` and `.MRC`, then lazily resolve their dir
 ## Implementation order
 
 1. Keep the existing `AssetId`, `AssetLocator`, catalog, cache and coarse scene lifecycle.
-2. Add resource-level IDs and a one-time `GlueContent` index for programs, windows, bitmaps and strings.
-3. Move PE bitmap decoding into the stdlib core and keep GPU conversion in the frontend.
-4. Add dynamic acquire/release support for assets discovered by `GlueRuntime`.
-5. Implement the lossless glue importer, runtime and render model in the phases defined by `notes/glue_runtime_architecture.md`.
-6. Invoke battle, movie and built-in UI scenes through typed request/result adapters and resume the same glue runtime.
-7. Add prefetch only where the next dependency is predictable and measure whether it is useful.
+2. Use the implemented `whshr.glue` lossless importer as the only parser for window and program resources.
+3. Use the implemented resource-level IDs and shared `GlueContent` index for programs, windows, bitmaps and strings.
+4. Keep indexed bitmap decoding in the stdlib core and RGBA/GPU conversion in the frontend.
+5. Use explicit cache owners for assets discovered dynamically by the future `GlueRuntime`.
+6. Implement the render model and runtime in the phases defined by `notes/glue_runtime_architecture.md`.
+7. Invoke battle, movie and built-in UI scenes through typed request/result adapters and resume the same glue runtime.
+8. Add prefetch only where the next dependency is predictable and measure whether it is useful.
 
 ## Deferred work
 

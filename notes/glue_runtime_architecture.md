@@ -10,7 +10,10 @@ The reverse engineering behind this decision is in:
 - `notes/campaign_tent.md` — `[BITMAP]` animation and `tentpos`;
 - `notes/glue_portraits.md` — portrait tables and animation sequences;
 - `notes/troop_selection.md` — the largest built-in campaign widget;
-- `notes/campaign.md` — progression, economy, saves and debriefing; and
+- `notes/campaign.md` — progression, economy, saves and debriefing;
+- `notes/activity_results.md` — the activity completion channels and resume contracts;
+- `notes/debrief_evaluation.md` — objective evaluators, `Result:` values and payment paths;
+- `notes/builtin_widgets.md` — reinforcement, roster, save/load, options and marching-order widgets; and
 - `notes/data_driven_audit.md` — the earlier audit of data accidentally copied into Python constants.
 
 ## 1. Decision
@@ -256,28 +259,28 @@ Do not block implementation on low-value unknowns. Unsupported behavior must be 
 | System | Research status | Work still required | Blocks |
 |---|---|---|---|
 | Window grammar | Mostly established | Typed importer and all-resource validation | first generic window |
-| Glue control flow | Major commands known, scattered across notes | One instruction reference; verify remaining status/wait/return details as encountered | complete VM |
+| Glue control flow | Established: `notes/glue_interpreter.md` (status/mask/mode, gosub/goto/return, waits, window and object commands, the four stacks, caravan entry, battle/movie/debrief/dialogue suspension and resumption); `python3 -m whshr glue-spec` reports command coverage | Implement it; open items are listed in §11 of that note | complete VM (unblocked) |
 | Window/context stack | Structure and main actions established | Implement and serialize it | faithful navigation/save |
 | Bitmap animation | General algorithm established | Implement data timing/frame resolution; runtime checks are polish | caravan/briefing animation |
 | Portrait animation | Tables and sequences established | Implement shared animator; a few outlier overlays remain | animated dialogue |
 | Dialogue | Layout and nominal timing established | Speech-progress coupling, queue behavior, ring buffer and click drain | faithful briefings |
 | Music/speech | Lookup and main semantics established | Audio host/effects and pause/resume | campaign audio |
-| Palette choice | Partly unresolved | Resolve DIB versus WinG palette policy or isolate compatibility modes | final colour fidelity |
+| Palette choice | Established: `notes/palette_selection.md` (one application palette; `palindex` pair on top-level open; embedded table for `-1` and full-screen pictures; system slots; verified 0 mismatches over 77 windows) | Headless `AppPalette` and runtime palette snapshots are implemented; route indexed rendering through it with `GlueView` (troop-screen icon palette remains an observation detail) | colour fidelity (unblocked) |
 | Mission list | Substantially established | Built-in widget model and renderer | mission selection |
 | Troop selection | Main model/layout established | Implement; research reinforcement window and a few edge flows | starting campaign battles |
 | Books/options/save UI | Entry points known | Implement built-in adapters; some layouts remain | complete campaign shell |
-| Debrief/economy | Main flow established | Decode evaluator table and result values | correct post-battle campaign |
+| Debrief/economy | Established: `notes/debrief_evaluation.md` (evaluator table, `Result:` values and payment paths) | Integrate evaluator and payment state with campaign persistence | correct post-battle campaign |
 | Save compatibility | Container and major state known | Runtime snapshot plus remaining `STAX` fields | original save import/export |
 
-Priority research remains the register in `ROADMAP.md`. In particular, debrief evaluators affect progression; unused ornament fields and machine-dependent historical timer speed do not block the VM.
+Priority research remains the register in `ROADMAP.md`. The evaluator research is complete; its integration is now implementation work. Unused ornament fields and machine-dependent historical timer speed do not block the VM.
 
 ## 6. Incremental implementation plan
 
 Each phase must leave the existing battle path usable. Old campaign scenes may coexist temporarily, but new glue behavior must be implemented in the shared path.
 
-A phase is not complete until its code, tests and affected documentation agree. The implementing agent must perform the documentation audit in §8 and remove or rewrite stale design text as part of the same change.
+A phase is not complete until its code, tests and affected documentation agree. The implementing agent must evolve the test suite with the production architecture, perform the documentation audit in §8, and remove or rewrite stale tests and design text as part of the same change.
 
-### Phase 0 — Establish regression fixtures
+### Phase 0 — Establish regression fixtures (implemented)
 
 Deliverables:
 
@@ -292,7 +295,7 @@ Exit criteria:
 - Every statement has a source location.
 - The coverage report is deterministic and unknown reachable commands fail a focused runtime test with a useful diagnostic.
 
-### Phase 1 — Lossless typed importer
+### Phase 1 — Lossless typed importer (implemented)
 
 Deliverables:
 
@@ -308,7 +311,7 @@ Exit criteria:
 - Round-trip diagnostic output preserves statement order and arguments.
 - No new runtime code parses raw glue text itself.
 
-### Phase 2 — Headless resource repository and asset cleanup
+### Phase 2 — Headless resource repository and asset cleanup (implemented)
 
 Deliverables:
 
@@ -342,7 +345,7 @@ Exit criteria:
 - Includes preserve original draw and hit-test order.
 - Headless tests validate the render model; screenshot tests cover only final presentation.
 
-### Phase 4 — Core glue VM and navigation
+### Phase 4 — Core glue VM and navigation (runtime foundation implemented)
 
 Implement in vertical slices:
 
@@ -355,10 +358,11 @@ Implement in vertical slices:
 
 Deliverables:
 
-- `GlueRuntime`, `GlueRuntimeState`, typed input and effects.
-- Deterministic instruction tracing for tests/debugging.
-- Snapshot/restore tests from every blocking state.
+- `GlueRuntime`, `GlueRuntimeState`, typed input/effects, status control flow, windows, waits, activity requests, context snapshots and deterministic instruction tracing are implemented headlessly.
+- Snapshot/restore tests cover the current wait and activity boundary; remaining blocking states will be added with their hosts.
 - `GlueScene` and `GlueView` hosting the runtime.
+
+The compatibility scene flow is intentionally still the host.  The next vertical slice is to put the static renderer in front of this runtime, then route one complete caravan/map path through it; no existing campaign transition is removed before that path is manually testable.
 
 Exit criteria:
 
@@ -427,6 +431,20 @@ After equivalent paths pass:
 
 Use three complementary levels.
 
+### The test suite migrates with every phase
+
+Testing is implementation work in every phase, not a final stabilization task. An agent changing a glue or campaign subsystem must in the same change:
+
+1. add focused tests for each new typed model, parser rule, runtime instruction, effect, renderer rule or host adapter;
+2. move behavioral coverage from named-screen tests into shared glue/runtime tests as the generic implementation takes ownership of that behavior;
+3. retain end-to-end tests for representative screens as integration fixtures, without making their resource names or layouts the architecture under test;
+4. rewrite tests whose assertions encode the outgoing screen-specific design;
+5. remove obsolete screen-specific tests when their production classes or paths are removed, unless they still verify user-visible behavior through the new generic path;
+6. keep reusable battle, asset, campaign-model and decoder tests independent of the glue migration; and
+7. run the affected focused tests plus the complete suite before declaring a phase complete.
+
+Tests must not preserve deprecated classes, compatibility helpers or stale architecture solely to keep old assertions passing. Preserve required behavior, then express it against the current public boundary. When a temporary compatibility path must remain between phases, label its tests as transitional and delete or migrate them in the phase that removes that path.
+
 ### Importer conformance
 
 - all 535 resources parse;
@@ -481,14 +499,14 @@ Design documents describe the architecture contributors should build now. They m
 
 This requirement applies incrementally: an agent need not rewrite unrelated documentation, but owns every stale reference made obsolete by its change.
 
-## 9. Immediate next slice
+The same ownership rule applies to the test suite under §7: affected tests must describe the current architecture, and outdated screen-specific coverage must be migrated or removed rather than retained as implementation history.
 
-The first implementation slice is Phases 0–1, not another visual screen:
+## 9. Current implementation boundary
 
-1. define `SourceLocation`, `GlueInstruction`, `GlueProgram` and typed window records;
-2. parse every WND resource once;
-3. produce a deterministic coverage report for all blocks, commands and fields;
-4. rebuild the existing campaign graph and briefing transcript as projections; and
-5. keep all current tests passing.
+`whshr.glue` is the stdlib-only implementation of Phases 0–1. It imports all 535 resources into `GlueProgram` or `WindowDefinition`, retains the normalized statement stream with `SourceLocation`, represents every window block with a typed ordered record, keeps duplicates and `UnknownField` diagnostics, and assigns every mission a `MissionRef(window, record_index)`. `coverage_report()` deterministically classifies every shipped block, command and field; `python3 -m whshr check <WARFB>` rejects an incomplete or newly unclassified inventory.
 
-That slice creates the foundation without changing runtime behavior. The first visible proof follows in Phase 3: render `MAINMENU` and one non-menu window through the generic render model.
+The campaign graph, window UI projection, mission-script report and briefing layout consume those typed resources. `parse_glue_lines()` remains only as a compatibility projection and has no production consumers.
+
+`whshr.glue_content` implements Phase 2. One shared lazy `GlueContent` instance indexes WND programs/windows, string tables and bitmap resources, caches decoded indexed bitmaps and portraits, and supports non-destructive resource/bitmap/string overlays. The catalog exposes dynamic `glue-window`, `glue-program`, `bitmap` and `string` IDs; `AssetCache.acquire()`/`release_owner()` provide ownership for future runtime-discovered assets. Campaign views receive decoded content and no longer open installation files. `SceneManifest.prefetch` remains an inactive hint, documented as such until a measured scheduler exists.
+
+The next implementation slice is Phase 3: add the headless `GlueRenderModel`, centralize the remaining compatibility tables, and make `MAINMENU` plus one unrelated window render through shared primitives. Runtime behavior remains on the existing campaign scenes until the generic renderer and VM replace it in later vertical slices.

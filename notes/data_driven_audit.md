@@ -67,7 +67,7 @@ table; **PROV** = guessed value; **KEY** = wrong lookup key; **STRINGS** = embed
 |---|---|---|
 | Hotspots (`BOOKS`, `GOLD_RECT`, `MISSION_RECT`, `DIETRICH_RECT`, `EXIT_RECT`, `SAVE_RECT`) | DATA | the *actual* caravan window's `[HOTSPOT]` list (only `STARTCARAVAN` is parsed today, for every caravan variant) |
 | Hint id -> action mapping (`150 -> open_mission_map`, `151 -> books`, ...) | DATA | each hotspot's `script:`/`res:` target (`PopContext`, `MagicBook`, `AbortGame`, `LoadSaveWindow`, ...) |
-| `CANDLE_POS`, `LAMP_POS`, book (296,260), eyes (312,208)/(300,200), mouth (288,220) | DATA | `[BITMAP] set:x/y` in `CARAVANCOMMON1`/`3` and the read/talk window scripts |
+| `CANDLE_POS`, `LAMP_POS`, book (296,260), eyes (312,208), talk eyes (300,200), mouth (288,220) | DATA + TABLE | `[BITMAP] set:x/y` in `CARAVANCOMMON1`/`3`; talk cells are created by the caravan built-in and live in `CARAVAN_BUILTIN_BITMAPS` |
 | `ANIMATION_FPS = 8`, `PAGE_HOLD_SECONDS = 3.0`, `BLINK_PERIOD_SECONDS = 2.0` | PROV | `animstartframe`, `animstopframe`, `timecnt`, `looptimecnt` (90, 30) of those bitmaps |
 | Scroll positions and thresholds (`SCROLLS`; `caravan_scroll_count` uses `min(.., 3)`) | DATA | `[BITMAP] set:x/y/depend` of `CARAVANCOMMON1`; draw when `depend <= visible missions` |
 | Frame counts `range(6)`, `range(12)`, `range(3)` and draw sizes | DATA | asset frame count and image size |

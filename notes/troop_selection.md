@@ -15,7 +15,7 @@ copied, except the short button/column labels already quoted in earlier notes.
 
 ### 1.1 Entry from the map ✅
 
-`Accept` on the map's Dietrich panel (`controlpanel=2`, slot 1) opens the selection for the **currently highlighted mission
+`Accept` on the map's Dietrich panel (`controlpanel=2`, slot 1) **or on a briefing's panel** (`controlpanel=1`, slot 1) opens the selection for the **currently highlighted mission
 row**. Whenever the highlighted row changes the record is already copied into the "current mission" and the initial payment
 is evaluated (prepaid, `notes/campaign.md` §2.3), so Accept does not need Brief first. Inputs:
 
@@ -24,7 +24,7 @@ is evaluated (prepaid, `notes/campaign.md` §2.3), so Accept does not need Brief
 | unit file | the company, `SAVE/ARMY.MRC` (all units in it are listed, hired or not) |
 | mode | 0 (selection) |
 | title text ids | the mission name id (`BRTXT 6xx`), used as `%s` in `BKTXT 400` / `401` / `403` |
-| return window | the map window that opened it (target of Abort) |
+| return window | the context that was on top of the stack when Accept pushed it (target of Abort): the map when opened by the map's Accept; when opened by a briefing's Accept, the briefing frame 🟡 (`notes/mission_selection.md` §5) |
 | completion callback | none for selection: Done runs the "selection done" procedure of §5 |
 
 If the file cannot be loaded, mode 0 skips the screen and runs Done immediately (used by scripts with no company) 🟡.
@@ -52,7 +52,7 @@ Pages: **P0** select regiments (6 per page), **P1** marching order, **P2** debri
 - Palette: glue palette index **1** = `GLUEBOOK` + `WINDBOOK` (`notes/fonts_glue.md`; table: 0 STANDARD, 1 BOOK, 2 MAP,
   3 CAR, 4 MIND, 5 END, 6 TITL, 7 GAME, 8 OPT, 9 BK2). The roster book (§8) uses index 9 (BK2, regiment pictures). On
   leaving, index 2 (MAP) is restored.
-- Music: `binary/music/tactical.mid` (played once; repeat semantics unverified) for every non-debrief page. Debrief mode 2
+- Music: `binary/music/tactical.mid`, **looping** (every glue and built-in tune is started with the repeat setter at 0 = forever; `notes/briefing_dialogue.md` §2.2) for every non-debrief page. Debrief mode 2
   plays `win.mid` or `lose.mid` by the mission result. This settles the `TACTICAL` track use in `notes/music.md`.
 - A 250 ms timer (id 3) drives the auto-scroll of P1.
 
@@ -171,7 +171,7 @@ window is drawn again. In P1 the same gesture opens the book for the clicked lis
 - **Abort**: if anything is selected, a Yes/No confirmation box (`BRTXT 308`, question icon, title "Warhammer") must be accepted;
   with nothing selected there is no confirmation. Yes discards the in-memory selection and reopens the return window (the map).
   Nothing is charged; hires done in the roster book were already written to `ARMY.MRC` (§8).
-- No keyboard shortcuts on this window except Ctrl (help cursor). ⬜ hotkey cheats handled by the global key handler are outside scope.
+- No keyboard shortcuts on this window except Ctrl (a click modifier: Ctrl+click opens the roster book, §4.3). The global key handling is the hidden cheat-code detector and the application accelerator table only (`notes/mission_selection.md` §4.3); Enter, Esc and Space do nothing. ✅
 
 ## 5. Page P1: marching order and Done
 
@@ -210,7 +210,7 @@ Done on P1 performs, in this order (money formulas in `notes/campaign.md` §2.3)
 3. write `SAVE/MARCH.MRC` with the selected units **in list order** (🟡 after putting routed models back into ranks and resetting the counters);
 4. roster flags: `inArmy` for every unit in the file, `inMarch` for the selected ones (`RMYI`, `notes/campaign.md` §3);
 5. write `ARMY.MRC` and `PLAY.MRC`; drop non-hired regiments from the company and clear unused reinforcements;
-6. close the window and run the mission's `setmissionscript`, which autosaves and starts the battle (`notes/campaign.md` §5).
+6. close the window and run the mission's `setmissionscript`, which autosaves and starts the battle (`notes/campaign.md` §5). A record **without** a mission script but with a battle (7 of the 64 shipped records: `MissionSZWindow` #3, `MissionWE45Window` x2, `MissionMSWindow`, `MissionEctsWindow` x3) starts that battle directly; when its debrief is done, control goes to the after-mission caravan (`gocaravan:select` behaviour) instead of resuming a script. ✅ (code; the same rule as panels 6/7/10, `notes/mission_selection.md` §4.2)
 
 Deployment `dir`/`x`/`y` in `MARCH.MRC` is not set here: the battle's deployment step places units (`notes/game_rules.md`, section "Missions and objectives", `DeployTroops`).
 🟡 whether the list order affects initial placement.
@@ -316,8 +316,8 @@ money delta and marks the mission taken; abort with something selected requires 
   read; not observed) and whether the roster-full sound also plays there.
 - ⬜ Font slot -> `.FON` file mapping; how the WinG palette mapping treats bitmaps whose embedded colours match `GLUEREND` while
   the screen runs on the BOOK palette (`notes/fonts_glue.md`).
-- ⬜ Use of the `MarchOrderMove` / `MarchOrderMoveDone` names; effect of the repeat count set for `tactical.mid`.
+- ⬜ Use of the `MarchOrderMove` / `MarchOrderMoveDone` names. (Resolved: `tactical.mid` loops, §1.3.)
 - ⬜ Open mode 1 (P1 alone) and the destination after Done on P5.
 - ⬜ Whether list order affects initial deployment positions in the battle.
 - ⬜ Layout of the reinforcements sub-window (only its bitmaps and strings are known).
-- ⬜ Exact `controlpanel` semantics of panels 6, 7, 10 that start the mission without this screen (`notes/mission_selection.md` §9.4).
+- ✅ Panels 6, 7, 10 (Accept starts the mission script, or the battle, without this screen) are **never opened by any shipped script**; details in `notes/mission_selection.md` §4.2 / §9.4. Nothing to implement for the campaign.

@@ -5,16 +5,15 @@ import pygame
 from .bitmap_font import BitmapFont
 from .gpu import ScreenQuad
 from .glue_bitmap import load_bitmap
-from .scene_view import SceneView
+from .scene_view import NativeScreenView
 
 
 COLOR_KEY = (0, 0, 255)  # palette index 0: the transparent colour of glue sprites
 
 
-class CaravanView(SceneView):
+class CaravanView(NativeScreenView):
     """Present the original caravan artwork at its native 640×480 composition."""
 
-    NATIVE_SIZE = (640, 480)
     HINT_BOTTOM_MARGIN = 10
     ANIMATION_FPS = 8
     PAGE_HOLD_SECONDS = 3.0
@@ -33,26 +32,26 @@ class CaravanView(SceneView):
 
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
-        self.read_background = self._load_quad(gpu, "READBACKGROUNDPIC.png")
-        self.talk_background = self._load_quad(gpu, "TALKBACKGROUNDPIC.png")
+        self.read_background = self._load_quad(gpu, "READBACKGROUNDPIC")
+        self.talk_background = self._load_quad(gpu, "TALKBACKGROUNDPIC")
         self.scroll_specs = tuple(sorted(
             (bitmap for bitmap in scene.campaign.caravan_bitmaps
              if bitmap.get("bitmap", "").casefold().startswith("carscroll")),
             key=lambda bitmap: bitmap["bitmap"].casefold(),
         ))
-        self.scrolls = [self._load_quad(gpu, f"{bitmap['bitmap'].upper()}.png", colorkey=True)
+        self.scrolls = [self._load_quad(gpu, bitmap["bitmap"], colorkey=True)
                         for bitmap in self.scroll_specs]
-        bitmap_specs = {bitmap.get("bitmap", "").casefold(): bitmap for bitmap in scene.campaign.caravan_bitmaps}
+        bitmap_specs = scene.campaign.caravan_bitmap_specs
         self.candle_spec = bitmap_specs["carcandlecell"]
         self.lamp_spec = bitmap_specs["carlampcell"]
         self.read_book_spec = bitmap_specs["dietbookcell"]
         self.read_eyes_spec = bitmap_specs["readeyescell"]
-        self.candles = [self._load_quad(gpu, f"CARCANDLECELL{index}.png") for index in range(6)]
-        self.lamps = [self._load_quad(gpu, f"CARLAMPCELL{index}.png") for index in range(6)]
-        self.read_books = [self._load_quad(gpu, f"DIETBOOKCELL{index}.png") for index in range(12)]
-        self.read_eyes = [self._load_quad(gpu, f"READEYESCELL{index}.png") for index in range(3)]
-        self.talk_mouths = [self._load_quad(gpu, f"DIETMOUTHCELL{index}.png") for index in range(6)]
-        self.talk_eyes = [self._load_quad(gpu, f"TALKEYESCELL{index}.png") for index in range(3)]
+        self.candles = [self._load_quad(gpu, f"CARCANDLECELL{index}", colorkey=True) for index in range(6)]
+        self.lamps = [self._load_quad(gpu, f"CARLAMPCELL{index}", colorkey=True) for index in range(6)]
+        self.read_books = [self._load_quad(gpu, f"DIETBOOKCELL{index}", colorkey=True) for index in range(12)]
+        self.read_eyes = [self._load_quad(gpu, f"READEYESCELL{index}", colorkey=True) for index in range(3)]
+        self.talk_mouths = [self._load_quad(gpu, f"DIETMOUTHCELL{index}", colorkey=True) for index in range(6)]
+        self.talk_eyes = [self._load_quad(gpu, f"TALKEYESCELL{index}", colorkey=True) for index in range(3)]
         self.elapsed = 0.0
         self.hover = None
         # PCSUBT is taller than the old temporary tooltip canvas; leave room
@@ -60,8 +59,8 @@ class CaravanView(SceneView):
         self.hint = gpu.text((640, 32), BitmapFont(scene.font), color=(220, 30, 30),
                              background=None, padding=0, align="center", fixed_width=True)
 
-    def _load_quad(self, gpu, filename, colorkey=False):
-        surface = load_bitmap(self.scene.installation, filename.removesuffix(".png"))
+    def _load_quad(self, gpu, resource_name, colorkey=False):
+        surface = load_bitmap(self.scene.content, resource_name)
         if colorkey:
             surface = surface.convert()
             surface.set_colorkey(COLOR_KEY)
@@ -69,13 +68,6 @@ class CaravanView(SceneView):
         quad = ScreenQuad(gpu, surface.get_size())
         quad.write(pygame.image.tobytes(surface, "RGBA"))
         return quad
-
-    def _layout(self):
-        screen_width, screen_height = self.gpu.target.size
-        native_width, native_height = self.NATIVE_SIZE
-        scale = min(screen_width / native_width, screen_height / native_height)
-        width, height = native_width * scale, native_height * scale
-        return (screen_width - width) / 2, (screen_height - height) / 2, scale
 
     def _native_point(self, pos):
         left, top, scale = self._layout()

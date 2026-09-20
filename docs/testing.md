@@ -75,3 +75,7 @@ the standard test runner can no longer express scenarios clearly.
 - **Original-install regression:** `python3 -m whshr check <WARFB>` and selected
   manual visual checks of the runtime frontend validate reverse-engineering against a legally
   owned local copy. These are not a replacement for portable behavioural tests.
+
+Set `WHSHR_INSTALLATION=<WARFB>` when running the unit suite to enable the optional
+all-535-resource glue inventory scenario. It verifies that every block, command and field
+remains classified without putting original scripts in the repository.

@@ -3,8 +3,13 @@
 Behavioral spec of what happens after the player clicks the "select mission" hotspot in the caravan,
 which parts are data (`WND.DLL` glue scripts, `BRTXT.DLL`) and which are built into `WHSHR.EXE`, and which
 graphics each screen uses. Availability rules (`depend`, `inactivedepend`, scroll count) are in
-`notes/campaign.md` §7 and are not repeated here. Status: ✅ from script data, 🟡 inferred from the
-front-end code and not verified at runtime.
+`notes/campaign.md` §7 and are not repeated here. Status: ✅ from script data or verified static analysis of the
+front end, 🟡 inferred (read from code, not observed running), ⬜ unknown, ⚠ evidence conflicts.
+
+One authoritative place per fact: portrait `index` table, `bkindex`, mouth/blink animation -> `notes/glue_portraits.md`;
+tent, animated/cell-set bitmap naming -> `notes/campaign_tent.md`; music, dialogue text, pacing, speech -> `notes/briefing_dialogue.md`;
+troop selection screen -> `notes/troop_selection.md`; money and mission availability -> `notes/campaign.md`. This note owns the
+map/mission-list input, the control-panel actions, the glue context stack (§8.1) and how screens are entered and left.
 
 ## 1. The screens are scripted windows on a stack ✅
 
@@ -23,10 +28,12 @@ screen is a window script; flow scripts (`[RUN]`) open windows, wait, and contin
 
 ## 2. Caravan → map ✅
 
-- The caravan hotspot (x 480, y 250, 160×110; hint `BRTXT 150`) has two forms:
-  - `StartCaravan`: `res:FlowScriptBP01` — starts the campaign (runs the first flow script).
-  - all later caravans: `script:pop.wnd` `res:PopContext` (`CaravanAfterMission`: `UnwindMission`) — built-in
-    windows that pop back to the suspended flow script and its map window.
+- The caravan hotspot (x 480, y 250, 160×110; hint `BRTXT 150`) has several forms; its `res:` is a built-in window (§8.1):
+  - `StartCaravan`: `res:FlowScriptBP01` - starts the campaign (runs the first flow script);
+  - `CaravanSelectMission` (opened from the map's Caravan button): `PopContext`;
+  - after-mission and after-encounter caravans (with and without recruit) and most `InfoCaravan*`: `UnwindMission`;
+  - `CaravanRecruit*AndResume` and `InfoCaravanENA/LA/SZA/SZB/WED`: `PopAndResume`;
+  - `CaravanContinueMission` (hint 161 "continue mission"): `PopContextCheckResume`.
 - The flow script is **parked**, not restarted: `waitforrelease:` returns only when the mission window
   releases it (chosen mission carries `set:releaseflag=1`, or nothing visible remains; `notes/campaign.md` §7.5).
 - The caravan is entered by the built-in `gocaravan:<mode>` command. Modes seen in scripts: `select` (28×,
@@ -57,32 +64,92 @@ screen is a window script; flow scripts (`[RUN]`) open windows, wait, and contin
   `setmissionscript:<script>`, `cash:type,initial,completion,rateA,rateB,letters`, optional `depend`,
   `inactivedepend`, `releaseflag`, `replacescript`, `excludeunits`, forced regiments.
 
-## 4. Selecting a row, and the Brief / Accept / Caravan buttons ✅ (code) / 🟡 (runtime)
+## 4. Map and mission-list input, and the control-panel actions ✅ (static analysis) / 🟡 (runtime)
 
-A click on a list row only **selects** it: the selection index changes and the list repaints. Nothing is launched
-by the click itself (see §9.4 for the panel that does). The Dietrich panel on the map (`ScribeMWindow`,
-`controlpanel=2`) has three buttons:
+### 4.1 The mission list (`MissionWindow` child of the map)
 
-- **Brief** copies the selected record into the current-mission struct (name, cash, forced regiments, battle,
-  mission script) and runs the record's `res:` briefing window (falling back to its `script:` name);
-- **Accept** opens troop selection for the current mission (`notes/campaign.md` §2.3), whose Done marks the mission
-  taken, charges the fee, and lets the mission script run the battle;
-- **Caravan** opens the `CaravanSelectMission` caravan; its hotspot `PopContext` returns to this map.
+| Input | Behaviour | Status |
+|---|---|---|
+| Left button down on a row | selects that row; ignored if the row is hidden, already selected, or its record names neither a battle nor a mission script | ✅ |
+| Mouse move with the left button held | same as a press: drag-selects the row under the pointer | ✅ |
+| Hover (no button) | nothing; there is no hover highlight | ✅ |
+| Left button up | nothing | ✅ |
+| Double-click | the window class enables double-clicks and its handler runs the **Brief** action for the current selection (same as the Brief button, §4.2) | ✅ code, ⚠ conflicts with the owner's observation, below |
+| Keyboard (arrows, Enter, Space, Esc, ...) | none: the list has no key handler; the glue window's key handler only feeds a hidden cheat-code detector; the only other keyboard input is the application accelerator table (Ctrl+X = command 16, effect unknown ⬜; the test table also has F2 = command 14) | ✅ (no key advances or selects anything) |
+| Empty list | no rows are painted, the window height is 0, clicks fall outside it; Brief and Accept do nothing when the window owns no records | ✅ |
+| Selection wrap | not applicable (there is no keyboard selection) | ✅ |
 
-The list row hit-test also has a second path that runs the same brief action (click on the
-already-selected row 🟡; not verified at runtime). Double-click does **not** trigger it: confirmed
-by the project owner from playing the original game — double-clicking a row has no special effect
-beyond the plain click (selection).
+All 64 shipped `[MISSION]` records (comments excluded) name a battle, so the "names a battle or mission script" rule never hides a real row; 7 records have no mission script (their battle is started directly, `notes/troop_selection.md` §5.3). ✅ (data)
 
-## 5. Briefing screen ✅
+A row is painted with `Scroll0` when selected and `Scroll1` otherwise, in record order, skipping hidden rows (`notes/campaign.md` §7.3).
+The selected index is part of the saved window state, so returning to the map (Abort from a briefing, `PopContext`) shows the same
+selection. ✅ (window state is restored as a block, §8.1)
 
-- Map window variant + tent + Dietrich (`ScribeWindow`) and Commander (`CommanderWindow`, 20,225,
-  `index=2`, `bkindex=16`) portraits, each with a talking/stop-talking `animseq` (1/2).
-- Dialogue: `settextcolor:red` (Dietrich) / `green` (Commander), `queuetoplaytext:res=<id>` … `playtext:res=<id>`;
-  ids `B×1000 + 10k + j` in `BRTXT` (`notes/pe_resources.md`). `set:textlines=2`.
-- MIDI `playmidi:sighted` during the briefing, `generic` during the mission script.
-- Between dialogue turns: trail dots (`addanimobject:res=Trail…`).
-- The repo's `whshr/briefing.py` already extracts the title and spoken lines from these scripts.
+**Double-click conflict ⚠.** Earlier text here said a click on the already-selected row runs Brief. That was wrong: a plain click
+never does. The static finding is that a **double-click** runs Brief. The project owner reports from playing the original that
+double-clicking a row has no effect beyond selecting it. The two disagree; the code path looks live (class registered with double-click
+support, handler present, same routine as the panel's Brief button) but has not been observed running. Unresolved until a
+runtime check; the engine should follow the owner's observation (double-click = plain selection) and keep the option easy to flip.
+
+Arrow keys, Esc-to-caravan and any wrap-around selection in the engine are **extensions**, not original behaviour.
+
+### 4.2 The control panel buttons (`controlpanel`, §9.4): what each slot does
+
+Slot 0 is the lowest button (§9.4). "Drain text" = finish or fast-forward the window's pending dialogue text (the same routine used
+when a click fast-forwards). "Stop audio" = stop the speech clip, the MIDI tune is discarded and (where noted) the remembered
+tune name is cleared. "Push" = save the running script state plus all glue windows on the context stack (§8.1), then destroy the
+windows. "Pause" = §5.
+
+| `controlpanel` | Where used (§9.4) | Slot 0 | Slot 1 | Slot 2 | Slot 3 |
+|---|---|---|---|---|---|
+| 1 | briefing windows | **Abort**: unpause; stop audio; forget the tune name; end the running (briefing) script; destroy all glue windows; **pop** one context and restore it (the parked map with its mission list) | **Accept**: unpause; drain text; stop audio; forget the tune name; **push**; open troop selection for the current mission (`notes/troop_selection.md` §1.1) | **Pause / Resume** | - |
+| 2 | map + mission list | **Caravan**: drain text; **push**; open `CaravanSelectMission` (its tune replaces the current one) | **Accept**: as panel 1 Accept | **Brief**: unpause; drain text; run Brief (below) | - |
+| 3 | ambush windows | **Defend**: unpause; drain text; start the pending encounter battle (the one an `encounterplaygame*` command stored) 🟡 | - | - | - |
+| 4 | encounter windows | **Evade**: unpause; drain text; resume the script | **Attack!**: drain text; set the script's true/false status flag to true 🟡; start the battle | - | - |
+| 5 | (no window) | Abort as panel 1 | Accept as panel 1 | Report: no action | Brief as panel 2 |
+| 6 | (no window opens it) | Abort as panel 1 | **Accept**: drain text; stop audio; forget the tune name; **push**; mark the current mission taken; run its mission script directly, or, if it has none but names a battle, start that battle; **no troop selection** | Pause / Resume | - |
+| 7 | (no window opens it) | **Decline**: as Evade | Accept as panel 6 | Brief as panel 2 | - |
+| 8 | Harkon, Azguz and Scribe encounter windows | **Attack!**: as Defend | - | - | - |
+| 9 | mission-script windows and encounters | **Caravan**: unless paused, drain text and stop the speech; **push**; open `CaravanContinueMission` (the mission script's tune keeps playing until the caravan's own tune replaces it) | **Options**: unless paused, drain text and stop the speech; always stop and discard the tune (its name is kept, so closing the dialog restarts it); push; open the Options dialog | Pause / Resume | - |
+| 10 | (no window uses it) | Caravan as panel 2 | Accept as panel 6 | Brief as panel 2 | - |
+
+**Brief** (panel 2 slot 2, panel 5 slot 3, and the list double-click): find the window that owns the mission records, copy the
+selected record into the current-mission struct (name, cash, forced regiments, briefing, battle, mission script) and open the record's
+briefing window (`res:`, falling back to its `script:` name), pushing a context first (the push is skipped when the owning window has portrait entries of its own 🟡). The
+briefing script therefore always starts from its first command; nothing remembers that it was seen. ✅
+
+**Accept on the map does not need Brief first**: the record is copied into the current mission whenever the selection changes,
+and Accept reads it from there (`notes/troop_selection.md` §1.1). ✅
+
+### 4.3 Hotspots and other keys
+
+- Hotspots (caravan, main menu) act on **button release** over the same hotspot that received the press. While the glue window
+  still has pending dialogue text, a hotspot's `script:`/`res:` target is not run. ✅ (control flow) / 🟡 (not observed)
+- **Enter, Esc, Space** do nothing on the map, briefing, caravan or troop windows. Enter and a left click only end two fixed-length
+  waits (about 3 s and 10 s) in the start-up path, apparently the logo/splash screens 🟡. In the troop window Ctrl is only a click
+  modifier (Ctrl+click opens the roster book, `notes/troop_selection.md`). ✅
+
+## 5. Briefing screen ✅ / 🟡
+
+- **Composition** (per briefing script): the briefing's map window variant (`MapWindowBP1`, ... : `MapTitle`, town labels,
+  trail dots), the campaign tent (`notes/campaign_tent.md`), Dietrich's window with panel 1 (Abort / Accept / Pause), the
+  Commander's window without a panel, and the dialogue text drawn on the map (`notes/briefing_dialogue.md` §3). Portraits, backdrops
+  and mouth/blink animation: `notes/glue_portraits.md`.
+- **Sequence**: `playmidi:sighted`, open the map, tent, portrait windows, then Dietrich and the Commander alternately talk
+  (`animseq` 1/2) while their `queuetoplaytext`/`playtext` lines are typed and spoken. Pacing, speech, colours, font: `briefing_dialogue.md`.
+- **After the last line** nothing happens by itself: the script ends, the windows stay, and the screen waits for a panel button.
+  `setdemodefault` is inert (`briefing_dialogue.md` §3.6). ✅
+- **Abort**: ends the script and all briefing windows, stops speech and music, and returns to the map exactly as it was left (§4.2,
+  §8.1). ✅ **The map is then silent**: Abort discards the tune and forgets its name, and the pop that Abort uses restores the
+  windows without restarting any tune. Only a map that a flow script gave its own tune with `addmidiobject` (the first campaign map)
+  could restart it when its window is re-created 🟡.
+- **Accept** while text is still being typed drains (skips) the remaining lines, stops the speech, and opens troop selection. The briefing
+  script is not resumed. ✅ What Abort in troop selection returns to when it was entered from a briefing (the parked briefing or the
+  map) depends on which context is on top of the stack 🟡.
+- **Pause / Resume** freezes text typing, portrait animation, speech and music; Resume undoes it (`briefing_dialogue.md` §2.5).
+- **Brief again** replays the briefing from the start (§4.2).
+- The current engine `BriefingScene` differs from the original in three ways: it advances by click/Enter instead of by timer, uses the
+  battle font instead of glue font slot 4, and continues automatically after the last turn instead of waiting for Accept / Abort.
 
 ## 6. Data versus hardcoded
 
@@ -109,7 +176,7 @@ Suggested engine model: a stack of scenes (caravan, map+list, briefing, troop se
 with transitions taken from the parsed scripts (`whshr/campaign.py`), so any window script can be a
 scene. The current `CaravanScene → BriefingScene` shortcut skips the map-and-list screen.
 
-## 8. Caravan entry is not unconditional; where cutscenes occur ✅ (scripts) / 🟡 (UnwindMission)
+## 8. Caravan entry is not unconditional; where cutscenes occur ✅
 
 Found by grepping the tails of the extracted mission scripts (`extracted/pe_resources/WND/rcdata`), not by
 tracing every script in full.
@@ -129,8 +196,47 @@ Conditional entry: `REMISSION4` does `testmission:` then `iftruegocaravan:infoRE
 caravan: after the A24 movie and the last battle it plays A25, A26 or A27 by objective flags, closes the map and
 runs `endgame:`.
 
-🟡 `UnwindMission` presumably returns control to the suspended script, which then decides whether a mission list
-appears; that was inferred from the script layout, not checked in the front-end code.
+What each caravan's hotspot does when it is left (`PopContext`, `UnwindMission`, `PopAndResume`, `PopContextCheckResume`) is
+specified in §8.1.
+
+### 8.1 The glue context stack and the built-in windows ✅ (static analysis) / 🟡 (runtime)
+
+**Context stack.** The front end keeps a stack of at most 16 context frames. A **push** saves (a) the running glue script's
+state, when a script is running (a "script frame"; otherwise a plain "window frame" that only records the window name), (b) the whole
+set of glue windows (up to 8: bitmaps, hotspots, portrait windows, the mission list and its **selected row**, the palette), and (c) the
+caller's window name; then it destroys the windows. A **pop** restores (b) and, for a script frame, (a), and shows the windows again; for
+a window frame the caller re-opens the saved window by name. Overflow and underflow are logged and ignored (no crash), so an extra pop
+with nothing on the stack is a harmless no-op.
+
+Who pushes: the panel buttons that open another screen (Caravan, Accept, Options: §4.2); `gocaravan:<mode>` (pushes the running
+script); and **every hotspot whose `res:` is opened** (the launcher pushes the current window before running the target).
+
+**Built-in windows.** A hotspot's or script's `res:` name is first matched, exactly, against this table of 15 built-in names; a name
+not in it is opened as a window resource. Each built-in first destroys the current windows.
+
+| Built-in window | Behaviour | Used by |
+|---|---|---|
+| `PopContext` | restart the remembered tune (looping; paused if the game is paused); pop and discard one frame (the window frame the hotspot launcher just pushed for the caravan); pop the next frame: a window frame re-opens that window, a script frame is restored and, if the game is not paused and the restored script's own flag is clear, the script runs again (the flow script re-parks in `waitforrelease`) | `CaravanSelectMission`, `OptionWindow` |
+| `PopContextCheckResume` | **identical dispatch to `PopContext`** (same routine, same resume check); the name differs only in the data | `CaravanContinueMission` |
+| `UnwindMission` | pop frames until a script frame is restored **whose windows contain a mission list**; a restored script frame without one (the mission script that ran `gocaravan`) is cleaned up and popped again. Then the mission-list *release step* (`notes/campaign.md` §7.5): a selected record with `replacescript` switches the flow; otherwise the current mission (marked taken by troop selection's Done) is copied over the selected record, visible rows are recounted, the first visible row is selected if the current one is hidden, the list is rebuilt, and the flow script resumes only if the record has `releaseflag` or nothing visible remains (else the player stays on the map) | after-mission and after-encounter caravans, `InfoCaravanBMA/BPC/ENE/LB/REA/REC`, `CaravanDietrich` |
+| `PopAndResume` | pop and discard two frames (the hotspot's window frame, then the mission script's frame `gocaravan` pushed), run the caravan-leave housekeeping (unhired units removed from `ARMY.MRC`, unused reinforcements cleared: `notes/campaign.md` §2.4), then resume the mission script after its `gocaravan:` command | `CaravanRecruit*AndResume`, `InfoCaravanENA/LA/SZA/SZB/WED` |
+| `AbortGame` | Yes/No confirmation (`BRTXT 308`); Yes cleans up, pops one frame and runs a final step that presumably abandons the campaign toward the main menu 🟡; No pops one frame and re-opens the window | caravan (`CaravanCommon1`), `CaravanEcts/Ms` |
+| `NewGame` | asks for the commander's name, creates the campaign files (`ARMY/PLAY/MARCH.MRC`, `debrief.dbf`) and enters `StartCaravan` | main menu |
+| `OptionsDialog` / `OptionsDialogDone` | open the option window / apply the settings, then as `PopContext` (restart the remembered tune) | caravan, main menu, panel 9 |
+| `ArmyBook`, `HireOnlyArmyBook`, `MagicBook`, `EncyclopediaBook` | open the roster book (mode 0 / hire-only), magic book or encyclopedia | caravan hotspots |
+| `ExitProcess` | close the application | main menu |
+| `Credits` | play the credits | main menu |
+| `NullWnd` | pop one frame and re-open it (no visible effect) | - |
+
+**How each caravan is left.** `CaravanSelectMission` (opened by the map's Caravan button): `PopContext` returns to the map. After-mission
+caravans (`gocaravan:select`): `UnwindMission` unwinds to the parked flow script and applies the mission result to the list (this
+happens when the caravan is left, **not** when a row is picked; the wording in `notes/campaign.md` §7.5 "after the player picks a row"
+should read "when the after-mission caravan is left"). Mid-mission caravans (`recruit`, `infoena` ...): `PopAndResume` continues the
+mission script. `CaravanContinueMission` (from panel 9's Caravan button while a mission script is showing its map, e.g. every
+`BPMission*` and encounter): `PopContextCheckResume` returns and the mission script continues.
+
+**When the encounter caravans appear.** `CaravanAfterEncounter[WithRecruit]` is opened by `gocaravan:resume` (`GMMission1`,
+`GMMission2`, after `encounterplaygamewithdebrief`); `CaravanContinueMission` is opened only by panel 9's Caravan button.
 
 ### Cutscenes (`playmovie:A<n>`)
 
@@ -182,16 +288,19 @@ The artwork is selected by numbers:
 ### 9.3 Frame geometry ✅
 
 The window is 144 wide. `FRAMETOP` (136×8) is drawn at (4,4), `FRAMELEFT` (8×152) at (4,12), `FRAMERIGHT` (8×152) at (132,12),
-and the panel bitmap at (4,164). The background/portrait is inside the frame (from 12,12: 8 + 120 + 8 = 136 wide,
-152 tall). Below it is either `FRAMEBOTTOM` (136×8, no buttons) or `FRAMEPANEL1..4` (136 × 28/48/68/88 = 8 + 20 × N),
-a panel with N button-shaped slots. A window with a 3-button panel is 12 + 152 + 68 + 8 = 240 tall, i.e. exactly
-`ScribeMWindow` (144×240).
+and the panel bitmap at (4,164). The background/portrait is inside the frame (from 12,12: 8 + 120 + 8 = 136 wide, 152 tall). Below it
+is either `FRAMEBOTTOM` (136×8, no buttons) **or** `FRAMEPANEL1..4` (136 × 28/48/68/88 = 8 + 20 × N), a panel with N button-shaped
+slots; exactly one of them, never both (`notes/data_driven_audit.md` §1 item 9).
+
+**Height ✅.** The declared window height equals `164 + panel height + 8` in **111 of 115** `[ANIM]` windows: 180 (no panel), 200
+(panel 1), 220 (panel 2), 240 (panels with 3 buttons), 260 (panel 4). The four exceptions are `Bernard3Window` (declared 240, no
+panel), the two `HarkonEncounterWindow*` (declared 220, one button) and the test `MapTestWindow` (480); they look like authoring
+inconsistencies (the real size is derived from the panel by the code 🟡).
 
 **What is data and what is fixed.** Across the 114 `[ANIM]` blocks (about 100 windows) the sub-window's own
 `[POSITION]` varies per scene (e.g. Dietrich on the map/briefing 450,25 or 475,55; Commander 20,225 or 20,25; 38 distinct
 values), always 144 wide and 180/200/220/240 tall. `[ANIM] set:x/y` is 0,0 in every block. The inner layout is
 constant in the front end: frame at (4,4), portrait/background at (12,12) inside it, panel at (4,164), buttons at x + 9.
-The declared height is not used as-is: the code derives it from the portrait bitmap plus the panel (20 px per button) 🟡.
 
 ### 9.4 The control panel: Brief / Accept / Caravan ✅
 
@@ -212,10 +321,26 @@ drawn over it from `BRTXT`. Labels by slot (BRTXT ids in brackets):
 | 8 | `FRAMEPANEL1` | Attack! (329) | – | – | – |
 | 0 / other | `FRAMEBOTTOM` | – | – | – | – |
 
-So the panel the question asks about is `controlpanel=2`, read top to bottom: **Brief, Accept, Caravan**.
-Button actions for 2 / 10 are in §4. Panels 6, 7, 10 additionally mark the current mission taken when Accept is
-pressed and start the battle without troop selection 🟡 (which windows use them was not checked). Panel 9 ("Caravan"
-= continue-mission caravan) belongs to `CaravanContinueMission`.
+So the panel the question asks about is `controlpanel=2`, read top to bottom: **Brief, Accept, Caravan**. What every slot does is in §4.2.
+
+**Which windows use each panel** (all 115 `[ANIM]` windows):
+
+| `controlpanel` | Windows | Opened by |
+|---|---|---|
+| none / 0 (60 windows) | speaker windows without buttons: `CommanderWindow*`, `Ceridan*`, `Dwarf*`, `Bernard*`, `Carlsson*`, `EngrolWindow*`, ... | briefing and encounter scripts |
+| 1 (22) | briefing windows: `ScribeWindow*`, `Scribe2/3/4Window*`, `YouWindow*`, `Dwarf*Enc1`, `Woodelf*`, `GotrekSpecialWindow`, ... | the briefing scripts |
+| 2 (2) | `ScribeMWindow` (map with mission list), `MapTestWindow` (test) | the flow scripts |
+| 3 (4) | `AmbushWindow`, `Forest/Mountain/SnowyAmbushWindow` | ambush subscripts, `BPMission5` |
+| 4 (2) | `CeridanEncounterWindow` (`SZMission5`); `EncounterWindow` (never opened) | mission scripts |
+| 5 | **no window** | - |
+| 6 (2), 7 (3) | `ScribeWindowEnc6`, `CommanderWindowEnc7TR`; `ScribeWindowEnc7`, `AzguzWindowEnc7TM`, `HolgerOfferWindow` - **never opened by any shipped script** | - |
+| 8 (4) | `HarkonEncounterWindow*` (`BPMission15`), `AzguzWindowEnc8`, `ScribeWindowEnc8` (Loren subscripts) | mission scripts |
+| 9 (17) | `Scribe5WindowTL*` (opened by nearly every `*Mission*` script: the map while a mission runs), `ScribeWindowEnc9*`, `CommanderWindowEnc9*` | mission scripts and subscripts |
+| 10 | **no window** | - |
+
+Panels 5, 6, 7 and 10 exist in the front end but are unused by the shipped data; an engine needs them only for completeness
+(the labels and actions are in §4.2). During a mission script the player therefore always has the panel-9 buttons: Caravan
+(`CaravanContinueMission`), Options and Pause.
 
 Text color: the button label is drawn in the `settextcolor` of the `[ANIM]` block; the font is glue font 2.
 Pressed/hover states use `FRAMEBUTTONDN`. Disabled buttons use a grey (0xC0C0C0) label 🟡.
@@ -239,8 +364,8 @@ fixed layout.
    colour), `sequence`/`frame` (initial state). The script commands `set:animseq=1/2` + `applyseq:` switch talking and
    stopped; `set:textlines` sets the dialogue line count.
 3. **Inside the window** use the fixed layout of §9.3: frame pieces at (4,4)/(4,12)/(132,12), backdrop and portrait at
-   (12,12), panel at (4,164), buttons at x + 9 (§9.4). Derive the window height from the portrait plus the panel
-   (20 px per button) instead of trusting `set:vy` 🟡.
+   (12,12), panel at (4,164), buttons at x + 9 (§9.4). The height is `164 + panel height + 8` (§9.3); it equals the declared
+   `set:vy` except in four windows, so derive it from the panel and ignore `set:vy`.
 4. **Assets, at runtime from the installation.** Portrait sprite set (`SCRI` for index 4) and `BACKALL` via the FOL/BOP
    decoder (`whshr/sprites.py`, `STANDARD.PAL`); `FRAME*` bitmaps and button/label text from the `WND`/`BITMAP`/`BRTXT`
    resources. Do not commit frames.
@@ -251,71 +376,35 @@ fixed layout.
 
 ## 10. Open questions
 
-- 🟡 Row-click handling details (keyboard?) still not located — the row hit-test/selection code was not
-  found in this pass (no distinctive string to anchor on; would need control-flow tracing of the
-  mission-list window procedure). **Double-click is resolved ✅**: confirmed by the project owner from
-  playing the original game that it has no special effect — it does not trigger Brief or any other action
-  beyond plain selection (see §4).  **What `PopContext` does on an empty stack is now resolved ✅** (static
-  analysis of `WHSHR.EXE`): every built-in window name (`PopContext`, `PopContextCheckResume`, `AbortGame`,
-  `NewGame`, `Credits`, `OptionsDialog`, `HireOnlyArmyBook`, …) is dispatched through one lookup table by
-  exact string match; unmatched names are silently ignored. The pop operation itself keeps its own window-stack
-  depth counter; when a pop is requested with the counter already at zero it logs a debug "stack underflow"
-  message and returns without popping or crashing — i.e. an extra `PopContext` with nothing left on the stack
-  is a harmless no-op, not an error state the flow script needs to guard against. `PopContext` and
-  `PopContextCheckResume` reach the *same* underlying pop routine; the "check resume" distinction is not a
-  different pop behavior in this routine, so it must come from what the resumed script does afterward with
-  the stack-frame's tag, not from the pop call itself (not traced further).
+Resolved by this note (kept for the record): input handling of the list, the panel actions of every `controlpanel` value, the built-in
+window table, `PopContext` / `PopContextCheckResume` (identical), `UnwindMission`, the music after Abort (silent), the "which windows use
+panels 6/7/10" question (none), the window height rule. The full register of open items across all notes is in `ROADMAP.md` ("Open
+research questions").
 
-- ✅ Chapter transitions, resolved by data (grepping the extracted `WND.DLL` scripts, not Ghidra): they are
-  **not** produced by a flow-script-to-flow-script call chain at all. Each per-mission `[MISSION]` record in a
-  mission-list window can carry a `replacescript:<FlowScriptXxx>` field, a sibling of `setbattlescript:` and
-  `setmissionscript:`. When that record's mission is taken, the running flow script for the campaign map is
-  swapped for the named one — the next time the map/list screen reopens it is built by the new chapter's flow
-  script and mission-list windows. Traced the full chapter graph this way: `FlowScriptBP01` → (via the
-  `MissionBP23Window` record) `FlowScriptBP03` or `FlowScriptBP25`; `BP03` → `BP05` → `BP09`; `BP09`
-  (via `MissionBP131415Window`) → `FlowScriptRE`, `FlowScriptBPBM`, or `FlowScriptGF`; `RE` (via
-  `MissionRE4568Window`) → `RE01`, `RE02`, `WE`, or `REBM`; `RE01` → (`MissionRE5678Window`) → `RE02`,
-  `REWE`, or `REBM`; `RE02` → (`MissionRE678Window`) → `REWE` or `REBM`; `GF02c` → `SZENGML`;
-  `WE1`/`WE45`/`BM1234`/`BM1235` → `WE` or `SZENGML`; `MissionLWindow` → `L3`. No flow script itself contains
-  `playtext`/`playmovie` before its first `waitforrelease` (only the demo `FlowScriptEcts` does, confirming
-  the earlier finding) — dialogue/cutscenes around a chapter change belong to the *mission script* that ends
-  the previous chapter (its `gocaravan:`/`playmovie:` calls, §8), not to anything inserted while switching
-  flow scripts.
+Still open in this note:
 
-- ✅ `MapWindow` palette 2 vs caravan palette 3, resolved by static analysis of `WHSHR.EXE`: `palindex` is not
-  a two-way toggle on one palette but an index (0–9) into a fixed table of **named screen palette pairs**,
-  each pair being a `WIND<name>.PAL` (RGB half, loaded first) and a matching `GLUE<name>.PAL` (4→8-bit
-  color-map half, loaded second), consistent with the WIND/GLUE-halves layout already documented in
-  `notes/fonts_glue.md`. The table, by `palindex`: 0/other → `STANDARD.PAL` (both halves); 1 → `book`;
-  **2 → `map`**; **3 → `car` (caravan)**; 4 → `mind`; 5 → `end`; 6 → `titl` (title); 7 → `game`; 8 → `opt`
-  (options); 9 → `bk2`. So switching from the map screen to the caravan screen genuinely loads a different
-  pair of on-disk palette files (`WINDMAP.PAL`/`GLUEMAP.PAL` vs `WINDCAR.PAL`/`GLUECAR.PAL`); there is no
-  single shared palette reused with a different half selected by index.
+- ⚠ **Double-click on a list row** (§4.1): the code runs Brief, the project owner observed no effect. Needs a runtime check.
+- ⬜ Effect of accelerator command 16 (Ctrl+X) and command 14 (F2, test table).
+- 🟡 Which context Abort in troop selection returns to when troop selection was opened from a briefing (§5).
+- 🟡 `Attack!` (panel 4) sets the script's true/false status flag before starting the battle (inferred from the shared routine).
+- 🟡 Whether the "drain text" step fast-forwards or merely finishes pending text (two variants: with and without a skip flag), and the
+  first step of Abort/Caravan whose purpose is not identified (it runs when speech is enabled).
+- 🟡 Whether the brief action's push is skipped when the owning window has portrait entries of its own (§4.2).
+- ⬜ What `Report` (panel 5, unused) would do.
+- 🟡 Music after Abort on the first campaign map, whose window carries its own tune (`addmidiobject`): silent or restarted on re-creation (§5).
 
-- ✅ `TroopSelect` window contents, resolved by static analysis of `WHSHR.EXE` (the routine that opens troop
-  selection after Brief/Accept, called with a mode parameter): it creates one built-in window (internal class/
-  title string `TroopWindow`, not `TroopSelect`) sized 640×480 (the full screen), with up to four child
-  buttons along the bottom edge (all at the same y): a **Done** button (BRTXT "Done") always present; a
-  **Next** button (BRTXT "Next") and a **Back** button (BRTXT "Back") present in every mode except one
-  (mode 5, used for the mid-mission recruit-and-resume flow, which shows no paging — consistent with there
-  being a single small "who to add" list rather than a scrollable roster); and an **Abort** button (BRTXT
-  "Abort") present only in the initial "choose troops before a fresh mission" mode. Before creating the
-  window it re-picks background music (win/lose fanfare after a battle result is known, otherwise the
-  tactical/mission-select tune) and, in the "briefing failed to load a valid battle record" case, falls back
-  to the plain map/list screen instead of opening troop selection at all. Button geometry and the roster list
-  itself were not further decoded in this pass (out of scope: layout is fixed in code, not data, per the
-  bullet above, but has no glue script to read from — cross-check by watching the actual screen next time it
-  can be reached).
+Resolved elsewhere (pointers):
 
-- 🟡 The glue `index` → portrait file table and mouth-frame timing: **not resolved**, no lookup table matching
-  glue portrait `index` values to sprite basenames was found in this pass (Dietrich→`SCRI` remains known only
-  by coincidence of `index=4` with the `name:Scribe` window, `notes/mission_selection.md` §9.2). `BACKALL`
-  palette for frames 16/17: partially narrowed — **no `BACKALL.PAL` file exists** in the installation
-  (`FILE/BINARY/` and `UPDATE/BINARY/` only have `BACKALL.FOL`/`.BOP`, checked directly), and no code reference
-  to the string `"BACKALL"` was found either (it is likely built at runtime by string-formatting the frame
-  index onto a fixed base name, so no fixed literal to anchor on). This rules out "there is a dedicated
-  `BACKALL.PAL`" as the explanation for frames 16/17 looking wrong under `STANDARD.PAL`; the more likely
-  explanation is that those frames use a different entry of the ordinary 4→8-bit sprite color-map scheme
-  (`FORMATS.md` "modulo 16" rule) than the one currently assumed, which is a sprite-decoder question, not a
-  missing-palette-file question — left open, not chased further to stay out of `whshr`/`scripts` code per this
-  task's research-only scope.
+- Chapter transitions: **not** a chain of flow-script calls. Each `[MISSION]` record can carry `replacescript:<FlowScriptXxx>`; when that mission is
+  taken and the release step runs (§8.1) the running flow is swapped for the named one, and the next map/list is built by the new chapter's flow
+  script. Chapter graph: `FlowScriptBP01` -> (`MissionBP23Window`) `BP03` or `BP25`; `BP03` -> `BP05` -> `BP09`; `BP09` (`MissionBP131415Window`) -> `RE`,
+  `BPBM` or `GF`; `RE` (`MissionRE4568Window`) -> `RE01`, `RE02`, `WE` or `REBM`; `RE01` (`MissionRE5678Window`) -> `RE02`, `REWE` or `REBM`; `RE02`
+  (`MissionRE678Window`) -> `REWE` or `REBM`; `GF02c` -> `SZENGML`; `WE1`/`WE45`/`BM1234`/`BM1235` -> `WE` or `SZENGML`; `MissionLWindow` -> `L3`. No
+  flow script has `playtext`/`playmovie` before its first `waitforrelease` (only the demo `FlowScriptEcts`); dialogue and cutscenes around a chapter
+  change belong to the mission script that ends the previous chapter (§8). ✅ (data)
+- Palettes: `palindex` (0-9) indexes a fixed table of named screen palette pairs, each a `WIND<name>.PAL` (RGB half, loaded first) plus a
+  `GLUE<name>.PAL` (colour-map half): 0/other `STANDARD`, 1 `book`, **2 `map`**, **3 `car`**, 4 `mind`, 5 `end`, 6 `titl`, 7 `game`, 8 `opt`, 9 `bk2`. Going from
+  the map to the caravan loads a different pair. `BACKALL` frames 16/17: `notes/glue_portraits.md` §2.1. ✅
+- The troop window (class `TroopWindow`, six pages, modes 0-7, buttons, music): `notes/troop_selection.md` (this note previously carried a partial
+  description; it is superseded).
+- Portrait `index` -> sprite table and animation timing: `notes/glue_portraits.md`.

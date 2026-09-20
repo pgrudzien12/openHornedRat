@@ -29,6 +29,34 @@ class SceneView:
         """Release GPU resources owned by this view."""
 
 
+class NativeScreenView(SceneView):
+    """A view that presents a fixed 640x480 original screen, centered and scaled to the window.
+
+    The scale is snapped to an integer so every original-game pixel is blown up by a whole
+    number of screen pixels: nearest-neighbor magnification at a fractional scale duplicates
+    source pixels unevenly and visibly distorts the small hand-drawn bitmap fonts (see
+    notes/fonts_glue.md). Snapping trades that distortion for letterboxing when the window
+    isn't an exact multiple of the native size, which keeps every resolution pixel-perfect.
+    """
+
+    NATIVE_SIZE = (640, 480)
+
+    def _layout(self):
+        screen_width, screen_height = self.gpu.target.size
+        native_width, native_height = self.NATIVE_SIZE
+        exact = min(screen_width / native_width, screen_height / native_height)
+        scale = max(1, round(exact))
+        while scale > 1 and (native_width * scale > screen_width or native_height * scale > screen_height):
+            scale -= 1
+        if native_width * scale > screen_width or native_height * scale > screen_height:
+            # The window is smaller than the native screen even at 1x: shrink to fit exactly
+            # instead of clipping. Below-native windows are rare (small capture sizes); pixel
+            # snapping only matters once there is room to snap to.
+            scale = exact
+        return ((screen_width - native_width * scale) / 2,
+                (screen_height - native_height * scale) / 2, scale)
+
+
 class PlaceholderView(SceneView):
     """Names a scene whose real presentation is not implemented yet."""
 

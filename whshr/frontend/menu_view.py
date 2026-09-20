@@ -5,7 +5,7 @@ import pygame
 from .bitmap_font import BitmapFont
 from .gpu import ScreenQuad
 from .glue_bitmap import load_bitmap
-from .scene_view import SceneView
+from .scene_view import NativeScreenView, SceneView
 
 
 def _wrap(font, text, max_width):
@@ -23,10 +23,8 @@ def _wrap(font, text, max_width):
     return lines
 
 
-class MainMenuView(SceneView):
+class MainMenuView(NativeScreenView):
     """The original OPTIONSCREEN menu, with its paired round button sprites."""
-
-    NATIVE_SIZE = (640, 480)
 
     # Only the campaign flow's New Campaign and Exit actions have scene
     # implementations today.  The other original controls still react visually.
@@ -36,19 +34,19 @@ class MainMenuView(SceneView):
 
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
-        self.screen = self._load_quad(gpu, "OPTIONSCREEN.png")
-        self.button_up = self._load_quad(gpu, "OPTIONBUTTONUP.png", transparent_blue=True)
-        self.button_down = self._load_quad(gpu, "OPTIONBUTTONDOWN.png", transparent_blue=True)
+        self.screen = self._load_quad(gpu, "OPTIONSCREEN")
+        self.button_up = self._load_quad(gpu, "OPTIONBUTTONUP", transparent_blue=True)
+        self.button_down = self._load_quad(gpu, "OPTIONBUTTONDOWN", transparent_blue=True)
         self.hotspots = tuple((scene.menu_ui or {}).get("hotspots", ()))
         self.pressed = None
 
-    def _load_quad(self, gpu, filename, transparent_blue=False):
+    def _load_quad(self, gpu, resource_name, transparent_blue=False):
         """Read a cached extractor PNG into a GPU texture.
 
         The two button resources use pure blue as a legacy chroma key rather
         than PNG alpha, so turn that colour transparent before upload.
         """
-        surface = load_bitmap(self.scene.installation, filename.removesuffix(".png"))
+        surface = load_bitmap(self.scene.content, resource_name)
         width, height = surface.get_size()
         rgba = bytearray(pygame.image.tobytes(surface, "RGBA"))
         if transparent_blue:
@@ -58,14 +56,6 @@ class MainMenuView(SceneView):
         quad = ScreenQuad(gpu, (width, height))
         quad.write(rgba)
         return quad
-
-    def _layout(self):
-        """Return the centered, aspect-preserving original-screen rectangle."""
-        screen_width, screen_height = self.gpu.target.size
-        native_width, native_height = self.NATIVE_SIZE
-        scale = min(screen_width / native_width, screen_height / native_height)
-        width, height = native_width * scale, native_height * scale
-        return (screen_width - width) / 2, (screen_height - height) / 2, scale
 
     def _button_at(self, pos):
         left, top, scale = self._layout()

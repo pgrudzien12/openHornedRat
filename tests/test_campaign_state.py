@@ -1,16 +1,29 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from whshr.briefing import load_briefing
+from whshr.briefing import _briefing_layout, load_briefing
 from whshr.campaign import (
     parse_mission_script, parse_mission_windows, parse_window_hotspots, parse_window_portrait, parse_window_ui,
 )
-from whshr.campaign_state import CampaignState, caravan_scroll_count, eligible_missions, initial_flow, start_caravan_continuation
+from whshr.campaign_state import (
+    CARAVAN_BUILTIN_BITMAPS, CampaignState, caravan_scroll_count, eligible_missions, initial_flow,
+    start_caravan_continuation,
+)
+from whshr.glue import MissionRef
+from whshr.glue_content import GlueContent
 
 
 class CampaignStateTests(unittest.TestCase):
+    def test_caravan_builtin_animation_specs_cover_cells_not_declared_by_startcaravan(self):
+        specs = {item["bitmap"]: item for item in CARAVAN_BUILTIN_BITMAPS}
+
+        self.assertEqual((specs["DietBookCell"]["x"], specs["DietBookCell"]["y"]), (296, 260))
+        self.assertEqual((specs["ReadEyesCell"]["x"], specs["ReadEyesCell"]["y"]), (312, 208))
+        self.assertEqual((specs["DietMouthCell"]["x"], specs["DietMouthCell"]["y"]), (288, 220))
+        self.assertEqual((specs["TalkEyesCell"]["x"], specs["TalkEyesCell"]["y"]), (300, 200))
+
     def setUp(self):
         self.graph = {
             "flow_scripts": {
@@ -44,23 +57,92 @@ class CampaignStateTests(unittest.TestCase):
             {"briefing_key": "first.0", "battle": "BF003", "name": "Placeholder", "brief_script": "FIRSTBRIEF"},
             {"briefing_key": "first.1", "battle": "BF003", "name": "Actual mission", "brief_script": "SECONDBRIEF"},
         ]}}
-        strings = MagicMock()
-        strings.load_strings.return_value = {902: "The selected record's briefing."}
+        content = GlueContent.from_data(
+            resources={"SECONDBRIEF": "[RUN]\nplaytext:res=902\n[END]"},
+            strings={
+                "BRTXT": {902: "The selected record's briefing."},
+                "BKTXT": {},
+                "GMTXT": {},
+            },
+        )
 
         with tempfile.TemporaryDirectory() as root, \
-             patch("whshr.briefing.build_campaign_graph", return_value=graph), \
-             patch("whshr.briefing.load_wnd_rcdata", return_value={"SECONDBRIEF": "playtext:res=902"}), \
-             patch("whshr.briefing.module", return_value=strings):
+             patch("whshr.briefing.build_campaign_graph", return_value=graph):
             dll = Path(root) / "FILE/DLL"
             dll.mkdir(parents=True)
             (dll / "WND.DLL").touch()
             (dll / "BRTXT.DLL").touch()
-            briefing = load_briefing(root, "first.1")
+            briefing = load_briefing(root, "first.1", content=content)
 
-        self.assertEqual(briefing, {
-            "battle": "BF003", "title": "Actual mission",
-            "lines": [{"speaker_color": None, "text": "The selected record's briefing."}],
-        })
+        self.assertEqual(briefing["battle"], "BF003")
+        self.assertEqual(briefing["title"], "Actual mission")
+        self.assertEqual(briefing["lines"], [{"speaker_color": None, "text": "The selected record's briefing."}])
+        # Tiny fixtures can remain transcript-only; real briefing scripts add
+        # their map/portrait layout through the same loader.
+        self.assertIsNone(briefing["map"])
+
+    def test_given_a_briefing_program_then_its_map_speakers_overlays_and_dialogue_batches_are_preserved(self):
+        wnd = {
+            "MAPWINDOW": """
+                [WINDOW]
+                [BITMAP]
+                    setbitmap:Map
+                [END]
+                [INCLUDE]
+                    script:TITLE
+                [END]
+                [END]
+            """,
+            "TITLE": """
+                [WINDOW]
+                [BITMAP]
+                    set:x=210
+                    set:y=15
+                    setbitmap:MapTitle
+                [END]
+                [END]
+            """,
+            "SCRIBE": """
+                [WINDOW]
+                [POSITION]
+                    set:x=450
+                    set:y=25
+                [END]
+                [ANIM]
+                    set:index=4
+                    set:bkindex=15
+                    name:Dietrich
+                [END]
+                [END]
+            """,
+            "TRAIL": """
+                [WINDOW]
+                [BITMAP]
+                    set:x=388
+                    set:y=335
+                    setbitmap:BP1aCell
+                [END]
+                [END]
+            """,
+        }
+        layout = _briefing_layout(wnd, """
+            openwindow:res=MapWindow
+            opensubwindow:res=Scribe
+            set:animseq=1
+            applyseq:res=Scribe
+            settextcolor:red
+            queuetoplaytext:res=7010
+            playtext:res=7011
+            addanimobject:res=Trail
+        """, {7010: "First", 7011: "Second"})
+
+        self.assertEqual(layout["map"]["bitmaps"][1]["bitmap"], "MapTitle")
+        self.assertEqual(layout["portraits"][0]["index"], 4)
+        self.assertEqual([(turn["speaker"], turn["text_id"], turn["text_lines"], turn["lines"])
+                          for turn in layout["turns"]],
+                         [("SCRIBE", 7010, 1, ["First"]), ("SCRIBE", 7011, 1, ["Second"])])
+        self.assertEqual(layout["objects"], [{"after_turn": 2,
+                                                "bitmaps": [{"x": 388, "y": 335, "bitmap": "BP1aCell"}]}])
 
     def test_given_a_completed_mission_then_its_dependency_gates_control_the_next_window(self):
         state = CampaignState(self.graph)
@@ -146,8 +228,14 @@ class CampaignStateTests(unittest.TestCase):
             [END]
         """})
 
-        self.assertEqual(windows["MISSIONTESTWINDOW"], [{"name_id": 601, "name": "MISSION_601",
-                          "depend": 600, "inactivedepend": 599}])
+        self.assertEqual(windows["MISSIONTESTWINDOW"], [{
+            "mission_ref": MissionRef("MISSIONTESTWINDOW", 0),
+            "briefing_key": "missiontestwindow.0",
+            "name_id": 601,
+            "name": "MISSION_601",
+            "depend": 600,
+            "inactivedepend": 599,
+        }])
 
     def test_given_a_speaker_window_then_its_position_and_anim_settings_are_data_driven(self):
         portrait = parse_window_portrait({"SCRIBEMWINDOW": """

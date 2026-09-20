@@ -6,17 +6,24 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 
-pygame = types.ModuleType("pygame")
-pygame.font = SimpleNamespace(Font=lambda *args, **kwargs: None)
-pygame.MOUSEWHEEL = 1
-pygame.MOUSEMOTION = 2
-pygame.KEYDOWN = 3
-pygame.MOUSEBUTTONDOWN = 4
-pygame.MOUSEBUTTONUP = 5
-pygame.K_HOME = 6
-pygame.K_ESCAPE = 7
-sys.modules.setdefault("pygame", pygame)
-sys.modules.setdefault("zengl", types.ModuleType("zengl"))
+try:
+    import pygame
+except ModuleNotFoundError:
+    pygame = types.ModuleType("pygame")
+    pygame.font = SimpleNamespace(Font=lambda *args, **kwargs: None)
+    pygame.MOUSEWHEEL = 1
+    pygame.MOUSEMOTION = 2
+    pygame.KEYDOWN = 3
+    pygame.MOUSEBUTTONDOWN = 4
+    pygame.MOUSEBUTTONUP = 5
+    pygame.K_HOME = 6
+    pygame.K_ESCAPE = 7
+    sys.modules["pygame"] = pygame
+
+try:
+    import zengl  # noqa: F401
+except ModuleNotFoundError:
+    sys.modules["zengl"] = types.ModuleType("zengl")
 
 from whshr.engine import Battle, Regiment
 from whshr.battlefield import SpriteFrame, SpriteSheet

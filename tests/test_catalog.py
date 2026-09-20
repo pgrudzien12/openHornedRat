@@ -16,6 +16,7 @@ class CatalogTests(unittest.TestCase):
         self._write("REMOTE/BINARY/ANIM/Intro.SI", b"RIFF")
         self._write("FILE/DLL/ANTXT.DLL", b"MZ")
         self._write("FILE/BINARY/GLUE/SUBTEXT.FON", b"MZ")
+        self._write("FILE/BINARY/GLUE/PCTEXT.FON", b"MZ")
         self._write("FILE/BINARY/PCTEXTA.FON", b"MZ")
         self._write("FILE/BINARY/STANDARD.PAL", b"file palette")
         self._write("UPDATE/BINARY/standard.pal", b"updated palette")
@@ -35,7 +36,7 @@ class CatalogTests(unittest.TestCase):
             [str(record.identifier) for record in assets.records],
             [
                 "vanilla:battle/bf001", "vanilla:cutscene/intro", "vanilla:cutscene/intro-media",
-                "vanilla:font/glue4", "vanilla:font/pctexta", "vanilla:font/subtext", "vanilla:palette/standard", "vanilla:text/anim",
+                "vanilla:font/glue2", "vanilla:font/glue4", "vanilla:font/pctexta", "vanilla:font/subtext", "vanilla:palette/standard", "vanilla:text/anim",
             ],
         )
         self.assertEqual(assets.get("vanilla:cutscene/intro").decoder, "omni-si")
@@ -104,6 +105,26 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(result, b"changed palette with a different size")
         self.assertEqual(calls, [b"updated palette", b"changed palette with a different size"])
 
+    def test_given_dynamically_acquired_assets_when_one_owner_releases_then_shared_content_survives(self):
+        assets = catalog.build(self.root)
+        locator = AssetLocator(self.root)
+        cache = AssetCache()
+        calls = []
+
+        def load(_, path):
+            calls.append(path)
+            return path.read_bytes()
+
+        first = cache.acquire(locator, assets, "vanilla:palette/standard", load, owner="window-a")
+        second = cache.acquire(locator, assets, "vanilla:palette/standard", load, owner="window-b")
+        cache.release_owner("window-a")
+        retained = cache.get(locator, assets, "vanilla:palette/standard", load)
+        cache.release_owner("window-b")
+        reloaded = cache.get(locator, assets, "vanilla:palette/standard", load)
+
+        self.assertEqual((first, second, retained, reloaded), (b"updated palette",) * 4)
+        self.assertEqual(len(calls), 2)
+
     def test_given_unsafe_asset_path_when_locator_resolves_it_then_it_is_rejected(self):
         locator = AssetLocator(self.root)
 
@@ -118,6 +139,16 @@ class CatalogTests(unittest.TestCase):
         record = assets.get("vanilla:briefing/_campaign")
         self.assertEqual(record.decoder, "campaign-briefing")
         self.assertEqual(assets.resolve(self.root, record.identifier), self.root / "FILE/DLL/WND.DLL")
+        self.assertEqual(assets.get("vanilla:glue-window/mainmenu").decoder, "glue-content")
+        self.assertEqual(assets.get("vanilla:glue-program/flow-script-bp01").path, "DLL/WND.DLL")
+
+    def test_given_bitmap_dll_present_when_a_dynamic_bitmap_is_resolved_then_it_uses_the_container(self):
+        self._write("FILE/DLL/BITMAP.DLL", b"MZ")
+
+        assets = catalog.build(self.root)
+
+        self.assertEqual(assets.get("vanilla:bitmap/map").decoder, "glue-content")
+        self.assertEqual(assets.resolve(self.root, "vanilla:bitmap/map"), self.root / "FILE/DLL/BITMAP.DLL")
 
     def test_given_original_developer_battle_name_when_used_as_an_asset_id_then_it_is_supported(self):
         identifier = AssetId("vanilla", "battle", "_destest")

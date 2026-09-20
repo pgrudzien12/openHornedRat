@@ -13,6 +13,7 @@ Type and name are an int (numeric ID) or a str (UTF-16 name stored in the direct
 """
 import struct, sys
 from collections import namedtuple
+from pathlib import Path
 
 RT_NAMES = {
     1: 'RT_CURSOR', 2: 'RT_BITMAP', 3: 'RT_ICON', 4: 'RT_MENU', 5: 'RT_DIALOG',
@@ -32,7 +33,7 @@ def type_name(t):
 class PE:
     def __init__(self, path):
         self.path = path
-        self.buf = open(path, 'rb').read()
+        self.buf = Path(path).read_bytes()
         b = self.buf
         if b[:2] != b'MZ':
             raise ValueError(f"{path}: no MZ signature")

@@ -3,6 +3,13 @@
 import json
 import os
 from pathlib import Path
+from dataclasses import asdict, is_dataclass
+
+from .glue import (
+    AnimRecord, BitmapRecord, GlueProgram, HotspotRecord, IncludeRecord, MissionRecord,
+    PositionRecord, TextRecord, WindowDefinition, parse_glue_resource,
+    parse_glue_resources, tokenize_glue, coverage_report, validate_program,
+)
 from .legacy import module
 from .paths import Installation
 
@@ -14,17 +21,46 @@ def load_wnd_rcdata(wnd_dll_path):
     return {str(r.name).upper(): pe.data(r).decode("latin-1") for r in pe.resources() if r.type == 10}
 
 
+def check_glue_inventory(installation_path, expected_resources=535):
+    """Validate complete glue coverage for the supported GOG v1.0 installation."""
+    game = Installation(installation_path)
+    resources = parse_glue_resources(load_wnd_rcdata(game.file_dir("DLL", "WND.DLL")))
+    report = coverage_report(resources)
+    if len(resources) != expected_resources:
+        raise ValueError(f"expected {expected_resources} WND resources, found {len(resources)}")
+    unknown = [f"{group}/{block}/{name}"
+               for group in ("commands", "fields")
+               for block, entries in report[group].items()
+               for name, details in entries.items()
+               if details["status"] == "unknown"]
+    if unknown:
+        raise ValueError("unclassified glue statements: " + ", ".join(unknown))
+    for resource in resources.values():
+        if isinstance(resource, GlueProgram):
+            validate_program(resource)
+    return report
+
+
 def parse_glue_lines(text):
-    """Yield non-comment (command, argument) pairs from a glue script."""
-    for raw in text.splitlines():
-        line = raw.split("//")[0].strip()
-        if not line or line.startswith(";") or line[0] in "\x1a\x1b":
-            continue
-        if line.startswith("["):
-            yield line.split("]")[0] + "]", ""
-            continue
-        key, _, val = line.partition(":")
-        yield key.strip().lower(), val.split(";")[0].strip()
+    """Compatibility projection of the typed importer as ``(command, argument)`` pairs."""
+    for statement in tokenize_glue("<memory>", text):
+        yield statement.command, statement.argument
+
+
+def _imported_resources(wnd):
+    if all(isinstance(resource, (GlueProgram, WindowDefinition)) for resource in wnd.values()):
+        return wnd
+    return parse_glue_resources(wnd)
+
+
+def _program_instructions(program_or_text, name="<memory>"):
+    if isinstance(program_or_text, WindowDefinition):
+        return ()
+    program = (program_or_text if isinstance(program_or_text, GlueProgram)
+               else parse_glue_resource(name, program_or_text))
+    if isinstance(program, WindowDefinition):
+        return ()
+    return program.instructions
 
 
 def parse_cash_field(cash_str):
@@ -58,19 +94,19 @@ def parse_mission_windows(wnd, brtxt=None):
     """Parse all [MISSION] blocks grouped by mission window resource name."""
     brtxt = brtxt or {}
     windows = {}
-    for name, text in sorted(wnd.items()):
+    for name, resource in _imported_resources(wnd).items():
         if not ("MISSION" in name and "WINDOW" in name) and not name.startswith("MISSION"):
             continue
-        cur_mission = None
         missions = []
-        for cmd, arg in parse_glue_lines(text):
-            if cmd == "[MISSION]":
-                cur_mission = {}
-            elif cmd == "[END]" and cur_mission is not None:
-                if cur_mission:
-                    missions.append(cur_mission)
-                cur_mission = None
-            elif cur_mission is not None:
+        if not isinstance(resource, WindowDefinition):
+            continue
+        for record in resource.records:
+            if not isinstance(record, MissionRecord):
+                continue
+            cur_mission = {"mission_ref": record.mission_ref,
+                           "briefing_key": record.mission_ref.key}
+            for statement in record.fields:
+                cmd, arg = statement.command, statement.argument
                 if cmd == "set" and arg.startswith("res="):
                     res_id = int(arg[4:])
                     cur_mission["name_id"] = res_id
@@ -94,6 +130,8 @@ def parse_mission_windows(wnd, brtxt=None):
                     cur_mission["inactivedepend"] = int(arg[15:])
                 elif cmd == "replacescript":
                     cur_mission["replacescript"] = arg.upper()
+            if len(cur_mission) > 2:
+                missions.append(cur_mission)
         if missions:
             windows[name] = missions
     return windows
@@ -120,64 +158,66 @@ def parse_window_ui(wnd, name, seen=()):
     name = name.upper()
     if name in seen:
         raise ValueError(f"cyclic window include: {' -> '.join((*seen, name))}")
+    resources = _imported_resources(wnd)
     try:
-        text = wnd[name]
+        resource = resources[name]
     except KeyError:
         raise ValueError(f"window resource not found: {name}") from None
+    if not isinstance(resource, WindowDefinition):
+        raise ValueError(f"resource is not a window: {name}")
 
     result = {"window": name, "position": {}, "bitmaps": [], "hotspots": [], "anims": [], "texts": []}
-    section, current = None, None
-    for command, argument in parse_glue_lines(text):
-        if command.startswith("["):
-            if command == "[POSITION]":
-                section, current = command, result["position"]
-            elif command == "[BITMAP]":
-                section, current = command, {}
-            elif command == "[HOTSPOT]":
-                section, current = command, {}
-            elif command == "[ANIM]":
-                section, current = command, {}
-            elif command == "[TEXT]":
-                section, current = command, {}
-            elif command == "[INCLUDE]":
-                section, current = command, None
-            elif command == "[END]":
-                if section == "[BITMAP]" and current:
-                    result["bitmaps"].append(current)
-                elif section == "[HOTSPOT]" and current:
-                    result["hotspots"].append(current)
-                elif section == "[ANIM]" and current:
-                    result["anims"].append(current)
-                elif section == "[TEXT]" and current:
-                    result["texts"].append(current)
-                section, current = None, None
+    for record in resource.records:
+        if isinstance(record, IncludeRecord):
+            script = next((item.argument for item in record.fields if item.command == "script"), None)
+            if script:
+                included = parse_window_ui(resources, script, (*seen, name))
+                result["bitmaps"].extend(included["bitmaps"])
+                result["hotspots"].extend(included["hotspots"])
+                result["anims"].extend(included["anims"])
+                result["texts"].extend(included["texts"])
             continue
-        if section == "[INCLUDE]" and command == "script":
-            included = parse_window_ui(wnd, argument, (*seen, name))
-            result["bitmaps"].extend(included["bitmaps"])
-            result["hotspots"].extend(included["hotspots"])
-            result["anims"].extend(included["anims"])
-            result["texts"].extend(included["texts"])
+        if isinstance(record, PositionRecord):
+            current = result["position"]
+        elif isinstance(record, BitmapRecord):
+            current = {}
+        elif isinstance(record, HotspotRecord):
+            current = {}
+        elif isinstance(record, AnimRecord):
+            current = {}
+        elif isinstance(record, TextRecord):
+            current = {}
+        else:
             continue
-        if current is None:
-            continue
-        if command == "set" and "=" in argument:
-            key, value = argument.split("=", 1)
-            try:
-                current[key] = int(value)
-            except ValueError:
-                current[key] = value
-        elif section == "[BITMAP]" and command in ("setbitmap", "setmask"):
-            current[command.removeprefix("set")] = argument
-        elif section == "[HOTSPOT]" and command in ("res", "script"):
-            current["target"] = argument
-            current["target_kind"] = command
-        elif section == "[ANIM]" and command == "settextcolor":
-            current["text_color"] = argument.lower()
-        elif section == "[ANIM]" and command == "name":
-            current["name"] = argument
-        elif section == "[TEXT]" and command in ("font", "format", "settextcolor"):
-            current["color" if command == "settextcolor" else command] = argument.lower()
+        for statement in record.fields:
+            command, argument = statement.command, statement.argument
+            if isinstance(record, BitmapRecord) and command == "gettentpos":
+                current["position_source"] = "tentpos"
+            elif command == "set" and "=" in argument:
+                key, value = argument.split("=", 1)
+                try:
+                    current[key] = int(value)
+                except ValueError:
+                    current[key] = value
+            elif isinstance(record, BitmapRecord) and command in ("setbitmap", "setmask"):
+                current[command.removeprefix("set")] = argument
+            elif isinstance(record, HotspotRecord) and command in ("res", "script"):
+                current["target"] = argument
+                current["target_kind"] = command
+            elif isinstance(record, AnimRecord) and command == "settextcolor":
+                current["text_color"] = argument.lower()
+            elif isinstance(record, AnimRecord) and command == "name":
+                current["name"] = argument
+            elif isinstance(record, TextRecord) and command in ("font", "format", "settextcolor"):
+                current["color" if command == "settextcolor" else command] = argument.lower()
+        if isinstance(record, BitmapRecord) and current:
+            result["bitmaps"].append(current)
+        elif isinstance(record, HotspotRecord) and current:
+            result["hotspots"].append(current)
+        elif isinstance(record, AnimRecord) and current:
+            result["anims"].append(current)
+        elif isinstance(record, TextRecord) and current:
+            result["texts"].append(current)
     return result
 
 
@@ -209,7 +249,8 @@ def parse_mission_script(text, bktxt=None):
         "caravan_entries": [],
         "ends_game": False,
     }
-    for cmd, arg in parse_glue_lines(text):
+    for instruction in _program_instructions(text):
+        cmd, arg = instruction.command, instruction.argument
         if cmd in ("playgame", "playgamewithdebrief", "encounterplaygame", "encounterplaygamewithdebrief", "setbattlescript"):
             parts = [p.strip() for p in arg.split(",") if p.strip()]
             battle_name = parts[0].upper() if parts else ""
@@ -270,7 +311,7 @@ def parse_mission_script(text, bktxt=None):
     return {"actions": actions, "summary": summary}
 
 
-def build_campaign_graph(installation_path):
+def build_campaign_graph(installation_path, wnd=None, string_tables=None):
     """Build the complete campaign transition graph from WND.DLL and associated string tables."""
     game = Installation(installation_path)
     wnd_dll = game.file_dir("DLL", "WND.DLL")
@@ -279,27 +320,33 @@ def build_campaign_graph(installation_path):
     gmtxt_dll = game.file_dir("DLL", "GMTXT.DLL")
 
     pe_missions = module("pe_missions")
-    wnd = load_wnd_rcdata(wnd_dll)
-    brtxt = pe_missions.load_strings(str(brtxt_dll))
-    bktxt = pe_missions.load_strings(str(bktxt_dll))
-    gmtxt = pe_missions.load_strings(str(gmtxt_dll))
+    wnd = parse_glue_resources(load_wnd_rcdata(wnd_dll)) if wnd is None else _imported_resources(wnd)
+    string_tables = string_tables or {}
+    brtxt = (string_tables["BRTXT"] if "BRTXT" in string_tables
+             else pe_missions.load_strings(str(brtxt_dll)))
+    bktxt = (string_tables["BKTXT"] if "BKTXT" in string_tables
+             else pe_missions.load_strings(str(bktxt_dll)))
+    gmtxt = (string_tables["GMTXT"] if "GMTXT" in string_tables
+             else pe_missions.load_strings(str(gmtxt_dll)))
 
     windows = parse_mission_windows(wnd, brtxt)
     # Battle script names are not unique: placeholder BF003 alone occurs in
     # many mission records. Preserve the record identity used by UI assets
     # and briefing lookup instead of treating ``battle`` as a key.
-    for window_name, missions in windows.items():
-        for index, mission in enumerate(missions):
-            mission["briefing_key"] = f"{window_name.casefold()}.{index}"
-    portrait_windows = {name: result for name in wnd if (result := parse_window_portrait(wnd, name)) is not None}
+    portrait_windows = {
+        name: result for name, resource in wnd.items()
+        if isinstance(resource, WindowDefinition)
+        if (result := parse_window_portrait(wnd, name)) is not None
+    }
 
     # Parse flow scripts
     flow_scripts = {}
-    for name, text in sorted(wnd.items()):
+    for name, resource in sorted(wnd.items()):
         if not name.startswith("FLOWSCRIPT"):
             continue
         steps = []
-        for cmd, arg in parse_glue_lines(text):
+        for instruction in _program_instructions(resource, name):
+            cmd, arg = instruction.command, instruction.argument
             if cmd == "addobject" and "res=" in arg.lower():
                 obj_res = arg.split("=", 1)[1].strip().upper()
                 steps.append({"action": "add_window", "window": obj_res})
@@ -315,9 +362,10 @@ def build_campaign_graph(installation_path):
 
     # Parse all execution mission scripts
     mission_scripts = {}
-    for name, text in sorted(wnd.items()):
-        if "MISSION" in name and not ("WINDOW" in name) and not name.startswith("FLOW"):
-            mission_scripts[name] = parse_mission_script(text, bktxt)
+    for name, resource in sorted(wnd.items()):
+        if (isinstance(resource, GlueProgram) and "MISSION" in name
+                and not ("WINDOW" in name) and not name.startswith("FLOW")):
+            mission_scripts[name] = parse_mission_script(resource, bktxt)
 
     # Resolve links and branches
     nodes = {}
@@ -387,6 +435,13 @@ def build_campaign_graph(installation_path):
             "edges": edges,
         },
     }
+
+
+def json_default(value):
+    """Encode typed campaign identities in legacy JSON report output."""
+    if is_dataclass(value):
+        return asdict(value)
+    raise TypeError(f"{type(value).__name__} is not JSON serializable")
 
 
 def export_graph_dot(campaign_data):
@@ -506,7 +561,7 @@ def main(argv=None):
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
         with open(args.json, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f, indent=2, default=json_default)
         print(f"Wrote JSON to {args.json}")
 
     if args.dot:

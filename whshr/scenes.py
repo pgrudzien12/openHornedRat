@@ -50,6 +50,7 @@ class SceneAssets:
     catalog: object
     cache: AssetCache
     loaders: dict
+    glue: object = None
 
     def load(self, identifier):
         record = self.catalog.get(identifier)
@@ -58,6 +59,27 @@ class SceneAssets:
         except KeyError:
             raise ValueError(f"no scene loader for decoder: {record.decoder}") from None
         return self.cache.get(self.locator, self.catalog, record.identifier, loader)
+
+    def acquire(self, identifier, owner):
+        """Load a runtime-discovered asset retained by an explicit owner."""
+        record = self.catalog.get(identifier)
+        try:
+            loader = self.loaders[record.decoder]
+        except KeyError:
+            raise ValueError(f"no scene loader for decoder: {record.decoder}") from None
+        return self.cache.acquire(
+            self.locator, self.catalog, record.identifier, loader, owner
+        )
+
+    def release_owner(self, owner):
+        self.cache.release_owner(owner)
+
+    def glue_content(self):
+        """Return the one shared, lazily indexed campaign-content repository."""
+        if self.glue is None:
+            from .glue_content import GlueContent
+            self.glue = GlueContent(self.locator.installation)
+        return self.glue
 
 
 class Scene(ABC):

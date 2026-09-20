@@ -64,6 +64,8 @@ file written at campaign start is the 45/46-byte stub `[MERCARMY]\r\n\r\n[END]\t
 
 ### 4.2 `SHDR` header (0xF8 bytes) ✅
 
+> **Correction (`notes/save_resume.md` §1-§2):** the four counters at `0xCC-0xD8` are the depths of the window-state, context, caller and script-frame stacks; the two u32 arrays after the snapshots are each snapshot's open-window count and palette id.
+
 Built by `FUN_00443cd2` (a zeroed `0xF8` buffer), applied by `FUN_004447b0`.
 
 | Offset | Type | Field | savegame.0 | savegame.5 | Evidence |
@@ -504,6 +506,8 @@ referenced by these code paths ⬜.
   (→ 4 wounded, 3 dead by 3.3), 20 kills, 80 XP.
 
 ## 5. Debrief flow (battle → campaign) ✅
+
+> **Corrections (see `notes/debrief_evaluation.md` §7 and `notes/activity_results.md`):** the mode-4 payment is made by the `debrief:` callback, not by Done; modes 6 (`playgame`, `encounterplaygame`) are never paid; the evaluator table has 41 records and 8 evaluator kinds; "NPC merging enabled" means objective `G` or `I` is defined in the battle.
 
 1. **Before the battle** the mission glue (e.g. `BPMission1`: `setdebrief:2`, `enablebook:0=26`, `autosave:`,
    `encounterplaygamewithdebrief:bf003`) records the debrief evaluator (`setdebrief:n` → `MISS+0xB4 = n − 1`),

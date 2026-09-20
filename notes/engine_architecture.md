@@ -680,3 +680,68 @@ unwritable log directory, disabled logging, and that every log line parses with 
 - `resolve_rally` still runs its Leadership test (and now logs a `rally_test` record) for a regiment that
   has already fled (`fled=True`); harmless (a fled regiment is inert either way) but a slightly misleading
   log entry.
+
+## Display scaling and fullscreen (research)
+
+Prompted by the owner's reaction to the integer-scale fix (`whshr/frontend/scene_view.py`
+`NativeScreenView`): it makes fonts and pixel art crisp again, but at a non-multiple window size
+it now letterboxes down to a small integer instead of filling the screen the way the engine used
+to (blurrily). Two related asks: a real fullscreen mode, and a scaling technique that fills any
+window/display size without either the fractional-nearest blur the original bug report was about,
+or the letterboxing the fix traded it for. Not implemented yet — this section records the design
+so the next step can go straight to it.
+
+### Why per-view fractional scaling was the wrong place to fix this
+
+Today every view (`CaravanView`, `MissionMapView`, `MainMenuView`, …) draws its own bitmaps and
+text quads straight into the window-sized render target (`Gpu.target`, sized to the actual window
+in `app.py`), multiplying every coordinate and size by that view's own `_layout()` scale. This is
+why the bug had to be fixed once in `NativeScreenView` and then inherited everywhere, and it's also
+why there's no single place to apply a smarter upscale filter — by the time a quad is drawn it is
+already sized in window pixels, one draw call at a time, each independently sampled by its own
+`nearest`/`linear` sampler.
+
+**Better architecture: render at native size, upscale once.** Give the frame a second, always
+`640x480` off-screen `RenderTarget` (the game's native resolution is fixed and known — see
+`NativeScreenView`). Every view draws into *that* using plain, unscaled native pixel coordinates
+(no more `_layout()`, no more `scale` threaded through every `draw()`/`_button_at()`/hit-test
+method — a real simplification, not just a rendering change). Once a frame is complete, one final
+full-screen pass stretches that 640x480 color texture onto the actual window-sized target. This
+also fixes hit-testing for free: mouse coordinates only need converting from window space to
+native space once, at the same place the final blit computes its own placement/scale, instead of
+duplicating that math in every view's `_mission_at`/`_button_at`.
+
+### The final upscale filter
+
+With rendering unified into one texture-to-window blit, the filter for *that one blit* decides
+sharpness for the whole game at once:
+
+| Technique | Result | Cost |
+|---|---|---|
+| `nearest`, integer scale + letterbox (current fix) | Pixel-perfect, but wastes screen space unless the window is an exact 640x480 multiple | none |
+| `linear`, stretch to fill (the old per-quad behavior that prompted the whole investigation) | Fills the screen, but blurs text and pixel art at any non-integer scale | none |
+| **"Sharp-bilinear"**: sample the native texture with `linear` filtering, but remap the fragment shader's UV so that only the thin band actually crossing a source-pixel boundary gets interpolated, using the exact `screen_size / 640x480` scale as a shader uniform (`uv_px = floor(uv*640) + saturate((frac(uv*640) - 0.5 + 0.5/scale) * scale)` and the analogous line for the y axis, then sample at `uv_px/640`) | Fills the screen at any size, looks crisp because most of every source pixel is still flat-sampled — only its edges blend; this is the technique behind emulators' "sharp-bilinear-simple" / RetroArch's default pixel-art shader | one shader, no extra texture, one draw call — cheap |
+| Edge-detecting upscalers (xBR/hqx family) | Best for hand-drawn sprite art, invented for exactly this kind of asset | Real complexity (multi-tap kernels, usually precomputed at fixed 2x/3x/4x factors) for a benefit that matters more to sprites than to the mostly text/UI screens the bug was about; not recommended as the first step |
+
+Recommendation: implement the native-target-plus-one-final-blit architecture with the
+sharp-bilinear shader for that blit. It fills the screen at any resolution/aspect ratio (no
+letterbox unless the window's aspect ratio actually differs from 4:3, which needs one either way),
+keeps text and UI art crisp, and is one shader — much less engineering than an xBR-style filter.
+`ScreenQuad.filter` already supports choosing `nearest`/`linear` per quad
+(`whshr/frontend/gpu.py`); the new blit would use a bespoke pipeline instead, since sharp-bilinear
+needs the scale as a uniform, not just a sampler mode.
+
+### Fullscreen
+
+No fullscreen support exists today (`open_window` in `whshr/frontend/app.py` always opens a plain
+window at the caller's `size`; there's no `--fullscreen` flag and no window-resize handling).
+Recommended approach: **borderless fullscreen**, not exclusive (`pygame.FULLSCREEN`) — sized to
+`pygame.display.Info()`'s current desktop resolution, opened with `pygame.NOFRAME` (no exclusive
+video-mode switch, which is the flaky part on Linux/Wayland/X11 and multi-monitor setups). Once
+rendering is unified behind one native-to-window blit (above), fullscreen is just "a window sized
+to the desktop" — no special-casing needed elsewhere, and the same code path also gives cheap
+support for resizing an ordinary window at runtime (recreate `Gpu.target` — a `RenderTarget` sized
+to the window — on `pygame.VIDEORESIZE`; every other GPU resource is sized to its own content, not
+the window, so nothing else needs to change). A runtime fullscreen toggle (e.g. Alt+Enter/F11) is
+then simply switching `size` and rebuilding `Gpu.target`; deferred as a nice-to-have, not required
+for the first fullscreen pass.

@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from . import legacy
-from . import audio, battle2d, battle3d, battle_replay, behaviour, campaign, catalog, engine, pbx, rules, si, viewer_web
+from . import audio, battle2d, battle3d, battle_replay, behaviour, campaign, catalog, engine, glue_spec, pbx, rules, si, viewer_web
 from .paths import Installation
 
 # Battle logs default to the git-ignored logs/ of this checkout, wherever the engine is started from.
@@ -43,6 +43,7 @@ def check(installation):
         ("SoundFont", lambda: audio.parse_sf2(
             game.binary_file("SOUND", "WARINTR3.SBK")
         )),
+        ("campaign glue inventory", lambda: campaign.check_glue_inventory(game.root)),
         ("campaign flow", lambda: bool(campaign.build_campaign_graph(str(game.root)))),
         ("3D viewer orientation", battle3d.check_orientation),
         ("game rules tables and unit stats", lambda: rules.check(game.root)),
@@ -71,7 +72,7 @@ def extract(installation, cache):
     camp_dir = cache / "campaign"
     camp_dir.mkdir(parents=True, exist_ok=True)
     with open(camp_dir / "campaign.json", "w", encoding="utf-8") as f:
-        json.dump(camp_data, f, indent=2)
+        json.dump(camp_data, f, indent=2, default=campaign.json_default)
     with open(camp_dir / "campaign.dot", "w", encoding="utf-8") as f:
         f.write(campaign.export_graph_dot(camp_data))
     with open(camp_dir / "campaign.md", "w", encoding="utf-8") as f:
@@ -164,6 +165,8 @@ def main(argv=None):
     rules_parser = commands.add_parser("rules", help="print GAMEF.DLL combat tables or decoded unit stats")
     rules_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     rules_parser.add_argument("script", nargs="?", help="optional BTS/MRC filename or path: decode its units")
+    glue_spec_parser = commands.add_parser("glue-spec", help="list glue script commands with usage and specification status")
+    glue_spec_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     scripts_parser = commands.add_parser("scripts", help="summarise or disassemble SCRIPT/BFxxx.DLL behaviour scripts")
     scripts_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     scripts_parser.add_argument("dll", nargs="?", help="optional mission DLL filename or path, e.g. BF001.DLL")
@@ -263,6 +266,8 @@ def main(argv=None):
         return 0 if results and all(result["max_error"] < 0.025 for result in results) else 1
     if args.command == "rules":
         return rules.main(args.installation, args.script)
+    if args.command == "glue-spec":
+        return glue_spec.main(args.installation)
     if args.command == "scripts":
         return behaviour.main(args.installation, args.dll, args.ids, args.names)
     if args.command == "viewer-web":

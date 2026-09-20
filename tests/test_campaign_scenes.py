@@ -24,6 +24,7 @@ class IntroSceneTests(unittest.TestCase):
         self._write("FILE/BINARY/STANDARD.PAL", b"palette")
         self._write("FILE/BINARY/PCSUBT.FON", b"MZ")
         self._write("FILE/BINARY/PCTEXTA.FON", b"MZ")
+        self._write("FILE/BINARY/GLUE/PCTEXT.FON", b"MZ")
         self._write("FILE/DLL/ANTXT.DLL", b"MZ")
         self._write("FILE/BINARY/GLUE/SUBTEXT.FON", b"MZ")
         self._write("REMOTE/BINARY/ANIM/A1.SI", b"container")
@@ -149,6 +150,7 @@ class IntroSceneTests(unittest.TestCase):
 
         self.assertIsInstance(machine.active, MissionMapScene)
         self.assertEqual(machine.history[0].reason, "campaign map opened")
+        self.assertIn(self.root / "FILE/BINARY/GLUE/PCTEXT.FON", self.loaded)
 
         machine.handle("select_mission:0")
 
@@ -221,6 +223,7 @@ class IntroSceneTests(unittest.TestCase):
 
         self.assertEqual(scene.briefing_id, briefing_asset_for(mission))
         self.assertEqual(scene.briefing, self.briefing)
+        self.assertEqual(scene.installation.root, self.root)
 
     def test_given_mission_briefing_when_battle_is_started_then_it_transitions_to_that_battle(self):
         scene = BriefingScene({"briefing_key": "test.0", "battle": "BF001"})

@@ -84,6 +84,10 @@ The others belong to regiment/leader portraits in the roster book.
 
 - The background is **frame `bkindex` of `BACKALL`** (21 frames of 120×152, sprite-table entry `AllBGs`), drawn under the
   portrait's frame 0 with palette index 0 of the portrait transparent. Values used in glue: 0–19 (frame 15 for Dietrich).
+- ✅ The frame number is exactly `bkindex`: the executable adds a base offset to it, but that offset is a constant 0 that nothing writes
+  (checked by searching for writers), and the set is selected by the fixed sprite-table entry `AllBGs`. No per-scene, day/night or
+  campaign-state offset exists. (The key is stored per `[ANIM]` block; a `[BITMAP]` `set:bkindex` is an unrelated repaint flag,
+  `notes/campaign_tent.md` §5.6.)
 - Frames 0–14 and 18–20 are landscapes, buildings and stone or hill backdrops; 15 is a red stage curtain; **16 and 17 are the two halves of a wooden
   interior** with a shelf and a bottle (left and right of an arch), used as single backgrounds by Commander, Carlsson,
   Dargrimm, Harkon, Cpt Bernard, Azguz, Holger (16) and Ceridan, Ilmarin, Engrol, Cpt Bernard (17).
@@ -132,8 +136,10 @@ window; a window advances its animations **once per message that finds at least 
 with several ticks if a message is late). So the nominal tick is 25 ms; on real Windows the timer granularity stretches this
 (about 31 ms on NT-family systems, 55 ms on Windows 9x), so the original's speed was machine dependent. An engine should use
 25 ms as the unit unless a timing measurement says otherwise. The timer is slowed to 500 ms while the main window is
-minimised, and animations do not advance while two front-end state flags are set (one seems to be the paused state shown by the
-Pause/Resume button 🟡; the other is unidentified).
+minimised, and animations do not advance while either of two front-end flags is set ✅: the **paused** flag (toggled by the
+Pause/Resume button, which also pauses the music) and a **glue busy** flag that is raised while windows are being built, cleaned
+up, started or shut down and restored afterwards. The same two flags gate the `[BITMAP]` animation step (`notes/campaign_tent.md`
+§5.3), which uses a 2-tick (50 ms) step where the portrait sequences use the one-tick unit above.
 
 ### 3.3 Sequence tables (kind 5), durations are the stored values (shown `duration+1` ticks)
 
@@ -166,7 +172,20 @@ Talking mouth patterns look pseudo-random but are **fixed sequences**, not gener
 - **`applyseq:res=<window>`** (script): for **every** `[ANIM]` block of the named window, copies that number into the block
   and restarts both slots with it. `animseq` 1 → talking (mouth sequence 1, eyes sequence 1); `animseq` 2 → stopped (mouth
   sequence 2 = closed mouth held, eyes sequence 2 = the same blink loop as 1, so **the eyes keep blinking while stopped**).
-- **`set:frame=3`**: present in every block (115) but has no observable effect on the tables above 🟡.
+- **`set:frame=N`** ✅ code, ✅ art: selects an **ornamental border set** for the portrait window from a table of four entries. Entries 0, 1
+  and 2 are three gold ornament sets of 8 pieces each (four corners, top and bottom edge, left and right edge), drawn from sprite frames
+  181–188, 189–196 and 197–204 of the `ICONS` sprite set (viewed: gilded corners with skulls, chains and thorn work); entry 3 is an
+  **empty list, so nothing is drawn**. Every shipped block (115) uses 3, so the ornaments are never shown and the plain `FRAME*` bitmap
+  border applies (`notes/mission_selection.md` §9.3). Offsets of the pieces inside the window (top-left corner, then edges):
+
+  | Set | Pieces as `(x, y)`: TL, top edge, TR, left edge, right edge, BL, bottom edge, BR |
+  |---|---|
+  | 0 | (0,0) (20,0) (96,0) (0,48) (116,32) (0,148) (28,156) (100,132) |
+  | 1 | (0,0) (24,0) (100,0) (0,32) (112,36) (0,148) (24,156) (100,148) |
+  | 2 | (0,0) (28,0) (96,0) (0,44) (112,36) (0,144) (28,160) (96,144) |
+
+  The role of each piece is read from the rendered sheet 🟡 and the window-relative origin of the ornaments was not traced. An
+  engine can ignore this key (only 3 occurs) and must not treat it as a pose or frame number.
 - Nothing ties the mouth to the speech audio or to `playtext`: the scripts start and stop talking explicitly
   (`set:animseq=1; applyseq; queuetoplaytext…; playtext…; set:animseq=2; applyseq`, see `BPBrief1`), and the mouth follows
   the fixed sequence for as long as `animseq` is 1. There is no amplitude analysis.
@@ -205,12 +224,12 @@ the view draws frame 0, then the current mouth overlay, then the current eye ove
   verified.
 - §9.2 "BACKALL may need its own palette 🟡" → frames 16/17 need the window's map screen palette pair (§2.1).
 - §9.1 `sequence`/`frame`/`animseq` rows → §3.4 (`frame` has no known effect; only `animseq` 1/2 occur; timing is 25 ms ticks).
-- `frame=3` and the two extra integers per resident-list record stay ⬜.
+- `frame=3` = "no ornaments" (§3.4). The two extra integers per resident-list record stay ⬜.
 
 ## 6. Open questions
 
 - ⬜ The story reason for `CeridanWindow` and `IlmarinWindow` using the hooded portrait (§1.2) and whether the two extra
   integers in each resident-list record are the roster book's per-portrait offsets.
-- ⬜ The second front-end flag that pauses animation ticks, and the machine-dependent real tick length.
-- 🟡 `set:frame=3` (no effect found).
+- ✅ Pause flags identified (§3.2); ✅ `set:frame` = ornament set, 3 = none (§3.4).
+- ⬜ The machine-dependent real tick length (needs a timing capture in the running original).
 - 🟡 Whether kind 3 (`SKA4`) is ever shown by a glue window (no `[ANIM]` uses index 3).

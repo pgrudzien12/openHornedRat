@@ -24,7 +24,8 @@ class ControlPanel:
 # actions remain deliberately disabled instead of being guessed.
 _PANELS = {
     0: ControlPanel("FRAMEBOTTOM"),
-    1: ControlPanel("FRAMEPANEL3", (311, 309, 310)),
+    1: ControlPanel("FRAMEPANEL3", (311, 309, 310),
+                    ("abort_briefing", "accept_briefing", "toggle_pause")),
     2: ControlPanel("FRAMEPANEL3", (333, 309, 313),
                     ("return_to_caravan", "open_troop_select", "open_briefing")),
     3: ControlPanel("FRAMEPANEL1", (331,)),

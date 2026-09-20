@@ -3,10 +3,10 @@
 from .assets import AssetId
 from .battle_scene import BattleScene, FIRST_BATTLE
 from .campaign_state import CampaignState
-from .campaign import load_wnd_rcdata, parse_window_ui
+from .campaign import parse_window_ui
 from .engine import DEFAULT_SEED
+from .glue_fonts import glue_font_asset
 from .legacy import module
-from .portraits import speaker_portrait
 from .scenes import Quit, Scene, SceneManifest, Transition
 from .si import load_si, walk_objects
 
@@ -17,6 +17,8 @@ ANIMATION_TEXT = AssetId("vanilla", "text", "anim")
 SUBTITLE_FONT = AssetId("vanilla", "font", "subtext")
 CARAVAN_FONT = AssetId("vanilla", "font", "pcsubt")
 PCTEXTA_FONT = AssetId("vanilla", "font", "pctexta")
+PCTEXT_FONT = glue_font_asset(2)
+BRIEFING_FONT = glue_font_asset(4)
 OPENING_TEXT_IDS = (1100, 1101, 1102)
 
 
@@ -33,7 +35,9 @@ def omni_duration_seconds(container):
 
 def briefing_asset_for(mission):
     """Return the briefing asset for one exact campaign mission record."""
-    return AssetId("vanilla", "briefing", mission["briefing_key"])
+    mission_ref = mission.get("mission_ref")
+    return AssetId("vanilla", "briefing", mission_ref.key if mission_ref is not None
+                   else mission["briefing_key"])
 
 
 class OpeningNarrationScene(Scene):
@@ -106,17 +110,18 @@ class MainMenuScene(Scene):
         self.log_dir, self.seed = log_dir, seed
         self.campaign = campaign
         self.menu_ui = None
+        self.content = None
 
     def enter(self, context):
         if context is None:
             return
         self.installation = context.locator.installation
+        self.content = context.glue_content()
         try:
             wnd_path = context.locator.installation.file_dir("DLL", "WND.DLL")
             if wnd_path.stat().st_size < 64:
                 return
-            wnd = load_wnd_rcdata(wnd_path)
-            self.menu_ui = parse_window_ui(wnd, "MAINMENU")
+            self.menu_ui = parse_window_ui(self.content.resources, "MAINMENU")
         except (FileNotFoundError, OSError, ValueError):
             # Focused scene tests can supply a minimal placeholder WND.DLL.
             self.menu_ui = None
@@ -128,7 +133,7 @@ class MainMenuScene(Scene):
                 # briefing; a real installation derives the full initial flow.
                 self.campaign = (
                     CampaignState.single_mission(self.briefing) if self.briefing is not None
-                    else CampaignState.from_installation(context.locator.installation)
+                    else CampaignState.from_installation(context.locator.installation, self.content)
                 )
             # StartCaravan's resource starts the first parked flow script.
             # Later ``gocaravan`` calls must supply their own continuation.
@@ -162,9 +167,12 @@ class CaravanScene(Scene):
         self.save_requested = False
         self.font = None
         self.installation = None
+        self.content = None
 
     def enter(self, context):
         self.installation = context.locator.installation
+        self.content = self.campaign.content or context.glue_content()
+        self.campaign.content = self.content
         self.font = context.load(CARAVAN_FONT)
 
     @property
@@ -209,7 +217,9 @@ class MissionMapScene(Scene):
     later troop-selection implementation accepts the briefing.
     """
 
-    manifest = SceneManifest(immediate=(PCTEXTA_FONT,))
+    # MissionWindow's built-in row painter and ScribeMWindow's buttons both
+    # select glue font 2, PCTEXT.FON (not the briefing's PCTEXTA.FON).
+    manifest = SceneManifest(immediate=(PCTEXT_FONT,))
 
     def __init__(self, campaign):
         self.campaign = campaign
@@ -217,18 +227,22 @@ class MissionMapScene(Scene):
         self.portrait_window = campaign.map_portrait_window
         self.selected_index = None
         self.installation = None
+        self.content = None
         self.font = None
 
     def enter(self, context):
         self.installation = context.locator.installation
-        self.font = context.load(PCTEXTA_FONT)
+        self.content = self.campaign.content or context.glue_content()
+        self.campaign.content = self.content
+        self.font = context.load(PCTEXT_FONT)
         # Portrait FOL/BOP files are not required by the minimal test fixture
         # or every partial installation, so leave the panel absent if either
         # source file has not been extracted from an installed game.
         try:
             if self.portrait_window is not None:
-                self.speaker_portrait = speaker_portrait(context.locator.installation,
-                                                         self.portrait_window["index"], self.portrait_window["bkindex"])
+                self.speaker_portrait = self.content.portrait_data(
+                    self.portrait_window["index"], self.portrait_window["bkindex"]
+                )
         except (FileNotFoundError, ValueError):
             self.speaker_portrait = None
 
@@ -259,7 +273,7 @@ class MissionMapScene(Scene):
             if mission is None:
                 return None
             briefing = mission.get("briefing") or BriefingScene(
-                mission
+                mission, campaign=self.campaign
             )
             return Transition(briefing, f"campaign mission briefing opened: {mission['name']}")
         if event == "open_troop_select" and self.selected_mission is not None:
@@ -277,26 +291,80 @@ class TroopSelectScene(Scene):
 
 
 class BriefingScene(Scene):
-    """Show one battle's campaign briefing text; Start Battle enters the battle itself."""
+    """Run the selected mission's data-defined map briefing before troop selection."""
 
-    def __init__(self, mission, log_dir=None, seed=DEFAULT_SEED):
+    def __init__(self, mission, log_dir=None, seed=DEFAULT_SEED, campaign=None):
         self.mission = mission
+        self.campaign = campaign
         self.battle_id = AssetId("vanilla", "battle", mission["battle"].casefold())
         self.briefing_id = briefing_asset_for(mission)
-        self.manifest = SceneManifest(immediate=(self.briefing_id, PCTEXTA_FONT), prefetch=(self.battle_id,))
+        self.manifest = SceneManifest(immediate=(self.briefing_id, BRIEFING_FONT, PCTEXT_FONT),
+                                      prefetch=(self.battle_id,))
         self.briefing = None
         self.font = None
+        self.ui_font = None
+        self.installation = None
+        self.content = None
+        self.turn_index = 0
+        self.characters_visible = 0
+        self.dialogue_elapsed = 0.0
+        self.dialogue_finished = False
+        self.paused = False
+        self.portraits = ()
         self.log_dir = log_dir
         self.seed = seed
 
     def enter(self, context):
+        self.installation = context.locator.installation
+        self.content = ((self.campaign.content if self.campaign is not None else None)
+                        or context.glue_content())
+        if self.campaign is not None:
+            self.campaign.content = self.content
         self.briefing = context.load(self.briefing_id)
-        self.font = context.load(PCTEXTA_FONT)
+        self.font = context.load(BRIEFING_FONT)
+        self.ui_font = context.load(PCTEXT_FONT)
+        # Older focused fixtures deliberately contain only a transcript.  The
+        # real loader supplies the full glue-derived layout.
+        self.portraits = tuple(self.briefing.get("portraits", ()))
 
     def handle(self, event, context):
+        if event in ("continue_briefing", "fast_forward_dialogue"):
+            turns = self.briefing.get("turns", ())
+            if not self.dialogue_finished and turns:
+                self.characters_visible = len(turns[self.turn_index]["lines"][0])
+                self.dialogue_elapsed = 0.75
+            return None
+        if event == "toggle_pause":
+            self.paused = not self.paused
+            return None
+        if event == "accept_briefing":
+            return Transition(TroopSelectScene(self.campaign, self.mission), "briefing accepted")
+        if event == "abort_briefing" and self.campaign is not None:
+            return Transition(MissionMapScene(self.campaign), "briefing aborted")
         if event == "start_battle":
+            # Compatibility bridge for the direct-development shortcut.  The
+            # normal UI uses continue_briefing and reaches TroopSelect first.
             return Transition(BattleScene(self.battle_id, log_dir=self.log_dir, seed=self.seed),
                               "briefing accepted")
+        return None
+
+    def update(self, seconds, context):
+        if self.paused or self.dialogue_finished:
+            return None
+        turns = self.briefing.get("turns", ())
+        if not turns:
+            self.dialogue_finished = True
+            return None
+        text = turns[self.turn_index]["lines"][0]
+        self.dialogue_elapsed += seconds
+        # The glue timer types one character every two 25 ms ticks, then holds
+        # for 30 ticks before clearing (notes/briefing_dialogue.md §3.5).
+        self.characters_visible = min(len(text), int(self.dialogue_elapsed / 0.05))
+        if self.characters_visible == len(text) and self.dialogue_elapsed >= len(text) * 0.05 + 0.75:
+            self.turn_index += 1
+            self.characters_visible = 0
+            self.dialogue_elapsed = 0.0
+            self.dialogue_finished = self.turn_index >= len(turns)
         return None
 
 

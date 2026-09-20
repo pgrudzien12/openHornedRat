@@ -41,8 +41,16 @@ class AssetCatalog:
         # Briefings are keyed by the live mission record, which is only known
         # after WND.DLL's flow has selected a mission. All use the same source
         # and decoder contract; retain that record as a dynamic template.
-        if asset_id.kind == "briefing":
-            template = self._by_identifier.get(AssetId(asset_id.namespace, "briefing", "_campaign"))
+        dynamic_templates = {
+            "briefing": "_campaign",
+            "glue-window": "_resource",
+            "glue-program": "_resource",
+            "bitmap": "_resource",
+        }
+        if asset_id.kind in dynamic_templates:
+            template = self._by_identifier.get(AssetId(
+                asset_id.namespace, asset_id.kind, dynamic_templates[asset_id.kind]
+            ))
             if template is not None:
                 return replace(template, identifier=asset_id)
         raise KeyError(asset_id)
@@ -118,6 +126,27 @@ def build(installation):
             AssetId("vanilla", "briefing", "_campaign"), "briefing", "file", "DLL/WND.DLL",
             "campaign-briefing", source_fingerprint(wnd_dll),
         ))
+        records.extend((
+            AssetRecord(AssetId("vanilla", "glue-window", "_resource"), "glue-window", "file",
+                        "DLL/WND.DLL", "glue-content", source_fingerprint(wnd_dll)),
+            AssetRecord(AssetId("vanilla", "glue-program", "_resource"), "glue-program", "file",
+                        "DLL/WND.DLL", "glue-content", source_fingerprint(wnd_dll)),
+        ))
+
+    bitmap_dll = game.find("FILE", "DLL", "BITMAP.DLL")
+    if bitmap_dll is not None:
+        records.append(AssetRecord(
+            AssetId("vanilla", "bitmap", "_resource"), "bitmap", "file", "DLL/BITMAP.DLL",
+            "glue-content", source_fingerprint(bitmap_dll),
+        ))
+
+    for table in ("BRTXT", "BKTXT", "GMTXT"):
+        table_dll = game.find("FILE", "DLL", f"{table}.DLL")
+        if table_dll is not None:
+            records.append(AssetRecord(
+                AssetId("vanilla", "string", table.casefold()), "glue-string-table", "file",
+                f"DLL/{table}.DLL", "glue-content", source_fingerprint(table_dll),
+            ))
 
     antxt_dll = game.find("FILE", "DLL", "ANTXT.DLL")
     if antxt_dll is not None:

@@ -1,28 +1,31 @@
-"""Load glue RT_BITMAP resources directly from an installed game."""
+"""Convert headless glue bitmaps from ``GlueContent`` into pygame surfaces."""
 
-import struct
+import re
 
 import pygame
 
-from ..legacy import module
+
+# Glue's gettentpos position table; notes/campaign_tent.md §3.
+TENT_POSITIONS = ((405, 332), (405, 332), (405, 332), (452, 316), (405, 332), (410, 346), (415, 349),
+                  (367, 288), (367, 288), (508, 215), (351, 309), (416, 243), (462, 209), (493, 194),
+                  (505, 195), (285, 187), (261, 159), (285, 187), (276, 238), (192, 214), (244, 269))
 
 
-def load_bitmap(installation, name):
-    """Return an RGBA surface for a named resource in FILE/DLL/BITMAP.DLL."""
-    pe = module("pe_resources").PE(str(installation.file_dir("DLL", "BITMAP.DLL")))
-    resource = next((r for r in pe.resources() if r.type == 2 and str(r.name).upper() == name.upper()), None)
-    if resource is None:
-        raise FileNotFoundError(f"BITMAP.DLL has no bitmap resource {name!r}")
-    dib = pe.data(resource)
-    header, width, height, _planes, bpp, compression, _size, _x, _y, colors, _ = struct.unpack_from("<IiiHHIIiiII", dib)
-    if header != 40 or compression != 0 or bpp != 8:
-        raise ValueError(f"unsupported glue bitmap {name!r}: {bpp} bpp, compression {compression}")
-    height, colors = abs(height), colors or 256
-    palette = [(dib[40 + 4 * i + 2], dib[40 + 4 * i + 1], dib[40 + 4 * i]) for i in range(colors)]
-    offset, stride, rgba = 40 + 4 * colors, (width + 3) & ~3, bytearray(width * height * 4)
-    for y in range(height):
-        source = offset + (height - 1 - y) * stride
-        for x in range(width):
-            red, green, blue = palette[dib[source + x]]
-            rgba[4 * (y * width + x):4 * (y * width + x + 1)] = bytes((red, green, blue, 255))
-    return pygame.image.frombuffer(rgba, (width, height), "RGBA").copy()
+def bitmap_frame_name(spec, frame=None):
+    """Resolve a glue [BITMAP] cell-set base to its current resource name."""
+    start = spec.get("animstartframe")
+    if frame is None:
+        frame = start
+    if start is None or start == -1 or start == spec.get("animstopframe", start):
+        return spec["bitmap"]
+    return re.sub(r"\d+$", "", spec["bitmap"]) + str(frame)
+
+
+def load_bitmap(content, name):
+    """Return an RGBA surface for a bitmap already owned by ``GlueContent``."""
+    bitmap = content.bitmap_data(name)
+    rgba = bytearray(bitmap.width * bitmap.height * 4)
+    for offset, palette_index in enumerate(bitmap.pixels):
+        red, green, blue = bitmap.palette[palette_index]
+        rgba[offset * 4:offset * 4 + 4] = bytes((red, green, blue, 255))
+    return pygame.image.frombuffer(rgba, (bitmap.width, bitmap.height), "RGBA").copy()

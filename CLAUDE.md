@@ -74,10 +74,10 @@ CLAUDE.md          - this file
 FORMATS.md         - format reference: overview table, structures, hypotheses, open questions
 ROADMAP.md         - work plan: game file inventory, phases 0-5 with status, milestones, order of steps
 notes/             - full per-format reports (how each claim was verified, per-file tables, open questions)
-  animations.md, battle_viewer.md, btp_sprite_leftovers.md, campaign.md, data_driven_audit.md, mission_selection.md, campaign_tent.md, troop_selection.md, briefing_dialogue.md, glue_portraits.md, fonts_glue.md, game_rules.md, music.md, pbx_rnc.md, research_plan.md,
+  animations.md, battle_viewer.md, btp_sprite_leftovers.md, campaign.md, data_driven_audit.md, mission_selection.md, campaign_tent.md, glue_keywords.md, glue_interpreter.md, palette_selection.md, activity_results.md, debrief_evaluation.md, builtin_widgets.md, save_resume.md, troop_selection.md, briefing_dialogue.md, glue_portraits.md, fonts_glue.md, game_rules.md, music.md, pbx_rnc.md, research_plan.md,
   pe_resources.md, scene_scripts.md, sfx.md, si_omni.md, sprite_names.md, terrain_gd.md
 whshr/             - unified package and CLI: python3 -m whshr check|extract|catalog|engine|battle-replay|viewer|
-                     viewer-web|viewer-2d|viewer-2d-web|terrain-check|rules|scripts (3D battle viewer: battle3d.py, 2D: battle2d.py,
+                     viewer-web|viewer-2d|viewer-2d-web|terrain-check|rules|scripts|glue-spec (3D battle viewer: battle3d.py, 2D: battle2d.py,
                      GAMEF.DLL rule tables and unit stat decoding: rules.py,
                      behaviour bytecode disassembler: behaviour.py, traced block formation layout: formation.py,
                      scenes and lazy assets: scenes.py, campaign_scenes.py, assets.py, catalog.py, cache.py,
@@ -89,7 +89,9 @@ whshr/             - unified package and CLI: python3 -m whshr check|extract|cat
                      structured battle events: battle_events.py, JSON Lines battle log recorder: battle_log.py,
                      one readable log per close combat, with an ASCII cell map and grid invariant
                      checks: skirmish_log.py,
-                     deterministic replay and comparison (python3 -m whshr battle-replay): battle_replay.py)
+                     deterministic replay and comparison (python3 -m whshr battle-replay): battle_replay.py,
+                     lossless typed WND.DLL importer and coverage inventory: glue.py,
+                     shared headless campaign resource repository and indexed bitmap decoder: glue_content.py)
   frontend/        - runtime frontend, the ONLY third-party-dependent code (pygame-ce + zengl, requirements-engine.txt,
                      local .venv/); imported solely by `engine`: app.py (window, loop, overlay), views.py (registry),
                      scene_view.py, battle_view.py (GPU terrain/scenery/sprites, camera, selection and orders),
@@ -109,6 +111,8 @@ scripts/           - parsers/renderers/extractors (Python 3 stdlib only); most h
   whscript.py      - .BTS/.MRC parser: tree, typed view (JSON), counter validation (--check)
   render_battle.py - top-down battle map (boundaries, objects, scenery, units, nodes) over the plan map
   battle_atlas.py  - atlas of N random campaign battles: PNG + .md description per battle + README with legend
+  glue_palette_check.py - verifies the palindex palette rule against BITMAP.DLL/WND.DLL (notes/palette_selection.md)
+  save_stax.py     - decodes the glue-interpreter part of savegame.N (notes/save_resume.md)
   pe_*.py          - PE resource parser, extraction of DLL resources, missions/objectives table
   fon_*.py         - .FON parser/renderer, GLUE/WIND palette analysis
   music_*.py       - MIDI and SBK (SoundFont 1.0) parsers, SBK->SF2 converter, stem renderer

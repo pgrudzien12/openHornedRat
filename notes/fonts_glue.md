@@ -158,6 +158,51 @@ placeholder: a solid block, or a thin bar in `GOTHTEXT`/`SUBTEXT`.
   prepared for German/French/Spanish/Italian versions. The punctuation gaps (no `#`, `&`, `@`,
   and no digits at all in the map fonts) show which characters the game text actually needs.
 
+### Rendering: how glyphs reach the screen
+
+**Confirmed by static analysis of `WHSHR.EXE` (Ghidra, function-behavior only, no decompiled
+text kept — see the clean-room policy in `CLAUDE.md`).**
+
+- `GlueCreateFont(N)` does not build a fresh `LOGFONTA` from scratch. At startup the game
+  enumerates its own installed raster fonts (`EnumFontsA`/`EnumFontFamiliesA` with the
+  `"Warhammer Font N"` face names) and, in the enumeration callback, copies the **exact
+  `LOGFONTA` GDI reports back for that already-installed resource** (including its native
+  `lfHeight`) into a small per-font table. `GlueCreateFont(N)` later looks up that table by
+  index or by face-name string compare and passes the stored, unmodified `LOGFONTA` straight
+  to `CreateFontIndirectA`. There is no separate, hand-picked `lfHeight` value chosen by the
+  game — it always requests the font at exactly the pixel size the raster resource itself
+  reports. **This rules out GDI raster-font stretching (question 3): the requested size always
+  matches the native size, so `StretchBlt`-style row/column duplication never comes into play
+  for these fonts.**
+- If the named font resource is not found (not registered/loaded), `GlueCreateFont` fails
+  outright and logs an error — there is no fallback to a system TrueType font by charset or
+  typeface (question 4). The lookup is a plain table/string match against the game's own six
+  `"Warhammer Font N"` resources, nothing else.
+- Text is drawn with plain, ordinary GDI calls: `SelectObject` the font returned by
+  `GlueCreateFont`, `SetBkMode(TRANSPARENT)`, `SetTextColor(...)`, then `TextOutA(hdc, x, y,
+  text, len)`. This pattern repeats at every text-drawing call site checked (button/tab
+  labels, mission scroll-row labels, mission title). There is no custom glyph-blit routine,
+  no lookup table indexed by neighboring glyph bits, no blend/grey edge color, and no
+  supersampling or blur pass anywhere near these call sites (question 2) — the game hands the
+  1-bpp raster glyph straight to `TextOutA` and lets GDI's ordinary raster-font path put it on
+  the (palettized, 8-bpp) screen DC.
+- **Conclusion:** the original game renders this UI text as a plain, aliased, pixel-exact
+  bit-blit of the `.FON` glyph bitmaps — the same crisp "on/off" pixels the `.FON` file itself
+  stores, with GDI requested at the font's native size. There is **no antialiasing, dithering,
+  edge-softening or bitmap stretching anywhere in this path** (questions 1–3 answered
+  negatively). Any perceived difference in crispness between the original (under Wine/Proton)
+  and the from-scratch engine is therefore not explained by a missing AA/smoothing technique
+  in the original — it must have another cause outside this note's scope (the engine
+  currently substitutes SDL's own antialiased system font instead of decoding the real `.FON`
+  glyphs at all, which is a materially different rendering path already noted as a known
+  placeholder in the engine).
+- Confidence: high for "plain `TextOutA`, no stretching, no fallback font, no custom
+  blit/AA" (directly confirmed at the enumeration/`CreateFontIndirectA`/`TextOutA` call
+  sites); the one residual uncertainty is whether *some* other, not-yet-located screen in the
+  game routes text through a different painter than the three checked here — the pattern was
+  consistent everywhere it was checked, so this is considered unlikely but not exhaustively
+  proven for every screen.
+
 ## 3. `FILE/BINARY/GLUE/*.PAL` — front-end palettes (text ready for FORMATS.md)
 
 **Format fully understood (variant A); screen assignment partly verified.**

@@ -6,6 +6,7 @@ from .briefing import load_briefing
 from .cache import AssetCache
 from .campaign_scenes import default_scene_loaders
 from .catalog import build
+from .glue_content import GlueContent
 from .scenes import SceneAssets
 from .si import process_si
 
@@ -14,13 +15,27 @@ def scene_context(installation, loaders=None):
     """Validate an installation and return the lazy asset access shared by all scenes."""
     locator = AssetLocator(installation)
     locator.validate()
+    glue = GlueContent(locator.installation)
     if loaders is None:
+        def load_glue(record, _path):
+            kind, name = record.identifier.kind, record.identifier.name
+            if kind == "glue-window":
+                return glue.window(name)
+            if kind == "glue-program":
+                return glue.program(name)
+            if kind == "bitmap":
+                return glue.bitmap_data(name)
+            if kind == "string":
+                return glue.strings(name)
+            raise ValueError(f"unsupported glue content asset: {record.identifier}")
+
         loaders = {
             **default_scene_loaders(),
             "battle-script": lambda _record, path: load_battlefield(locator.installation, path),
             "omni-si-media": lambda _record, path: process_si(path),
             "campaign-briefing": lambda record, _path: load_briefing(
-                locator.installation, record.identifier.name
+                locator.installation, record.identifier.name, content=glue
             ),
+            "glue-content": load_glue,
         }
-    return SceneAssets(locator, build(locator.installation), AssetCache(), loaders)
+    return SceneAssets(locator, build(locator.installation), AssetCache(), loaders, glue=glue)
