@@ -17,6 +17,8 @@ from .gpu import ScreenQuad
 from .scene_view import NativeScreenView
 
 MIXER_CHANNELS = 8  # matches intro_view's cutscene mixer; music runs on pygame's separate music channel
+MUSIC_VOLUME = 0.5  # engine-level mix setting, not game data: setmidivolume/setwavvolume are unused by any
+                     # script (notes/briefing_dialogue.md §2.1) and default 100, so there is no data value to read
 
 
 def _ensure_mixer():
@@ -81,6 +83,7 @@ class GlueView(NativeScreenView):
                 try:
                     path = self.scene.runtime.content.installation.binary_file("MUSIC", f"{effect.name}.MID")
                     pygame.mixer.music.load(str(path))
+                    pygame.mixer.music.set_volume(MUSIC_VOLUME)
                     pygame.mixer.music.play(loops=-1)
                 except (FileNotFoundError, AttributeError, pygame.error):
                     pass
