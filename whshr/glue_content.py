@@ -5,7 +5,7 @@ import re
 import struct
 
 from .assets import AssetId
-from .glue import GlueProgram, WindowDefinition, parse_glue_resources
+from .glue import GlueProgram, MissionRecord, MissionRef, WindowDefinition, parse_glue_resources
 from .legacy import module
 from .paths import Installation
 
@@ -111,6 +111,22 @@ class GlueContent:
         if not isinstance(resource, WindowDefinition):
             raise TypeError(f"glue resource {name!r} is not a window")
         return resource
+
+    def mission(self, reference):
+        """Resolve a stable :class:`MissionRef` to its typed source record.
+
+        Mission-list widgets retain references rather than copied dictionaries,
+        so content overrides and future campaign-state projections share one
+        authoritative record.
+        """
+        if not isinstance(reference, MissionRef):
+            raise TypeError("mission reference must be a MissionRef")
+        records = (record for record in self.window(reference.window).records
+                   if isinstance(record, MissionRecord))
+        try:
+            return tuple(records)[reference.record_index]
+        except IndexError:
+            raise KeyError(f"glue mission not found: {reference.key}") from None
 
     def _resource(self, name):
         key = str(name).upper()

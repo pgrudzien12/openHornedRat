@@ -78,6 +78,7 @@ set:res=602
 
         self.assertEqual((model.mission_lists[0].x, model.mission_lists[0].y), (30, 15))
         self.assertEqual([reference.key for reference in model.mission_lists[0].missions], ["missions.0", "missions.1"])
+        self.assertEqual(content.mission(model.mission_lists[0].missions[1]).values["res"], 602)
 
 
 if __name__ == "__main__":
