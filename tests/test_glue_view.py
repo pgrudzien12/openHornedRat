@@ -1,7 +1,8 @@
 import importlib.util
 import unittest
 
-from whshr.glue_render import GlueRenderModel, RenderHotspot
+from whshr.glue_render import GlueRenderModel, RenderHotspot, RenderMissionList
+from whshr.glue import MissionRef
 from whshr.glue_render import RenderText
 from whshr.glue_content import GlueContent
 
@@ -32,6 +33,19 @@ class GlueViewTests(unittest.TestCase):
 
         self.assertEqual(resolve_text(content, RenderText(7, None)), "default")
         self.assertEqual(resolve_text(content, RenderText(7, "BKTXT")), "book")
+
+    def test_mission_without_a_cash_record_has_no_payment_line(self):
+        from whshr.frontend.glue_view import _mission_rows
+        content = GlueContent.from_data(resources={
+            "MISSIONS": "[WINDOW]\n[MISSION]\nset:res=601\n[END]",
+        }, strings={"BRTXT": {601: "No payment"}})
+        reference = MissionRef("MISSIONS", 0)
+        model = GlueRenderModel("MISSIONS", 0, 0, 640, 480, 0, (), (), (), (), (),
+                                (RenderMissionList(30, 15, (reference,)),))
+
+        rows = _mission_rows(content, (model,), reference)
+
+        self.assertEqual(rows[0][1:3], ("No payment", ""))
 
     def test_dynamic_animation_base_without_a_bitmap_resource_is_transparent(self):
         from whshr.frontend.glue_bitmap import load_optional_bitmap

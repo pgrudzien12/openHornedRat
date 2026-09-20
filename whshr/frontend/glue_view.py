@@ -19,7 +19,7 @@ from .scene_view import NativeScreenView
 MIXER_CHANNELS = 8  # matches intro_view's cutscene mixer; music runs on pygame's separate music channel
 MUSIC_VOLUME = 0.01  # engine-level mix setting, not game data: setmidivolume/setwavvolume are unused by any
                      # script (notes/briefing_dialogue.md §2.1) and default 100, so there is no data value to read
-MISSION_ROW_HEIGHT = 20
+MISSION_ROW_HEIGHT = 88
 
 
 def _ensure_mixer():
@@ -235,7 +235,7 @@ class GlueView(NativeScreenView):
         except (KeyError, ValueError):
             return
         content = self.scene.runtime.content
-        for reference, label_text, x, y, selected in rows:
+        for reference, title, payment, x, y, selected in rows:
             surface = load_optional_bitmap(content, "Scroll0" if selected else "Scroll1", app_palette=palette)
             if surface is not None:
                 quad = ScreenQuad(self.gpu, surface.get_size())
@@ -244,10 +244,13 @@ class GlueView(NativeScreenView):
                 width, height = surface.get_size()
             else:
                 width, height = 320, MISSION_ROW_HEIGHT
-            text = self.gpu.text((max(1, width - 12), max(1, font.font.height)), font, color=(0, 0, 0),
-                                 background=None, padding=0)
-            text.set_lines((label_text,))
-            self.mission_labels.append((text, (x + 6, y + max(0, (height - font.font.height) // 2))))
+            lines = _wrap(font, title, max(1, width - 12))
+            if payment:
+                lines.append(payment)
+            text = self.gpu.text((max(1, width - 12), max(1, height - 8)), font, color=(0, 0, 0),
+                                 background=None, padding=0, fixed_width=True)
+            text.set_lines(tuple(lines))
+            self.mission_labels.append((text, (x + 6, y + 4)))
             self.mission_rows.append((pygame.Rect(x, y, width, height), reference))
 
     def _add_panel_bitmap(self, content, name, position, palette):
@@ -482,9 +485,21 @@ def _mission_rows(content, models, selected, taken=()):
                     label = content.string("BRTXT", name_id)
                 except (KeyError, StopIteration, TypeError, ValueError):
                     label = reference.key
-                rows.append((reference, label, model.x + mission_list.x, y, reference == selected))
+                rows.append((reference, label, _mission_payment(record), model.x + mission_list.x, y,
+                             reference == selected))
                 y += MISSION_ROW_HEIGHT
     return tuple(rows)
+
+
+def _mission_payment(record):
+    cash = next((field.argument for field in record.fields if field.command == "cash"), "")
+    parts = [part.strip() for part in cash.split(",")]
+    if len(parts) < 3:
+        return ""
+    try:
+        return f"({int(parts[1])}, {int(parts[2])})"
+    except ValueError:
+        return ""
 
 
 def resolve_text(content, text):
