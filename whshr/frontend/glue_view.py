@@ -202,7 +202,10 @@ class GlueView(NativeScreenView):
                     label.set_lines((content.string("BRTXT", label_id),))
                 except KeyError:
                     label.set_lines(())
-                self.panel_labels.append((label, (origin[0] + 9, origin[1] + y)))
+                # TextLabel only centres horizontally; nudge down to vertically centre the text
+                # in the 20px button (it draws from the top otherwise, reading too high).
+                label_y = origin[1] + y + max(0, (20 - font.font.height) // 2)
+                self.panel_labels.append((label, (origin[0] + 9, label_y)))
                 if action:
                     rect = pygame.Rect(origin[0] + 9, origin[1] + y, 119, 20)
                     self.panel_buttons.append((model.name, rect, action))
