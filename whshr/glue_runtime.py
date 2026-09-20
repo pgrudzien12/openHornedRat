@@ -9,7 +9,7 @@ calls :meth:`GlueRuntime.resume`.
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-from .glue import GlueInstruction
+from .glue import BitmapRecord, GlueInstruction
 
 
 @dataclass(frozen=True)
@@ -420,12 +420,14 @@ class GlueRuntime:
         if target is None or not name:
             return
         try:
-            self.content.window(name)
+            definition = self.content.window(name)
         except (KeyError, TypeError):
             return
         target.objects.append(name)
         effects.append(UpdateWindow(target.name))
-        if animated:
+        last_bitmap = next((record for record in reversed(definition.records) if isinstance(record, BitmapRecord)), None)
+        stop_frame = last_bitmap.values.get("animstopframe", -1) if last_bitmap is not None else -1
+        if animated and self._parse_int(stop_frame, -1) >= 0:
             self.state.wait_reason = "animation-finished"
             self.state.current.parked = True
 

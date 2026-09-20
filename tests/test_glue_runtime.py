@@ -13,6 +13,7 @@ from whshr.glue_runtime import (
     StartDialogue,
     StartMovie,
     StopSpeech,
+    UpdateWindow,
 )
 
 
@@ -26,6 +27,10 @@ class GlueRuntimeTests(unittest.TestCase):
             "MOVIE": "[RUN]\n[START]\nplaymovie:A2\nplaygamewithdebrief:bf001,3\n[END]",
             "TALK": "[RUN]\n[START]\nqueuetoplaytext:res=7\nendgame:\n[END]",
             "CARAVAN": "[RUN]\n[START]\ngocaravan:select\nendgame:\n[END]",
+            "LOOP": "[WINDOW]\n[BITMAP]\nsetbitmap:Cell\nset:animstartframe=1\nset:animstopframe=-1\n[END]\n[END]",
+            "FINITE": "[WINDOW]\n[BITMAP]\nsetbitmap:Cell\nset:animstartframe=1\nset:animstopframe=0\n[END]\n[END]",
+            "ANIM_LOOP": "[RUN]\n[START]\nopenwindow:res=MAIN\nsetcurwindow:res=MAIN\naddanimobject:res=LOOP\nendgame:\n[END]",
+            "ANIM_FINITE": "[RUN]\n[START]\nopenwindow:res=MAIN\nsetcurwindow:res=MAIN\naddanimobject:res=FINITE\nendgame:\n[END]",
             "MOVIE_CONTEXT": "[RUN]\n[START]\nopenwindow:res=MAIN\nplaymovie:A2\nwaitforrelease:\n[END]",
             "DEBRIEF": "[RUN]\n[START]\nsetdebrief:5\ndebriefwithsummary:0\nendgame:\n[END]",
         })
@@ -130,6 +135,17 @@ class GlueRuntimeTests(unittest.TestCase):
         runtime.restore(snapshot)
 
         self.assertEqual(runtime.handle(GlueInput("mission-release")), resumed)
+
+    def test_looping_addanimobject_does_not_park_the_script(self):
+        runtime = GlueRuntime(self.content)
+
+        self.assertEqual(runtime.start("ANIM_LOOP"), (OpenWindow("MAIN", None, 2), UpdateWindow("MAIN"), EndGame()))
+
+    def test_finite_addanimobject_parks_until_the_animation_finishes(self):
+        runtime = GlueRuntime(self.content)
+
+        self.assertEqual(runtime.start("ANIM_FINITE"), (OpenWindow("MAIN", None, 2), UpdateWindow("MAIN")))
+        self.assertEqual(runtime.state.wait_reason, "animation-finished")
 
 
 if __name__ == "__main__":
