@@ -101,6 +101,7 @@ def main(argv=None):
     engine_parser.add_argument("--height", type=int, default=800, help="window height (default: 800)")
     engine_parser.add_argument("--skip-intro", action="store_true", help="start in the main menu")
     engine_parser.add_argument("--battle", help="start directly in a battle, e.g. BF001 (development shortcut)")
+    engine_parser.add_argument("--glue-program", help="start a typed [RUN] glue resource directly (development shortcut)")
     engine_parser.add_argument("--camera", type=float, nargs=3, metavar=("YAW", "PITCH", "DISTANCE"),
                                help="initial battle camera: degrees, degrees, mesh units")
     engine_parser.add_argument("--hidden", action="store_true", help="do not show the window (captures)")
@@ -210,6 +211,8 @@ def main(argv=None):
             parser.error("--screenshot needs --frames")
         if args.frame_time is not None and args.frame_time < 0:
             parser.error("--frame-time must not be negative")
+        if args.battle and args.glue_program:
+            parser.error("--battle and --glue-program cannot be combined")
         try:
             from .frontend import app
         except ModuleNotFoundError as error:
@@ -223,7 +226,7 @@ def main(argv=None):
         log_dir = None if args.no_battle_log else args.battle_log
         result = app.run(args.installation, (args.width, args.height), args.skip_intro, args.hidden,
                          args.frames, args.screenshot, args.frame_time, args.battle, args.camera,
-                         log_dir, args.seed)
+                         log_dir, args.seed, args.glue_program)
         print(f"{result['frames']} frames, {result['ticks']} ticks, final scene {result['scene']}")
         return 0
     if args.command == "viewer":

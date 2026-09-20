@@ -15,6 +15,7 @@ from ..campaign_scenes import OpeningNarrationScene  # noqa: E402
 from ..clock import FixedStepClock  # noqa: E402
 from ..engine import DEFAULT_SEED  # noqa: E402
 from ..game import scene_context  # noqa: E402
+from ..glue_scene import GlueScene  # noqa: E402
 from ..scenes import SceneMachine  # noqa: E402
 from .gpu import Gpu  # noqa: E402
 from .views import view_for  # noqa: E402
@@ -61,7 +62,7 @@ class FrameRate:
 
 
 def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=None, screenshot=None,
-        frame_time=None, battle=None, camera=None, log_dir=None, seed=DEFAULT_SEED):
+        frame_time=None, battle=None, camera=None, log_dir=None, seed=DEFAULT_SEED, glue_program=None):
     """Run the game until the window closes, or for ``frames`` frames when given.
 
     ``frame_time`` replaces the measured wall-clock frame duration, so a capture after a number of frames
@@ -70,13 +71,16 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
     disable) and ``seed`` are threaded into every ``BattleScene`` reached through the scene flow, so
     ``--battle-log``/``--no-battle-log``/``--seed`` (``python3 -m whshr engine``) apply however the
     battle is reached (the ``--battle`` shortcut, or intro -> menu -> briefing).
+    ``glue_program`` is a development shortcut that starts a typed ``[RUN]``
+    resource through ``GlueScene`` and its generic static view.
     """
     context = scene_context(installation)
     ctx = open_window(size, hidden)
     gpu = Gpu(ctx, size)
     # Wider debug overlay; unrelated to the battle HUD.
     overlay = gpu.text((820, 140))
-    initial = (BattleScene(AssetId("vanilla", "battle", Path(battle).stem.casefold()), log_dir=log_dir, seed=seed)
+    initial = (GlueScene(glue_program) if glue_program else
+               BattleScene(AssetId("vanilla", "battle", Path(battle).stem.casefold()), log_dir=log_dir, seed=seed)
                if battle else OpeningNarrationScene(log_dir=log_dir, seed=seed))
     machine = SceneMachine(initial, context)
     options = {"camera": camera}
@@ -114,6 +118,8 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
                 for scene_event in view.events(event):
                     machine.handle(scene_event)
                     view = synchronise(view)
+                    if hasattr(view, "refresh"):
+                        view.refresh()
                     if machine.quit is not None:
                         running = False
 
@@ -121,6 +127,8 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
             for _ in range(clock.advance(seconds)):
                 machine.update(clock.step)
                 view = synchronise(view)
+                if hasattr(view, "refresh"):
+                    view.refresh()
                 if machine.quit is not None:
                     running = False
             if running:

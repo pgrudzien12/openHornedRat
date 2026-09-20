@@ -26,10 +26,13 @@ class GlueView(NativeScreenView):
 
     def refresh(self):
         """Rebuild GPU quads after the runtime changes its active windows."""
+        models = tuple(build_render_model(self.scene.runtime.content, window)
+                       for window in self.scene.runtime.state.windows)
+        if models == self.models:
+            return
         for quad, _ in self.quads:
             quad.release()
-        self.models = tuple(build_render_model(self.scene.runtime.content, window)
-                            for window in self.scene.runtime.state.windows)
+        self.models = models
         self.quads = []
         for model in self.models:
             for bitmap in model.bitmaps:
@@ -60,6 +63,8 @@ class GlueView(NativeScreenView):
             released = self.hotspot_at(self.models, self._native_point(event.pos))
             if pressed is not None and pressed == released:
                 return (GlueInput("hotspot-release", pressed.target),)
+            if pressed is None and released is None:
+                return (GlueInput("dialogue-drain"),)
         return ()
 
     def draw(self):

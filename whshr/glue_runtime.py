@@ -90,6 +90,11 @@ class StopMusic:
 
 
 @dataclass(frozen=True)
+class StopSpeech:
+    pass
+
+
+@dataclass(frozen=True)
 class Autosave:
     pass
 
@@ -106,7 +111,7 @@ class Diagnostic:
 
 
 GlueEffect = (OpenWindow | CloseWindow | UpdateWindow | StartMovie | StartBattle | StartDialogue |
-              EnterCaravan | StartDebrief | PlayMusic | StopMusic | Autosave | EndGame | Diagnostic)
+              EnterCaravan | StartDebrief | PlayMusic | StopMusic | StopSpeech | Autosave | EndGame | Diagnostic)
 
 
 @dataclass
@@ -218,6 +223,9 @@ class GlueRuntime:
         """Resume a parked script when its explicit wait event arrives."""
         if not isinstance(input_, GlueInput):
             raise TypeError("handle expects GlueInput")
+        if input_.kind == "dialogue-drain" and self.state.pending is not None and self.state.pending.kind == "dialogue":
+            self.state.pending = None
+            return (StopSpeech(), *self.step_until_blocked())
         expected = self.state.wait_reason
         if expected is None or input_.kind != expected:
             return ()

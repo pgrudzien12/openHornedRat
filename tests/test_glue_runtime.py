@@ -12,6 +12,7 @@ from whshr.glue_runtime import (
     StartDebrief,
     StartDialogue,
     StartMovie,
+    StopSpeech,
 )
 
 
@@ -74,6 +75,16 @@ class GlueRuntimeTests(unittest.TestCase):
         self.assertEqual(dialogue.string_id, 7)
 
         self.assertEqual(runtime.resume(ActivityResult(dialogue.request_id, "dialogue")), (EndGame(),))
+
+    def test_given_a_pending_dialogue_when_an_empty_release_drains_it_then_speech_stops_and_the_script_continues(self):
+        runtime = GlueRuntime(self.content)
+        runtime.start("TALK")
+
+        effects = runtime.handle(GlueInput("dialogue-drain"))
+
+        self.assertEqual(effects, (StopSpeech(), EndGame()))
+        self.assertIsNone(runtime.state.pending)
+        self.assertIsNone(runtime.state.current)
 
     def test_given_a_caravan_request_when_started_then_it_remains_suspended_until_its_host_resumes_it(self):
         runtime = GlueRuntime(self.content)
