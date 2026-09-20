@@ -33,11 +33,9 @@ logic. This pipeline reads campaign state (coffers, missions, roster) from `Camp
 
 **New, general pipeline** (`whshr/glue_scene.py` + `whshr/frontend/glue_view.py`): interprets any
 `[RUN]` glue program generically — dialogue, portraits, panels, music, animation, all read from
-`WND.DLL`/`BITMAP.DLL`/`BRTXT` at runtime. Far more complete for what it covers than the bespoke
-scenes. But it is currently reachable only through the `--glue-program` development shortcut
-(`python3 -m whshr engine <installation> --glue-program <NAME>`); nothing wires it into the real
-menu flow, and `GlueRuntime` does not touch `CampaignState` at all - `GlueRuntime.campaign` is
-stored in `__init__` and never read anywhere else in the module.
+`WND.DLL`/`BITMAP.DLL`/`BRTXT` at runtime. New Campaign starts the initial generic flow, and
+`--glue-program` remains available for direct development runs. `GlueRuntime` uses the campaign
+runtime interface for the currently implemented roster and coffers operations.
 
 `whshr/controlpanel.py` (frame/button geometry and BRTXT label ids) is already shared by both
 pipelines and does not need touching.
@@ -64,9 +62,7 @@ pipelines and does not need touching.
    `testforunitinmarch`, coffers on Accept, mission-taken tracking, autosave, using the existing
    `CampaignState`. The largest single chunk of new work in this plan.
 3. **Switch the entry point.** `MainMenuScene.handle("new_campaign")` starts
-   `GlueScene(<the real first flow script>, campaign=...)` instead of `CaravanScene`. Confirm the
-   actual first flow-script resource name before committing to this (likely `StartCaravan`'s glue
-   resource; not yet verified for this plan).
+   `GlueScene("FLOWSCRIPTBP01", campaign=...)` instead of `CaravanScene`.
 4. **Parity pass.** Run the same battery of scripts already exercised through `--glue-program`,
    but now through the real menu flow; fix whatever the old scenes handled that the new one
    doesn't yet. Troop selection's current stub status is not a regression either way - it was
@@ -81,7 +77,7 @@ to be done one step at a time with a verify-then-commit rhythm, not as one large
 
 ## Open questions
 
-- ⬜ Exact resource name of the real first flow script reached by "New Campaign" (step 3).
+- ✅ The first New Campaign flow is `FLOWSCRIPTBP01`.
 - ⬜ Whether `CampaignState`'s current shape is the right one to read/write from inside
   `GlueRuntime`, or whether it needs a narrower read/write interface for that (step 2).
 - ⬜ Whether troop selection gets built as part of this migration or scheduled separately (step 4).
@@ -150,9 +146,8 @@ migration as complete.
 
 ### 7. Switch New Campaign
 
-Determine the actual first flow resource from the installation. Change
-`MainMenuScene.handle("new_campaign")` to start `GlueScene(program, campaign=...)`, then remove the
-old campaign-chain construction and unused imports.
+New Campaign starts `GlueScene("FLOWSCRIPTBP01", campaign=...)`. Remove the remaining old
+campaign-chain construction and unused imports as their fallback routes are replaced.
 
 ### 8. Verify and remove the remaining old pipeline
 
@@ -172,7 +167,7 @@ path uses them.
 | Campaign commands | Partial | `testforunitinarmy`, `testforunitinmarch`, `addcash`, `iftrueaddcash`, `addtroop`, `unitjoinmission`, and `unitleavemission` call the campaign runtime. |
 | Battle activity | Implemented | `StartBattle` transitions to `BattleScene`; completing the battle resumes the same parked `GlueScene` with an `ActivityResult`. |
 | Other activities | Not implemented | Movie, debrief, caravan, and troop-selection effects are emitted by the runtime but do not yet have scene routes. |
-| Normal entry point | Not switched | `--glue-program <NAME>` starts a generic program directly. Main-menu New Campaign still uses the bespoke caravan/map/briefing chain. |
+| Normal entry point | Implemented | New Campaign starts `FLOWSCRIPTBP01` through `GlueScene`; the opening narration and intro remain unchanged. |
 | Persistent saves | Deferred | `autosave` captures a runtime snapshot in memory. It does not write or load save files. |
 
 ## Current implementation gaps
@@ -201,9 +196,8 @@ path uses them.
 
 ### Migration prerequisites
 
-1. Confirm the first flow resource selected by New Campaign from installation data.
-2. Verify a real generic briefing script through the existing map selection path before replacing `BriefingScene`.
-3. Delete each bespoke scene and view only after its generic replacement covers its live entry, exit, and return path.
+1. Verify real generic briefing scripts through the normal New Campaign path before replacing `BriefingScene`.
+2. Delete each bespoke scene and view only after its generic replacement covers its live entry, exit, and return path.
 
 ## Migration rules
 

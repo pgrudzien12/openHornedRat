@@ -12,6 +12,7 @@ from whshr.campaign_scenes import (
 from whshr.campaign_state import CampaignState
 from whshr.catalog import build
 from whshr.glue_scene import GlueScene
+from whshr.glue_content import GlueContent
 from whshr.scenes import SceneAssets, SceneMachine
 
 BF001 = AssetId("vanilla", "battle", "bf001")
@@ -130,14 +131,18 @@ class IntroSceneTests(unittest.TestCase):
         self.assertIsInstance(machine.active, MainMenuScene)
         self.assertEqual(machine.history[-1].reason, "intro completed")
 
-    def test_given_main_menu_when_new_campaign_is_chosen_then_the_caravan_becomes_active(self):
+    def test_given_main_menu_when_new_campaign_is_chosen_then_the_initial_glue_flow_becomes_active(self):
         briefing_scene = BriefingScene({"briefing_key": "test.0", "battle": "BF001"})
+        self.context.glue = GlueContent.from_data(resources={
+            "FLOWSCRIPTBP01": "[RUN]\n[START]\nendgame:\n[END]",
+        })
         machine = SceneMachine(MainMenuScene(briefing_scene), self.context)
 
         machine.handle("new_campaign")
 
-        self.assertIsInstance(machine.active, CaravanScene)
-        self.assertEqual(machine.active.missions[0]["battle"], "BF001")
+        self.assertIsInstance(machine.active, GlueScene)
+        self.assertEqual(machine.active.program, "FLOWSCRIPTBP01")
+        self.assertIs(machine.active.campaign, machine.initial.campaign)
         self.assertEqual(machine.history[0].reason, "new campaign started")
 
     def test_given_the_caravan_when_its_mission_is_chosen_then_the_map_opens_before_the_briefing(self):

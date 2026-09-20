@@ -136,10 +136,7 @@ class MainMenuScene(Scene):
                     CampaignState.single_mission(self.briefing) if self.briefing is not None
                     else CampaignState.from_installation(context.locator.installation, self.content)
                 )
-            # StartCaravan's resource starts the first parked flow script.
-            # Later ``gocaravan`` calls must supply their own continuation.
-            return Transition(CaravanScene(self.campaign, continuation=self.campaign.caravan_continuation),
-                              "new campaign started")
+            return Transition(GlueScene(self.campaign.flow, self.campaign), "new campaign started")
         if event == "quit":
             return Quit("player quit from the main menu")
         return None
