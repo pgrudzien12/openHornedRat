@@ -188,6 +188,7 @@ class IntroSceneTests(unittest.TestCase):
 
         self.assertIsInstance(transition.scene, GlueScene)
         self.assertEqual((transition.scene.program, transition.scene.accept_battle), ("BRIEFING", "BF001"))
+        self.assertIs(transition.scene.return_scene, scene)
 
     def test_given_the_mission_map_when_escape_is_pressed_then_the_caravan_returns(self):
         campaign = CampaignState.single_mission(BriefingScene({"briefing_key": "test.0", "battle": "BF001"}))

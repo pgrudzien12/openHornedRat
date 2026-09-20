@@ -276,7 +276,7 @@ class MissionMapScene(Scene):
                 return None
             if mission.get("brief_script") and mission.get("battle"):
                 return Transition(GlueScene(mission["brief_script"], self.campaign,
-                                            accept_battle=mission["battle"]),
+                                            accept_battle=mission["battle"], return_scene=self),
                                   f"campaign mission briefing opened: {mission['name']}")
             briefing = mission.get("briefing") or BriefingScene(
                 mission, campaign=self.campaign

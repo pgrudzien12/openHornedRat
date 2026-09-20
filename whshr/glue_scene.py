@@ -7,17 +7,18 @@ campaign Python scenes at every window/activity boundary.
 
 from .glue_runtime import ActivityResult, GlueInput, GlueRuntime, StartBattle
 from .glue_fonts import glue_font_asset
-from .scenes import Scene
+from .scenes import Scene, Transition
 
 
 class GlueScene(Scene):
     """Own one ``GlueRuntime`` and expose its ordered effects to a presentation host."""
 
-    def __init__(self, program, campaign=None, *, speech_enabled=True, accept_battle=None):
+    def __init__(self, program, campaign=None, *, speech_enabled=True, accept_battle=None, return_scene=None):
         self.program = str(program).upper()
         self.campaign = campaign
         self.speech_enabled = speech_enabled
         self.accept_battle = accept_battle
+        self.return_scene = return_scene
         self.runtime = None
         self.context = None
         self._fonts = {}
@@ -61,8 +62,11 @@ class GlueScene(Scene):
         if self.runtime is None:
             raise RuntimeError("GlueScene must be entered before handling input")
         if isinstance(event, GlueInput):
-            if event.kind == "panel-action" and event.target == "accept_briefing" and self.accept_battle:
+            if event.kind == "panel-action" and event.target in ("accept_briefing", "open_troop_select") and self.accept_battle:
                 self._effects.extend(self.runtime.start_battle(self.accept_battle))
+            elif event.kind == "panel-action" and event.target in ("abort_briefing", "return_to_caravan") and self.return_scene:
+                self._effects.extend(self.runtime.handle(GlueInput("panel-action", "abort_briefing")))
+                return Transition(self.return_scene, "generic briefing dismissed")
             else:
                 self._effects.extend(self.runtime.handle(event))
         elif isinstance(event, ActivityResult):

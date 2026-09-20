@@ -3,7 +3,7 @@ import unittest
 from whshr.glue_content import GlueContent
 from whshr.glue_runtime import ActivityResult, EndGame, GlueInput, OpenWindow, StartBattle, StartMovie, StopMusic
 from whshr.glue_scene import GlueScene
-from whshr.scenes import SceneMachine
+from whshr.scenes import SceneMachine, Transition
 
 
 class _Context:
@@ -48,12 +48,22 @@ class GlueSceneTests(unittest.TestCase):
         scene = GlueScene("BRIEFING", accept_battle="bf001")
         SceneMachine(scene, self.context)
 
-        scene.handle(GlueInput("panel-action", "accept_briefing"), self.context)
+        scene.handle(GlueInput("panel-action", "open_troop_select"), self.context)
 
         effects = scene.take_effects()
         self.assertEqual(effects[0], StopMusic())
         self.assertIsInstance(effects[1], StartBattle)
         self.assertEqual(effects[1].battle, "BF001")
+
+    def test_briefing_return_restores_its_configured_scene(self):
+        return_scene = object()
+        scene = GlueScene("BRIEFING", return_scene=return_scene)
+        SceneMachine(scene, self.context)
+
+        transition = scene.handle(GlueInput("panel-action", "return_to_caravan"), self.context)
+
+        self.assertIsInstance(transition, Transition)
+        self.assertIs(transition.scene, return_scene)
 
 
 if __name__ == "__main__":
