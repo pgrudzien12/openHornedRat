@@ -35,7 +35,7 @@ class CatalogTests(unittest.TestCase):
             [str(record.identifier) for record in assets.records],
             [
                 "vanilla:battle/bf001", "vanilla:cutscene/intro", "vanilla:cutscene/intro-media",
-                "vanilla:font/pctexta", "vanilla:font/subtext", "vanilla:palette/standard", "vanilla:text/anim",
+                "vanilla:font/glue4", "vanilla:font/pctexta", "vanilla:font/subtext", "vanilla:palette/standard", "vanilla:text/anim",
             ],
         )
         self.assertEqual(assets.get("vanilla:cutscene/intro").decoder, "omni-si")

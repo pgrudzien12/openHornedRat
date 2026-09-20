@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .assets import AssetId, AssetLocator, source_fingerprint
+from .glue_fonts import GLUE_FONT_FILES
 
 CATALOG_VERSION = 1
 
@@ -145,6 +146,11 @@ def build(installation):
             AssetId("vanilla", "font", "pctexta"), "font", "file", "BINARY/PCTEXTA.FON",
             "warhammer-fon", source_fingerprint(pctexta_fon),
         ))
+    for slot, relative in GLUE_FONT_FILES.items():
+        path = game.find("FILE", "BINARY", *relative.split("/"))
+        if path is not None:
+            records.append(AssetRecord(AssetId("vanilla", "font", f"glue{slot}"), "font", "file",
+                                       f"BINARY/{relative}", "warhammer-fon", source_fingerprint(path)))
 
     standard = game.find("UPDATE", "BINARY", "STANDARD.PAL") or game.find("FILE", "BINARY", "STANDARD.PAL")
     if standard is not None:

@@ -125,7 +125,7 @@ def parse_window_ui(wnd, name, seen=()):
     except KeyError:
         raise ValueError(f"window resource not found: {name}") from None
 
-    result = {"window": name, "position": {}, "bitmaps": [], "hotspots": [], "anims": []}
+    result = {"window": name, "position": {}, "bitmaps": [], "hotspots": [], "anims": [], "texts": []}
     section, current = None, None
     for command, argument in parse_glue_lines(text):
         if command.startswith("["):
@@ -137,6 +137,8 @@ def parse_window_ui(wnd, name, seen=()):
                 section, current = command, {}
             elif command == "[ANIM]":
                 section, current = command, {}
+            elif command == "[TEXT]":
+                section, current = command, {}
             elif command == "[INCLUDE]":
                 section, current = command, None
             elif command == "[END]":
@@ -146,6 +148,8 @@ def parse_window_ui(wnd, name, seen=()):
                     result["hotspots"].append(current)
                 elif section == "[ANIM]" and current:
                     result["anims"].append(current)
+                elif section == "[TEXT]" and current:
+                    result["texts"].append(current)
                 section, current = None, None
             continue
         if section == "[INCLUDE]" and command == "script":
@@ -153,6 +157,7 @@ def parse_window_ui(wnd, name, seen=()):
             result["bitmaps"].extend(included["bitmaps"])
             result["hotspots"].extend(included["hotspots"])
             result["anims"].extend(included["anims"])
+            result["texts"].extend(included["texts"])
             continue
         if current is None:
             continue
@@ -171,6 +176,8 @@ def parse_window_ui(wnd, name, seen=()):
             current["text_color"] = argument.lower()
         elif section == "[ANIM]" and command == "name":
             current["name"] = argument
+        elif section == "[TEXT]" and command in ("font", "format", "settextcolor"):
+            current["color" if command == "settextcolor" else command] = argument.lower()
     return result
 
 

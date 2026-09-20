@@ -223,6 +223,7 @@ class CampaignStateTests(unittest.TestCase):
             "bitmaps": [{"bitmap": "MAP", "x": 4, "y": 5, "animstartframe": 2, "animstopframe": 8, "timecnt": 90}],
             "hotspots": [{"x": 1, "y": 2, "vx": 3, "vy": 4, "res": 150, "target": "PopContext", "target_kind": "script"}],
             "anims": [{"index": 4, "bkindex": 15, "controlpanel": 2, "text_color": "red", "name": "Dietrich"}],
+            "texts": [],
         })
 
     def test_given_a_release_flag_in_a_mission_window_then_it_is_parsed(self):
