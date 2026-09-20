@@ -1,13 +1,16 @@
 # Fonts (`.FON`) and front-end ("glue") palettes — ROADMAP 1.6
 
 Findings from black-box analysis of the files plus string references in `WHSHR.EXE` /
-`GAMEF.DLL`. No disassembly. Everything below was checked on **all** files of each type.
+`GAMEF.DLL`, plus (§2) a later Ghidra static-analysis pass on `WHSHR.EXE`'s glue font selection and
+UI painters — described here as behavior only, per `CLAUDE.md`'s clean-room policy. Everything
+below was checked on **all** files of each type.
 
 | Item | Status |
 |---|---|
 | `.FON` container (NE + `RT_FONTDIR`/`RT_FONT`) | ✅ Fully understood, all 12 files parse and pass consistency checks |
 | FNT glyph data (FNT 2.0 and 3.0, 1-bit raster) | ✅ Fully understood, verified visually (charts of all 9 unique fonts) |
-| Which font is used for which UI element | 🟡 Hypotheses from names/strings; needs a screenshot or disassembly |
+| Font number (1–6) → `.FON` file | ✅ Confirmed by static analysis: the number selects one of six literal face-name strings baked into `WHSHR.EXE`, matching each file's own `dfFace` |
+| Which font is used for which UI element | 🟡 Font 2 (`PCTEXT.FON`) confirmed for the mission title, mission-list rows and control-panel buttons (§2); other elements still hypotheses from names |
 | `GLUE/*.PAL` format | ✅ Variant A, all 19 files; verified visually on bitmaps from `BITMAP.DLL` |
 | Which palette belongs to which screen | 🟡 7 of 10 matched exactly to bitmaps; `GAME`, `OPT`, `REND` still open |
 
@@ -120,13 +123,37 @@ placeholder: a solid block, or a thin bar in `GOTHTEXT`/`SUBTEXT`.
   can both register their fonts with `AddFontResourceA` at the same time without clashing.
 - The code uses GDI: `AddFontResourceA`, `CreateFontIndirectA`, `EnumFontFamiliesA`,
   `RemoveFontResourceA`. `WHSHR.EXE` selects fonts by number (`[GlueCreateFont] Font %d not
-  found`), which fits the face names `Warhammer Font 1..6`.
+  found`/`...not loaded`), which fits the face names `Warhammer Font 1..6`.
+- **Font number → file, confirmed ✅.** This is not just a naming coincidence: `GlueCreateFont(N)`
+  looks `N` up in a fixed-size table of font records (one per registered `.FON`) and builds a
+  `LOGFONTA` whose face name is one of the six literal strings `"Warhammer Font 1"`…`"Warhammer
+  Font 6"` found in `WHSHR.EXE`, in that numeric order, before calling `CreateFontIndirectA`. Those
+  strings are the exact `dfFace` values read out of the six `GLUE/*.FON` files themselves
+  (`fon_parse.py`), so the mapping is fixed by the files' own embedded face names, not guessed from
+  filenames:
+
+  | Font # | Face name (in the `.FON` file) | File |
+  |---|---|---|
+  | 1 | `Warhammer Font 1` | `GLUE/MAPTEXT1.FON` |
+  | 2 | `Warhammer Font 2` | `GLUE/PCTEXT.FON` |
+  | 3 | `Warhammer Font 3` | `GLUE/SMAPTEX1.FON` |
+  | 4 | `Warhammer Font 4` | `GLUE/SUBTEXT.FON` |
+  | 5 | `Warhammer Font 5` | `GLUE/GOTHTEXT.FON` |
+  | 6 | `Warhammer Font 6` | `GLUE/PCTEXTB.FON` |
+
+  (`PCTEXTA.FON`/`PCTEXTAB.FON`/`PCSUBT.FON` are `GAMEF.DLL`'s own copies, registered under
+  different face names `WarhammerA`/`WarhammerABold`/`WarhammerSubText` for the battle engine, not
+  reachable through this glue-side numbering.)
 - **Hypotheses about use (from names only, not checked in game):**
   - `MAPTEXT1`/`SMAPTEX1`: campaign map labels. The printed labels on the `MAP` bitmap use a
     similar capital serif style.
   - `SUBTEXT`/`PCSUBT`: subtitles for speech and cutscenes.
   - `GOTHTEXT`: headings and titles.
   - `PCTEXT`/`PCTEXTB`: general UI text, regular and bold.
+- **Confirmed by static analysis (§6):** font 2 = `PCTEXT.FON` (12px height, 9px ascent, ~9/13px
+  avg/max glyph width) is the font `WHSHR.EXE`'s built-in painters use for the mission title, the
+  mission-list scroll-row labels, and the control-panel button labels (Brief/Accept/Caravan/etc.) —
+  all three call `GlueCreateFont(2)` with a constant argument.
 - Languages: the accented Latin-1 letters (`ÄÖÜß`, `éèêàç`, `ñ`…) suggest the fonts were
   prepared for German/French/Spanish/Italian versions. The punctuation gaps (no `#`, `&`, `@`,
   and no digits at all in the map fonts) show which characters the game text actually needs.
@@ -236,8 +263,19 @@ Outputs (local only, `extracted/` is git-ignored):
 
 ## 6. Open questions
 
-- Which font number is used for which UI element, and in what colors. Needs a screenshot from
-  the game under Wine, or `GlueCreateFont` in Ghidra (Phase 4).
+- ✅ Which font number is used for the mission-list/button UI elements not declared via `[TEXT]
+  set:font=`. Resolved by static analysis of `WHSHR.EXE` (Ghidra, `GlueCreateFont`/
+  `CreateFontIndirectA` in the `[GlueCreateFont] Font %d not found`/`not loaded` routine): both the
+  mission-list row painter (draws each row's `Scroll0`/`Scroll1` bitmap plus the `BRTXT` mission
+  name/payment label) and the shared control-panel button-label painter (`FrameButtonUp`/
+  `FrameButtonDn`, used for Brief/Accept/Caravan and every other button label) call it with the
+  constant argument 2, i.e. font 2 = `PCTEXT.FON`. This is the same font number already used by
+  the mission title and town-name `[TEXT]` blocks (`set:font=2`, grep-confirmed in the WND.DLL glue
+  scripts), so all three UI elements — mission title, mission-list rows, and button labels — render
+  in `PCTEXT.FON`'s 12px-tall / 9px-ascent glyphs (see the font table in §2). Colors are set
+  per-call (`SetTextColor`) rather than being fixed to the font. Other UI font numbers (colors for
+  each specific screen) remain unconfirmed; only font 2's usage for these three elements was
+  checked.
 - Which screens use `GLUEGAME`/`WINDGAME` and `GLUEOPT`/`WINDOPT`: no bitmap in `BITMAP.DLL`
   matches them. Maybe bitmaps in `WND.DLL` or the `.SI` cutscene files, or palettes left over
   from an older version of the option screens.

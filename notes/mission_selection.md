@@ -47,6 +47,10 @@ screen is a window script; flow scripts (`[RUN]`) open windows, wait, and contin
 - Trail dots: `Trail*`/`FlowTrail*` objects (`addanimobject`).
 - The list: `MissionWindow` at `[MISSIONWINDOW] set:x/y` (always 30,15), one row per visible mission, bitmap
   `Scroll0` (selected) / `Scroll1`, label = `BRTXT` mission name + `" (initial, completion)"` payment.
+  Not declared through `[TEXT]`/`set:font=`: the front end's built-in row painter selects glue font 2
+  (`GlueCreateFont(2)`, i.e. `PCTEXT.FON`) with a constant argument before drawing every row's label —
+  confirmed by static analysis (`notes/fonts_glue.md` §6), the same font number as the mission title and
+  the control-panel button labels (§9.4 below).
 - Mission window resources: 41 `MISSION*WINDOW`, at most 5 `[MISSION]` records each. Each record:
   `set:res=<BRTXT name id>`, `script:<orig .run name>`, `res:<briefing script>`, `setbattlescript:<bf>`,
   `setmissionscript:<script>`, `cash:type,initial,completion,rateA,rateB,letters`, optional `depend`,
@@ -64,8 +68,10 @@ by the click itself (see §9.4 for the panel that does). The Dietrich panel on t
   taken, charges the fee, and lets the mission script run the battle;
 - **Caravan** opens the `CaravanSelectMission` caravan; its hotspot `PopContext` returns to this map.
 
-The list row hit-test also has a second path that runs the same brief action (double-click or click on the
-already-selected row 🟡; not verified at runtime).
+The list row hit-test also has a second path that runs the same brief action (click on the
+already-selected row 🟡; not verified at runtime). Double-click does **not** trigger it: confirmed
+by the project owner from playing the original game — double-clicking a row has no special effect
+beyond the plain click (selection).
 
 ## 5. Briefing screen ✅
 
@@ -213,6 +219,11 @@ pressed and start the battle without troop selection 🟡 (which windows use the
 Text color: the button label is drawn in the `settextcolor` of the `[ANIM]` block; the font is glue font 2.
 Pressed/hover states use `FRAMEBUTTONDN`. Disabled buttons use a grey (0xC0C0C0) label 🟡.
 
+Cross-verified by static analysis (`notes/fonts_glue.md` §6): the front end's shared `FrameButtonUp`/
+`FrameButtonDn` button-label painter (the same routine draws Brief/Accept/Caravan, reinforcement and tab
+button labels) also selects glue font 2 with a constant argument, matching the mission-list row painter
+and the mission title — all three built-in UI text elements use font 2 (`PCTEXT.FON`).
+
 ### 9.5 What an engine needs: read the data, don't hardcode the placement
 
 Where things go is decided by the scene's glue scripts; the engine reads it and only the *inside* of the sub-window is
@@ -239,9 +250,71 @@ fixed layout.
 
 ## 10. Open questions
 
-- 🟡 Row-click handling details (double click? keyboard?) and what `PopContext` does when the stack is empty.
-- 🟡 Which flow-script → mission-script chains produce chapter transitions and whether any adds dialogue before a list.
-- ⬜ Exact `MapWindow` palette 2 vs caravan palette 3 switching between screens (`notes/fonts_glue.md`).
-- ⬜ Contents of the built-in `TroopSelect` window layout (graphics not in `WND.DLL`).
-- ⬜ The glue `index` → portrait file table, `BACKALL` palette for frames 16/17, and mouth
-  frame timing (§9).
+- 🟡 Row-click handling details (keyboard?) still not located — the row hit-test/selection code was not
+  found in this pass (no distinctive string to anchor on; would need control-flow tracing of the
+  mission-list window procedure). **Double-click is resolved ✅**: confirmed by the project owner from
+  playing the original game that it has no special effect — it does not trigger Brief or any other action
+  beyond plain selection (see §4).  **What `PopContext` does on an empty stack is now resolved ✅** (static
+  analysis of `WHSHR.EXE`): every built-in window name (`PopContext`, `PopContextCheckResume`, `AbortGame`,
+  `NewGame`, `Credits`, `OptionsDialog`, `HireOnlyArmyBook`, …) is dispatched through one lookup table by
+  exact string match; unmatched names are silently ignored. The pop operation itself keeps its own window-stack
+  depth counter; when a pop is requested with the counter already at zero it logs a debug "stack underflow"
+  message and returns without popping or crashing — i.e. an extra `PopContext` with nothing left on the stack
+  is a harmless no-op, not an error state the flow script needs to guard against. `PopContext` and
+  `PopContextCheckResume` reach the *same* underlying pop routine; the "check resume" distinction is not a
+  different pop behavior in this routine, so it must come from what the resumed script does afterward with
+  the stack-frame's tag, not from the pop call itself (not traced further).
+
+- ✅ Chapter transitions, resolved by data (grepping the extracted `WND.DLL` scripts, not Ghidra): they are
+  **not** produced by a flow-script-to-flow-script call chain at all. Each per-mission `[MISSION]` record in a
+  mission-list window can carry a `replacescript:<FlowScriptXxx>` field, a sibling of `setbattlescript:` and
+  `setmissionscript:`. When that record's mission is taken, the running flow script for the campaign map is
+  swapped for the named one — the next time the map/list screen reopens it is built by the new chapter's flow
+  script and mission-list windows. Traced the full chapter graph this way: `FlowScriptBP01` → (via the
+  `MissionBP23Window` record) `FlowScriptBP03` or `FlowScriptBP25`; `BP03` → `BP05` → `BP09`; `BP09`
+  (via `MissionBP131415Window`) → `FlowScriptRE`, `FlowScriptBPBM`, or `FlowScriptGF`; `RE` (via
+  `MissionRE4568Window`) → `RE01`, `RE02`, `WE`, or `REBM`; `RE01` → (`MissionRE5678Window`) → `RE02`,
+  `REWE`, or `REBM`; `RE02` → (`MissionRE678Window`) → `REWE` or `REBM`; `GF02c` → `SZENGML`;
+  `WE1`/`WE45`/`BM1234`/`BM1235` → `WE` or `SZENGML`; `MissionLWindow` → `L3`. No flow script itself contains
+  `playtext`/`playmovie` before its first `waitforrelease` (only the demo `FlowScriptEcts` does, confirming
+  the earlier finding) — dialogue/cutscenes around a chapter change belong to the *mission script* that ends
+  the previous chapter (its `gocaravan:`/`playmovie:` calls, §8), not to anything inserted while switching
+  flow scripts.
+
+- ✅ `MapWindow` palette 2 vs caravan palette 3, resolved by static analysis of `WHSHR.EXE`: `palindex` is not
+  a two-way toggle on one palette but an index (0–9) into a fixed table of **named screen palette pairs**,
+  each pair being a `WIND<name>.PAL` (RGB half, loaded first) and a matching `GLUE<name>.PAL` (4→8-bit
+  color-map half, loaded second), consistent with the WIND/GLUE-halves layout already documented in
+  `notes/fonts_glue.md`. The table, by `palindex`: 0/other → `STANDARD.PAL` (both halves); 1 → `book`;
+  **2 → `map`**; **3 → `car` (caravan)**; 4 → `mind`; 5 → `end`; 6 → `titl` (title); 7 → `game`; 8 → `opt`
+  (options); 9 → `bk2`. So switching from the map screen to the caravan screen genuinely loads a different
+  pair of on-disk palette files (`WINDMAP.PAL`/`GLUEMAP.PAL` vs `WINDCAR.PAL`/`GLUECAR.PAL`); there is no
+  single shared palette reused with a different half selected by index.
+
+- ✅ `TroopSelect` window contents, resolved by static analysis of `WHSHR.EXE` (the routine that opens troop
+  selection after Brief/Accept, called with a mode parameter): it creates one built-in window (internal class/
+  title string `TroopWindow`, not `TroopSelect`) sized 640×480 (the full screen), with up to four child
+  buttons along the bottom edge (all at the same y): a **Done** button (BRTXT "Done") always present; a
+  **Next** button (BRTXT "Next") and a **Back** button (BRTXT "Back") present in every mode except one
+  (mode 5, used for the mid-mission recruit-and-resume flow, which shows no paging — consistent with there
+  being a single small "who to add" list rather than a scrollable roster); and an **Abort** button (BRTXT
+  "Abort") present only in the initial "choose troops before a fresh mission" mode. Before creating the
+  window it re-picks background music (win/lose fanfare after a battle result is known, otherwise the
+  tactical/mission-select tune) and, in the "briefing failed to load a valid battle record" case, falls back
+  to the plain map/list screen instead of opening troop selection at all. Button geometry and the roster list
+  itself were not further decoded in this pass (out of scope: layout is fixed in code, not data, per the
+  bullet above, but has no glue script to read from — cross-check by watching the actual screen next time it
+  can be reached).
+
+- 🟡 The glue `index` → portrait file table and mouth-frame timing: **not resolved**, no lookup table matching
+  glue portrait `index` values to sprite basenames was found in this pass (Dietrich→`SCRI` remains known only
+  by coincidence of `index=4` with the `name:Scribe` window, `notes/mission_selection.md` §9.2). `BACKALL`
+  palette for frames 16/17: partially narrowed — **no `BACKALL.PAL` file exists** in the installation
+  (`FILE/BINARY/` and `UPDATE/BINARY/` only have `BACKALL.FOL`/`.BOP`, checked directly), and no code reference
+  to the string `"BACKALL"` was found either (it is likely built at runtime by string-formatting the frame
+  index onto a fixed base name, so no fixed literal to anchor on). This rules out "there is a dedicated
+  `BACKALL.PAL`" as the explanation for frames 16/17 looking wrong under `STANDARD.PAL`; the more likely
+  explanation is that those frames use a different entry of the ordinary 4→8-bit sprite color-map scheme
+  (`FORMATS.md` "modulo 16" rule) than the one currently assumed, which is a sprite-decoder question, not a
+  missing-palette-file question — left open, not chased further to stay out of `whshr`/`scripts` code per this
+  task's research-only scope.

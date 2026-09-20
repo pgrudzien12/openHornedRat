@@ -840,6 +840,13 @@ than 8 px into stripes. All fonts are bold, cp1252, proportional, characters 0x2
 | `GLUE/GOTHTEXT.FON` | Warhammer Font 5 | blackletter, the only complete character set |
 | `PCTEXTA.FON`, `PCTEXTAB.FON`, `PCSUBT.FON` (battle, `GAMEF.DLL`) | WarhammerA, WarhammerABold, WarhammerSubText | the same glyphs as `PCTEXT`, `PCTEXTB`, `SUBTEXT` under other face names |
 
+The front end's `GlueCreateFont(N)` selects a `.FON` by number (1–6) using these exact face
+names, confirmed by static analysis, so the file column above is a fact, not a name-based guess.
+Font 2 (`PCTEXT.FON`, 12 px tall, 9 px ascent) is also confirmed (not just declared in data) as
+the font used to draw the campaign mission title, the mission-list scroll-row labels, and the
+control-panel button labels (Brief/Accept/Caravan/…) — see `notes/fonts_glue.md` §2/§6 and
+`notes/mission_selection.md` §3/§9.4.
+
 **Front-end palettes** (`FILE/BINARY/GLUE/*.PAL`, variant A) come in pairs that together fill the
 236 free indices: `GLUE<screen>.PAL` = 10–105 and `WIND<screen>.PAL` = 106–245. Comparing the colour
 tables of all 717 bitmaps with every palette gives exact matches for `TITL` (title screen), `MIND`
