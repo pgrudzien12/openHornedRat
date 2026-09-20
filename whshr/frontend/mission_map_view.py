@@ -22,6 +22,21 @@ class MissionMapView(SceneView):
     PANEL_ORIGIN = (4, 164)
     BUTTON_X = 9
 
+    @staticmethod
+    def _wrap_mission_name(font, name, width=120):
+        """Wrap BRTXT's one-line mission name inside a scroll's text column."""
+        words, lines, current = name.split(), [], ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if not current or font.size(candidate)[0] <= width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        return lines
+
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
         self.map = self._load_quad(gpu, "MAP.png")
@@ -52,7 +67,7 @@ class MissionMapView(SceneView):
         # Mission-window scripts define their origin but no text placement or
         # colour.  The original executable owns those values; retain this
         # deliberately isolated approximation until that renderer is traced.
-        self.labels = [gpu.text((120, self.TEXT_HEIGHT), self.text_font, color=(0, 0, 0), background=None,
+        self.labels = [gpu.text((120, 64), self.text_font, color=(0, 0, 0), background=None,
                                 padding=0, align="center", fixed_width=True)
                        for _ in scene.missions]
         self.button_labels = [gpu.text((119, self.TEXT_HEIGHT), self.text_font, color=self.button_color, background=None,
@@ -77,8 +92,15 @@ class MissionMapView(SceneView):
         for label, mission in zip(self.labels, missions):
             cash = mission.get("cash") or {}
             initial, completion = cash.get("initial"), cash.get("completion")
-            payment = f" ({initial}, {completion})" if initial is not None and completion is not None else ""
-            label.set_lines((f"{mission['name']}{payment}",))
+            lines = self._wrap_mission_name(self.text_font, mission["name"])
+            # This format is created by MissionWindow's executable-owned row
+            # painter, not by the WND record: name, then a newline and the
+            # initial/completion payment with a slash separator.
+            if initial or completion:
+                lines.append(f"{initial}/{completion}")
+            elif cash.get("type") == 15:
+                lines.append(self.scene.campaign.hint(612))
+            label.set_lines(lines)
 
     def _set_button_labels(self):
         for index, (label, slot) in enumerate(zip(self.button_labels, self.button_slots)):
@@ -178,8 +200,7 @@ class MissionMapView(SceneView):
             x, y = self.SCROLL_ORIGIN[0], self.SCROLL_ORIGIN[1] + index * self.ROW_PITCH
             self.scrolls[index == self.scene.selected_index].draw(left + x * scale, top + y * scale,
                                                        self.SCROLL_SIZE[0] * scale, self.SCROLL_SIZE[1] * scale)
-            label.draw(left + (x + 12) * scale, top + (y + 38) * scale,
-                       120 * scale, self.TEXT_HEIGHT * scale)
+            label.draw(left + (x + 12) * scale, top + (y + 10) * scale, 120 * scale, 64 * scale)
 
     def release(self):
         for quad in (self.map, *self.scrolls, *self.frame.values(), self.button_up, self.button_down):
