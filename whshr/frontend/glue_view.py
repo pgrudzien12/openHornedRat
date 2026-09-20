@@ -23,6 +23,7 @@ class GlueView(NativeScreenView):
         super().__init__(gpu, scene, options)
         self.models = ()
         self.quads = []
+        self.portrait_quads = []
         self.text_labels = []
         self.dialogue_labels = []
         self.dialogue_state = None
@@ -30,32 +31,34 @@ class GlueView(NativeScreenView):
         self.refresh()
 
     def refresh(self):
-        """Rebuild GPU quads after the runtime changes its active windows."""
+        """Rebuild GPU quads after the runtime changes its active windows.
+
+        Split into independent groups so a portrait's mouth/eye frame or a typing dialogue line -
+        which change almost every tick - only rebuild their own small quads, not every bitmap on
+        screen (the 640x480 map foremost): re-decoding that on every blink was the actual cost
+        behind a briefing running at a few FPS.
+        """
         models = tuple(build_render_model(self.scene.runtime.content, window, self.scene.runtime.state.object_positions)
                        for window in self.scene.runtime.state.windows)
         frames = {(animation.window_name, animation.object_name): animation.animator.display_name
                   for animation in self.scene.runtime.state.animations}
         palette = self._palette(models)
-        dialogue_state = _dialogue_state(self.scene.runtime.state)
-        portraits = tuple(sorted((name, animator.mouth_frame, animator.eye_frame)
-                                 for name, animator in self.scene.runtime.state.portrait_animators.items()))
-        if (models, frames, palette, dialogue_state, portraits) == (
-            self.models, getattr(self, "frames", {}), getattr(self, "palette", None), self.dialogue_state,
-            getattr(self, "portraits", ())
-        ):
+        self.models = models
+        self._refresh_bitmaps(models, frames, palette)
+        self._refresh_portraits(models, palette)
+        self._refresh_dialogue(_dialogue_state(self.scene.runtime.state))
+
+    def _refresh_bitmaps(self, models, frames, palette):
+        if (models, frames, palette) == (getattr(self, "_bitmap_models", ()), getattr(self, "frames", {}),
+                                          getattr(self, "palette", None)):
             return
         for quad, _ in self.quads:
             quad.release()
         for label, _ in self.text_labels:
             label.release()
-        self.models = models
-        self.frames = frames
-        self.palette = palette
-        self.portraits = portraits
-        self.dialogue_state = dialogue_state
-        self.quads = []
-        self.text_labels = []
-        for model in self.models:
+        self._bitmap_models, self.frames, self.palette = models, frames, palette
+        self.quads, self.text_labels = [], []
+        for model in models:
             for bitmap in model.bitmaps:
                 name = frames.get((model.name, bitmap.object_name), bitmap.name)
                 surface = load_optional_bitmap(self.scene.runtime.content, name, app_palette=palette)
@@ -64,23 +67,6 @@ class GlueView(NativeScreenView):
                 quad = ScreenQuad(self.gpu, surface.get_size())
                 quad.write(pygame.image.tobytes(surface, "RGBA"))
                 self.quads.append((quad, (model.x + bitmap.x, model.y + bitmap.y)))
-            for animation in model.animations:
-                if animation.index is None:
-                    continue
-                animator = self.scene.runtime.state.portrait_animators.get(model.name)
-                try:
-                    if animator is not None:
-                        width, height, rgba = self.scene.runtime.content.portrait_frame(
-                            animation.index, animation.bkindex or 0, animator.mouth_frame, animator.eye_frame,
-                            rgb_palette=palette.colours)
-                    else:
-                        width, height, rgba = self.scene.runtime.content.portrait_data(
-                            animation.index, animation.bkindex or 0, rgb_palette=palette.colours)
-                except (ValueError, FileNotFoundError, KeyError):
-                    continue
-                quad = ScreenQuad(self.gpu, (width, height))
-                quad.write(rgba)
-                self.quads.append((quad, (model.x + animation.x, model.y + animation.y)))
             for text in model.texts:
                 value = resolve_text(self.scene.runtime.content, text)
                 if value is None:
@@ -90,7 +76,37 @@ class GlueView(NativeScreenView):
                 except (KeyError, ValueError):
                     continue
                 self.text_labels.append(_place_text(self.gpu, font, value, text, model))
-        self._refresh_dialogue(dialogue_state)
+
+    def _refresh_portraits(self, models, palette):
+        portraits = tuple(sorted((name, animator.mouth_frame, animator.eye_frame)
+                                 for name, animator in self.scene.runtime.state.portrait_animators.items()))
+        animations = tuple((model.name, animation) for model in models for animation in model.animations
+                           if animation.index is not None)
+        if (animations, palette, portraits) == (
+            getattr(self, "_portrait_animations", ()), getattr(self, "_portrait_palette", None),
+            getattr(self, "portraits", ())
+        ):
+            return
+        for quad, _ in self.portrait_quads:
+            quad.release()
+        self._portrait_animations, self._portrait_palette, self.portraits = animations, palette, portraits
+        self.portrait_quads = []
+        for model_name, animation in animations:
+            model = next(model for model in models if model.name == model_name)
+            animator = self.scene.runtime.state.portrait_animators.get(model_name)
+            try:
+                if animator is not None:
+                    width, height, rgba = self.scene.runtime.content.portrait_frame(
+                        animation.index, animation.bkindex or 0, animator.mouth_frame, animator.eye_frame,
+                        rgb_palette=palette.colours)
+                else:
+                    width, height, rgba = self.scene.runtime.content.portrait_data(
+                        animation.index, animation.bkindex or 0, rgb_palette=palette.colours)
+            except (ValueError, FileNotFoundError, KeyError):
+                continue
+            quad = ScreenQuad(self.gpu, (width, height))
+            quad.write(rgba)
+            self.portrait_quads.append((quad, (model.x + animation.x, model.y + animation.y)))
 
     def _refresh_dialogue(self, dialogue_state):
         """Rebuild the bottom-anchored briefing dialogue block (notes/briefing_dialogue.md §3.3).
@@ -98,6 +114,9 @@ class GlueView(NativeScreenView):
         Each logical line keeps the settextcolor it was queued under (one label per line) so an
         older line from a previous speaker never gets repainted in the new speaker's colour.
         """
+        if dialogue_state == self.dialogue_state:
+            return
+        self.dialogue_state = dialogue_state
         for label, _ in self.dialogue_labels:
             label.release()
         self.dialogue_labels = []
@@ -162,6 +181,8 @@ class GlueView(NativeScreenView):
         left, top, scale = self._layout()
         for quad, (x, y) in self.quads:
             quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
+        for quad, (x, y) in self.portrait_quads:
+            quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
         for label, (x, y) in self.text_labels:
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
         for label, (x, y) in self.dialogue_labels:
@@ -170,12 +191,15 @@ class GlueView(NativeScreenView):
     def release(self):
         for quad, _ in self.quads:
             quad.release()
+        for quad, _ in self.portrait_quads:
+            quad.release()
         for label, _ in self.text_labels:
             label.release()
         for label, _ in self.dialogue_labels:
             label.release()
         self.dialogue_labels = []
         self.quads = []
+        self.portrait_quads = []
         self.text_labels = []
 
 
