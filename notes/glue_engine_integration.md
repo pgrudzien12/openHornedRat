@@ -111,6 +111,13 @@ to glue; direct battle mode may retain its standalone result flow.
 Use generic glue programs and `GlueView` for mission briefings. Verify dialogue, portraits,
 animation, music, panel actions, battle entry, and return behavior through this path.
 
+#### Interim Accept route
+
+Before troop selection is available, Accept may launch the selected mission's existing `BattleScene`
+directly. This makes generic briefings playable while deliberately deferring troop selection, mission
+costs, roster updates, and mission-taken bookkeeping. Replace this route with the troop-selection
+activity in milestone 6.
+
 Delete `BriefingScene`, `BriefingView`, their routing branches, and their dedicated tests after the
 generic flow covers them.
 
