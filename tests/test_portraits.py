@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from whshr.portraits import dietrich_portrait
+from whshr.portraits import dietrich_portrait, speaker_portrait
 
 
 class DietrichPortraitTests(unittest.TestCase):
@@ -37,6 +37,10 @@ class DietrichPortraitTests(unittest.TestCase):
         self.assertEqual((width, height), (2, 2))
         self.assertEqual(rgba, bytes((2, 3, 4, 255, 9, 10, 11, 255,
                                      4, 5, 6, 255, 10, 11, 12, 255)))
+
+    def test_unknown_glue_portrait_index_is_not_silently_rendered_as_dietrich(self):
+        with self.assertRaisesRegex(ValueError, "no verified portrait"):
+            speaker_portrait(self.temporary.name, 99, 0)
 
 
 if __name__ == "__main__":

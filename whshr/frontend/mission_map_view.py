@@ -35,7 +35,7 @@ class MissionMapView(SceneView):
         }
         self.button_up = self._load_quad(gpu, "FRAMEBUTTONUP.png", colorkey=True)
         self.button_down = self._load_quad(gpu, "FRAMEBUTTONDN.png", colorkey=True)
-        portrait = scene.dietrich_portrait
+        portrait = scene.speaker_portrait
         self.map_panel = self.portrait_window is not None
         self.button_slots = tuple(reversed(range(self.panel.slot_count)))
         # The map/list uses compact black PCTEXTA glyphs.  Keep the working

@@ -6,7 +6,7 @@ from .campaign_state import CampaignState
 from .campaign import load_wnd_rcdata, parse_window_ui
 from .engine import DEFAULT_SEED
 from .legacy import module
-from .portraits import dietrich_portrait
+from .portraits import speaker_portrait
 from .scenes import Quit, Scene, SceneManifest, Transition
 from .si import load_si, walk_objects
 
@@ -213,7 +213,7 @@ class MissionMapScene(Scene):
 
     def __init__(self, campaign):
         self.campaign = campaign
-        self.dietrich_portrait = None
+        self.speaker_portrait = None
         self.portrait_window = campaign.map_portrait_window
         self.selected_index = None
         self.installation = None
@@ -226,12 +226,11 @@ class MissionMapScene(Scene):
         # or every partial installation, so leave the panel absent if either
         # source file has not been extracted from an installed game.
         try:
-            if self.portrait_window is not None and self.portrait_window.get("index") == 4:
-                self.dietrich_portrait = dietrich_portrait(
-                    context.locator.installation, self.portrait_window.get("bkindex", 15)
-                )
-        except FileNotFoundError:
-            self.dietrich_portrait = None
+            if self.portrait_window is not None:
+                self.speaker_portrait = speaker_portrait(context.locator.installation,
+                                                         self.portrait_window["index"], self.portrait_window["bkindex"])
+        except (FileNotFoundError, ValueError):
+            self.speaker_portrait = None
 
     @property
     def missions(self):
