@@ -20,6 +20,8 @@ class GlueSceneTests(unittest.TestCase):
             "WINDOW": "[WINDOW]\n[POSITION]\nset:palindex=2\n[END]\n[END]",
             "FLOW": "[RUN]\n[START]\nopenwindow:res=WINDOW\nwaitforrelease:\nplaymovie:A2\nendgame:\n[END]",
             "BRIEFING": "[RUN]\n[START]\nwaitforrelease:\n[END]",
+            "MAP": "[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n[MISSION]\nset:res=601\nres:BRIEFING\nsetbattlescript:BF001\n[END]",
+            "MAP_FLOW": "[RUN]\n[START]\nopenwindow:res=MAP\nwaitforrelease:\n[END]",
         }))
 
     def test_scene_owns_runtime_effects_across_input_and_activity_boundaries(self):
@@ -64,6 +66,18 @@ class GlueSceneTests(unittest.TestCase):
 
         self.assertIsInstance(transition, Transition)
         self.assertIs(transition.scene, return_scene)
+
+    def test_generic_map_brief_action_opens_the_selected_generic_briefing(self):
+        map_scene = GlueScene("MAP_FLOW")
+        machine = SceneMachine(map_scene, self.context)
+
+        machine.handle(GlueInput("mission-select", "map.0"))
+        machine.handle(GlueInput("panel-action", "open_briefing"))
+
+        self.assertIsInstance(machine.active, GlueScene)
+        self.assertEqual(machine.active.program, "BRIEFING")
+        self.assertEqual(machine.active.accept_battle, "BF001")
+        self.assertIs(machine.active.return_scene, map_scene)
 
 
 if __name__ == "__main__":

@@ -167,6 +167,7 @@ path uses them.
 | Generic window presentation | Implemented | Bitmap windows, text, portraits, dialogue timing, bitmap animation, music, and control-panel drawing are presented by `GlueView`. |
 | Control panels | Partial | Pause/Resume and briefing Abort work. A generic briefing with a configured battle uses its selection action to start that battle directly and its return action to restore the mission map. Other activity-launching actions do not. |
 | Generic briefing entry | Partial | The existing mission map opens `GlueScene` for a selected mission that provides `brief_script` and `battle`. |
+| Generic mission selection | Partial | `GlueView` paints mission rows from `[MISSIONWINDOW]`, selects a row, and opens its generic briefing through the map panel. |
 | Campaign runtime interface | Partial | `CampaignState` supplies coffers, army/march membership, reinforcements, selected generic mission identity, and an in-memory autosave snapshot. |
 | Campaign commands | Partial | `testforunitinarmy`, `testforunitinmarch`, `addcash`, `iftrueaddcash`, `addtroop`, `unitjoinmission`, and `unitleavemission` call the campaign runtime. |
 | Battle activity | Implemented | `StartBattle` transitions to `BattleScene`; completing the battle resumes the same parked `GlueScene` with an `ActivityResult`. |
@@ -187,8 +188,9 @@ path uses them.
 ### Campaign behavior
 
 1. Implement troop-selection confirmation: mission costs, roster updates, mission-taken state, and continuation into a mission script or battle.
-2. Implement `addunit`, `cash`, bonus counters, book flags, `testmission`, `testobjective`, and `gomissionselect` through the campaign runtime.
-3. Replace the in-memory autosave snapshot with defined persistence and load behavior when save/load is in scope.
+2. Apply dependency and inactive-dependency visibility rules to generic mission rows, then rebuild them after a committed mission.
+3. Implement `addunit`, `cash`, bonus counters, book flags, `testmission`, `testobjective`, and `gomissionselect` through the campaign runtime.
+4. Replace the in-memory autosave snapshot with defined persistence and load behavior when save/load is in scope.
 
 ### Glue interpreter behavior
 

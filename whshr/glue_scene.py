@@ -64,6 +64,14 @@ class GlueScene(Scene):
         if isinstance(event, GlueInput):
             if event.kind == "panel-action" and event.target in ("accept_briefing", "open_troop_select") and self.accept_battle:
                 self._effects.extend(self.runtime.start_battle(self.accept_battle))
+            elif event.kind == "panel-action" and event.target == "open_troop_select" and self.runtime.state.selected_mission:
+                self._effects.extend(self.runtime.start_battle(self._selected_battle()))
+            elif event.kind == "panel-action" and event.target == "open_briefing" and self.runtime.state.selected_mission:
+                briefing = self._selected_briefing()
+                if briefing:
+                    return Transition(GlueScene(briefing, self.campaign,
+                                                accept_battle=self._selected_battle(), return_scene=self),
+                                      "generic mission briefing opened")
             elif event.kind == "panel-action" and event.target in ("abort_briefing", "return_to_caravan") and self.return_scene:
                 self._effects.extend(self.runtime.handle(GlueInput("panel-action", "abort_briefing")))
                 return Transition(self.return_scene, "generic briefing dismissed")
@@ -72,6 +80,15 @@ class GlueScene(Scene):
         elif isinstance(event, ActivityResult):
             self._effects.extend(self.runtime.resume(event))
         return None
+
+    def _selected_values(self):
+        return self.runtime.content.mission(self.runtime.state.selected_mission).values
+
+    def _selected_battle(self):
+        return self._selected_values().get("setbattlescript", "")
+
+    def _selected_briefing(self):
+        return self._selected_values().get("res") or self._selected_values().get("script")
 
     def update(self, seconds, context):
         super().update(seconds, context)

@@ -19,6 +19,7 @@ from .scene_view import NativeScreenView
 MIXER_CHANNELS = 8  # matches intro_view's cutscene mixer; music runs on pygame's separate music channel
 MUSIC_VOLUME = 0.01  # engine-level mix setting, not game data: setmidivolume/setwavvolume are unused by any
                      # script (notes/briefing_dialogue.md §2.1) and default 100, so there is no data value to read
+MISSION_ROW_HEIGHT = 20
 
 
 def _ensure_mixer():
@@ -47,6 +48,9 @@ class GlueView(NativeScreenView):
         self.panel_quads = []
         self.panel_labels = []
         self.panel_buttons = []
+        self.mission_quads = []
+        self.mission_labels = []
+        self.mission_rows = []
         self.music_name = None
         self._music_ok = _ensure_mixer()
         self.pressed = None
@@ -71,6 +75,7 @@ class GlueView(NativeScreenView):
         self._refresh_bitmaps(models, frames, palette)
         self._refresh_portraits(models, palette)
         self._refresh_panel(models, palette)
+        self._refresh_missions(models, palette)
         self._refresh_dialogue(_dialogue_state(self.scene.runtime.state))
 
     def _process_music(self):
@@ -213,6 +218,38 @@ class GlueView(NativeScreenView):
                     rect = pygame.Rect(origin[0] + 9, origin[1] + y, 119, 20)
                     self.panel_buttons.append((model.name, rect, action))
 
+    def _refresh_missions(self, models, palette):
+        rows = _mission_rows(self.scene.runtime.content, models, self.scene.runtime.state.selected_mission,
+                             getattr(self.scene.campaign, "taken_missions", ()))
+        state = (rows, palette)
+        if state == getattr(self, "_mission_state", None):
+            return
+        for quad, _ in self.mission_quads:
+            quad.release()
+        for label, _ in self.mission_labels:
+            label.release()
+        self._mission_state = state
+        self.mission_quads, self.mission_labels, self.mission_rows = [], [], []
+        try:
+            font = BitmapFont(self.scene.font(2))
+        except (KeyError, ValueError):
+            return
+        content = self.scene.runtime.content
+        for reference, label_text, x, y, selected in rows:
+            surface = load_optional_bitmap(content, "Scroll0" if selected else "Scroll1", app_palette=palette)
+            if surface is not None:
+                quad = ScreenQuad(self.gpu, surface.get_size())
+                quad.write(pygame.image.tobytes(surface, "RGBA"))
+                self.mission_quads.append((quad, (x, y)))
+                width, height = surface.get_size()
+            else:
+                width, height = 320, MISSION_ROW_HEIGHT
+            text = self.gpu.text((max(1, width - 12), max(1, font.font.height)), font, color=(0, 0, 0),
+                                 background=None, padding=0)
+            text.set_lines((label_text,))
+            self.mission_labels.append((text, (x + 6, y + max(0, (height - font.font.height) // 2))))
+            self.mission_rows.append((pygame.Rect(x, y, width, height), reference))
+
     def _add_panel_bitmap(self, content, name, position, palette):
         surface = load_optional_bitmap(content, name, app_palette=palette)
         if surface is None:
@@ -283,9 +320,20 @@ class GlueView(NativeScreenView):
                 return action
         return None
 
+    def _mission_at(self, point):
+        for rect, reference in reversed(self.mission_rows):
+            if rect.collidepoint(point):
+                return reference
+        return None
+
     def events(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             point = self._native_point(event.pos)
+            mission = self._mission_at(point)
+            if mission is not None:
+                self._pressed_button = None
+                self.pressed = None
+                return (GlueInput("mission-select", mission.key),)
             self._pressed_button = self._panel_button_at(point)
             self.pressed = None if self._pressed_button is not None else self.hotspot_at(self.models, point)
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
@@ -311,9 +359,13 @@ class GlueView(NativeScreenView):
             quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
         for quad, (x, y) in self.panel_quads:
             quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
+        for quad, (x, y) in self.mission_quads:
+            quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
         for label, (x, y) in self.text_labels:
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
         for label, (x, y) in self.panel_labels:
+            label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
+        for label, (x, y) in self.mission_labels:
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
         for label, (x, y) in self.dialogue_labels:
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
@@ -325,9 +377,13 @@ class GlueView(NativeScreenView):
             quad.release()
         for quad, _ in self.panel_quads:
             quad.release()
+        for quad, _ in self.mission_quads:
+            quad.release()
         for label, _ in self.text_labels:
             label.release()
         for label, _ in self.panel_labels:
+            label.release()
+        for label, _ in self.mission_labels:
             label.release()
         for label, _ in self.dialogue_labels:
             label.release()
@@ -336,6 +392,9 @@ class GlueView(NativeScreenView):
         self.portrait_quads = []
         self.panel_quads = []
         self.panel_labels = []
+        self.mission_quads = []
+        self.mission_labels = []
+        self.mission_rows = []
         self.text_labels = []
 
 
@@ -404,6 +463,25 @@ def _dialogue_state(state):
     current = (typed, state.dialogue_line_colour) if typed else None
     lines = (*state.dialogue_lines, current) if current else state.dialogue_lines
     return state.dialogue_window_name, lines
+
+
+def _mission_rows(content, models, selected, taken=()):
+    taken = set(taken)
+    rows = []
+    for model in models:
+        for mission_list in model.mission_lists:
+            y = model.y + mission_list.y
+            for reference in mission_list.missions:
+                if reference in taken:
+                    continue
+                values = content.mission(reference).values
+                try:
+                    label = content.string("BRTXT", int(values["res"]))
+                except (KeyError, TypeError, ValueError):
+                    label = reference.key
+                rows.append((reference, label, model.x + mission_list.x, y, reference == selected))
+                y += MISSION_ROW_HEIGHT
+    return tuple(rows)
 
 
 def resolve_text(content, text):
