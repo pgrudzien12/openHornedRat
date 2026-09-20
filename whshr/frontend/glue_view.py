@@ -250,7 +250,7 @@ class GlueView(NativeScreenView):
             text = self.gpu.text((max(1, width - 12), max(1, height - 8)), font, color=(0, 0, 0),
                                  background=None, padding=0, fixed_width=True)
             text.set_lines(tuple(lines))
-            self.mission_labels.append((text, (x + 6, y + 4)))
+            self.mission_labels.append((text, (x + 6, y + 4 + font.font.height // 2)))
             self.mission_rows.append((pygame.Rect(x, y, width, height), reference))
 
     def _add_panel_bitmap(self, content, name, position, palette):
