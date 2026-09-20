@@ -1,7 +1,7 @@
 import unittest
 
 from whshr.glue_content import GlueContent
-from whshr.glue_runtime import ActivityResult, EndGame, GlueInput, OpenWindow, StartMovie
+from whshr.glue_runtime import ActivityResult, EndGame, GlueInput, OpenWindow, StartBattle, StartMovie, StopMusic
 from whshr.glue_scene import GlueScene
 from whshr.scenes import SceneMachine
 
@@ -19,6 +19,7 @@ class GlueSceneTests(unittest.TestCase):
         self.context = _Context(GlueContent.from_data(resources={
             "WINDOW": "[WINDOW]\n[POSITION]\nset:palindex=2\n[END]\n[END]",
             "FLOW": "[RUN]\n[START]\nopenwindow:res=WINDOW\nwaitforrelease:\nplaymovie:A2\nendgame:\n[END]",
+            "BRIEFING": "[RUN]\n[START]\nwaitforrelease:\n[END]",
         }))
 
     def test_scene_owns_runtime_effects_across_input_and_activity_boundaries(self):
@@ -42,6 +43,17 @@ class GlueSceneTests(unittest.TestCase):
         scene.restore(snapshot)
 
         self.assertEqual(scene.runtime.state.wait_reason, "mission-release")
+
+    def test_briefing_accept_starts_the_configured_battle(self):
+        scene = GlueScene("BRIEFING", accept_battle="bf001")
+        SceneMachine(scene, self.context)
+
+        scene.handle(GlueInput("panel-action", "accept_briefing"), self.context)
+
+        effects = scene.take_effects()
+        self.assertEqual(effects[0], StopMusic())
+        self.assertIsInstance(effects[1], StartBattle)
+        self.assertEqual(effects[1].battle, "BF001")
 
 
 if __name__ == "__main__":

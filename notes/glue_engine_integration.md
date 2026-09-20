@@ -165,7 +165,8 @@ path uses them.
 | Area | Status | Available behavior |
 |---|---|---|
 | Generic window presentation | Implemented | Bitmap windows, text, portraits, dialogue timing, bitmap animation, music, and control-panel drawing are presented by `GlueView`. |
-| Control panels | Partial | Pause/Resume and briefing Abort work. Accept and the other activity-launching actions do not. |
+| Control panels | Partial | Pause/Resume and briefing Abort work. A generic briefing with a configured battle uses Accept to start that battle directly. Other activity-launching actions do not. |
+| Generic briefing entry | Partial | The existing mission map opens `GlueScene` for a selected mission that provides `brief_script` and `battle`. |
 | Campaign runtime interface | Partial | `CampaignState` supplies coffers, army/march membership, reinforcements, selected generic mission identity, and an in-memory autosave snapshot. |
 | Campaign commands | Partial | `testforunitinarmy`, `testforunitinmarch`, `addcash`, `iftrueaddcash`, `addtroop`, `unitjoinmission`, and `unitleavemission` call the campaign runtime. |
 | Battle activity | Implemented | `StartBattle` transitions to `BattleScene`; completing the battle resumes the same parked `GlueScene` with an `ActivityResult`. |

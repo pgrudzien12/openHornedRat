@@ -11,6 +11,7 @@ from whshr.campaign_scenes import (
 )
 from whshr.campaign_state import CampaignState
 from whshr.catalog import build
+from whshr.glue_scene import GlueScene
 from whshr.scenes import SceneAssets, SceneMachine
 
 BF001 = AssetId("vanilla", "battle", "bf001")
@@ -172,6 +173,21 @@ class IntroSceneTests(unittest.TestCase):
 
         self.assertIsInstance(machine.active, TroopSelectScene)
         self.assertEqual(machine.active.mission["battle"], "BF001")
+
+    def test_given_a_selected_mission_with_a_glue_briefing_then_the_generic_scene_receives_its_battle(self):
+        campaign = CampaignState(
+            {"flow_scripts": {"FLOW": ({"action": "add_window", "window": "MAP"},)},
+             "mission_windows": {"MAP": [{"name": "Test", "name_id": 1,
+                                             "brief_script": "BRIEFING", "battle": "BF001"}]}},
+            flow="FLOW",
+        )
+        scene = MissionMapScene(campaign)
+        scene.selected_index = 0
+
+        transition = scene.handle("open_briefing", self.context)
+
+        self.assertIsInstance(transition.scene, GlueScene)
+        self.assertEqual((transition.scene.program, transition.scene.accept_battle), ("BRIEFING", "BF001"))
 
     def test_given_the_mission_map_when_escape_is_pressed_then_the_caravan_returns(self):
         campaign = CampaignState.single_mission(BriefingScene({"briefing_key": "test.0", "battle": "BF001"}))

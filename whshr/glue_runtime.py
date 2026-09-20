@@ -322,6 +322,20 @@ class GlueRuntime:
             self.state.current.parked = False
         return self.step_until_blocked()
 
+    def start_battle(self, battle):
+        battle = str(battle).upper()
+        if not battle or self.state.pending is not None and self.state.pending.kind == "battle":
+            return ()
+        self.state.paused = False
+        effects = []
+        if self.state.pending is not None and self.state.pending.kind == "dialogue":
+            self.state.pending = None
+            self._clear_dialogue()
+            effects.append(StopSpeech())
+        effects.append(StopMusic())
+        self._request_battle("playgame", battle, effects)
+        return tuple(effects)
+
     def _visible_mission(self, key):
         """Find a mission advertised by an active window without reparsing glue."""
         if key is None:
