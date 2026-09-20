@@ -7,7 +7,9 @@ adapters until their renderer rules are moved out of compatibility views.
 
 import pygame
 
+from ..campaign_state import CARAVAN_MODE_WINDOWS
 from ..controlpanel import button_y, control_panel
+from ..glue_animation import GlueBitmapAnimator
 from ..glue_render import build_render_model
 from ..glue_runtime import GlueInput, PlayMusic, StopMusic
 from ..glue_palette import AppPalette
@@ -21,6 +23,7 @@ MUSIC_VOLUME = 0.01  # engine-level mix setting, not game data: setmidivolume/se
                      # script (notes/briefing_dialogue.md §2.1) and default 100, so there is no data value to read
 MISSION_ROW_HEIGHT = 88
 MISSION_TEXT_INSET = 12
+HINT_BOTTOM_MARGIN = 10
 
 
 def _ensure_mixer():
@@ -52,6 +55,9 @@ class GlueView(NativeScreenView):
         self.mission_quads = []
         self.mission_labels = []
         self.mission_rows = []
+        self.hint_label = None
+        self.hover_hint = None
+        self.bitmap_animators = {}
         self.music_name = None
         self._music_ok = _ensure_mixer()
         self.pressed = None
@@ -71,6 +77,7 @@ class GlueView(NativeScreenView):
                        for window in self.scene.runtime.state.windows)
         frames = {(animation.window_name, animation.object_name): animation.animator.display_name
                   for animation in self.scene.runtime.state.animations}
+        frames.update(self._static_animation_frames(models, frames))
         palette = self._palette(models)
         self.models = models
         self._refresh_bitmaps(models, frames, palette)
@@ -78,6 +85,26 @@ class GlueView(NativeScreenView):
         self._refresh_panel(models, palette)
         self._refresh_missions(models, palette)
         self._refresh_dialogue(_dialogue_state(self.scene.runtime.state))
+
+    def _static_animation_frames(self, models, runtime_frames):
+        active = {}
+        frames = {}
+        for model in models:
+            for index, bitmap in enumerate(model.bitmaps):
+                key = (model.name, index)
+                if (model.name, bitmap.object_name) in runtime_frames or not bitmap.animation:
+                    continue
+                spec = {"bitmap": bitmap.name, **dict(bitmap.animation)}
+                animator = self.bitmap_animators.get(key)
+                if animator is None:
+                    animator = GlueBitmapAnimator(spec)
+                active[key] = animator
+                if animator.display_name == bitmap.name and "animstartframe" in spec:
+                    frames[key] = f"{bitmap.name}{spec['animstartframe']}"
+                else:
+                    frames[key] = animator.display_name
+        self.bitmap_animators = active
+        return frames
 
     def _process_music(self):
         """Drain playmidi/stopmidi effects (notes/briefing_dialogue.md §2.1: replace abruptly, loop forever)."""
@@ -112,8 +139,10 @@ class GlueView(NativeScreenView):
         self._bitmap_models, self.frames, self.palette = models, frames, palette
         self.quads, self.text_labels = [], []
         for model in models:
-            for bitmap in model.bitmaps:
-                name = frames.get((model.name, bitmap.object_name), bitmap.name)
+            for index, bitmap in enumerate(model.bitmaps):
+                if not _bitmap_visible(bitmap, self.scene.campaign):
+                    continue
+                name = frames.get((model.name, bitmap.object_name), frames.get((model.name, index), bitmap.name))
                 surface = load_optional_bitmap(self.scene.runtime.content, name, app_palette=palette)
                 if surface is None:
                     continue
@@ -254,6 +283,24 @@ class GlueView(NativeScreenView):
             self.mission_labels.append((text, (x + MISSION_TEXT_INSET, y + 4 + font.font.height // 2)))
             self.mission_rows.append((pygame.Rect(x, y, width, height), reference))
 
+    def _refresh_hint(self):
+        hint = self.hover_hint
+        if hint == getattr(self, "_drawn_hint", None):
+            return
+        if self.hint_label is not None:
+            self.hint_label.release()
+        self._drawn_hint = hint
+        self.hint_label = None
+        if not hint:
+            return
+        try:
+            font = BitmapFont(self.scene.font(4))
+        except (KeyError, ValueError):
+            return
+        self.hint_label = self.gpu.text((640, 32), font, color=(220, 30, 30), background=None,
+                                        padding=0, align="center", fixed_width=True)
+        self.hint_label.set_lines((hint,))
+
     def _add_panel_bitmap(self, content, name, position, palette):
         surface = load_optional_bitmap(content, name, app_palette=palette)
         if surface is None:
@@ -331,6 +378,10 @@ class GlueView(NativeScreenView):
         return None
 
     def events(self, event):
+        if event.type == pygame.MOUSEMOTION:
+            hotspot = self.hotspot_at(self.models, self._native_point(event.pos))
+            self.hover_hint = _caravan_hint(self.scene.campaign, self.models, hotspot)
+            self._refresh_hint()
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             point = self._native_point(event.pos)
             mission = self._mission_at(point)
@@ -354,6 +405,11 @@ class GlueView(NativeScreenView):
                 return (GlueInput("dialogue-drain"),)
         return ()
 
+    def animate(self, seconds):
+        changed = any(animator.tick(round(seconds * 1000)).redrawn for animator in self.bitmap_animators.values())
+        if changed:
+            self.refresh()
+
     def draw(self):
         super().draw()
         left, top, scale = self._layout()
@@ -373,6 +429,10 @@ class GlueView(NativeScreenView):
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
         for label, (x, y) in self.dialogue_labels:
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
+        if self.hint_label is not None:
+            _, hint_height = self.hint_label.text_size
+            self.hint_label.draw(left, top + (self.NATIVE_SIZE[1] - hint_height - HINT_BOTTOM_MARGIN) * scale,
+                                 self.hint_label.size[0] * scale, self.hint_label.size[1] * scale)
 
     def release(self):
         for quad, _ in self.quads:
@@ -391,6 +451,8 @@ class GlueView(NativeScreenView):
             label.release()
         for label, _ in self.dialogue_labels:
             label.release()
+        if self.hint_label is not None:
+            self.hint_label.release()
         self.dialogue_labels = []
         self.quads = []
         self.portrait_quads = []
@@ -400,6 +462,7 @@ class GlueView(NativeScreenView):
         self.mission_labels = []
         self.mission_rows = []
         self.text_labels = []
+        self.hint_label = None
 
 
 # notes/briefing_dialogue.md §3.4, the front-end's settextcolor name -> RGB table.
@@ -467,6 +530,29 @@ def _dialogue_state(state):
     current = (typed, state.dialogue_line_colour) if typed else None
     lines = (*state.dialogue_lines, current) if current else state.dialogue_lines
     return state.dialogue_window_name, lines
+
+
+def _bitmap_visible(bitmap, campaign):
+    """Apply a bitmap's campaign-count dependency when a campaign is active."""
+    if not bitmap.name.casefold().startswith("carscroll"):
+        return True
+    depend = dict(bitmap.animation).get("depend")
+    if depend is None or campaign is None:
+        return True
+    try:
+        return int(depend) <= len(campaign.missions)
+    except (TypeError, ValueError, AttributeError):
+        return True
+
+
+def _caravan_hint(campaign, models, hotspot):
+    """Resolve a caravan hotspot hint, including the coffer value placeholder."""
+    if campaign is None or hotspot is None or not any(model.name in CARAVAN_MODE_WINDOWS.values() for model in models):
+        return None
+    hint_id = 402 if hotspot.hint_id == -1 else hotspot.hint_id
+    if hint_id is None:
+        return None
+    return campaign.hint(hint_id, campaign.coffers) if hint_id == 402 else campaign.hint(hint_id)
 
 
 def _mission_rows(content, models, selected, taken=()):

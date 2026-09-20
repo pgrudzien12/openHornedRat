@@ -1,7 +1,7 @@
 import importlib.util
 import unittest
 
-from whshr.glue_render import GlueRenderModel, RenderHotspot, RenderMissionList
+from whshr.glue_render import GlueRenderModel, RenderBitmap, RenderHotspot, RenderMissionList
 from whshr.glue import MissionRef
 from whshr.glue_render import RenderText
 from whshr.glue_content import GlueContent
@@ -51,6 +51,30 @@ class GlueViewTests(unittest.TestCase):
         from whshr.frontend.glue_bitmap import load_optional_bitmap
 
         self.assertIsNone(load_optional_bitmap(GlueContent.from_data(), "Tent4"))
+
+    def test_campaign_count_controls_dependent_caravan_bitmap_visibility(self):
+        from whshr.frontend.glue_view import _bitmap_visible
+        bitmap = RenderBitmap("CarScroll3", animation=(("depend", 2),))
+        campaign = type("Campaign", (), {"missions": (object(),)})()
+
+        self.assertFalse(_bitmap_visible(bitmap, campaign))
+        campaign.missions = (object(), object())
+        self.assertTrue(_bitmap_visible(bitmap, campaign))
+
+    def test_only_caravan_scrolls_use_campaign_count_dependency(self):
+        from whshr.frontend.glue_view import _bitmap_visible
+        bitmap = RenderBitmap("OtherBitmap", animation=(("depend", 2),))
+        campaign = type("Campaign", (), {"missions": ()})()
+
+        self.assertTrue(_bitmap_visible(bitmap, campaign))
+
+    def test_caravan_coffers_hint_receives_the_campaign_value(self):
+        from whshr.frontend.glue_view import _caravan_hint
+        campaign = type("Campaign", (), {"coffers": 500, "hint": lambda self, hint, *args: f"{hint}:{args}"})()
+        model = GlueRenderModel("STARTCARAVAN", 0, 0, 640, 480, 0, (), (), (), (), ())
+        hotspot = RenderHotspot(0, 0, 1, 1, -1, None, None, None, None)
+
+        self.assertEqual(_caravan_hint(campaign, (model,), hotspot), "402:(500,)")
 
     def test_format_1_text_centres_in_vx_and_uses_vy_as_a_y_offset_not_a_box_height(self):
         from whshr.frontend.glue_view import _place_text
