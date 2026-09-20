@@ -52,6 +52,13 @@ class GlueBitmapAnimatorTests(unittest.TestCase):
         self.assertEqual([update.redrawn for update in updates], [False, False, False, True])
         self.assertEqual(updates[-1].bitmap, "Cell2")
 
+    def test_display_name_uses_the_start_frame_before_the_first_timer_step(self):
+        animator = GlueBitmapAnimator({"bitmap": "TrailCell", "animstartframe": 3, "animstopframe": 0})
+
+        self.assertEqual(animator.display_name, "TrailCell3")
+        animator.tick(50)
+        self.assertEqual(animator.display_name, "TrailCell3")
+
 
 if __name__ == "__main__":
     unittest.main()

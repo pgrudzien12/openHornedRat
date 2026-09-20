@@ -28,15 +28,19 @@ class GlueView(NativeScreenView):
         """Rebuild GPU quads after the runtime changes its active windows."""
         models = tuple(build_render_model(self.scene.runtime.content, window)
                        for window in self.scene.runtime.state.windows)
-        if models == self.models:
+        frames = {(animation.window_name, animation.animator.base): animation.animator.display_name
+                  for animation in self.scene.runtime.state.animations}
+        if (models, frames) == (self.models, getattr(self, "frames", {})):
             return
         for quad, _ in self.quads:
             quad.release()
         self.models = models
+        self.frames = frames
         self.quads = []
         for model in self.models:
             for bitmap in model.bitmaps:
-                surface = load_bitmap(self.scene.runtime.content, bitmap.name)
+                name = frames.get((model.name, bitmap.name), bitmap.name)
+                surface = load_bitmap(self.scene.runtime.content, name)
                 quad = ScreenQuad(self.gpu, surface.get_size())
                 quad.write(pygame.image.tobytes(surface, "RGBA"))
                 self.quads.append((quad, (model.x + bitmap.x, model.y + bitmap.y)))
