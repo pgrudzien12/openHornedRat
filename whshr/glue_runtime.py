@@ -9,6 +9,7 @@ calls :meth:`GlueRuntime.resume`.
 from copy import deepcopy
 from dataclasses import dataclass, field
 
+from .glue_animation import GlueBitmapAnimator
 from .glue import BitmapRecord, GlueInstruction
 
 
@@ -137,6 +138,13 @@ class PendingRequest:
 
 
 @dataclass
+class RuntimeAnimation:
+    window_name: str
+    animator: GlueBitmapAnimator
+    notify_on_stop: bool = False
+
+
+@dataclass
 class ContextSnapshot:
     """A saved RUN context, kept independently from the script call stack."""
 
@@ -169,6 +177,7 @@ class GlueRuntimeState:
     debrief_index: int = 0
     palette_id: int = 0
     context_stack: list[ContextSnapshot] = field(default_factory=list)
+    animations: list[RuntimeAnimation] = field(default_factory=list)
     wait_reason: str | None = None
     pending: PendingRequest | None = None
     next_request_id: int = 1
@@ -217,7 +226,22 @@ class GlueRuntime:
     def tick(self, milliseconds):
         if milliseconds < 0:
             raise ValueError("tick duration must not be negative")
-        return ()
+        effects = []
+        completed = False
+        remaining = []
+        for animation in self.state.animations:
+            update = animation.animator.tick(milliseconds)
+            if update.finished and animation.notify_on_stop:
+                completed = True
+                continue
+            remaining.append(animation)
+        self.state.animations = remaining
+        if completed and self.state.wait_reason == "animation-finished":
+            self.state.wait_reason = None
+            if self.state.current is not None:
+                self.state.current.parked = False
+            effects.extend(self.step_until_blocked())
+        return tuple(effects)
 
     def handle(self, input_):
         """Resume a parked script when its explicit wait event arrives."""
@@ -427,6 +451,10 @@ class GlueRuntime:
         effects.append(UpdateWindow(target.name))
         last_bitmap = next((record for record in reversed(definition.records) if isinstance(record, BitmapRecord)), None)
         stop_frame = last_bitmap.values.get("animstopframe", -1) if last_bitmap is not None else -1
+        if animated and last_bitmap is not None:
+            spec = {"bitmap": last_bitmap.values.get("setbitmap", ""), **last_bitmap.values}
+            self.state.animations.append(RuntimeAnimation(target.name, GlueBitmapAnimator(spec),
+                                                          self._parse_int(stop_frame, -1) >= 0))
         if animated and self._parse_int(stop_frame, -1) >= 0:
             self.state.wait_reason = "animation-finished"
             self.state.current.parked = True

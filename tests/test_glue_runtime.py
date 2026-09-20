@@ -147,6 +147,10 @@ class GlueRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.start("ANIM_FINITE"), (OpenWindow("MAIN", None, 2), UpdateWindow("MAIN")))
         self.assertEqual(runtime.state.wait_reason, "animation-finished")
 
+        self.assertEqual(runtime.tick(50), ())
+        self.assertEqual(runtime.tick(50), (EndGame(),))
+        self.assertIsNone(runtime.state.current)
+
 
 if __name__ == "__main__":
     unittest.main()
