@@ -173,6 +173,7 @@ class CaravanScene(Scene):
         self.installation = context.locator.installation
         self.content = self.campaign.content or context.glue_content()
         self.campaign.content = self.content
+        self.campaign.activate_caravan_mode(self.mode)
         self.font = context.load(CARAVAN_FONT)
 
     @property

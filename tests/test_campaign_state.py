@@ -8,7 +8,7 @@ from whshr.campaign import (
     parse_mission_script, parse_mission_windows, parse_window_hotspots, parse_window_portrait, parse_window_ui,
 )
 from whshr.campaign_state import (
-    CARAVAN_BUILTIN_BITMAPS, CampaignState, caravan_scroll_count, eligible_missions, initial_flow,
+    CARAVAN_BUILTIN_BITMAPS, CampaignState, caravan_scroll_count, caravan_window_for_mode, eligible_missions, initial_flow,
     start_caravan_continuation,
 )
 from whshr.glue import MissionRef
@@ -16,6 +16,32 @@ from whshr.glue_content import GlueContent
 
 
 class CampaignStateTests(unittest.TestCase):
+    def test_caravan_modes_resolve_to_their_window_resources_and_activate_that_projection(self):
+        state = CampaignState(self.graph, caravan_uis={
+            "STARTCARAVAN": {"hotspots": [{"res": 150}], "bitmaps": [{"bitmap": "Start"}]},
+            "CARAVANAFTERMISSION": {"hotspots": [{"res": -1}], "bitmaps": [{"bitmap": "After"}]},
+            "INFOCARAVANREC": {"hotspots": [{"res": 151}], "bitmaps": [{"bitmap": "Info"}]},
+        })
+
+        self.assertEqual(caravan_window_for_mode("select"), "CARAVANAFTERMISSION")
+        self.assertEqual(caravan_window_for_mode("infoREC"), "INFOCARAVANREC")
+        self.assertTrue(state.activate_caravan_mode("select"))
+        self.assertEqual((state.hotspots[0]["res"], state.caravan_bitmaps[0]["bitmap"]), (-1, "After"))
+        self.assertTrue(state.activate_caravan_mode("infoREC"))
+        self.assertEqual(state.hotspots[0]["res"], 151)
+        self.assertFalse(state.activate_caravan_mode("unknown"))
+
+    def test_window_ui_expands_every_script_in_one_include_block_in_source_order(self):
+        content = GlueContent.from_data(resources={
+            "ROOT": "[WINDOW]\n[INCLUDE]\nscript:ONE\nscript:TWO\n[END]",
+            "ONE": "[WINDOW]\n[BITMAP]\nsetbitmap:First\n[END]",
+            "TWO": "[WINDOW]\n[BITMAP]\nsetbitmap:Second\n[END]",
+        })
+
+        ui = parse_window_ui(content.resources, "ROOT")
+
+        self.assertEqual([bitmap["bitmap"] for bitmap in ui["bitmaps"]], ["First", "Second"])
+
     def test_caravan_builtin_animation_specs_cover_cells_not_declared_by_startcaravan(self):
         specs = {item["bitmap"]: item for item in CARAVAN_BUILTIN_BITMAPS}
 

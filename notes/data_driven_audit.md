@@ -65,7 +65,7 @@ table; **PROV** = guessed value; **KEY** = wrong lookup key; **STRINGS** = embed
 
 | Item | Class | Should come from / become |
 |---|---|---|
-| Hotspots (`BOOKS`, `GOLD_RECT`, `MISSION_RECT`, `DIETRICH_RECT`, `EXIT_RECT`, `SAVE_RECT`) | DATA | the *actual* caravan window's `[HOTSPOT]` list (only `STARTCARAVAN` is parsed today, for every caravan variant) |
+| Hotspots (`BOOKS`, `GOLD_RECT`, `MISSION_RECT`, `DIETRICH_RECT`, `EXIT_RECT`, `SAVE_RECT`) | DATA | the active caravan window's `[HOTSPOT]` list, selected from the documented `gocaravan` mode mapping |
 | Hint id -> action mapping (`150 -> open_mission_map`, `151 -> books`, ...) | DATA | each hotspot's `script:`/`res:` target (`PopContext`, `MagicBook`, `AbortGame`, `LoadSaveWindow`, ...) |
 | `CANDLE_POS`, `LAMP_POS`, book (296,260), eyes (312,208), talk eyes (300,200), mouth (288,220) | DATA + TABLE | `[BITMAP] set:x/y` in `CARAVANCOMMON1`/`3`; talk cells are created by the caravan built-in and live in `CARAVAN_BUILTIN_BITMAPS` |
 | `ANIMATION_FPS = 8`, `PAGE_HOLD_SECONDS = 3.0`, `BLINK_PERIOD_SECONDS = 2.0` | PROV | `animstartframe`, `animstopframe`, `timecnt`, `looptimecnt` (90, 30) of those bitmaps |
@@ -91,7 +91,7 @@ table; **PROV** = guessed value; **KEY** = wrong lookup key; **STRINGS** = embed
 | `INITIAL_COFFERS = 500` | TABLE | executable default; keep, cite `notes/campaign.md` §2.1 |
 | `briefing_asset_for(battle)` / `load_briefing(installation, battle)` return the first record with that battle | **KEY** | key by mission record; `bf003` alone matches 21 records |
 | `BriefingScene(AssetId(battle))` built from `mission["battle"]` | **KEY** | the record's `res:` briefing script |
-| Hotspots from `STARTCARAVAN` only | DATA | the window for the current caravan mode |
+| Caravan mode → window-resource mapping | DATA | `gocaravan` mode mapping; each active mode now projects its own window UI |
 | `MissionMapScene` action names (`open_briefing`, `open_troop_select`, ...) | ENGINE | fine; the slot -> action mapping goes in the `controlpanel` table |
 
 ### `whshr/portraits.py`

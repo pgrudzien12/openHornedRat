@@ -27,6 +27,8 @@ class CaravanView(NativeScreenView):
         "loadsavewindow": "save_campaign",
         "magicbook": "browse_book:magic",
         "popcontext": "open_mission_map",
+        "unwindmission": "open_mission_map",
+        "popcontextcheckresume": "open_mission_map",
     }
     NO_TARGET_ACTIONS = {155: "speak_to_dietrich"}
 

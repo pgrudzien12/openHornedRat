@@ -95,8 +95,8 @@ def _included_records(content, name, seen=()):
     definition = content.window(key)
     for record in definition.records:
         if isinstance(record, IncludeRecord):
-            target = _fields(record).get("script")
-            if target:
+            targets = (field.argument for field in record.fields if field.command == "script")
+            for target in targets:
                 yield from _included_records(content, target, (*seen, key))
         else:
             yield record

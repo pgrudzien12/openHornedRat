@@ -27,6 +27,22 @@ CARAVAN_BUILTIN_BITMAPS = (
     {"bitmap": "TalkEyesCell", "x": 300, "y": 200},
 )
 
+CARAVAN_MODE_WINDOWS = {
+    "start": "STARTCARAVAN",
+    "select": "CARAVANAFTERMISSION",
+    "resume": "CARAVANAFTERENCOUNTER",
+    "recruit": "CARAVANRECRUITANDRESUME",
+    "recruitnospeech": "CARAVANRECRUITNOSPEECHANDRESUME",
+}
+
+
+def caravan_window_for_mode(mode):
+    """Resolve a glue ``gocaravan`` mode to its top-level window resource."""
+    mode = str(mode).casefold()
+    if mode.startswith("info"):
+        return "INFOCARAVAN" + mode[4:].upper()
+    return CARAVAN_MODE_WINDOWS.get(mode)
+
 
 def mission_visible(missions, mission, taken):
     """Is ``mission`` offered in its window right now?
@@ -87,6 +103,7 @@ class CampaignState:
     tentpos: int = 0
     hotspots: tuple[dict, ...] = ()
     caravan_bitmaps: tuple[dict, ...] = ()
+    caravan_uis: dict[str, dict] = field(default_factory=dict, repr=False, compare=False)
     caravan_continuation: str | None = None
     hints: dict[int, str] = field(default_factory=dict)
     content: object = field(default=None, repr=False, compare=False)
@@ -120,6 +137,16 @@ class CampaignState:
         specs = {bitmap["bitmap"].casefold(): bitmap for bitmap in CARAVAN_BUILTIN_BITMAPS}
         specs.update({bitmap.get("bitmap", "").casefold(): bitmap for bitmap in self.caravan_bitmaps})
         return specs
+
+    def activate_caravan_mode(self, mode):
+        """Install the selected caravan window's projected controls and artwork."""
+        window = caravan_window_for_mode(mode)
+        ui = self.caravan_uis.get(window) if window else None
+        if ui is None:
+            return False
+        self.hotspots = tuple(ui["hotspots"])
+        self.caravan_bitmaps = tuple(ui["bitmaps"])
+        return True
 
     @property
     def map_portrait_window(self):
@@ -160,11 +187,18 @@ class CampaignState:
         wnd = content.resources
         tables = {name: content.strings(name) for name in ("BRTXT", "BKTXT", "GMTXT")}
         hints = tables["BRTXT"]
-        caravan_ui = parse_window_ui(wnd, "STARTCARAVAN")
+        caravan_uis = {}
+        for window in set(CARAVAN_MODE_WINDOWS.values()):
+            caravan_uis[window] = parse_window_ui(wnd, window)
+        for mode in ("infobpc", "inforea", "inforec", "infowed", "infosza", "infoszb", "infoene",
+                     "infoena", "infola", "infolb", "infobma"):
+            window = caravan_window_for_mode(mode)
+            caravan_uis[window] = parse_window_ui(wnd, window)
+        caravan_ui = caravan_uis["STARTCARAVAN"]
         hotspots = tuple(caravan_ui["hotspots"])
         return cls(build_campaign_graph(str(game.root), wnd=wnd, string_tables=tables),
                    flow=initial_flow(hotspots), hotspots=hotspots,
-                   caravan_bitmaps=tuple(caravan_ui["bitmaps"]),
+                   caravan_bitmaps=tuple(caravan_ui["bitmaps"]), caravan_uis=caravan_uis,
                    caravan_continuation=start_caravan_continuation(hotspots), hints=hints, content=content)
 
     @classmethod

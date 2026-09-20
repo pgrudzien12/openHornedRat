@@ -169,8 +169,8 @@ def parse_window_ui(wnd, name, seen=()):
     result = {"window": name, "position": {}, "bitmaps": [], "hotspots": [], "anims": [], "texts": []}
     for record in resource.records:
         if isinstance(record, IncludeRecord):
-            script = next((item.argument for item in record.fields if item.command == "script"), None)
-            if script:
+            scripts = (item.argument for item in record.fields if item.command == "script")
+            for script in scripts:
                 included = parse_window_ui(resources, script, (*seen, name))
                 result["bitmaps"].extend(included["bitmaps"])
                 result["hotspots"].extend(included["hotspots"])
