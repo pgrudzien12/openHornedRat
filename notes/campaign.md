@@ -73,7 +73,7 @@ Built by `FUN_00443cd2` (a zeroed `0xF8` buffer), applied by `FUN_004447b0`.
 | `0x80` | char[64] | current map/glue window (`DAT_005a4a50`) | empty | `MapWindowBp1` | copied back on load |
 | `0xC0` | u32 | format version, always 1 | 1 | 1 | the loader only runs the check below when it is 1 |
 | `0xC4` | u32 | "checksum" (`FUN_004432c3`): sizes of `BK01`+`BKO2`+`BK03`+`RMYI` (2236) + file size of `FILE/DLL/WND.DLL` (string-table entry 1, 390 144 B) | `0x5FCBC` | `0x5FCBC` | ✅ value matches both files; 🟡 the reader recomputes it but the decompiled code discards the result, so a mismatch is not rejected |
-| `0xC8` | u32 | `DAT_005bb340` | 0 | 0 | ⬜ restored on load |
+| `0xC8` | u32 | `DAT_005bb340` = `tentpos` | 0 | 0 | ✅ campaign tent position, restored on load (`notes/campaign_tent.md`) |
 | `0xCC` | u32 | `nScripts`: number of glue script contexts in `STAX` | 0 | 2 | chunk size formula |
 | `0xD0` | u32 | `nCalls`: return-address stack depth | 2 | 4 | chunk size formula |
 | `0xD4` | u32 | `nWindows`: window stack depth | 2 | 4 | chunk size formula |
@@ -742,7 +742,7 @@ the scroll pile counts down.
 
 ## 8. Open questions
 
-- ⬜ `SHDR+0xC8` (`DAT_005bb340`) and the two `u32` per script in `STAX`.
+- ✅ `SHDR+0xC8` is `tentpos` (`notes/campaign_tent.md`). ⬜ The two `u32` per script in `STAX`.
 - 🟡 Whether the taken flags (`+0xA4`) of the *other* missions in a window survive a save/load. `STAX` stores
   window objects as `nObjects × 0xA0`, far too small for the `0x4314`-byte window blocks, and a reloaded flow
   script re-runs `addobject:res=…`, which re-parses the `[MISSION]` blocks with `+0xA4 = 0`. Only the selected

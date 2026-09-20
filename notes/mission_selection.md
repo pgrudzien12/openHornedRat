@@ -42,8 +42,9 @@ screen is a window script; flow scripts (`[RUN]`) open windows, wait, and contin
   `SMarkNN` crosses (`SmallCross` bitmap at the town).
 - Sub-window `ScribeMWindow` (450,25, 144×240): `[ANIM] name:Dietrich`, `sequence=1`, `controlpanel=2`;
   the flow script forces `animseq=2` (stop talking). The briefing uses `ScribeWindow` (`controlpanel=1`).
-- `TentObject01`: bitmap `Tent4` at 384,318; the position frame comes from the flow variable `set:tentpos`
-  (0 at the start, 1 after the first mission window is dismissed).
+- The campaign tent is **not** part of the mission-list map: only briefing scripts add `TentObject01`. Flow scripts just
+  maintain the `tentpos` variable (0 at the start, 1 after the first mission window is dismissed) for those briefings, whose
+  tent position comes from a table indexed by it and whose bitmap `Tent4` is the cell set `TENT3..0` (`notes/campaign_tent.md`).
 - Trail dots: `Trail*`/`FlowTrail*` objects (`addanimobject`).
 - The list: `MissionWindow` at `[MISSIONWINDOW] set:x/y` (always 30,15), one row per visible mission, bitmap
   `Scroll0` (selected) / `Scroll1`, label = `BRTXT` mission name + `" (initial, completion)"` payment.
@@ -170,13 +171,13 @@ The artwork is selected by numbers:
   green tunic holding a red book (the same man as the caravan close-up); frames 1, 3, 4, 5, 6 = 44×26 mouth overlays at
   (40, 84); frames 2, 7 = 32×5 eye overlays at (47, 69) (blink). The overlay position is the record's `int16 x, y`
   (`notes/animations.md`).
-- `index` is **not** the position in the leader-portrait category (Dietrich would be 19, Commander 5): the table that maps
-  the glue index to a file was not found. Only Dietrich → `SCRI` is supported (by the shared `index`); `Commander` → `COMM`
-  is by name only 🟡.
+- `index` is **not** the position in the leader-portrait category: it is a position in a separate 37-entry resident portrait
+  list. The full table (all indices used in glue, with sprite sets) is in `notes/glue_portraits.md` §1; Dietrich → `SCRI` and
+  Commander → `COMM` are both verified.
 - `bkindex=15` (Dietrich's usual value) is `BACKALL` frame 15, a red stage curtain with gold curl trim; the portrait's
   chair back matches it. Compositing frame 0 over it, with a mouth overlay at its stored position, gives the expected
-  picture (rendered locally, not committed). Frames 16 and 17 (Commander's usual) decode with a wrong-looking palette
-  (green/red interior with a bottle) when `STANDARD.PAL` is used, so `BACKALL` may need its own palette 🟡.
+  picture (rendered locally, not committed). Frames 16 and 17 (Commander's usual) need the window's map screen palette pair,
+  not `STANDARD.PAL` alone (`notes/glue_portraits.md` §2.1). Mouth/blink animation: `notes/glue_portraits.md` §3.
 
 ### 9.3 Frame geometry ✅
 
