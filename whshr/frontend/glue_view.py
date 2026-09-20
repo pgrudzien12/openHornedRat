@@ -37,8 +37,11 @@ class GlueView(NativeScreenView):
                   for animation in self.scene.runtime.state.animations}
         palette = self._palette(models)
         dialogue_state = _dialogue_state(self.scene.runtime.state)
-        if (models, frames, palette, dialogue_state) == (
-            self.models, getattr(self, "frames", {}), getattr(self, "palette", None), self.dialogue_state
+        portraits = tuple(sorted((name, animator.mouth_frame, animator.eye_frame)
+                                 for name, animator in self.scene.runtime.state.portrait_animators.items()))
+        if (models, frames, palette, dialogue_state, portraits) == (
+            self.models, getattr(self, "frames", {}), getattr(self, "palette", None), self.dialogue_state,
+            getattr(self, "portraits", ())
         ):
             return
         for quad, _ in self.quads:
@@ -48,6 +51,7 @@ class GlueView(NativeScreenView):
         self.models = models
         self.frames = frames
         self.palette = palette
+        self.portraits = portraits
         self.dialogue_state = dialogue_state
         self.quads = []
         self.text_labels = []
@@ -60,6 +64,23 @@ class GlueView(NativeScreenView):
                 quad = ScreenQuad(self.gpu, surface.get_size())
                 quad.write(pygame.image.tobytes(surface, "RGBA"))
                 self.quads.append((quad, (model.x + bitmap.x, model.y + bitmap.y)))
+            for animation in model.animations:
+                if animation.index is None:
+                    continue
+                animator = self.scene.runtime.state.portrait_animators.get(model.name)
+                try:
+                    if animator is not None:
+                        width, height, rgba = self.scene.runtime.content.portrait_frame(
+                            animation.index, animation.bkindex or 0, animator.mouth_frame, animator.eye_frame,
+                            rgb_palette=palette.colours)
+                    else:
+                        width, height, rgba = self.scene.runtime.content.portrait_data(
+                            animation.index, animation.bkindex or 0, rgb_palette=palette.colours)
+                except (ValueError, FileNotFoundError, KeyError):
+                    continue
+                quad = ScreenQuad(self.gpu, (width, height))
+                quad.write(rgba)
+                self.quads.append((quad, (model.x + animation.x, model.y + animation.y)))
             for text in model.texts:
                 value = resolve_text(self.scene.runtime.content, text)
                 if value is None:

@@ -10,7 +10,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 from .glue_animation import GlueBitmapAnimator
-from .glue import BitmapRecord, GlueInstruction, MissionRecord, MissionRef
+from .glue import AnimRecord, BitmapRecord, GlueInstruction, MissionRecord, MissionRef
+from .portraits import PortraitAnimator
 
 # notes/briefing_dialogue.md §3.5, "no speech / no audio device" fallback path (§7 point 9): the
 # engine has no WAV playback yet, so dialogue always uses the fixed no-speech pacing rather than
@@ -203,6 +204,7 @@ class GlueRuntimeState:
     dialogue_ms: int = 0
     dialogue_colour: str = "black"
     object_positions: dict = field(default_factory=dict)
+    portrait_animators: dict = field(default_factory=dict)
 
 
 class GlueRuntime:
@@ -249,6 +251,8 @@ class GlueRuntime:
             raise ValueError("tick duration must not be negative")
         effects = []
         completed = False
+        for animator in self.state.portrait_animators.values():
+            animator.advance(milliseconds)
         for animation in self.state.animations:
             update = animation.animator.tick(milliseconds)
             # A finite animation ends holding its last frame (notes/campaign_tent.md §5.3); the
@@ -427,6 +431,8 @@ class GlueRuntime:
             self.state.current_window_name = self._resource_argument(argument)
         elif command in ("updatewindow", "applyseq"):
             name = self._resource_argument(argument) if argument else self.state.current_window_name
+            if command == "applyseq" and name in self.state.portrait_animators:
+                self.state.portrait_animators[name].apply(self.state.variables.get("animseq", 1))
             effects.append(UpdateWindow(name))
         elif command in ("addobject", "addanimobject"):
             self._add_object(argument, command == "addanimobject", effects)
@@ -499,11 +505,15 @@ class GlueRuntime:
             self.state.palette_id = palette
         instance = WindowInstance(name, parent, palette)
         self.state.windows.append(instance)
+        anim = next((record for record in definition.records if isinstance(record, AnimRecord)), None)
+        if anim is not None:
+            self.state.portrait_animators[name] = PortraitAnimator(anim.values.get("sequence", 1))
         effects.append(OpenWindow(name, parent, palette))
 
     def _close_window(self, argument, effects):
         name = self._resource_argument(argument)
         self.state.windows = [window for window in self.state.windows if window.name != name]
+        self.state.portrait_animators.pop(name, None)
         effects.append(CloseWindow(name))
 
     def _add_object(self, argument, animated, effects):
@@ -668,3 +678,4 @@ class GlueRuntime:
         self.state.context_stack.clear()
         self.state.pending = None
         self.state.wait_reason = None
+        self.state.portrait_animators.clear()

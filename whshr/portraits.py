@@ -33,6 +33,104 @@ def compose_portrait(palette, background, foreground):
     return background.width, background.height, bytes(rgba)
 
 
+# Mouth/eye overlay rectangles verified for the two portraits used by every shipped briefing
+# (notes/glue_portraits.md §3.1); other sprite sets' overlay geometry is not yet reverse-engineered
+# (§6 open question), so they fall back to the static frame-0 portrait with no talk/blink overlay.
+OVERLAY_POSITIONS = {
+    "SCRI": {frame: (40, 84, 44, 26) for frame in (1, 3, 4, 5, 6)} | {frame: (47, 69, 32, 5) for frame in (2, 7)},
+    "COMM": {frame: (43, 64, 36, 27) for frame in (1, 3, 4, 5, 6)} | {frame: (45, 52, 28, 4) for frame in (2, 7)},
+}
+
+# Kind-5 sequence tables, notes/glue_portraits.md §3.3. The eye loop's tick counts are given in
+# full and reproduced exactly. The mouth "talking" pattern is documented only as a partial,
+# non-generated prefix ("looks pseudo-random but is a fixed sequence... then loops"); this repeats
+# that documented prefix rather than inventing the undocumented remainder of the real 36-step table.
+_EYE_OPEN_TICKS = (49, 36, 40, 46, 22, 44)
+EYE_SEQUENCE = tuple(step for open_ticks in _EYE_OPEN_TICKS for step in ((2, open_ticks + 1), (7, 2)))
+MOUTH_TALK_FRAMES = (1, 4, 6, 5, 3, 4, 1, 4, 3, 4, 1, 4, 6, 4, 1, 3, 5, 3)
+
+
+def _mouth_step_ticks(frame):
+    return 2 if frame == 6 else 3
+
+
+class PortraitAnimator:
+    """Advance one [ANIM] block's mouth and eye overlay slots (notes/glue_portraits.md §3.2-3.4).
+
+    ``sequence`` 1 = talking (mouth cycles ``MOUTH_TALK_FRAMES``, eyes blink); 2 = stopped (mouth
+    held closed at frame 1, eyes still blink - the same loop as sequence 1).
+    """
+
+    def __init__(self, sequence=1):
+        self.sequence = 1
+        self._mouth_index = 0
+        self._mouth_remaining = 0
+        self._eye_index = 0
+        self._eye_remaining = 0
+        self._elapsed_ms = 0
+        self.apply(sequence)
+
+    def apply(self, sequence):
+        self.sequence = 2 if int(sequence) == 2 else 1
+        self._mouth_index = 0
+        self._mouth_remaining = _mouth_step_ticks(MOUTH_TALK_FRAMES[0])
+        self._eye_index = 0
+        self._eye_remaining = EYE_SEQUENCE[0][1]
+        self._elapsed_ms = 0
+
+    @property
+    def mouth_frame(self):
+        return MOUTH_TALK_FRAMES[self._mouth_index] if self.sequence == 1 else 1
+
+    @property
+    def eye_frame(self):
+        return EYE_SEQUENCE[self._eye_index][0]
+
+    def advance(self, milliseconds):
+        """One step per 25 ms glue timer message (§3.2)."""
+        self._elapsed_ms += milliseconds
+        while self._elapsed_ms >= 25:
+            self._elapsed_ms -= 25
+            self._step()
+
+    def _step(self):
+        if self.sequence == 1:
+            self._mouth_remaining -= 1
+            if self._mouth_remaining <= 0:
+                self._mouth_index = (self._mouth_index + 1) % len(MOUTH_TALK_FRAMES)
+                self._mouth_remaining = _mouth_step_ticks(MOUTH_TALK_FRAMES[self._mouth_index])
+        self._eye_remaining -= 1
+        if self._eye_remaining <= 0:
+            self._eye_index = (self._eye_index + 1) % len(EYE_SEQUENCE)
+            self._eye_remaining = EYE_SEQUENCE[self._eye_index][1]
+
+
+def compose_talking_portrait(palette, background, base, sprite_sheet, mouth_frame, eye_frame):
+    """Composite the base portrait, then stamp the current mouth and eye overlay frames onto it."""
+    width, height, rgba = compose_portrait(palette, background, base)
+    positions = OVERLAY_POSITIONS.get(sprite_sheet.name)
+    if positions is None:
+        return width, height, rgba
+    canvas = bytearray(rgba)
+    for frame_index in (mouth_frame, eye_frame):
+        position = positions.get(frame_index)
+        if position is None or frame_index >= len(sprite_sheet.frames):
+            continue
+        ox, oy, overlay_width, overlay_height = position
+        overlay = sprite_sheet.frames[frame_index]
+        for row in range(overlay_height):
+            for col in range(overlay_width):
+                pixel = overlay.pixels[row * overlay_width + col]
+                if not pixel:
+                    continue
+                px, py = ox + col, oy + row
+                if 0 <= px < width and 0 <= py < height:
+                    offset = (py * width + px) * 4
+                    canvas[offset:offset + 3] = bytes(palette[pixel])
+                    canvas[offset + 3] = 255
+    return width, height, bytes(canvas)
+
+
 def speaker_portrait(installation, index, bkindex):
     """Compatibility wrapper around the shared content repository."""
     from .glue_content import GlueContent

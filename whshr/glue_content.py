@@ -214,33 +214,51 @@ class GlueContent:
         return (AssetId("vanilla", "portrait", sprite),
                 AssetId("vanilla", "portrait", f"backall.{int(bkindex)}"))
 
-    def portrait_data(self, index, bkindex):
-        """Decode and cache the stopped-pose composite used by current views."""
-        key = int(index), int(bkindex)
-        if key in self._portraits:
-            return self._portraits[key]
+    def _portrait_sources(self, index, bkindex, rgb_palette):
+        """Resolve the palette, background frame and speaker sprite sheet for one portrait."""
         if self.installation is None:
             if self._parent is not None:
-                return self._parent.portrait_data(*key)
+                return self._parent._portrait_sources(index, bkindex, rgb_palette)
             raise FileNotFoundError("portrait data needs an original installation")
         from .image import load_rgb_palette
-        from .portraits import PORTRAIT_SPRITES, compose_portrait, load_sprite_sheet
+        from .portraits import PORTRAIT_SPRITES, load_sprite_sheet
         try:
-            sprite_name = PORTRAIT_SPRITES[key[0]]
+            sprite_name = PORTRAIT_SPRITES[index]
         except KeyError:
             raise ValueError(f"no verified portrait sprite mapping for glue index {index}") from None
-        if self._palette is None:
-            self._palette = load_rgb_palette(self.installation.binary_file("STANDARD.PAL"))
+        if rgb_palette is not None:
+            palette = rgb_palette
+        else:
+            if self._palette is None:
+                self._palette = load_rgb_palette(self.installation.binary_file("STANDARD.PAL"))
+            palette = self._palette
         for name in ("BACKALL", sprite_name):
             if name not in self._sprite_sheets:
                 self._sprite_sheets[name] = load_sprite_sheet(self.installation, name)
-        result = compose_portrait(
-            self._palette,
-            self._sprite_sheets["BACKALL"].frames[key[1]],
-            self._sprite_sheets[sprite_name].frames[0],
-        )
+        return palette, self._sprite_sheets["BACKALL"].frames[bkindex], self._sprite_sheets[sprite_name]
+
+    def portrait_data(self, index, bkindex, *, rgb_palette=None):
+        """Decode and cache the stopped-pose composite used by current views.
+
+        ``BACKALL`` frames 16/17 need the map screen's palette pair, not ``STANDARD.PAL``
+        (notes/glue_portraits.md §2.1); pass the caller's resolved ``AppPalette.colours`` as
+        ``rgb_palette`` to get that (harmless for every other frame, which renders identically
+        under either — the note verifies this).
+        """
+        key = int(index), int(bkindex), rgb_palette
+        if key in self._portraits:
+            return self._portraits[key]
+        from .portraits import compose_portrait
+        palette, background, sheet = self._portrait_sources(key[0], key[1], rgb_palette)
+        result = compose_portrait(palette, background, sheet.frames[0])
         self._portraits[key] = result
         return result
+
+    def portrait_frame(self, index, bkindex, mouth_frame, eye_frame, *, rgb_palette=None):
+        """Composite one live animation frame (base + mouth/eye overlay); not cached, it changes every tick."""
+        from .portraits import compose_talking_portrait
+        palette, background, sheet = self._portrait_sources(int(index), int(bkindex), rgb_palette)
+        return compose_talking_portrait(palette, background, sheet.frames[0], sheet, mouth_frame, eye_frame)
 
     def speech(self, identifier):
         return AssetId("vanilla", "speech", str(identifier).casefold())
