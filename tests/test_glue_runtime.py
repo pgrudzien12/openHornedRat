@@ -8,7 +8,9 @@ from whshr.glue_runtime import (
     GlueInput,
     GlueRuntime,
     OpenWindow,
+    PlayMusic,
     StartBattle,
+    StopMusic,
     StartDebrief,
     StartDialogue,
     StartMovie,
@@ -26,6 +28,7 @@ class GlueRuntimeTests(unittest.TestCase):
             "SUB": "[RUN]\n[START]\nopensubwindow:res=CHILD\nreturn:\n[END]",
             "MOVIE": "[RUN]\n[START]\nplaymovie:A2\nplaygamewithdebrief:bf001,3\n[END]",
             "TALK": "[RUN]\n[START]\nqueuetoplaytext:res=7\nendgame:\n[END]",
+            "MUSIC": "[RUN]\n[START]\nplaymidi:sighted\nwaitforrelease:\nstopmidi:\nendgame:\n[END]",
             "TWO_SPEAKERS": ("[RUN]\n[START]\nsettextcolor:red\nqueuetoplaytext:res=1\n"
                              "settextcolor:green\nqueuetoplaytext:res=2\nendgame:\n[END]"),
             "CARAVAN": "[RUN]\n[START]\ngocaravan:select\nendgame:\n[END]",
@@ -118,6 +121,13 @@ class GlueRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.tick(50), (StopSpeech(), EndGame()))
         self.assertIsNone(runtime.state.pending)
         self.assertIsNone(runtime.state.current)
+
+    def test_playmidi_and_stopmidi_emit_music_effects(self):
+        runtime = GlueRuntime(self.content)
+
+        self.assertEqual(runtime.start("MUSIC"), (PlayMusic("sighted"),))
+
+        self.assertEqual(runtime.handle(GlueInput("mission-release")), (StopMusic(), EndGame()))
 
     def test_given_a_caravan_request_when_started_then_it_remains_suspended_until_its_host_resumes_it(self):
         runtime = GlueRuntime(self.content)

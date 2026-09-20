@@ -8,12 +8,26 @@ adapters until their renderer rules are moved out of compatibility views.
 import pygame
 
 from ..glue_render import build_render_model
-from ..glue_runtime import GlueInput
+from ..glue_runtime import GlueInput, PlayMusic, StopMusic
 from ..glue_palette import AppPalette
 from .bitmap_font import BitmapFont
 from .glue_bitmap import load_optional_bitmap
 from .gpu import ScreenQuad
 from .scene_view import NativeScreenView
+
+MIXER_CHANNELS = 8  # matches intro_view's cutscene mixer; music runs on pygame's separate music channel
+
+
+def _ensure_mixer():
+    """Best-effort mixer setup; audio stays silently unavailable without a usable audio device."""
+    try:
+        if pygame.mixer.get_init() is None:
+            pygame.mixer.init()
+        if pygame.mixer.get_num_channels() < MIXER_CHANNELS:
+            pygame.mixer.set_num_channels(MIXER_CHANNELS)
+        return True
+    except pygame.error:
+        return False
 
 
 class GlueView(NativeScreenView):
@@ -27,6 +41,8 @@ class GlueView(NativeScreenView):
         self.text_labels = []
         self.dialogue_labels = []
         self.dialogue_state = None
+        self.music_name = None
+        self._music_ok = _ensure_mixer()
         self.pressed = None
         self.refresh()
 
@@ -38,6 +54,7 @@ class GlueView(NativeScreenView):
         screen (the 640x480 map foremost): re-decoding that on every blink was the actual cost
         behind a briefing running at a few FPS.
         """
+        self._process_music()
         models = tuple(build_render_model(self.scene.runtime.content, window, self.scene.runtime.state.object_positions)
                        for window in self.scene.runtime.state.windows)
         frames = {(animation.window_name, animation.object_name): animation.animator.display_name
@@ -47,6 +64,27 @@ class GlueView(NativeScreenView):
         self._refresh_bitmaps(models, frames, palette)
         self._refresh_portraits(models, palette)
         self._refresh_dialogue(_dialogue_state(self.scene.runtime.state))
+
+    def _process_music(self):
+        """Drain playmidi/stopmidi effects (notes/briefing_dialogue.md §2.1: replace abruptly, loop forever)."""
+        for effect in self.scene.take_effects():
+            if isinstance(effect, PlayMusic):
+                self.music_name = effect.name
+                if not self._music_ok:
+                    continue
+                try:
+                    path = self.scene.runtime.content.installation.binary_file("MUSIC", f"{effect.name}.MID")
+                    pygame.mixer.music.load(str(path))
+                    pygame.mixer.music.play(loops=-1)
+                except (FileNotFoundError, AttributeError, pygame.error):
+                    pass
+            elif isinstance(effect, StopMusic):
+                self.music_name = None
+                if self._music_ok:
+                    try:
+                        pygame.mixer.music.stop()
+                    except pygame.error:
+                        pass
 
     def _refresh_bitmaps(self, models, frames, palette):
         if (models, frames, palette) == (getattr(self, "_bitmap_models", ()), getattr(self, "frames", {}),
