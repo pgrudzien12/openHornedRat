@@ -9,6 +9,7 @@ import pygame
 
 from ..glue_render import build_render_model
 from ..glue_runtime import GlueInput
+from ..glue_palette import AppPalette
 from .glue_bitmap import load_bitmap
 from .gpu import ScreenQuad
 from .scene_view import NativeScreenView
@@ -30,20 +31,30 @@ class GlueView(NativeScreenView):
                        for window in self.scene.runtime.state.windows)
         frames = {(animation.window_name, animation.animator.base): animation.animator.display_name
                   for animation in self.scene.runtime.state.animations}
-        if (models, frames) == (self.models, getattr(self, "frames", {})):
+        palette = self._palette(models)
+        if (models, frames, palette) == (self.models, getattr(self, "frames", {}), getattr(self, "palette", None)):
             return
         for quad, _ in self.quads:
             quad.release()
         self.models = models
         self.frames = frames
+        self.palette = palette
         self.quads = []
         for model in self.models:
             for bitmap in model.bitmaps:
                 name = frames.get((model.name, bitmap.name), bitmap.name)
-                surface = load_bitmap(self.scene.runtime.content, name)
+                surface = load_bitmap(self.scene.runtime.content, name, app_palette=palette)
                 quad = ScreenQuad(self.gpu, surface.get_size())
                 quad.write(pygame.image.tobytes(surface, "RGBA"))
                 self.quads.append((quad, (model.x + bitmap.x, model.y + bitmap.y)))
+
+    def _palette(self, models):
+        """Select the one application palette active for the runtime windows."""
+        palette_id = self.scene.runtime.state.palette_id
+        embedded = None
+        if palette_id < 0 and models and models[0].bitmaps:
+            embedded = self.scene.runtime.content.bitmap_data(models[0].bitmaps[0].name).palette
+        return AppPalette.select(palette_id, self.scene.runtime.content.palette_tables(), embedded=embedded)
 
     @staticmethod
     def hotspot_at(models, point):
