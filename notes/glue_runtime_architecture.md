@@ -345,7 +345,7 @@ Exit criteria:
 - Includes preserve original draw and hit-test order.
 - Headless tests validate the render model; screenshot tests cover only final presentation.
 
-### Phase 4 — Core glue VM and navigation (runtime foundation implemented)
+### Phase 4 — Core glue VM and navigation (runtime/scene foundation implemented)
 
 Implement in vertical slices:
 
@@ -360,7 +360,7 @@ Deliverables:
 
 - `GlueRuntime`, `GlueRuntimeState`, typed input/effects, status control flow, windows, waits, activity requests, context snapshots and deterministic instruction tracing are implemented headlessly.
 - Snapshot/restore tests cover the current wait and activity boundary; remaining blocking states will be added with their hosts.
-- `GlueScene` and `GlueView` hosting the runtime.
+- A headless `GlueScene` now owns runtime lifecycle, effect handoff, typed input/activity resumption and snapshots; `GlueView` remains to be built and the compatibility scene flow remains active.
 
 The compatibility scene flow is intentionally still the host.  The next vertical slice is to put the static renderer in front of this runtime, then route one complete caravan/map path through it; no existing campaign transition is removed before that path is manually testable.
 
