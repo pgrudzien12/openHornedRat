@@ -198,11 +198,12 @@ class GlueRuntimeState:
     next_request_id: int = 1
     trace: list[InstructionTrace] = field(default_factory=list)
     dialogue_window_name: str = ""
-    dialogue_lines: tuple[str, ...] = ()
+    dialogue_lines: tuple = ()  # (text, colour) pairs, oldest first; notes/briefing_dialogue.md §3.3
     dialogue_text: str = ""
+    dialogue_line_colour: str = "black"  # colour the current line was queued under
     dialogue_typed: int = 0
     dialogue_ms: int = 0
-    dialogue_colour: str = "black"
+    dialogue_colour: str = "black"  # live settextcolor value, applies to the *next* queued line
     object_positions: dict = field(default_factory=dict)
     portrait_animators: dict = field(default_factory=dict)
 
@@ -560,16 +561,28 @@ class GlueRuntime:
         self._request("dialogue", effects, string_id=string_id, queued=queued)
 
     def _queue_dialogue_line(self, string_id):
-        """Scroll the previous line into history and start typing the next one (§3.3 ring buffer)."""
+        """Scroll the previous line into history and start typing the next one (§3.3 ring buffer).
+
+        A colour change means a new speaker (briefings set a distinct settextcolor per speaker,
+        e.g. Dietrich red / the Commander green); the box clears instead of scrolling a mismatched
+        colour's leftover line up alongside the new speaker's, matching the original's behaviour.
+        """
         try:
             text = self.content.string("BRTXT", string_id)
         except KeyError:
             text = ""
-        limit = max(1, self._parse_int(self.state.variables.get("textlines", 1), 1))
-        history = (*self.state.dialogue_lines, self.state.dialogue_text) if self.state.dialogue_text else self.state.dialogue_lines
-        self.state.dialogue_lines = history[-(limit - 1):] if limit > 1 else ()
+        speaker_changed = self.state.dialogue_text and self.state.dialogue_colour != self.state.dialogue_line_colour
+        if speaker_changed:
+            history = ()
+        else:
+            limit = max(1, self._parse_int(self.state.variables.get("textlines", 1), 1))
+            previous = (self.state.dialogue_text, self.state.dialogue_line_colour) if self.state.dialogue_text else None
+            combined = (*self.state.dialogue_lines, previous) if previous else self.state.dialogue_lines
+            history = combined[-(limit - 1):] if limit > 1 else ()
+        self.state.dialogue_lines = history
         self.state.dialogue_window_name = self.state.current_window_name
         self.state.dialogue_text = text
+        self.state.dialogue_line_colour = self.state.dialogue_colour
         self.state.dialogue_typed = 0
         self.state.dialogue_ms = 0
 

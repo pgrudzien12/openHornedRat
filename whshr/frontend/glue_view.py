@@ -24,7 +24,7 @@ class GlueView(NativeScreenView):
         self.models = ()
         self.quads = []
         self.text_labels = []
-        self.dialogue_label = None
+        self.dialogue_labels = []
         self.dialogue_state = None
         self.pressed = None
         self.refresh()
@@ -93,11 +93,15 @@ class GlueView(NativeScreenView):
         self._refresh_dialogue(dialogue_state)
 
     def _refresh_dialogue(self, dialogue_state):
-        """Rebuild the bottom-anchored briefing dialogue block (notes/briefing_dialogue.md §3.3)."""
-        if self.dialogue_label is not None:
-            self.dialogue_label[0].release()
-            self.dialogue_label = None
-        window_name, lines, colour = dialogue_state
+        """Rebuild the bottom-anchored briefing dialogue block (notes/briefing_dialogue.md §3.3).
+
+        Each logical line keeps the settextcolor it was queued under (one label per line) so an
+        older line from a previous speaker never gets repainted in the new speaker's colour.
+        """
+        for label, _ in self.dialogue_labels:
+            label.release()
+        self.dialogue_labels = []
+        window_name, lines = dialogue_state
         if not lines:
             return
         model = next((model for model in self.models if model.name == window_name), None)
@@ -109,14 +113,15 @@ class GlueView(NativeScreenView):
             return
         line_height = max(1, font.font.height)
         left = model.x + max(0, round(model.width * 0.05))
-        width = max(1, round(model.width * 0.90))  # wrap width, §3.3; the label itself is sized to fit
-        wrapped = [physical for logical in lines for physical in _wrap(font, logical, width)]
-        top = model.y + model.height - round(1.5 * line_height) - (len(wrapped) - 1) * line_height
-        label = self.gpu.text((width, max(1, len(wrapped)) * line_height), font,
-                              color=_TEXT_COLOURS.get(colour, (0, 0, 0)), background=None, padding=0,
-                              outline=True)
-        label.set_lines(wrapped)
-        self.dialogue_label = (label, (left, top))
+        width = max(1, round(model.width * 0.90))  # wrap width, §3.3; each label is sized to fit
+        physical = [(row, colour) for text, colour in lines for row in _wrap(font, text, width)]
+        top = model.y + model.height - round(1.5 * line_height) - (len(physical) - 1) * line_height
+        for row, colour in physical:
+            label = self.gpu.text((width, line_height), font, color=_TEXT_COLOURS.get(colour, (0, 0, 0)),
+                                  background=None, padding=0, outline=True)
+            label.set_lines((row,))
+            self.dialogue_labels.append((label, (left, top)))
+            top += line_height
 
     def _palette(self, models):
         """Select the one application palette active for the runtime windows."""
@@ -159,8 +164,7 @@ class GlueView(NativeScreenView):
             quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
         for label, (x, y) in self.text_labels:
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
-        if self.dialogue_label is not None:
-            label, (x, y) = self.dialogue_label
+        for label, (x, y) in self.dialogue_labels:
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
 
     def release(self):
@@ -168,9 +172,9 @@ class GlueView(NativeScreenView):
             quad.release()
         for label, _ in self.text_labels:
             label.release()
-        if self.dialogue_label is not None:
-            self.dialogue_label[0].release()
-            self.dialogue_label = None
+        for label, _ in self.dialogue_labels:
+            label.release()
+        self.dialogue_labels = []
         self.quads = []
         self.text_labels = []
 
@@ -235,10 +239,11 @@ def _wrap(font, text, width):
 
 
 def _dialogue_state(state):
-    """The (window, visible lines, colour) fingerprint refresh() diffs against, per §3.3's ring buffer."""
+    """The (window, (text, colour) lines) fingerprint refresh() diffs against, §3.3's ring buffer."""
     typed = state.dialogue_text[:state.dialogue_typed]
-    lines = (*state.dialogue_lines, typed) if typed else state.dialogue_lines
-    return state.dialogue_window_name, lines, state.dialogue_colour
+    current = (typed, state.dialogue_line_colour) if typed else None
+    lines = (*state.dialogue_lines, current) if current else state.dialogue_lines
+    return state.dialogue_window_name, lines
 
 
 def resolve_text(content, text):

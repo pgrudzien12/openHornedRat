@@ -26,6 +26,8 @@ class GlueRuntimeTests(unittest.TestCase):
             "SUB": "[RUN]\n[START]\nopensubwindow:res=CHILD\nreturn:\n[END]",
             "MOVIE": "[RUN]\n[START]\nplaymovie:A2\nplaygamewithdebrief:bf001,3\n[END]",
             "TALK": "[RUN]\n[START]\nqueuetoplaytext:res=7\nendgame:\n[END]",
+            "TWO_SPEAKERS": ("[RUN]\n[START]\nsettextcolor:red\nqueuetoplaytext:res=1\n"
+                             "settextcolor:green\nqueuetoplaytext:res=2\nendgame:\n[END]"),
             "CARAVAN": "[RUN]\n[START]\ngocaravan:select\nendgame:\n[END]",
             "LOOP": "[WINDOW]\n[BITMAP]\nsetbitmap:Cell\nset:animstartframe=1\nset:animstopframe=-1\n[END]\n[END]",
             "FINITE": "[WINDOW]\n[BITMAP]\nsetbitmap:Cell\nset:animstartframe=1\nset:animstopframe=0\n[END]\n[END]",
@@ -192,6 +194,21 @@ class GlueRuntimeTests(unittest.TestCase):
 
         runtime.tick(50)  # further ticks must not drop or re-fire the held animation
         self.assertEqual(len(runtime.state.animations), 1)
+
+    def test_a_speaker_colour_change_clears_the_dialogue_box_instead_of_mixing_colours(self):
+        content = self.content.overlay(strings={"BRTXT": {1: "Hello", 2: "Hi there"}})
+        runtime = GlueRuntime(content)
+        runtime.start("TWO_SPEAKERS")
+        self.assertEqual(runtime.state.dialogue_text, "Hello")
+        self.assertEqual(runtime.state.dialogue_line_colour, "red")
+
+        runtime.handle(GlueInput("dialogue-drain"))  # first speaker's line completes
+
+        # Second speaker's line is queued under a different colour: the first speaker's now
+        # fully-typed line must not carry over into history under the new colour.
+        self.assertEqual(runtime.state.dialogue_lines, ())
+        self.assertEqual(runtime.state.dialogue_text, "Hi there")
+        self.assertEqual(runtime.state.dialogue_line_colour, "green")
 
     def test_mission_selection_accepts_only_rows_from_active_windows(self):
         runtime = GlueRuntime(self.content)
