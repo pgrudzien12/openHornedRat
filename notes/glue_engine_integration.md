@@ -1,5 +1,14 @@
 # Integrating the generic glue engine, and retiring the bespoke campaign scenes
 
+## Contents
+
+- [Current state: two parallel pipelines](#current-state-two-parallel-pipelines)
+- [The two gaps that block a real switch](#the-two-gaps-that-block-a-real-switch)
+- [Proposed order of steps](#proposed-order-of-steps)
+- [Open questions](#open-questions)
+- [Implementation milestones](#implementation-milestones)
+- [Migration rules](#migration-rules)
+
 Plan record: where the generic `GlueScene`/`GlueView` pipeline stands after the M1-M5 work
 (portraits, dialogue, music, control panel), what is missing before it can replace the older
 hand-rolled campaign scenes, and the order of steps to get there. Not a status report of finished
@@ -74,3 +83,80 @@ to be done one step at a time with a verify-then-commit rhythm, not as one large
 - ⬜ Whether `CampaignState`'s current shape is the right one to read/write from inside
   `GlueRuntime`, or whether it needs a narrower read/write interface for that (step 2).
 - ⬜ Whether troop selection gets built as part of this migration or scheduled separately (step 4).
+
+## Implementation milestones
+
+### 1. Define the campaign runtime interface
+
+Give `GlueRuntime` a narrow interface for the campaign operations it actually needs: coffers,
+mission selection and taken state, roster membership queries, battle/debrief bookkeeping, and
+`autosave()`.
+
+Adapt `CampaignState` to provide the first implementation. `autosave()` may be a no-op or retain
+an in-memory snapshot until save/load is implemented; glue must still invoke it at the specified
+runtime points. Add focused runtime tests for the interface and every command it serves.
+
+### 2. Route generic external activities
+
+Add a glue activity coordinator at the scene boundary. It consumes `GlueScene` effects and
+transitions to movie, battle, debrief, caravan, or troop-selection presentation as those activities
+are implemented.
+
+When an activity finishes, route a matching `ActivityResult` back to the originating `GlueScene`.
+Do not replace the glue scene or reconstruct its runtime state. A battle started by glue must return
+to glue; direct battle mode may retain its standalone result flow.
+
+### 3. Replace the bespoke briefing path
+
+Use generic glue programs and `GlueView` for mission briefings. Verify dialogue, portraits,
+animation, music, panel actions, battle entry, and return behavior through this path.
+
+Delete `BriefingScene`, `BriefingView`, their routing branches, and their dedicated tests after the
+generic flow covers them.
+
+### 4. Replace map and mission selection
+
+Drive mission selection from generic glue windows and the campaign runtime interface. Implement
+mission visibility, selection, and the panel actions needed to enter the selected mission route.
+
+Delete `MissionMapScene`, `MissionMapView`, and their dedicated tests after the equivalent generic
+path is exercised end to end.
+
+### 5. Replace caravan modes
+
+Route `EnterCaravan` into the generic caravan presentation while preserving the parked glue runtime.
+On exit, return its `ActivityResult` to that runtime. Implement the caravan modes required by the
+campaign flow first.
+
+Delete `CaravanScene`, `CaravanView`, and `CampaignState` members used only by the former caravan
+projection as each corresponding generic behavior is complete.
+
+### 6. Implement troop selection as a built-in activity
+
+Build troop selection as a dedicated activity. It must choose a force, apply mission costs, mark the
+mission taken, update roster membership, and launch the pending mission script or battle route.
+
+If troop selection is deferred, record it as the explicit functional boundary and do not treat the
+migration as complete.
+
+### 7. Switch New Campaign
+
+Determine the actual first flow resource from the installation. Change
+`MainMenuScene.handle("new_campaign")` to start `GlueScene(program, campaign=...)`, then remove the
+old campaign-chain construction and unused imports.
+
+### 8. Verify and remove the remaining old pipeline
+
+Exercise menu-to-battle and return-to-campaign flows through the normal entry point. Remove any
+remaining bespoke campaign scenes, views, tests, imports, and compatibility-only code once no live
+path uses them.
+
+## Migration rules
+
+- Work one milestone at a time: add focused tests, verify the real flow, then commit.
+- Autosave is invoked at the correct runtime points from milestone 1, but persistent save/load is
+  deferred until it has a defined implementation.
+- When generic behavior replaces an old path, delete the replaced code in the same milestone once
+  no live caller requires it.
+- Do not keep compatibility wrappers, deprecation paths, historical-decision comments, or legacy
+  comments after their code has been removed.
