@@ -206,6 +206,7 @@ class GlueRuntimeState:
     dialogue_colour: str = "black"  # live settextcolor value, applies to the *next* queued line
     object_positions: dict = field(default_factory=dict)
     portrait_animators: dict = field(default_factory=dict)
+    paused: bool = False
 
 
 class GlueRuntime:
@@ -250,6 +251,9 @@ class GlueRuntime:
     def tick(self, milliseconds):
         if milliseconds < 0:
             raise ValueError("tick duration must not be negative")
+        if self.state.paused:
+            # §3.2/§3.6.4: the timer handler does nothing while paused - no typing, no animation.
+            return ()
         effects = []
         completed = False
         for animator in self.state.portrait_animators.values():
@@ -305,6 +309,8 @@ class GlueRuntime:
             self.state.dialogue_ms = 0
             self.state.pending = None
             return (StopSpeech(), *self.step_until_blocked())
+        if input_.kind == "panel-action":
+            return self._panel_action(input_.target)
         expected = self.state.wait_reason
         if expected is None or input_.kind != expected:
             return ()
@@ -692,3 +698,56 @@ class GlueRuntime:
         self.state.pending = None
         self.state.wait_reason = None
         self.state.portrait_animators.clear()
+        self._clear_dialogue()
+
+    def _clear_dialogue(self):
+        self.state.dialogue_lines = ()
+        self.state.dialogue_text = ""
+        self.state.dialogue_typed = 0
+        self.state.dialogue_ms = 0
+
+    def _panel_action(self, action):
+        """Dispatch a control-panel button by the action name whshr.controlpanel assigns its slot.
+
+        Only "toggle_pause" and "abort_briefing" (panel 1's Pause and Abort) map onto behaviour
+        this runtime already has; every other action reaches into a scene/flow this engine does
+        not build yet (troop selection, caravan, the Options dialog, encounter battles) and is
+        reported rather than silently doing nothing.
+        """
+        if action == "toggle_pause":
+            self.state.paused = not self.state.paused
+            return ()
+        if action == "abort_briefing":
+            return self._panel_abort()
+        self.state.paused = False
+        effects = []
+        if self.state.pending is not None and self.state.pending.kind == "dialogue":
+            self.state.dialogue_typed = len(self.state.dialogue_text)
+            self.state.dialogue_ms = 0
+            self.state.pending = None
+            effects.append(StopSpeech())
+        effects.append(Diagnostic("panel", f"{action!r} is not yet implemented"))
+        if self.state.current is not None and not self.state.current.parked:
+            effects.extend(self.step_until_blocked())
+        return tuple(effects)
+
+    def _panel_abort(self):
+        """Panel slot 0 for controlpanel 1/5/6/7 (notes/mission_selection.md §4.2): Abort.
+
+        Unpause, stop audio, end the running script, destroy its windows, and restore the parked
+        map if one was pushed (real flow); with nothing pushed (e.g. a standalone dev-shortcut
+        run) there is nothing to return to, so this behaves like endgame instead.
+        """
+        self.state.paused = False
+        self.state.current = None
+        self.state.call_stack.clear()
+        self.state.windows.clear()
+        self.state.pending = None
+        self.state.wait_reason = None
+        self.state.portrait_animators.clear()
+        self._clear_dialogue()
+        popped = self.pop_context()
+        effects = [StopSpeech(), StopMusic()]
+        if popped is None:
+            effects.append(EndGame())
+        return tuple(effects)

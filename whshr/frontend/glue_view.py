@@ -7,6 +7,7 @@ adapters until their renderer rules are moved out of compatibility views.
 
 import pygame
 
+from ..controlpanel import button_y, control_panel
 from ..glue_render import build_render_model
 from ..glue_runtime import GlueInput, PlayMusic, StopMusic
 from ..glue_palette import AppPalette
@@ -41,9 +42,13 @@ class GlueView(NativeScreenView):
         self.text_labels = []
         self.dialogue_labels = []
         self.dialogue_state = None
+        self.panel_quads = []
+        self.panel_labels = []
+        self.panel_buttons = []
         self.music_name = None
         self._music_ok = _ensure_mixer()
         self.pressed = None
+        self._pressed_button = None
         self.refresh()
 
     def refresh(self):
@@ -63,6 +68,7 @@ class GlueView(NativeScreenView):
         self.models = models
         self._refresh_bitmaps(models, frames, palette)
         self._refresh_portraits(models, palette)
+        self._refresh_panel(models, palette)
         self._refresh_dialogue(_dialogue_state(self.scene.runtime.state))
 
     def _process_music(self):
@@ -144,7 +150,67 @@ class GlueView(NativeScreenView):
                 continue
             quad = ScreenQuad(self.gpu, (width, height))
             quad.write(rgba)
-            self.portrait_quads.append((quad, (model.x + animation.x, model.y + animation.y)))
+            # The portrait sits inside the frame at a fixed offset, not at the [ANIM] block's own
+            # x/y (always 0,0 in the data); notes/mission_selection.md §9.3.
+            self.portrait_quads.append((quad, (model.x + 12, model.y + 12)))
+
+    def _refresh_panel(self, models, palette):
+        """Draw the speaker frame and its control-panel buttons (notes/mission_selection.md §9.3-9.4).
+
+        Button geometry, panel bitmaps and BRTXT label ids come from ``whshr.controlpanel`` (also
+        used by the legacy briefing view); only "toggle_pause"/"abort_briefing" (panel 1's Pause
+        and Abort) map onto runtime behaviour that exists, so those are the only clickable actions
+        wired here - every panel still renders in full, per that module's traced/labelled slots.
+        """
+        animations = tuple((model.name, animation) for model in models for animation in model.animations
+                           if animation.index is not None)
+        paused = self.scene.runtime.state.paused
+        state = (animations, palette, paused)
+        if state == getattr(self, "_panel_state", None):
+            return
+        for quad, _ in self.panel_quads:
+            quad.release()
+        for label, _ in self.panel_labels:
+            label.release()
+        self._panel_state = state
+        self.panel_quads, self.panel_labels, self.panel_buttons = [], [], []
+        try:
+            font = BitmapFont(self.scene.font(2))
+        except (KeyError, ValueError):
+            font = None
+        content = self.scene.runtime.content
+        colour = _TEXT_COLOURS.get(self.scene.runtime.state.dialogue_colour, (0, 0, 0))
+        for model_name, animation in animations:
+            model = next(model for model in models if model.name == model_name)
+            origin = (model.x, model.y)
+            panel = control_panel(animation.controlpanel or 0)
+            for name, (dx, dy) in (("FRAMETOP", (4, 4)), ("FRAMELEFT", (4, 12)), ("FRAMERIGHT", (132, 12)),
+                                   (panel.bitmap, (4, 164))):
+                self._add_panel_bitmap(content, name, (origin[0] + dx, origin[1] + dy), palette)
+            if font is None:
+                continue
+            for slot, (label_id, action) in enumerate(zip(panel.labels, panel.actions or (None,) * len(panel.labels))):
+                y = button_y(animation.controlpanel or 0, slot)
+                if action == "toggle_pause":
+                    label_id = 312 if paused else 310
+                self._add_panel_bitmap(content, "FRAMEBUTTONUP", (origin[0] + 9, origin[1] + y), palette)
+                label = self.gpu.text((119, 20), font, color=colour, background=None, padding=0, align="center")
+                try:
+                    label.set_lines((content.string("BRTXT", label_id),))
+                except KeyError:
+                    label.set_lines(())
+                self.panel_labels.append((label, (origin[0] + 9, origin[1] + y)))
+                if action:
+                    rect = pygame.Rect(origin[0] + 9, origin[1] + y, 119, 20)
+                    self.panel_buttons.append((model.name, rect, action))
+
+    def _add_panel_bitmap(self, content, name, position, palette):
+        surface = load_optional_bitmap(content, name, app_palette=palette)
+        if surface is None:
+            return
+        quad = ScreenQuad(self.gpu, surface.get_size())
+        quad.write(pygame.image.tobytes(surface, "RGBA"))
+        self.panel_quads.append((quad, position))
 
     def _refresh_dialogue(self, dialogue_state):
         """Rebuild the bottom-anchored briefing dialogue block (notes/briefing_dialogue.md §3.3).
@@ -202,15 +268,28 @@ class GlueView(NativeScreenView):
         left, top, scale = self._layout()
         return (pos[0] - left) / scale, (pos[1] - top) / scale
 
+    def _panel_button_at(self, point):
+        for name, rect, action in reversed(self.panel_buttons):
+            if rect.collidepoint(point):
+                return action
+        return None
+
     def events(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            self.pressed = self.hotspot_at(self.models, self._native_point(event.pos))
+            point = self._native_point(event.pos)
+            self._pressed_button = self._panel_button_at(point)
+            self.pressed = None if self._pressed_button is not None else self.hotspot_at(self.models, point)
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            point = self._native_point(event.pos)
+            pressed_button, self._pressed_button = self._pressed_button, None
             pressed, self.pressed = self.pressed, None
-            released = self.hotspot_at(self.models, self._native_point(event.pos))
+            released_button = self._panel_button_at(point)
+            if pressed_button is not None and pressed_button == released_button:
+                return (GlueInput("panel-action", pressed_button),)
+            released = self.hotspot_at(self.models, point)
             if pressed is not None and pressed == released:
                 return (GlueInput("hotspot-release", pressed.target),)
-            if pressed is None and released is None:
+            if pressed is None and released is None and pressed_button is None and released_button is None:
                 return (GlueInput("dialogue-drain"),)
         return ()
 
@@ -221,7 +300,11 @@ class GlueView(NativeScreenView):
             quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
         for quad, (x, y) in self.portrait_quads:
             quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
+        for quad, (x, y) in self.panel_quads:
+            quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
         for label, (x, y) in self.text_labels:
+            label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
+        for label, (x, y) in self.panel_labels:
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
         for label, (x, y) in self.dialogue_labels:
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
@@ -231,13 +314,19 @@ class GlueView(NativeScreenView):
             quad.release()
         for quad, _ in self.portrait_quads:
             quad.release()
+        for quad, _ in self.panel_quads:
+            quad.release()
         for label, _ in self.text_labels:
+            label.release()
+        for label, _ in self.panel_labels:
             label.release()
         for label, _ in self.dialogue_labels:
             label.release()
         self.dialogue_labels = []
         self.quads = []
         self.portrait_quads = []
+        self.panel_quads = []
+        self.panel_labels = []
         self.text_labels = []
 
 

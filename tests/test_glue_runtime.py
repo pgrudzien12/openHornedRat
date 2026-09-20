@@ -37,6 +37,7 @@ class GlueRuntimeTests(unittest.TestCase):
             "ANIM_LOOP": "[RUN]\n[START]\nopenwindow:res=MAIN\nsetcurwindow:res=MAIN\naddanimobject:res=LOOP\nendgame:\n[END]",
             "ANIM_FINITE": "[RUN]\n[START]\nopenwindow:res=MAIN\nsetcurwindow:res=MAIN\naddanimobject:res=FINITE\nendgame:\n[END]",
             "MOVIE_CONTEXT": "[RUN]\n[START]\nopenwindow:res=MAIN\nplaymovie:A2\nwaitforrelease:\n[END]",
+            "PANEL": "[RUN]\n[START]\nopenwindow:res=MAIN\nwaitforrelease:\nendgame:\n[END]",
             "DEBRIEF": "[RUN]\n[START]\nsetdebrief:5\ndebriefwithsummary:0\nendgame:\n[END]",
             "MISSIONS": "[WINDOW]\n[MISSION]\nset:res=601\n[END]\n[END]",
             "MISSION_FLOW": "[RUN]\n[START]\nopenwindow:res=MISSIONS\nwaitforrelease:\n[END]",
@@ -128,6 +129,44 @@ class GlueRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.start("MUSIC"), (PlayMusic("sighted"),))
 
         self.assertEqual(runtime.handle(GlueInput("mission-release")), (StopMusic(), EndGame()))
+
+    def test_panel_pause_toggles_and_stops_the_timer_from_advancing_anything(self):
+        runtime = GlueRuntime(self.content)
+        runtime.start("PANEL")
+        runtime.start("ANIM_LOOP")  # gives tick() something to advance
+
+        self.assertEqual(runtime.handle(GlueInput("panel-action", "toggle_pause")), ())
+        self.assertTrue(runtime.state.paused)
+        self.assertEqual(runtime.tick(1000), ())  # no effects, no animator progress, while paused
+        self.assertEqual(runtime.handle(GlueInput("panel-action", "toggle_pause")), ())
+        self.assertFalse(runtime.state.paused)
+
+    def test_panel_abort_ends_the_script_and_restores_a_pushed_context_if_there_is_one(self):
+        runtime = GlueRuntime(self.content)
+        runtime.start("PANEL")
+        runtime.push_context()  # simulate having been reached from a parked map, as real flow does
+
+        effects = runtime.handle(GlueInput("panel-action", "abort_briefing"))
+
+        self.assertEqual(effects, (StopSpeech(), StopMusic()))  # no EndGame: a context was restored
+        self.assertEqual(runtime.state.context_stack, [])  # the pushed context was consumed
+
+    def test_panel_abort_with_nothing_pushed_behaves_like_endgame(self):
+        runtime = GlueRuntime(self.content)
+        runtime.start("PANEL")
+
+        effects = runtime.handle(GlueInput("panel-action", "abort_briefing"))
+
+        self.assertEqual(effects, (StopSpeech(), StopMusic(), EndGame()))
+
+    def test_panel_action_reports_a_diagnostic_instead_of_doing_nothing_silently(self):
+        runtime = GlueRuntime(self.content)
+        runtime.start("PANEL")
+
+        effects = runtime.handle(GlueInput("panel-action", "open_briefing"))
+
+        self.assertEqual(len(effects), 1)
+        self.assertEqual(effects[0].message, "'open_briefing' is not yet implemented")
 
     def test_given_a_caravan_request_when_started_then_it_remains_suspended_until_its_host_resumes_it(self):
         runtime = GlueRuntime(self.content)
