@@ -13,8 +13,11 @@ from .scenes import Scene, Transition
 class GlueScene(Scene):
     """Own one ``GlueRuntime`` and expose its ordered effects to a presentation host."""
 
-    def __init__(self, program, campaign=None, *, speech_enabled=True, accept_battle=None, return_scene=None):
-        self.program = str(program).upper()
+    def __init__(self, program=None, campaign=None, *, window=None, speech_enabled=True, accept_battle=None, return_scene=None):
+        if (program is None) == (window is None):
+            raise ValueError("GlueScene needs exactly one program or window")
+        self.program = str(program).upper() if program is not None else None
+        self.window = str(window).upper() if window is not None else None
         self.campaign = campaign
         self.speech_enabled = speech_enabled
         self.accept_battle = accept_battle
@@ -44,7 +47,8 @@ class GlueScene(Scene):
         if self.runtime is None:
             content = context.glue_content()
             self.runtime = GlueRuntime(content, self.campaign, speech_enabled=self.speech_enabled)
-            self._effects.extend(self.runtime.start(self.program))
+            self._effects.extend(self.runtime.start(self.program) if self.program is not None
+                                 else self.runtime.start_window(self.window))
 
     def complete_activity(self, result):
         if self.runtime is None:
@@ -62,6 +66,8 @@ class GlueScene(Scene):
         if self.runtime is None:
             raise RuntimeError("GlueScene must be entered before handling input")
         if isinstance(event, GlueInput):
+            if event.kind == "hotspot-release" and self.window == "STARTCARAVAN" and event.target:
+                return Transition(GlueScene(event.target, self.campaign), "generic caravan mission map opened")
             if event.kind == "panel-action" and event.target in ("accept_briefing", "open_troop_select") and self.accept_battle:
                 self._effects.extend(self.runtime.start_battle(self.accept_battle))
             elif event.kind == "panel-action" and event.target == "open_troop_select" and self.runtime.state.selected_mission:

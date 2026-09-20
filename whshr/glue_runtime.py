@@ -228,6 +228,12 @@ class GlueRuntime:
         self.state = GlueRuntimeState(current=ScriptFrame(str(program).upper()))
         return self.step_until_blocked()
 
+    def start_window(self, window):
+        self.state = GlueRuntimeState()
+        effects = []
+        self._open_window(f"res={str(window).upper()}", False, effects)
+        return tuple(effects)
+
     def step_until_blocked(self):
         effects = []
         while self.state.current is not None and self.state.pending is None and self.state.wait_reason is None:

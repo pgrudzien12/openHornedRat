@@ -141,7 +141,7 @@ class IntroSceneTests(unittest.TestCase):
         machine.handle("new_campaign")
 
         self.assertIsInstance(machine.active, GlueScene)
-        self.assertEqual(machine.active.program, "FLOWSCRIPTBP01")
+        self.assertEqual(machine.active.window, "STARTCARAVAN")
         self.assertIs(machine.active.campaign, machine.initial.campaign)
         self.assertEqual(machine.history[0].reason, "new campaign started")
 
