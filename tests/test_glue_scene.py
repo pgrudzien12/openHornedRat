@@ -71,6 +71,7 @@ class GlueSceneTests(unittest.TestCase):
         map_scene = GlueScene("MAP_FLOW")
         machine = SceneMachine(map_scene, self.context)
 
+        self.assertEqual(map_scene.runtime.state.selected_mission.key, "map.0")
         machine.handle(GlueInput("mission-select", "map.0"))
         machine.handle(GlueInput("panel-action", "open_briefing"))
 

@@ -75,6 +75,15 @@ class GlueScene(Scene):
             elif event.kind == "panel-action" and event.target in ("abort_briefing", "return_to_caravan") and self.return_scene:
                 self._effects.extend(self.runtime.handle(GlueInput("panel-action", "abort_briefing")))
                 return Transition(self.return_scene, "generic briefing dismissed")
+            elif event.kind == "panel-action" and event.target == "return_to_caravan" and hasattr(context, "locator"):
+                from .campaign_scenes import CaravanScene
+                from .campaign_state import CampaignState
+
+                campaign = self.campaign or CampaignState.from_installation(
+                    context.locator.installation, self.runtime.content
+                )
+                return Transition(CaravanScene(campaign, continuation="open_mission_map"),
+                                  "generic mission map dismissed")
             else:
                 self._effects.extend(self.runtime.handle(event))
         elif isinstance(event, ActivityResult):

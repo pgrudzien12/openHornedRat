@@ -474,10 +474,13 @@ def _mission_rows(content, models, selected, taken=()):
             for reference in mission_list.missions:
                 if reference in taken:
                     continue
-                values = content.mission(reference).values
+                record = content.mission(reference)
                 try:
-                    label = content.string("BRTXT", int(values["res"]))
-                except (KeyError, TypeError, ValueError):
+                    name_id = next(int(field.argument.split("=", 1)[1].split(None, 1)[0])
+                                   for field in record.fields
+                                   if field.command == "set" and field.argument.casefold().startswith("res="))
+                    label = content.string("BRTXT", name_id)
+                except (KeyError, StopIteration, TypeError, ValueError):
                     label = reference.key
                 rows.append((reference, label, model.x + mission_list.x, y, reference == selected))
                 y += MISSION_ROW_HEIGHT

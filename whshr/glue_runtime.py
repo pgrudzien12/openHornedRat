@@ -587,6 +587,7 @@ class GlueRuntime:
             self.state.palette_id = palette
         instance = WindowInstance(name, parent, palette)
         self.state.windows.append(instance)
+        self._select_first_mission()
         anim = next((record for record in definition.records if isinstance(record, AnimRecord)), None)
         if anim is not None:
             self.state.portrait_animators[name] = PortraitAnimator(anim.values.get("sequence", 1))
@@ -608,6 +609,7 @@ class GlueRuntime:
         except (KeyError, TypeError):
             return
         target.objects.append(name)
+        self._select_first_mission()
         effects.append(UpdateWindow(target.name))
         last_bitmap = next((record for record in reversed(definition.records) if isinstance(record, BitmapRecord)), None)
         stop_frame = last_bitmap.values.get("animstopframe", -1) if last_bitmap is not None else -1
@@ -631,6 +633,22 @@ class GlueRuntime:
         if argument.casefold() == "bitmap" and target.objects:
             target.objects.pop()
         effects.append(UpdateWindow(target.name))
+
+    def _select_first_mission(self):
+        if self.state.selected_mission is not None:
+            return
+        for window in self.state.windows:
+            for name in (window.name, *window.objects):
+                try:
+                    records = self.content.window(name).records
+                except (KeyError, TypeError):
+                    continue
+                for record in records:
+                    if isinstance(record, MissionRecord) and record.mission_ref is not None:
+                        self.state.selected_mission = record.mission_ref
+                        if self.campaign is not None:
+                            self.campaign.select_mission(record.mission_ref)
+                        return
 
     def _dialogue(self, argument, queued, effects):
         string_id = self._parse_resource_id(argument)
