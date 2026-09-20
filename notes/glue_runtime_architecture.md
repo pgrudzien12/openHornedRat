@@ -329,14 +329,14 @@ Exit criteria:
 - Repeated requests do not reparse the containing DLL.
 - A synthetic namespace can override one bitmap and one window in a test.
 
-### Phase 3 — Generic static window renderer
+### Phase 3 — Generic static window renderer (render-model foundation implemented)
 
 Deliverables:
 
-- Build `GlueRenderModel` for `[POSITION]`, ordered `[BITMAP]`, `[TEXT]`, `[HOTSPOT]`, `[ANIM]`, `[MIDI]` and `[INCLUDE]`.
+- Headless `GlueRenderModel` now projects `[POSITION]`, ordered `[BITMAP]`, `[TEXT]`, `[HOTSPOT]`, `[ANIM]`, `[MIDI]`, `[INCLUDE]` and runtime-added objects. It is deliberately presentation-neutral and has order/cycle tests.
 - Build reusable bitmap, text, hotspot, portrait-frame and control-panel renderers.
 - Centralize executable-owned tables: colours, text formats, frame geometry, control panels, portrait index and `tentpos`.
-- Render `MAINMENU` entirely from its window definition.
+- `MainMenuView` now consumes its static background, hotspots and button art through this model; the generic `GlueView` remains to be built.
 
 Exit criteria:
 

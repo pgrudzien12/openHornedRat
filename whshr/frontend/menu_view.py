@@ -5,6 +5,8 @@ import pygame
 from .bitmap_font import BitmapFont
 from .gpu import ScreenQuad
 from .glue_bitmap import load_bitmap
+from ..glue_render import build_render_model
+from ..glue_runtime import WindowInstance
 from .scene_view import NativeScreenView, SceneView
 
 
@@ -34,10 +36,11 @@ class MainMenuView(NativeScreenView):
 
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
-        self.screen = self._load_quad(gpu, "OPTIONSCREEN")
-        self.button_up = self._load_quad(gpu, "OPTIONBUTTONUP", transparent_blue=True)
-        self.button_down = self._load_quad(gpu, "OPTIONBUTTONDOWN", transparent_blue=True)
-        self.hotspots = tuple((scene.menu_ui or {}).get("hotspots", ()))
+        self.model = build_render_model(scene.content, WindowInstance("MAINMENU", None, -1))
+        self.screen = self._load_quad(gpu, self.model.bitmaps[0].name)
+        self.hotspots = self.model.hotspots
+        self.button_up = self._load_quad(gpu, self.hotspots[0].up_bitmap, transparent_blue=True)
+        self.button_down = self._load_quad(gpu, self.hotspots[0].down_bitmap, transparent_blue=True)
         self.pressed = None
 
     def _load_quad(self, gpu, resource_name, transparent_blue=False):
@@ -61,7 +64,7 @@ class MainMenuView(NativeScreenView):
         left, top, scale = self._layout()
         native_x, native_y = ((pos[0] - left) / scale, (pos[1] - top) / scale)
         for index, hotspot in enumerate(self.hotspots):
-            if pygame.Rect(hotspot["x"], hotspot["y"], hotspot["vx"], hotspot["vy"]).collidepoint(native_x, native_y):
+            if pygame.Rect(hotspot.x, hotspot.y, hotspot.width, hotspot.height).collidepoint(native_x, native_y):
                 return index
         return None
 
@@ -75,7 +78,7 @@ class MainMenuView(NativeScreenView):
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             index, self.pressed = self.pressed, None
             if index is not None and index == self._button_at(event.pos):
-                action = self.TARGET_ACTIONS.get(self.hotspots[index].get("target", "").lower())
+                action = self.TARGET_ACTIONS.get((self.hotspots[index].target or "").lower())
                 return (action,) if action else ()
         return ()
 
@@ -85,8 +88,8 @@ class MainMenuView(NativeScreenView):
         self.screen.draw(left, top, self.NATIVE_SIZE[0] * scale, self.NATIVE_SIZE[1] * scale)
         for index, hotspot in enumerate(self.hotspots):
             sprite = self.button_down if index == self.pressed else self.button_up
-            sprite.draw(left + hotspot["x"] * scale, top + hotspot["y"] * scale,
-                        hotspot["vx"] * scale, hotspot["vy"] * scale)
+            sprite.draw(left + hotspot.x * scale, top + hotspot.y * scale,
+                        hotspot.width * scale, hotspot.height * scale)
 
     def release(self):
         self.screen.release()

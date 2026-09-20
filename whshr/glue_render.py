@@ -1,0 +1,148 @@
+"""Headless presentation projection for typed glue windows.
+
+The model intentionally contains names, indexed-resource references and native
+coordinates only.  A pygame/OpenGL view may consume it, but importing this
+module never creates a surface or opens an original-game file.
+"""
+
+from dataclasses import dataclass
+
+from .glue import AnimRecord, BitmapRecord, HotspotRecord, IncludeRecord, MidiRecord, PositionRecord, TextRecord
+
+
+@dataclass(frozen=True)
+class RenderBitmap:
+    name: str
+    x: int = 0
+    y: int = 0
+    mask: str | None = None
+    animation: tuple[tuple[str, int | str], ...] = ()
+
+
+@dataclass(frozen=True)
+class RenderText:
+    string_id: int | None
+    table: str | None
+    x: int = 0
+    y: int = 0
+    width: int = 0
+    height: int = 0
+    font: str | None = None
+    format: str | None = None
+    colour: str | None = None
+
+
+@dataclass(frozen=True)
+class RenderHotspot:
+    x: int
+    y: int
+    width: int
+    height: int
+    hint_id: int | None
+    target: str | None
+    cursor: str | None
+    up_bitmap: str | None
+    down_bitmap: str | None
+
+
+@dataclass(frozen=True)
+class RenderAnimation:
+    name: str | None
+    x: int = 0
+    y: int = 0
+    index: int | None = None
+    bkindex: int | None = None
+    controlpanel: int | None = None
+
+
+@dataclass(frozen=True)
+class GlueRenderModel:
+    name: str
+    x: int
+    y: int
+    width: int
+    height: int
+    palette_id: int
+    bitmaps: tuple[RenderBitmap, ...]
+    texts: tuple[RenderText, ...]
+    hotspots: tuple[RenderHotspot, ...]
+    animations: tuple[RenderAnimation, ...]
+    music: tuple[str, ...]
+
+
+def _integer(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _fields(record):
+    values = {}
+    for field in record.fields:
+        if field.command == "set" and "=" in field.argument:
+            key, value = field.argument.split("=", 1)
+            values[key.casefold()] = _integer(value, value)
+        else:
+            values[field.command] = field.argument
+    return values
+
+
+def _included_records(content, name, seen=()):
+    key = str(name).upper()
+    if key in seen:
+        raise ValueError(f"cyclic glue include: {' -> '.join((*seen, key))}")
+    definition = content.window(key)
+    for record in definition.records:
+        if isinstance(record, IncludeRecord):
+            target = _fields(record).get("script")
+            if target:
+                yield from _included_records(content, target, (*seen, key))
+        else:
+            yield record
+
+
+def build_render_model(content, window):
+    """Project one runtime ``WindowInstance`` into ordered, native UI primitives."""
+    records = list(_included_records(content, window.name))
+    for object_name in window.objects:
+        records.extend(_included_records(content, object_name))
+    position, bitmaps, texts, hotspots, animations, music = {}, [], [], [], [], []
+    for record in records:
+        values = _fields(record)
+        if isinstance(record, PositionRecord):
+            position = values
+        elif isinstance(record, BitmapRecord) and values.get("setbitmap"):
+            animation = tuple((key, value) for key, value in values.items()
+                              if key not in {"setbitmap", "setmask", "x", "y"})
+            bitmaps.append(RenderBitmap(values["setbitmap"], _integer(values.get("x")), _integer(values.get("y")),
+                                        values.get("setmask") or None, animation))
+        elif isinstance(record, TextRecord):
+            texts.append(RenderText(
+                _integer(values.get("res"), None) if values.get("res") is not None else None,
+                values.get("resfile") or None, _integer(values.get("x")), _integer(values.get("y")),
+                _integer(values.get("vx")), _integer(values.get("vy")), values.get("font") or None,
+                values.get("format") or None, values.get("settextcolor") or None,
+            ))
+        elif isinstance(record, HotspotRecord):
+            hint = values.get("res") if "res" in values and "set:res" not in values else None
+            # A set:res is the hint; a later res: is the launch target. Retain both.
+            hint = next((_integer(field.argument.split("=", 1)[1], None) for field in record.fields
+                         if field.command == "set" and field.argument.casefold().startswith("res=")), hint)
+            target = next((field.argument for field in record.fields if field.command == "res"), None)
+            up_bitmap = values.get("setupbitmap") or None
+            down_bitmap = values.get("setdownbitmap") or None
+            hotspots.append(RenderHotspot(_integer(values.get("x")), _integer(values.get("y")),
+                                          _integer(values.get("vx")), _integer(values.get("vy")), hint,
+                                          target, values.get("cursor") or None, up_bitmap, down_bitmap))
+        elif isinstance(record, AnimRecord):
+            animations.append(RenderAnimation(values.get("name") or None, _integer(values.get("x")),
+                                              _integer(values.get("y")),
+                                              _integer(values.get("index"), None) if "index" in values else None,
+                                              _integer(values.get("bkindex"), None) if "bkindex" in values else None,
+                                              _integer(values.get("controlpanel"), None) if "controlpanel" in values else None))
+        elif isinstance(record, MidiRecord) and values.get("name"):
+            music.append(values["name"])
+    return GlueRenderModel(window.name, _integer(position.get("x")), _integer(position.get("y")),
+                           _integer(position.get("vx")), _integer(position.get("vy")), window.palette_id,
+                           tuple(bitmaps), tuple(texts), tuple(hotspots), tuple(animations), tuple(music))
