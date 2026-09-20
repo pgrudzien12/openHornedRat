@@ -137,6 +137,8 @@ Milestones:
 - **M5**: one playable mission (`BF001`) with a hand-rewritten script.
 - **M6**: campaign (glue flow from 1.9, army between battles, briefings, movies, save games).
 
+The M6 implementation architecture and its phased, testable migration from the current screen-specific prototype are specified in **`notes/glue_runtime_architecture.md`**. The key boundary is one long-lived glue runtime for campaign windows and contexts, with battles, movies and executable-owned widgets invoked through typed request/result adapters.
+
 ---
 
 ## Proposed order of the next steps

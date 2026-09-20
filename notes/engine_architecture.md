@@ -169,6 +169,8 @@ the opaque original bytecode from becoming the permanent modding language.
 
 ## Near-term consequences
 
+Most non-battle screens are programs for one shared `WND.DLL` glue interpreter rather than independent scene types. The architecture review and phased implementation plan are in **`notes/glue_runtime_architecture.md`**: keep `SceneMachine` for coarse application modes, and host campaign navigation, active windows and saved contexts in one `GlueRuntime`/`GlueScene`.
+
 1. Keep the simulation API independent of pygame-ce, zengl, and any other presentation library.
 2. Done: the frontend subpackage `whshr/frontend/` and its requirements file `requirements-engine.txt`.
 3. Engine phase 1, in order: a battle view (plan map or terrain, directional sprites in the traced
