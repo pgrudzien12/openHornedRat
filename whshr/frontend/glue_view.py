@@ -179,7 +179,6 @@ class GlueView(NativeScreenView):
         except (KeyError, ValueError):
             font = None
         content = self.scene.runtime.content
-        colour = _TEXT_COLOURS.get(self.scene.runtime.state.dialogue_colour, (0, 0, 0))
         for model_name, animation in animations:
             model = next(model for model in models if model.name == model_name)
             origin = (model.x, model.y)
@@ -194,7 +193,11 @@ class GlueView(NativeScreenView):
                 if action == "toggle_pause":
                     label_id = 312 if paused else 310
                 self._add_panel_bitmap(content, "FRAMEBUTTONUP", (origin[0] + 9, origin[1] + y), palette)
-                label = self.gpu.text((119, 20), font, color=colour, background=None, padding=0, align="center")
+                # notes/mission_selection.md §9.4 says the ANIM block's own settextcolor, but that
+                # field isn't threaded through RenderAnimation yet; black matches what's actually
+                # observed and is FrameButtonUp's own default label colour either way.
+                label = self.gpu.text((119, 20), font, color=(0, 0, 0), background=None, padding=0,
+                                      align="center", fixed_width=True)
                 try:
                     label.set_lines((content.string("BRTXT", label_id),))
                 except KeyError:
