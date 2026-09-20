@@ -7,7 +7,8 @@ module never creates a surface or opens an original-game file.
 
 from dataclasses import dataclass
 
-from .glue import AnimRecord, BitmapRecord, HotspotRecord, IncludeRecord, MidiRecord, PositionRecord, TextRecord
+from .glue import (AnimRecord, BitmapRecord, HotspotRecord, IncludeRecord, MidiRecord, MissionRecord,
+                   MissionRef, MissionWindowRecord, PositionRecord, TextRecord)
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,13 @@ class RenderAnimation:
 
 
 @dataclass(frozen=True)
+class RenderMissionList:
+    x: int
+    y: int
+    missions: tuple[MissionRef, ...]
+
+
+@dataclass(frozen=True)
 class GlueRenderModel:
     name: str
     x: int
@@ -68,6 +76,7 @@ class GlueRenderModel:
     hotspots: tuple[RenderHotspot, ...]
     animations: tuple[RenderAnimation, ...]
     music: tuple[str, ...]
+    mission_lists: tuple[RenderMissionList, ...] = ()
 
 
 def _integer(value, default=0):
@@ -107,7 +116,7 @@ def build_render_model(content, window):
     records = list(_included_records(content, window.name))
     for object_name in window.objects:
         records.extend(_included_records(content, object_name))
-    position, bitmaps, texts, hotspots, animations, music = {}, [], [], [], [], []
+    position, bitmaps, texts, hotspots, animations, music, mission_lists, missions = {}, [], [], [], [], [], [], []
     for record in records:
         values = _fields(record)
         if isinstance(record, PositionRecord):
@@ -141,8 +150,13 @@ def build_render_model(content, window):
                                               _integer(values.get("index"), None) if "index" in values else None,
                                               _integer(values.get("bkindex"), None) if "bkindex" in values else None,
                                               _integer(values.get("controlpanel"), None) if "controlpanel" in values else None))
+        elif isinstance(record, MissionWindowRecord):
+            mission_lists.append(RenderMissionList(_integer(values.get("x")), _integer(values.get("y")), ()))
+        elif isinstance(record, MissionRecord) and record.mission_ref is not None:
+            missions.append(record.mission_ref)
         elif isinstance(record, MidiRecord) and values.get("name"):
             music.append(values["name"])
     return GlueRenderModel(window.name, _integer(position.get("x")), _integer(position.get("y")),
                            _integer(position.get("vx")), _integer(position.get("vy")), window.palette_id,
-                           tuple(bitmaps), tuple(texts), tuple(hotspots), tuple(animations), tuple(music))
+                           tuple(bitmaps), tuple(texts), tuple(hotspots), tuple(animations), tuple(music),
+                           tuple(RenderMissionList(item.x, item.y, tuple(missions)) for item in mission_lists))

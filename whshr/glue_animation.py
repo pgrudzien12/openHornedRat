@@ -36,8 +36,6 @@ class GlueBitmapAnimator:
     @property
     def display_name(self):
         """The resource a renderer should show before and after the first timer step."""
-        if self.drawn_name == self.base and self.current >= 0:
-            return re.sub(r"\d+$", "", self.base) + str(self.current)
         return self.drawn_name
 
     def tick(self, milliseconds):

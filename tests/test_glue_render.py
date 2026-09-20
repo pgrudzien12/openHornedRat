@@ -59,6 +59,26 @@ setbitmap:Late
         with self.assertRaisesRegex(ValueError, "cyclic glue include"):
             build_render_model(content, WindowInstance("A", None, 0))
 
+    def test_mission_window_exposes_its_geometry_and_stable_mission_references(self):
+        content = GlueContent.from_data(resources={
+            "MISSIONS": """[WINDOW]
+[MISSIONWINDOW]
+set:x=30
+set:y=15
+[END]
+[MISSION]
+set:res=601
+[END]
+[MISSION]
+set:res=602
+[END]""",
+        })
+
+        model = build_render_model(content, WindowInstance("MISSIONS", None, 0))
+
+        self.assertEqual((model.mission_lists[0].x, model.mission_lists[0].y), (30, 15))
+        self.assertEqual([reference.key for reference in model.mission_lists[0].missions], ["missions.0", "missions.1"])
+
 
 if __name__ == "__main__":
     unittest.main()
