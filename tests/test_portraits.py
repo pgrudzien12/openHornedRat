@@ -8,12 +8,12 @@ from whshr.portraits import EYE_SEQUENCE, MOUTH_TALK_FRAMES, PortraitAnimator, d
 
 class PortraitAnimatorTests(unittest.TestCase):
     def test_talking_sequence_cycles_the_documented_mouth_frames(self):
-        # notes/glue_portraits.md §3.2-3.3: one step per 25 ms tick, each mouth step shown for
-        # 2 (frame 6) or 3 ticks.
+        # notes/glue_portraits.md §3.2-3.3: one step per tick, each mouth step shown for 2
+        # (frame 6) or 3 ticks.
         animator = PortraitAnimator(sequence=1)
         self.assertEqual(animator.mouth_frame, MOUTH_TALK_FRAMES[0])
 
-        animator.advance(25 * 3)  # first mouth step's duration
+        animator.advance(PortraitAnimator.TICK_MILLISECONDS * 3)  # first mouth step's duration
 
         self.assertEqual(animator.mouth_frame, MOUTH_TALK_FRAMES[1])
 
@@ -21,7 +21,7 @@ class PortraitAnimatorTests(unittest.TestCase):
         animator = PortraitAnimator(sequence=1)
         self.assertEqual(animator.eye_frame, EYE_SEQUENCE[0][0])
 
-        animator.advance(25 * EYE_SEQUENCE[0][1])  # exhaust the first (open-eyes) step exactly
+        animator.advance(PortraitAnimator.TICK_MILLISECONDS * EYE_SEQUENCE[0][1])  # exhaust the first (open-eyes) step exactly
 
         self.assertEqual(animator.eye_frame, EYE_SEQUENCE[1][0])  # blink frame 7
 
@@ -30,7 +30,7 @@ class PortraitAnimatorTests(unittest.TestCase):
         animator.apply(2)
 
         self.assertEqual(animator.mouth_frame, 1)
-        animator.advance(25 * 50)
+        animator.advance(PortraitAnimator.TICK_MILLISECONDS * 50)
         self.assertEqual(animator.mouth_frame, 1)  # still held closed
         self.assertEqual(animator.eye_frame, EYE_SEQUENCE[1][0])  # blinking is unaffected by animseq
 

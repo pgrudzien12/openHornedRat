@@ -59,7 +59,13 @@ class PortraitAnimator:
 
     ``sequence`` 1 = talking (mouth cycles ``MOUTH_TALK_FRAMES``, eyes blink); 2 = stopped (mouth
     held closed at frame 1, eyes still blink - the same loop as sequence 1).
+
+    The tick length is an open question (§6): the timer's *designed* rate is 25 ms, but the note
+    itself flags that real Windows 9x hardware only delivered it about every 55 ms, and that this
+    was never actually timed against the running original. Using the 55 ms Windows 9x figure here
+    rather than the 25 ms design rate; a real capture would settle this properly.
     """
+    TICK_MILLISECONDS = 55
 
     def __init__(self, sequence=1):
         self.sequence = 1
@@ -87,10 +93,10 @@ class PortraitAnimator:
         return EYE_SEQUENCE[self._eye_index][0]
 
     def advance(self, milliseconds):
-        """One step per 25 ms glue timer message (§3.2)."""
+        """One step per glue timer message (§3.2), see TICK_MILLISECONDS."""
         self._elapsed_ms += milliseconds
-        while self._elapsed_ms >= 25:
-            self._elapsed_ms -= 25
+        while self._elapsed_ms >= self.TICK_MILLISECONDS:
+            self._elapsed_ms -= self.TICK_MILLISECONDS
             self._step()
 
     def _step(self):

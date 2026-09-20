@@ -74,6 +74,10 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
     ``glue_program`` is a development shortcut that starts a typed ``[RUN]``
     resource through ``GlueScene`` and its generic static view.
     """
+    if hidden:
+        # A hidden run is a development/test capture (--frames, --screenshot); it has no listener
+        # and should not play audio through the machine's real device while running unattended.
+        os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     context = scene_context(installation)
     ctx = open_window(size, hidden)
     gpu = Gpu(ctx, size)
