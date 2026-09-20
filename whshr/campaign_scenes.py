@@ -16,7 +16,6 @@ INTRO_MEDIA = AssetId("vanilla", "cutscene", "a1-media")
 MAIN_MENU = AssetId("vanilla", "ui", "main-menu")
 ANIMATION_TEXT = AssetId("vanilla", "text", "anim")
 SUBTITLE_FONT = AssetId("vanilla", "font", "subtext")
-CARAVAN_FONT = AssetId("vanilla", "font", "pcsubt")
 PCTEXTA_FONT = AssetId("vanilla", "font", "pctexta")
 PCTEXT_FONT = glue_font_asset(2)
 BRIEFING_FONT = glue_font_asset(4)
@@ -142,71 +141,6 @@ class MainMenuScene(Scene):
         return None
 
 
-class CaravanScene(Scene):
-    """Campaign hub in Dietrich's caravan before the first mission is chosen.
-
-    Coffers and mission availability are data-driven; save slots and book-page
-    browsing remain presentation hooks until their persistence/views are added.
-    """
-
-    manifest = SceneManifest(immediate=(CARAVAN_FONT,))
-
-    def __init__(self, campaign, has_message=False, mode="start", continuation=None):
-        self.campaign = campaign
-        self.has_message = has_message
-        self.mode = mode.lower()
-        # This is deliberately supplied by the glue-script runner.  A caravan
-        # does not itself imply that the parked map/list should open: ``resume``
-        # and recruit modes continue their mission, while info modes unwind to
-        # whatever their enclosing script specifies next.
-        self.continuation = continuation
-        self.dietrich_mode = None  # ``reading`` / ``talking`` while his close-up is open
-        self.selected_book = None
-        self.save_requested = False
-        self.font = None
-        self.installation = None
-        self.content = None
-
-    def enter(self, context):
-        self.installation = context.locator.installation
-        self.content = self.campaign.content or context.glue_content()
-        self.campaign.content = self.content
-        self.campaign.activate_caravan_mode(self.mode)
-        self.font = context.load(CARAVAN_FONT)
-
-    @property
-    def gold(self):
-        return self.campaign.coffers
-
-    @property
-    def missions(self):
-        return self.campaign.missions
-
-    @property
-    def scroll_count(self):
-        return self.campaign.scroll_count
-
-    @property
-    def can_select_mission(self):
-        """Whether this caravan's hotspot has resolved to the map/list."""
-        return self.continuation == "open_mission_map"
-
-    def handle(self, event, context):
-        if event == "open_mission_map" and self.can_select_mission:
-            return Transition(MissionMapScene(self.campaign), "campaign map opened")
-        if event == "exit_campaign":
-            return Transition(MainMenuScene(), "campaign exited")
-        if event == "speak_to_dietrich":
-            self.dietrich_mode = "talking" if self.has_message else "reading"
-        elif event == "dismiss_dietrich":
-            self.dietrich_mode = None
-        elif event.startswith("browse_book:"):
-            self.selected_book = event.removeprefix("browse_book:")
-        elif event == "save_campaign":
-            self.save_requested = True
-        return None
-
-
 class MissionMapScene(Scene):
     """The parked campaign map and its interactive mission-scroll list.
 
@@ -257,9 +191,7 @@ class MissionMapScene(Scene):
 
     def handle(self, event, context):
         if event == "return_to_caravan":
-            # Esc only closes the list view; it does not change the parked
-            # StartCaravan continuation that opened it.
-            return Transition(CaravanScene(self.campaign, continuation="open_mission_map"),
+            return Transition(GlueScene(campaign=self.campaign, window="STARTCARAVAN"),
                               "campaign map dismissed")
         if event.startswith("select_mission:"):
             index = int(event.removeprefix("select_mission:"))

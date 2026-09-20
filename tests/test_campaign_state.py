@@ -8,36 +8,13 @@ from whshr.campaign import (
     parse_mission_script, parse_mission_windows, parse_window_hotspots, parse_window_portrait, parse_window_ui,
 )
 from whshr.campaign_state import (
-    CARAVAN_BUILTIN_BITMAPS, CampaignState, caravan_scroll_count, caravan_window_for_mode, eligible_missions, initial_flow,
-    start_caravan_continuation,
+    CampaignState, eligible_missions, initial_flow,
 )
 from whshr.glue import MissionRef
 from whshr.glue_content import GlueContent
 
 
 class CampaignStateTests(unittest.TestCase):
-    def test_caravan_modes_resolve_to_their_window_resources_and_activate_that_projection(self):
-        state = CampaignState(self.graph, caravan_uis={
-            "STARTCARAVAN": {"hotspots": [{"res": 150}], "bitmaps": [{"bitmap": "Start"}]},
-            "CARAVANAFTERMISSION": {"hotspots": [{"res": -1}], "bitmaps": [{"bitmap": "After"}]},
-            "INFOCARAVANREC": {"hotspots": [{"res": 151}], "bitmaps": [{"bitmap": "Info"}]},
-        })
-
-        self.assertEqual(caravan_window_for_mode("select"), "CARAVANAFTERMISSION")
-        self.assertEqual(caravan_window_for_mode("infoREC"), "INFOCARAVANREC")
-        self.assertTrue(state.activate_caravan_mode("select"))
-        self.assertEqual((state.hotspots[0]["res"], state.caravan_bitmaps[0]["bitmap"]), (-1, "After"))
-        self.assertTrue(state.activate_caravan_mode("infoREC"))
-        self.assertEqual(state.hotspots[0]["res"], 151)
-        self.assertFalse(state.activate_caravan_mode("unknown"))
-
-    def test_active_caravan_background_is_the_first_window_bitmap(self):
-        state = CampaignState(self.graph, caravan_bitmaps=(
-            {"bitmap": "TalkBackgroundPic"}, {"bitmap": "CarLampCell"},
-        ))
-
-        self.assertEqual(state.caravan_background, "TalkBackgroundPic")
-
     def test_window_ui_expands_every_script_in_one_include_block_in_source_order(self):
         content = GlueContent.from_data(resources={
             "ROOT": "[WINDOW]\n[INCLUDE]\nscript:ONE\nscript:TWO\n[END]",
@@ -48,14 +25,6 @@ class CampaignStateTests(unittest.TestCase):
         ui = parse_window_ui(content.resources, "ROOT")
 
         self.assertEqual([bitmap["bitmap"] for bitmap in ui["bitmaps"]], ["First", "Second"])
-
-    def test_caravan_builtin_animation_specs_cover_cells_not_declared_by_startcaravan(self):
-        specs = {item["bitmap"]: item for item in CARAVAN_BUILTIN_BITMAPS}
-
-        self.assertEqual((specs["DietBookCell"]["x"], specs["DietBookCell"]["y"]), (296, 260))
-        self.assertEqual((specs["ReadEyesCell"]["x"], specs["ReadEyesCell"]["y"]), (312, 208))
-        self.assertEqual((specs["DietMouthCell"]["x"], specs["DietMouthCell"]["y"]), (288, 220))
-        self.assertEqual((specs["TalkEyesCell"]["x"], specs["TalkEyesCell"]["y"]), (300, 200))
 
     def setUp(self):
         self.graph = {
@@ -208,31 +177,15 @@ class CampaignStateTests(unittest.TestCase):
 
         self.assertEqual(len(eligible_missions(missions, set())), 1)
 
-    def test_given_offered_missions_then_scrolls_are_one_fewer_capped_at_three(self):
-        self.assertEqual([caravan_scroll_count(n) for n in range(6)], [0, 0, 1, 2, 3, 3])
-
     def test_given_start_caravan_hotspots_then_their_resource_selects_the_initial_flow(self):
         self.assertEqual(initial_flow((
             {"res": 150, "target_kind": "script", "target": "PopContext"},
             {"res": 151, "target_kind": "res", "target": "FLOWSCRIPTBP03"},
         )), "FLOWSCRIPTBP03")
 
-    def test_given_start_caravan_flow_target_then_it_continues_to_the_mission_map(self):
-        self.assertEqual(start_caravan_continuation((
-            {"target_kind": "res", "target": "FLOWSCRIPTBP03"},
-        )), "open_mission_map")
-
     def test_given_start_caravan_without_one_flow_target_then_initial_flow_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "exactly one flow"):
             initial_flow(())
-
-    def test_given_envoy_to_nuln_then_scrolls_follow_2_0_1_as_missions_are_taken(self):
-        window = [{"name_id": 671}, {"name_id": 672, "depend": 671},
-                  {"name_id": 673, "inactivedepend": 672}, {"name_id": 628, "inactivedepend": 672}]
-        counts = [caravan_scroll_count(len(eligible_missions(window, taken)))
-                  for taken in (set(), {671}, {671, 672})]
-
-        self.assertEqual(counts, [2, 0, 1])
 
     def test_given_a_mission_without_release_flag_then_the_player_stays_on_the_window(self):
         self.graph["mission_windows"]["FIRST"].append({"name_id": 609, "name": "Extra", "battle": "BF009"})

@@ -6,7 +6,7 @@ from whshr.assets import AssetId, AssetLocator
 from whshr.battle_scene import BattleScene
 from whshr.cache import AssetCache
 from whshr.campaign_scenes import (
-    BriefingScene, CaravanScene, IntroScene, MainMenuScene, MissionMapScene, OpeningNarrationScene,
+    BriefingScene, IntroScene, MainMenuScene, MissionMapScene, OpeningNarrationScene,
     TroopSelectScene, briefing_asset_for,
 )
 from whshr.campaign_state import CampaignState
@@ -145,30 +145,6 @@ class IntroSceneTests(unittest.TestCase):
         self.assertIs(machine.active.campaign, machine.initial.campaign)
         self.assertEqual(machine.history[0].reason, "new campaign started")
 
-    def test_given_the_caravan_when_its_mission_is_chosen_then_the_map_opens_before_the_briefing(self):
-        briefing_scene = BriefingScene({"briefing_key": "test.0", "battle": "BF001"})
-        machine = SceneMachine(
-            CaravanScene(CampaignState.single_mission(briefing_scene), continuation="open_mission_map"),
-            self.context,
-        )
-
-        machine.handle("open_mission_map")
-
-        self.assertIsInstance(machine.active, MissionMapScene)
-        self.assertEqual(machine.history[0].reason, "campaign map opened")
-        self.assertIn(self.root / "FILE/BINARY/GLUE/PCTEXT.FON", self.loaded)
-
-        machine.handle("select_mission:0")
-
-        self.assertIsInstance(machine.active, MissionMapScene)
-        self.assertIs(machine.active.selected_mission, machine.active.missions[0])
-
-        machine.handle("open_briefing")
-
-        self.assertIs(machine.active, briefing_scene)
-        self.assertEqual(machine.active.briefing, self.briefing)
-        self.assertEqual(machine.history[-1].reason, "campaign mission briefing opened: BF001")
-
     def test_given_a_selected_map_mission_when_accept_is_pressed_then_troop_selection_opens(self):
         campaign = CampaignState.single_mission(BriefingScene({"briefing_key": "test.0", "battle": "BF001"}))
         machine = SceneMachine(MissionMapScene(campaign), self.context)
@@ -194,39 +170,6 @@ class IntroSceneTests(unittest.TestCase):
         self.assertIsInstance(transition.scene, GlueScene)
         self.assertEqual((transition.scene.program, transition.scene.accept_battle), ("BRIEFING", "BF001"))
         self.assertIs(transition.scene.return_scene, scene)
-
-    def test_given_the_mission_map_when_escape_is_pressed_then_the_caravan_returns(self):
-        campaign = CampaignState.single_mission(BriefingScene({"briefing_key": "test.0", "battle": "BF001"}))
-        machine = SceneMachine(MissionMapScene(campaign), self.context)
-
-        machine.handle("return_to_caravan")
-
-        self.assertIsInstance(machine.active, CaravanScene)
-        self.assertIs(machine.active.campaign, campaign)
-        self.assertTrue(machine.active.can_select_mission)
-
-        machine.handle("open_mission_map")
-        self.assertIsInstance(machine.active, MissionMapScene)
-
-    def test_given_a_resume_caravan_when_its_mission_hotspot_is_used_then_it_does_not_open_the_list(self):
-        caravan = CaravanScene(CampaignState.single_mission(BriefingScene({"briefing_key": "test.0", "battle": "BF001"})), mode="resume")
-
-        self.assertFalse(caravan.can_select_mission)
-        self.assertIsNone(caravan.handle("open_mission_map", self.context))
-
-    def test_given_the_caravan_when_dietrich_has_no_message_then_he_reads(self):
-        caravan = CaravanScene(CampaignState.single_mission(BriefingScene({"briefing_key": "test.0", "battle": "BF001"})) )
-
-        caravan.handle("speak_to_dietrich", self.context)
-
-        self.assertEqual(caravan.dietrich_mode, "reading")
-
-    def test_given_the_caravan_when_dietrich_has_a_message_then_he_talks(self):
-        caravan = CaravanScene(CampaignState.single_mission(BriefingScene({"briefing_key": "test.0", "battle": "BF001"})), has_message=True)
-
-        caravan.handle("speak_to_dietrich", self.context)
-
-        self.assertEqual(caravan.dietrich_mode, "talking")
 
     def test_given_main_menu_when_quit_is_chosen_then_the_application_receives_a_quit_signal(self):
         machine = SceneMachine(MainMenuScene(), self.context)

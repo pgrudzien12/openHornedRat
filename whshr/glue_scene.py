@@ -67,7 +67,12 @@ class GlueScene(Scene):
             raise RuntimeError("GlueScene must be entered before handling input")
         if isinstance(event, GlueInput):
             if event.kind == "hotspot-release" and self.window == "STARTCARAVAN" and event.target:
-                return Transition(GlueScene(event.target, self.campaign), "generic caravan mission map opened")
+                if event.target.casefold() == "abortgame":
+                    from .campaign_scenes import MainMenuScene
+                    return Transition(MainMenuScene(), "generic caravan exited")
+                if event.target.casefold() not in {"armybook", "encyclopediabook", "loadsavewindow", "magicbook",
+                                                   "optionsdialog"}:
+                    return Transition(GlueScene(event.target, self.campaign), "generic caravan mission map opened")
             if event.kind == "panel-action" and event.target in ("accept_briefing", "open_troop_select") and self.accept_battle:
                 self._effects.extend(self.runtime.start_battle(self.accept_battle))
             elif event.kind == "panel-action" and event.target == "open_troop_select" and self.runtime.state.selected_mission:
@@ -82,13 +87,12 @@ class GlueScene(Scene):
                 self._effects.extend(self.runtime.handle(GlueInput("panel-action", "abort_briefing")))
                 return Transition(self.return_scene, "generic briefing dismissed")
             elif event.kind == "panel-action" and event.target == "return_to_caravan" and hasattr(context, "locator"):
-                from .campaign_scenes import CaravanScene
                 from .campaign_state import CampaignState
 
                 campaign = self.campaign or CampaignState.from_installation(
                     context.locator.installation, self.runtime.content
                 )
-                return Transition(CaravanScene(campaign, continuation="open_mission_map"),
+                return Transition(GlueScene(campaign=campaign, window="STARTCARAVAN"),
                                   "generic mission map dismissed")
             else:
                 self._effects.extend(self.runtime.handle(event))

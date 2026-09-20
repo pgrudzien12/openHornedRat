@@ -167,7 +167,7 @@ path uses them.
 | Campaign commands | Partial | `testforunitinarmy`, `testforunitinmarch`, `addcash`, `iftrueaddcash`, `addtroop`, `unitjoinmission`, and `unitleavemission` call the campaign runtime. |
 | Battle activity | Implemented | `StartBattle` transitions to `BattleScene`; completing the battle resumes the same parked `GlueScene` with an `ActivityResult`. |
 | Other activities | Not implemented | Movie, debrief, caravan, and troop-selection effects are emitted by the runtime but do not yet have scene routes. |
-| Generic caravan | Partial | New Campaign opens `STARTCARAVAN` through `GlueScene`; animated candle, lamp, book, and eyes sprites, hover hints, and mission-count-dependent desk scrolls are rendered there. Its mission hotspot enters `FLOWSCRIPTBP01`. Books, recruitment, and post-mission caravan modes remain unavailable. |
+| Generic caravan | Partial | New Campaign opens `STARTCARAVAN` through `GlueScene`; animated candle, lamp, book, and eyes sprites, hover hints, and mission-count-dependent desk scrolls are rendered there. Its mission hotspot enters `FLOWSCRIPTBP01`, and Abort returns to the main menu. Books, recruitment, and post-mission caravan modes remain unavailable. |
 | Normal entry point | Implemented | New Campaign starts the generic `STARTCARAVAN`; the opening narration and intro remain unchanged. |
 | Persistent saves | Deferred | `autosave` captures a runtime snapshot in memory. It does not write or load save files. |
 
