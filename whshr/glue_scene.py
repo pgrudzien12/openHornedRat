@@ -5,7 +5,7 @@ that gives a future ``GlueView`` one long-lived runtime rather than recreating
 campaign Python scenes at every window/activity boundary.
 """
 
-from .glue_runtime import ActivityResult, GlueInput, GlueRuntime
+from .glue_runtime import ActivityResult, GlueInput, GlueRuntime, StartBattle
 from .glue_fonts import glue_font_asset
 from .scenes import Scene
 
@@ -31,11 +31,23 @@ class GlueScene(Scene):
         effects, self._effects = tuple(self._effects), []
         return effects
 
+    def take_battle_effect(self):
+        for index, effect in enumerate(self._effects):
+            if isinstance(effect, StartBattle):
+                return self._effects.pop(index)
+        return None
+
     def enter(self, context):
         self.context = context
-        content = context.glue_content()
-        self.runtime = GlueRuntime(content, self.campaign, speech_enabled=self.speech_enabled)
-        self._effects.extend(self.runtime.start(self.program))
+        if self.runtime is None:
+            content = context.glue_content()
+            self.runtime = GlueRuntime(content, self.campaign, speech_enabled=self.speech_enabled)
+            self._effects.extend(self.runtime.start(self.program))
+
+    def complete_activity(self, result):
+        if self.runtime is None:
+            raise RuntimeError("GlueScene must be entered before completing an activity")
+        self._effects.extend(self.runtime.resume(result))
 
     def font(self, slot):
         """Load one verified glue font slot only when a view needs it."""

@@ -117,11 +117,13 @@ class SceneMachine:
     def __post_init__(self):
         self.active = self.initial
         self.active.enter(self.context)
+        self._start_glue_battle()
 
     def handle(self, event):
         """Give an event to the active scene and apply its transition or quit, if any."""
         if self.quit is None:
             self._apply(self.active.handle(event, self.context))
+            self._start_glue_battle()
 
     def update(self, seconds):
         """Give fixed or measured time to the active scene and apply its transition or quit, if any."""
@@ -129,6 +131,22 @@ class SceneMachine:
             raise ValueError("scene update duration must not be negative")
         if self.quit is None:
             self._apply(self.active.update(seconds, self.context))
+            self._start_glue_battle()
+
+    def _start_glue_battle(self):
+        from .glue_scene import GlueScene
+
+        if not isinstance(self.active, GlueScene):
+            return
+        effect = self.active.take_battle_effect()
+        if effect is None:
+            return
+        from .assets import AssetId
+        from .battle_scene import BattleScene
+
+        battle = AssetId("vanilla", "battle", effect.battle.casefold())
+        self._apply(Transition(BattleScene(battle, glue_scene=self.active, request_id=effect.request_id),
+                               "glue battle started"))
 
     def _apply(self, transition):
         if transition is None:

@@ -7,6 +7,9 @@ from whshr.assets import AssetLocator
 from whshr.battle_scene import BATTLE_TICK_SECONDS, BattleScene
 from whshr.cache import AssetCache
 from whshr.catalog import build
+from whshr.glue_content import GlueContent
+from whshr.glue_runtime import EndGame
+from whshr.glue_scene import GlueScene
 from whshr.result_scene import ResultScene
 from whshr.scenes import SceneAssets, SceneMachine, Scene, Transition
 
@@ -60,6 +63,21 @@ class BattleSceneTests(unittest.TestCase):
         infantry = regiments["Grudgebringer_Infantry"]
         self.assertEqual((infantry.models, infantry.ranks, infantry.player), (16, 4, True))
         self.assertEqual(len(infantry.model_positions()), 16)
+
+    def test_given_a_glue_battle_when_it_resolves_then_its_same_runtime_resumes(self):
+        self.context.glue = GlueContent.from_data(resources={
+            "FLOW": "[RUN]\n[START]\nplaygame:bf001\nendgame:\n[END]",
+        })
+        glue = GlueScene("FLOW")
+        machine = SceneMachine(glue, self.context)
+
+        self.assertIsInstance(machine.active, BattleScene)
+        self.assertIs(machine.active.glue_scene, glue)
+        machine.active.battle.result = "victory"
+        machine.update(0)
+
+        self.assertIs(machine.active, glue)
+        self.assertEqual(glue.take_effects(), (EndGame(),))
 
     def test_given_active_battle_when_a_quarter_second_passes_then_two_100_ms_ticks_have_run(self):
         scene = BattleScene()

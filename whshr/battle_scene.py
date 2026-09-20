@@ -5,6 +5,7 @@ from .assets import AssetId
 from .battlefield import sprite_files
 from .clock import FixedStepClock
 from .engine import Battle, DEFAULT_SEED
+from .glue_runtime import ActivityResult
 from .result_scene import ResultScene
 from .scenes import Scene, SceneManifest, Transition
 
@@ -21,7 +22,7 @@ class BattleScene(Scene):
     from the same deterministic state (notes/engine_architecture.md, "Battle logs and replay").
     """
 
-    def __init__(self, battle=FIRST_BATTLE, log_dir=None, seed=DEFAULT_SEED):
+    def __init__(self, battle=FIRST_BATTLE, log_dir=None, seed=DEFAULT_SEED, glue_scene=None, request_id=None):
         self.battle_id = battle
         self.manifest = SceneManifest(immediate=(battle,))
         self.field = None
@@ -33,6 +34,8 @@ class BattleScene(Scene):
         self.logger = None
         self.skirmishes = None  # whshr.skirmish_log.SkirmishLogger, one file per close combat
         self._log_closed = True
+        self.glue_scene = glue_scene
+        self.request_id = request_id
 
     def enter(self, context):
         self.field = context.load(self.battle_id)
@@ -118,6 +121,9 @@ class BattleScene(Scene):
                 self.logger.write_snapshot(self.battle.tick_count, self.battle)
                 self.logger.write_result(self.battle.tick_count, self.battle)
                 self.close_log("result")
+            if self.glue_scene is not None:
+                self.glue_scene.complete_activity(ActivityResult(self.request_id, "battle"))
+                return Transition(self.glue_scene, "glue battle resolved")
             return Transition(ResultScene(self.battle.result, self._casualty_summary()), "battle resolved")
         return None
 
