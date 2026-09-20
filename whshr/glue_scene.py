@@ -6,6 +6,7 @@ campaign Python scenes at every window/activity boundary.
 """
 
 from .glue_runtime import ActivityResult, GlueInput, GlueRuntime
+from .glue_fonts import glue_font_asset
 from .scenes import Scene
 
 
@@ -17,6 +18,8 @@ class GlueScene(Scene):
         self.campaign = campaign
         self.speech_enabled = speech_enabled
         self.runtime = None
+        self.context = None
+        self._fonts = {}
         self._effects = []
 
     @property
@@ -29,9 +32,17 @@ class GlueScene(Scene):
         return effects
 
     def enter(self, context):
+        self.context = context
         content = context.glue_content()
         self.runtime = GlueRuntime(content, self.campaign, speech_enabled=self.speech_enabled)
         self._effects.extend(self.runtime.start(self.program))
+
+    def font(self, slot):
+        """Load one verified glue font slot only when a view needs it."""
+        slot = int(slot)
+        if slot not in self._fonts:
+            self._fonts[slot] = self.context.load(glue_font_asset(slot))
+        return self._fonts[slot]
 
     def handle(self, event, context):
         if self.runtime is None:

@@ -10,6 +10,7 @@ import pygame
 from ..glue_render import build_render_model
 from ..glue_runtime import GlueInput
 from ..glue_palette import AppPalette
+from .bitmap_font import BitmapFont
 from .glue_bitmap import load_bitmap
 from .gpu import ScreenQuad
 from .scene_view import NativeScreenView
@@ -22,6 +23,7 @@ class GlueView(NativeScreenView):
         super().__init__(gpu, scene, options)
         self.models = ()
         self.quads = []
+        self.text_labels = []
         self.pressed = None
         self.refresh()
 
@@ -36,10 +38,13 @@ class GlueView(NativeScreenView):
             return
         for quad, _ in self.quads:
             quad.release()
+        for label, _ in self.text_labels:
+            label.release()
         self.models = models
         self.frames = frames
         self.palette = palette
         self.quads = []
+        self.text_labels = []
         for model in self.models:
             for bitmap in model.bitmaps:
                 name = frames.get((model.name, bitmap.name), bitmap.name)
@@ -47,6 +52,19 @@ class GlueView(NativeScreenView):
                 quad = ScreenQuad(self.gpu, surface.get_size())
                 quad.write(pygame.image.tobytes(surface, "RGBA"))
                 self.quads.append((quad, (model.x + bitmap.x, model.y + bitmap.y)))
+            for text in model.texts:
+                value = resolve_text(self.scene.runtime.content, text)
+                if value is None:
+                    continue
+                try:
+                    font = BitmapFont(self.scene.font(text.font or 2))
+                except (KeyError, ValueError):
+                    continue
+                label = self.gpu.text((max(1, text.width or 640), max(1, text.height or font.font.height)),
+                                      font, color=_TEXT_COLOURS.get(text.colour, (0, 0, 0)),
+                                      background=None, padding=0, fixed_width=bool(text.width))
+                label.set_lines((value,))
+                self.text_labels.append((label, (model.x + text.x, model.y + text.y)))
 
     def _palette(self, models):
         """Select the one application palette active for the runtime windows."""
@@ -87,8 +105,26 @@ class GlueView(NativeScreenView):
         left, top, scale = self._layout()
         for quad, (x, y) in self.quads:
             quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
+        for label, (x, y) in self.text_labels:
+            label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
 
     def release(self):
         for quad, _ in self.quads:
             quad.release()
+        for label, _ in self.text_labels:
+            label.release()
         self.quads = []
+        self.text_labels = []
+
+
+_TEXT_COLOURS = {"red": (220, 30, 30), "green": (40, 180, 60), "black": (0, 0, 0)}
+
+
+def resolve_text(content, text):
+    """Resolve one glue text record without importing pygame or a scene context."""
+    if text.string_id is None:
+        return None
+    try:
+        return content.string(text.table or "BRTXT", text.string_id)
+    except KeyError:
+        return None

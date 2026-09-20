@@ -2,6 +2,8 @@ import importlib.util
 import unittest
 
 from whshr.glue_render import GlueRenderModel, RenderHotspot
+from whshr.glue_render import RenderText
+from whshr.glue_content import GlueContent
 
 
 @unittest.skipUnless(importlib.util.find_spec("pygame"), "Pygame is not installed in the headless test environment")
@@ -23,6 +25,13 @@ class GlueViewTests(unittest.TestCase):
         hit = self.view_type.hotspot_at((bottom, top), (8, 8))
 
         self.assertEqual(hit.target, "top-last")
+
+    def test_text_resolution_uses_the_declared_table_or_brtext_by_default(self):
+        from whshr.frontend.glue_view import resolve_text
+        content = GlueContent.from_data(strings={"BRTXT": {7: "default"}, "BKTXT": {7: "book"}})
+
+        self.assertEqual(resolve_text(content, RenderText(7, None)), "default")
+        self.assertEqual(resolve_text(content, RenderText(7, "BKTXT")), "book")
 
 
 if __name__ == "__main__":
