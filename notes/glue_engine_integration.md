@@ -59,7 +59,8 @@ renumber later work.
 
 - [x] **GEI7b — Troop selection view (P0 + P1).** Render the real regiment-select and
   marching-order pages (`notes/troop_selection.md` §2-§5): background, rows, buttons, status
-  text/colours, and P1 reordering (click-to-pick-up/drop, not live drag-and-drop).
+  text/colours, and P1 reordering (click-to-pick-up/drop; the picked row following the cursor
+  visually is GEI7f).
 
 - [x] **GEI7c — Bankruptcy page (P5).** Render `notes/troop_selection.md` §7 and route the forced
   regiments over-budget case to it at open.
@@ -73,7 +74,11 @@ renumber later work.
   §5.3 points 3, 5) on troop-selection Done. Reinforcements still have no standalone-file home in the
   original (only `savegame.N`'s `RMYI` chunk carries them) and stay in-memory pending GEI14's writer.
 
-- [ ] **GEI7f — Troop selection view** live drag-and-drop for P1 reordering.
+- [x] **GEI7f — Troop selection view carried-item tracking.** The picked-up P1 regiment visually
+  follows the cursor (`notes/troop_selection.md` §5.2: "the strip... follows the cursor"). The
+  interaction itself stays click-to-pick-up/click-to-drop, matching the original's own hint text
+  (`BRTXT 315`: "click to pick up, click again to drop") rather than switching to a continuous
+  mouse-button-held drag, which the spec never documents.
 
 - [ ] **GEI8 — Debrief activity.** Present `StartDebrief`, apply the payment and result effects,
   and resume the requesting Glue runtime.
@@ -182,8 +187,20 @@ renumber later work.
   items, sprites, AI script, deployment `x`/`y`, all of it) with only `set:hired` replaced,
   instead of reconstructing a unit from the trimmed fields `Regiment` exposes for display — the
   narrower model would silently drop everything it doesn't track. `CampaignState.commit_troop_selection`
-  calls `roster.write_company`/`write_march` only when `self.content.installation` is set, so
-  tests and other installation-less callers stay a pure in-memory commit.
+  calls `roster.write_company`/`write_march` only when `self.save_dir` is set, so tests and other
+  save-dir-less callers stay a pure in-memory commit.
+- Engine saves never go into the original installation (owner decision, not a spec finding): they
+  write to the engine's own directory (`SceneAssets.save_dir`, default git-ignored `saves/`,
+  `python3 -m whshr engine --save-dir`), threaded from `app.run`/`game.scene_context` down to
+  `CampaignState.save_dir`. The engine keeps no save-format compatibility promise toward the
+  original either; the `.MRC` text grammar is reused in `write_company`/`write_march` because it
+  is already required for reading, not as a compatibility commitment (CLAUDE.md "Engine rule:
+  saves are the engine's own, not the original's").
+- GEI7f: the picked-up P1 row's y position is derived from the raw pointer (`TroopSelectionView.pointer`,
+  updated on every `MOUSEMOTION`), clamped to the visible row band, not quantised to
+  `hover_march_index` (which stays row-granular, for the drop-target highlight only). `refresh()`'s
+  diff state only includes the pointer while a regiment is picked up, so idle mouse movement does
+  not force redraws on P0 or an empty P1.
 
 ## Working rules
 

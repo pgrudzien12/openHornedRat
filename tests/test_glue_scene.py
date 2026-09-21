@@ -192,6 +192,33 @@ class GlueSceneTests(unittest.TestCase):
 
         self.assertEqual(called, ["p0", "buttons"])
 
+    def test_p1_carried_regiment_follows_the_cursor_and_is_hidden_from_its_own_slot(self):
+        model = type("Model", (), {"selection": (2, 5, 6), "row": lambda self, whoami: f"row-{whoami}"})()
+        view = TroopSelectionView.__new__(TroopSelectionView)
+        view.scene = type("Scene", (), {
+            "phase": "march_order", "march_offset": 0, "picked_whoami": 5, "model": model, "record": None,
+        })()
+        view.hover_march_index, view.pointer, view.rows = None, (300, 300), []
+        view.body_font = type("Body", (), {"font": type("Font", (), {"height": 12})()})()
+        bitmaps, regiments = [], []
+        view._title = lambda _text_id: ""
+        view._heading = lambda *_args: None
+        view._bitmap = lambda name, position: bitmaps.append((name, position))
+        view._bitmap_centered = lambda *_a, **_k: None
+        view._center = lambda *_args, **_kwargs: None
+        view._regiment = lambda row, y, x, *, p1: regiments.append((row, y, x, p1))
+        view._string = lambda table, text_id, *args: ""
+
+        view._p1()
+
+        # whoami 5 sits at its normal slot (index 1, y=50+12+4*12*1=110) but must not be drawn there.
+        self.assertNotIn(("row-5", 110, 157, True), regiments)
+        self.assertIn(("row-2", 62, 157, True), regiments)
+        self.assertIn(("row-6", 158, 157, True), regiments)
+        # It instead follows the pointer (y=300), clamped and centred: y = 300 - 2*12 = 276.
+        self.assertIn(("row-5", 276, 157, True), regiments)
+        self.assertIn(("BookScroll0", (145, 266)), bitmaps)
+
     def test_army_records_button_enablement_follows_for_hire_not_selection_or_capacity(self):
         commander = Regiment(2, "Commander", True, 10, 10, 0,
                              RosterRow(2, keep=False, for_hire=False, wizard=False, artillery=False, base_price=10))

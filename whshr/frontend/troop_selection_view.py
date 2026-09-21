@@ -111,6 +111,7 @@ class TroopSelectionView(NativeScreenView):
         self.banner_surfaces = {}
         self.state = None
         self.hover_march_index = None
+        self.pointer = None
         self.scroll_direction = None
         self.scroll_elapsed = 0.0
         self.pressed_button = None
@@ -133,6 +134,7 @@ class TroopSelectionView(NativeScreenView):
         model = self.scene.model
         state = (self.scene.phase, self.scene.page, self.scene.march_offset, self.scene.picked_whoami,
                  self.hover_march_index, self.pressed_button,
+                 self.pointer if self.scene.picked_whoami is not None else None,
                  tuple(model.selection) if model else (), model.total_cost if model else 0)
         if state == self.state:
             return
@@ -185,6 +187,14 @@ class TroopSelectionView(NativeScreenView):
                 self._center(str(index + 1), y, BLACK, x=83, width=56)
                 self._regiment(model.row(whoami), y, 157, p1=True)
             self.rows.append((pygame.Rect(83, y - height, 482, 4 * height), index))
+        if self.scene.picked_whoami is not None and self.pointer is not None:
+            # notes/troop_selection.md §5.2: "the strip (BookScroll0) with its contents follows
+            # the cursor while the original row is hidden" - only x=145/157 are fixed; y tracks
+            # the cursor, clamped to the visible row band.
+            row_top, row_bottom = 50 + height, 50 + height + 4 * height * (P1_ROWS - 1)
+            y = max(row_top, min(self.pointer[1] - 2 * height, row_bottom))
+            self._bitmap("BookScroll0", (145, y - 10))
+            self._regiment(model.row(self.scene.picked_whoami), y, 157, p1=True)
         self._center(self._string("BRTXT", 315), 400, BLUE)
         self._center(self._string("BRTXT", 316), 400 + height, BLUE)
 
@@ -426,11 +436,11 @@ class TroopSelectionView(NativeScreenView):
 
     def _update_march_hover(self, point):
         self.scroll_direction = self._scroll_direction_at(point)
-        if self.scene.phase != "march_order" or self.scene.picked_whoami is None:
-            next_hover = None
-        else:
-            next_hover = next((index for rect, index in self.rows if rect.collidepoint(point)), None)
-        if next_hover != self.hover_march_index:
+        carrying = self.scene.phase == "march_order" and self.scene.picked_whoami is not None
+        next_hover = next((index for rect, index in self.rows if rect.collidepoint(point)), None) if carrying else None
+        moved = carrying and point != self.pointer
+        self.pointer = point
+        if next_hover != self.hover_march_index or moved:
             self.hover_march_index = next_hover
             self.refresh()
 
