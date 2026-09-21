@@ -12,6 +12,7 @@ from .campaign import build_campaign_graph, parse_window_ui
 from .glue import MissionRef
 from .glue_content import GlueContent
 from .paths import Installation
+from . import roster
 from .roster import load_company
 
 
@@ -117,6 +118,15 @@ class CampaignState:
         self.coffers += deployment.money_delta
         self.march_units = set(deployment.units)
         self.army_units = set(deployment.hired)
+        installation = getattr(self.content, "installation", None)
+        if installation is not None:
+            # notes/troop_selection.md §5.3 points 3, 5: durable ARMY.MRC/MARCH.MRC
+            # (notes/glue_engine_integration.md GEI7e). Reinforcements have no standalone-file
+            # home in the original either (only the savegame.N RIFF's RMYI chunk carries them,
+            # notes/campaign.md §4.5), so they stay in-memory until GEI14 defines that writer.
+            hired = {whoami: whoami in self.army_units for whoami in {r.whoami for r in self.company}}
+            roster.write_company(installation, self.company, hired)
+            roster.write_march(installation, deployment.units, self.company)
 
     def autosave(self, runtime_state):
         self.autosave_state = deepcopy(runtime_state)

@@ -2,7 +2,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from whshr.roster import Regiment, RosterRow, load_company
+from whshr import script
+from whshr.roster import Regiment, RosterRow, load_company, write_company, write_march
 from whshr.script import resource_name
 
 MRC = """[MERCARMY]
@@ -75,6 +76,43 @@ class RosterTests(unittest.TestCase):
         cavalry = Regiment(2, "Grudgebringer Cavalry", True, 0, 12, 13, self.roster[2])
 
         self.assertTrue(cavalry.destroyed)
+
+    def test_given_a_fired_regiment_when_the_company_is_written_then_it_is_dropped(self):
+        company = load_company(self.root, roster=self.roster)
+
+        write_company(self.root, company, hired={2: True, 14: False})
+
+        written = script.parse(str(self.root / "SAVE/ARMY.MRC"))
+        units = script.units_of(written)
+        self.assertEqual([script.unit_view(u)["set"]["whoami"] for u in units], [2])
+
+    def test_given_a_hired_regiment_when_the_company_is_written_then_its_hired_flag_is_current(self):
+        company = load_company(self.root, roster=self.roster)
+        cavalry = next(r for r in company if r.whoami == 2)
+        self.assertTrue(cavalry.hired)  # was already hired=1 in the source file
+
+        write_company(self.root, company, hired={2: False, 14: True})
+
+        written = script.parse(str(self.root / "SAVE/ARMY.MRC"))
+        views = {script.unit_view(u)["set"]["whoami"]: script.unit_view(u) for u in script.units_of(written)}
+        self.assertEqual([w for w in views], [14])  # 2 dropped (fired), 14 kept (hired)
+        self.assertEqual(views[14]["set"]["hired"], 1)
+
+    def test_given_a_marching_order_when_written_then_units_appear_in_that_order(self):
+        company = load_company(self.root, roster=self.roster)
+
+        write_march(self.root, (14, 2), company)
+
+        written = script.parse(str(self.root / "SAVE/MARCH.MRC"))
+        self.assertEqual([script.unit_view(u)["set"]["whoami"] for u in script.units_of(written)], [14, 2])
+
+    def test_given_a_regiment_loaded_from_a_synthetic_source_with_no_raw_node_then_writing_skips_it(self):
+        synthetic = Regiment(99, "Synthetic", True, 1, 1, 0, self.roster[2])
+
+        write_company(self.root, (synthetic,), hired={99: True})
+
+        written = script.parse(str(self.root / "SAVE/ARMY.MRC"))
+        self.assertEqual(script.units_of(written), [])
 
 
 if __name__ == "__main__":

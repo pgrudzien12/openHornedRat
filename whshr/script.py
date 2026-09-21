@@ -126,6 +126,39 @@ def parse(path):
     return root
 
 
+def write(node):
+    """Serialize a parse() node tree back to .BTS/.MRC text; the inverse of parse().
+
+    Round-trips semantically, not byte-for-byte: field order is normalised (label, set,
+    setstats, cmds, children) and comments other than a section's own label are dropped,
+    matching what parse() itself already discards. A written-then-parsed tree carries the
+    same set/stats/cmds/children data as the original.
+    """
+    lines = []
+    _write_node(node, lines)
+    return "\n".join(lines) + "\n"
+
+
+def _write_node(node, lines):
+    # A label comment is the first line *inside* a section (parse() attaches it to
+    # whichever section is already open when the comment line is read), never before a block.
+    if node['kind'] == 'section':
+        lines.append(f"[{node['name']}]")
+        if node['label'] is not None:
+            lines.append(f"; {node['label']}")
+    else:
+        lines.append(f"{node['kind']}:{node['name']}")
+    for key, value in node['set'].items():
+        lines.append(f"set:{key}={value}")
+    for key, values in node['stats'].items():
+        lines.append(f"setstats:{key}={','.join(str(v) for v in values)}")
+    for key, value in node['cmds']:
+        lines.append(f"{key}:{value}")
+    for child in node['children']:
+        _write_node(child, lines)
+    lines.append("[END]" if node['kind'] == 'section' else f"{BLOCKS[node['kind']]}:")
+
+
 # ---------------------------------------------------------------- helpers
 
 def _num(s):
@@ -233,6 +266,13 @@ def load_army(path):
     return {'file': os.path.basename(path), 'type': root['name'],
             'mission': mission_view(_section(root, 'MISSIONINFO')),
             'armies': [army_view(s) for s in _sections(root, 'UNITS')]}
+
+
+def units_of(root):
+    """Raw ``addunit`` nodes of every ``[UNITS]`` section, for callers that need the full node
+    (e.g. to round-trip it through :func:`write`) rather than :func:`unit_view`'s trimmed view."""
+    return [child for section in _sections(root, 'UNITS') for child in section['children']
+            if child['kind'] == 'addunit']
 
 
 def load_battle(path, with_merc=True):

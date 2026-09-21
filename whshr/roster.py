@@ -6,7 +6,7 @@ copied game content (`notes/campaign.md` §4.5's full table already lives in tha
 not as copyrightable expression).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .paths import Installation
 from .rules import PeImage, stat_fields
@@ -63,6 +63,7 @@ class Regiment:
     leader_profile: tuple = ()
     leader_armour: int = 0
     leader_weapon: int = 0
+    raw: object = field(default=None, repr=False, compare=False)  # the parse() node, for write_company/write_march
 
     @property
     def destroyed(self):
@@ -93,34 +94,78 @@ def load_company(installation, roster=None, path=STARTING_COMPANY):
     """
     game = installation if isinstance(installation, Installation) else Installation(installation)
     roster = roster if roster is not None else static_roster(game)
-    army = script.load_army(str(game.file_dir(*path)))
+    root = script.parse(str(game.file_dir(*path)))
     regiments = []
-    for group in army["armies"]:
-        for unit in group["units"]:
-            whoami = unit["set"].get("whoami")
-            row = roster.get(whoami) if whoami is not None else None
-            if row is None:
-                continue
-            fields = stat_fields(unit["stats"])[0]
-            leader = unit.get("leader")
-            leader_fields = stat_fields(leader["stats"])[0] if leader is not None else {}
-            regiments.append(Regiment(
-                whoami=whoami, name=unit["name"], hired=bool(unit["set"].get("hired", 0)),
-                models=fields.get("s_size", 0), orgsize=fields.get("s_orgsize", 0),
-                points=fields.get("s_pntval", 0), row=row,
-                weapon_name=fields.get("s_weponame", 0), armour=fields.get("s_armr", 0),
-                banner=unit.get("banner"),
-                profile=tuple(fields.get(name, 0) for name in
-                              ("s_move", "s_wepn", "s_bals", "s_strn", "s_tuff", "s_wnds", "s_init", "s_atks", "s_lead")),
-                # s_Exp is a scalar `set:` field (FORMATS.md's unit block), not a `setstats:`
-                # block entry, so it lives in unit["set"], not unit["stats"]; Army Records
-                # displays it (§8, campaign.md §1).
-                experience=unit["set"].get("s_Exp", 0),
-                leader_name=leader["name"] if leader else None,
-                leader_portrait=leader["portrait"] if leader else None,
-                leader_profile=tuple(leader_fields.get(name, 0) for name in
-                                     ("s_move", "s_wepn", "s_bals", "s_strn", "s_tuff", "s_wnds", "s_init", "s_atks", "s_lead")),
-                leader_armour=leader_fields.get("s_armr", 0),
-                leader_weapon=leader_fields.get("s_weponame", 0),
-            ))
+    for node in script.units_of(root):
+        unit = script.unit_view(node)
+        whoami = unit["set"].get("whoami")
+        row = roster.get(whoami) if whoami is not None else None
+        if row is None:
+            continue
+        fields = stat_fields(unit["stats"])[0]
+        leader = unit.get("leader")
+        leader_fields = stat_fields(leader["stats"])[0] if leader is not None else {}
+        regiments.append(Regiment(
+            whoami=whoami, name=unit["name"], hired=bool(unit["set"].get("hired", 0)),
+            models=fields.get("s_size", 0), orgsize=fields.get("s_orgsize", 0),
+            points=fields.get("s_pntval", 0), row=row,
+            weapon_name=fields.get("s_weponame", 0), armour=fields.get("s_armr", 0),
+            banner=unit.get("banner"),
+            profile=tuple(fields.get(name, 0) for name in
+                          ("s_move", "s_wepn", "s_bals", "s_strn", "s_tuff", "s_wnds", "s_init", "s_atks", "s_lead")),
+            # s_Exp is a scalar `set:` field (FORMATS.md's unit block), not a `setstats:`
+            # block entry, so it lives in unit["set"], not unit["stats"]; Army Records
+            # displays it (§8, campaign.md §1).
+            experience=unit["set"].get("s_Exp", 0),
+            leader_name=leader["name"] if leader else None,
+            leader_portrait=leader["portrait"] if leader else None,
+            leader_profile=tuple(leader_fields.get(name, 0) for name in
+                                 ("s_move", "s_wepn", "s_bals", "s_strn", "s_tuff", "s_wnds", "s_init", "s_atks", "s_lead")),
+            leader_armour=leader_fields.get("s_armr", 0),
+            leader_weapon=leader_fields.get("s_weponame", 0),
+            raw=node,
+        ))
     return tuple(regiments)
+
+
+def _unit_section(units, label):
+    """A [MERCARMY]/[UNITS] root wrapping ``units`` (raw addunit nodes); notes/campaign.md §4.4."""
+    units_section = {'kind': 'section', 'name': 'UNITS', 'line': 0, 'label': label,
+                     'set': {'count': str(len(units))}, 'stats': {}, 'cmds': [], 'children': list(units)}
+    return {'kind': 'section', 'name': 'MERCARMY', 'line': 0, 'label': None,
+           'set': {}, 'stats': {}, 'cmds': [], 'children': [units_section]}
+
+
+def _with_hired(node, hired):
+    """A shallow copy of ``node`` with its ``set:hired`` value replaced; never mutates ``node``."""
+    copy = dict(node)
+    copy['set'] = dict(node['set'])
+    copy['set']['hired'] = '1' if hired else '0'
+    return copy
+
+
+def write_company(installation, regiments, hired, path=("SAVE", "ARMY.MRC")):
+    """Write the company roster (notes/troop_selection.md §5.3 point 5: hired regiments only).
+
+    ``hired`` is a ``{whoami: bool}`` mapping (the confirmed troop-selection state); regiments
+    without a ``raw`` node (not loaded from a real .MRC, e.g. in tests) are skipped.
+    """
+    game = installation if isinstance(installation, Installation) else Installation(installation)
+    units = [_with_hired(regiment.raw, True) for regiment in regiments
+             if regiment.raw is not None and hired.get(regiment.whoami, regiment.hired)]
+    _write_units_file(game, path, units, "Mercenary Army")
+
+
+def write_march(installation, ordered_whoami, regiments, path=("SAVE", "MARCH.MRC")):
+    """Write the marching order (notes/troop_selection.md §5.3 point 3), in list order."""
+    game = installation if isinstance(installation, Installation) else Installation(installation)
+    by_whoami = {regiment.whoami: regiment for regiment in regiments}
+    units = [_with_hired(by_whoami[whoami].raw, True) for whoami in ordered_whoami
+             if by_whoami.get(whoami) is not None and by_whoami[whoami].raw is not None]
+    _write_units_file(game, path, units, "Mercenary Army (Marching Orders)")
+
+
+def _write_units_file(game, path, units, label):
+    target = game.root.joinpath(*path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(script.write(_unit_section(units, label)))

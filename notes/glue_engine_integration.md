@@ -69,9 +69,9 @@ renumber later work.
   Hire/Fire variant. Caravan book hotspots, reinforcement controls, and durable roster writes
   remain deferred to their separately scoped work.
 
-- [ ] **GEI7e — Durable roster and marching order.** Write `ARMY.MRC`/`MARCH.MRC` and persist
-  reinforcements instead of only updating in-memory `CampaignState`; belongs with GEI14's save/load
-  persistence model rather than GEI7's in-memory commit.
+- [x] **GEI7e — Durable roster and marching order.** Write `ARMY.MRC`/`MARCH.MRC` (notes/troop_selection.md
+  §5.3 points 3, 5) on troop-selection Done. Reinforcements still have no standalone-file home in the
+  original (only `savegame.N`'s `RMYI` chunk carries them) and stay in-memory pending GEI14's writer.
 
 - [ ] **GEI7f — Troop selection view** live drag-and-drop for P1 reordering.
 
@@ -171,8 +171,19 @@ renumber later work.
   `TroopSelection` model: `forHire` controls enablement, hire appends a selection when capacity
   permits, fire deselects, and a full selection leaves a newly hired regiment unselected without
   a refusal sound or coffer change. Done keeps the in-memory changes; Abort restores the book-open
-  hired snapshot and removes any cancelled hire from the selection. No ARMY/MARCH file write,
-  caravan economy, or reinforcement UI was added.
+  hired snapshot and removes any cancelled hire from the selection. Caravan economy and
+  reinforcement UI were not added; ARMY/MARCH file writes are GEI7e.
+- GEI7e added `script.write()`, a generic inverse of `script.parse()` (any `.BTS`/`.MRC` node
+  tree back to text), rather than a roster-specific serializer: round-tripped against all 87
+  shipped `.BTS`/`.MRC` files plus the real `SAVE/ARMY.MRC`/`PLAY.MRC`/`MARCH.MRC`, byte-for-byte
+  semantic equality (field order is normalised; only decorative comments other than a section's
+  own label, already discarded by `parse()`, are not reproduced). `roster.Regiment` keeps the raw
+  `addunit` node (`raw`) precisely so a write reuses that verbatim node (leader block, spells,
+  items, sprites, AI script, deployment `x`/`y`, all of it) with only `set:hired` replaced,
+  instead of reconstructing a unit from the trimmed fields `Regiment` exposes for display — the
+  narrower model would silently drop everything it doesn't track. `CampaignState.commit_troop_selection`
+  calls `roster.write_company`/`write_march` only when `self.content.installation` is set, so
+  tests and other installation-less callers stay a pure in-memory commit.
 
 ## Working rules
 
