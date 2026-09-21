@@ -8,6 +8,7 @@ import pygame
 
 from ..glue_palette import AppPalette
 from ..legacy import module
+from ..portraits import BACKGROUND_SET, CROP_WINDOWS, LEADER_BOX_SIZE, NO_MATCH_CROP_WINDOW, load_sprite_sheet
 from ..script import resource_name
 from .bitmap_font import BitmapFont
 from .glue_bitmap import load_optional_bitmap
@@ -71,6 +72,7 @@ class ArmyRecordsView(NativeScreenView):
         self._description_cache = {}
         self.sprite_files = None
         self.sprite_surfaces = {}
+        self.crop_surfaces = {}
         self.refresh()
 
     def refresh(self):
@@ -114,25 +116,29 @@ class ArmyRecordsView(NativeScreenView):
             y = 39 + 2 * h
             self._sprite(regiment.banner, (350, y))
             self._equipment_block(regiment.armour, regiment.weapon_name, 350, y + 106)
-            if regiment.leader_name and regiment.models != 1:
-                self._sprite(regiment.leader_portrait, (470, y), size=(72, 104))
+            # notes/builtin_widgets.md §2.3: the Information page shows the leader block whenever
+            # a leader is present; unlike the Statistics page it is not gated on models == 1.
+            if regiment.leader_name:
+                self._leader_box(470, y, regiment)
                 self._label(regiment.leader_name, 470, y + 106, BLACK)
                 self._equipment_block(regiment.leader_armour, regiment.leader_weapon, 470, y + 106 + h)
-            description_y = y + 106 + (5 * h if regiment.leader_name and regiment.models != 1 else 4 * h)
+            description_y = y + 106 + (5 * h if regiment.leader_name else 4 * h)
             self._paragraph(self._description(regiment.whoami), 350, description_y, 240)
             self._status_line(regiment)
             return
         self._center(self._string("BKTXT", 503), 39, BLACK, x=350, width=240)
         # Regiment currently retains the profile fields needed by selection only;
         # absent profile data is intentionally not guessed.
-        profile = regiment.leader_profile if regiment.leader_name and regiment.models == 1 else regiment.profile
+        show_leader = regiment.leader_name and regiment.models == 1
+        profile = regiment.leader_profile if show_leader else regiment.profile
         h = self.body_font.font.height
         y = 39 + 2 * h
-        portrait = regiment.leader_portrait if regiment.leader_name and regiment.models == 1 else regiment.banner
-        self._sprite(portrait, (350, y), size=(72, 104) if portrait == regiment.leader_portrait else None)
-        if regiment.leader_name and regiment.models == 1:
+        if show_leader:
+            self._leader_box(350, y, regiment)
             self._label(regiment.leader_name, 350, y + 106, BLACK)
-        y += 106 + (h if regiment.leader_name and regiment.models == 1 else 0)
+        else:
+            self._sprite(regiment.banner, (350, y))
+        y += 106 + (h if show_leader else 0)
         for index in range(9):
             value = profile[index] if index < len(profile) else "-"
             row_y = y + index * h
@@ -256,29 +262,78 @@ class ArmyRecordsView(NativeScreenView):
 
     def _sprite(self, name, position, *, size=None):
         """Draw frame zero of a runtime banner or leader-portrait resource (§2.2)."""
-        resource = resource_name(name)
-        if resource is None or self.content.installation is None:
-            return
-        if self.sprite_files is None:
-            from ..battlefield import resource_files
-            self.sprite_files = resource_files(self.content.installation, {"banners", "portraits"})
-        base = self.sprite_files.get(resource.casefold())
+        base = self._resolve_sprite_base(name)
         if base is None:
             return
-        surface = self.sprite_surfaces.get(base)
-        if surface is None:
-            try:
-                from ..portraits import load_sprite_sheet
-                frame = load_sprite_sheet(self.content.installation, base).frames[0]
-                surface = pygame.image.frombuffer(self.palette.rgba(frame.pixels),
-                                                   (frame.width, frame.height), "RGBA").copy()
-            except (FileNotFoundError, IndexError, OSError, ValueError):
-                surface = False
-            self.sprite_surfaces[base] = surface
+        surface = self._decode_frame(base)
         if surface is False:
             return
         if size is not None and surface.get_size() != size:
             surface = pygame.transform.scale(surface, size)
+        self._append_quad(surface, position)
+
+    def _leader_box(self, x, y, regiment):
+        """Crop-composite the leader portrait over its background (notes/builtin_widgets.md §2.3,
+        notes/glue_portraits.md §1.3): background and portrait share one crop window into their
+        120x152 frame 0, so the face stays centred. A leader whose portrait set is not in the
+        roster book's resident list falls back to a fixed background window and the regiment's
+        banner drawn at full size instead of a cropped portrait.
+        """
+        base = self._resolve_sprite_base(regiment.leader_portrait)
+        window = CROP_WINDOWS.get(base.upper()) if base else None
+        origin = window if window is not None else NO_MATCH_CROP_WINDOW
+        self._draw_crop(BACKGROUND_SET, origin, (x, y))
+        if window is not None:
+            self._draw_crop(base, origin, (x, y))
+        else:
+            self._sprite(regiment.banner, (x, y))
+
+    def _resolve_sprite_base(self, name):
+        resource = resource_name(name)
+        if resource is None or self.content.installation is None:
+            return None
+        if self.sprite_files is None:
+            from ..battlefield import resource_files
+            self.sprite_files = resource_files(self.content.installation, {"banners", "portraits"})
+        return self.sprite_files.get(resource.casefold())
+
+    def _decode_frame(self, base, frame_index=0):
+        key = (base, frame_index)
+        surface = self.sprite_surfaces.get(key)
+        if surface is None:
+            try:
+                frame = load_sprite_sheet(self.content.installation, base).frames[frame_index]
+                surface = pygame.image.frombuffer(self.palette.rgba(frame.pixels),
+                                                   (frame.width, frame.height), "RGBA").copy()
+            except (FileNotFoundError, IndexError, OSError, ValueError):
+                surface = False
+            self.sprite_surfaces[key] = surface
+        return surface
+
+    def _draw_crop(self, base, origin, position):
+        """Draw the documented 72x104 crop of ``base``'s frame 0 at ``origin`` (§1.3)."""
+        key = (base, origin)
+        surface = self.crop_surfaces.get(key)
+        if surface is None:
+            try:
+                frame = load_sprite_sheet(self.content.installation, base).frames[0]
+                pixels = self._crop_pixels(frame, origin, LEADER_BOX_SIZE)
+                surface = pygame.image.frombuffer(self.palette.rgba(pixels), LEADER_BOX_SIZE, "RGBA").copy()
+            except (FileNotFoundError, IndexError, OSError, ValueError):
+                surface = False
+            self.crop_surfaces[key] = surface
+        if surface is False:
+            return
+        self._append_quad(surface, position)
+
+    @staticmethod
+    def _crop_pixels(frame, origin, size):
+        ox, oy = origin
+        width, height = size
+        return b"".join(frame.pixels[(oy + row) * frame.width + ox:(oy + row) * frame.width + ox + width]
+                        for row in range(height))
+
+    def _append_quad(self, surface, position):
         quad = ScreenQuad(self.gpu, surface.get_size())
         quad.write(pygame.image.tobytes(surface, "RGBA"))
         self.quads.append((quad, position))

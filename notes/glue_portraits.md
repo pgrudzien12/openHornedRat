@@ -10,8 +10,8 @@ from the front-end code and checked against data/renders), 🟡 inferred, ⬜ un
 `index` is **not** a position in the leader-portrait category of the sprite-name table and not a name lookup. The front end
 keeps one **resident portrait list** of 37 records (loaded when the glue is initialised, terminated by a `-1` marker). Each
 record holds a sprite-table index (`notes/sprite_names.md`); the `[ANIM]` `index` is the position in this list.
-Each record also carries two further integers (used by the roster book, not by glue windows; meaning unknown ⬜).
-The list is also what the roster book uses to find a regiment's portrait from a sprite-table index (inferred 🟡).
+Each record also carries two further integers: the crop-window origin used by the roster book, not by glue windows (§1.3).
+The list is also what the roster book uses to find a regiment's portrait from a sprite-table index (§1.3).
 
 The list is a small fixed table in the executable. Every entry is a leader-portrait sprite set (`.FOL/.BOP` in
 `FILE/BINARY` or `UPDATE/BINARY`, 6–8 type-1 frames: frame 0 = 120×152 portrait, later frames = mouth/eye overlays),
@@ -79,6 +79,58 @@ The others belong to regiment/leader portraits in the roster book.
 - **Ungrunn index 10 (same as Gotrek).** `UngrunnWindow` (index 10, `GOTR`) is **never opened** by any script; only
   `UngrunnWindowBR` (index 35, `KING`) is (`SZBrief5`). The index-10 window is a dead template. Do not treat it as a mapping
   error in the table.
+
+### 1.3 Roster-book crop window ✅
+
+The two extra integers of each record are the **x, y origin of a 72×104 crop window** inside the 120×152 frame 0 of the
+set. The roster book (`notes/builtin_widgets.md` §2.3) uses the same window for the portrait and for its background, so
+the face stays centred. Glue windows ignore them. A set that the roster never shows has (0, 0). All x are ≤ 47 and all y ≤ 30
+(the slack of a 72×104 window in 120×152). Rendered crops of `COMM`, `GOTR`, `DWA3`, `REIK`, `BRIW`, `TREE`, `IRON`, `ELF1`
+frame each face centrally with nothing cut off.
+
+| Index | Set | X | Y |
+|---|---|---|---|
+| 0 | `CER1` | 0 | 0 |
+| 1 | `CARL` | 0 | 0 |
+| 2 | `COMM` | 26 | 6 |
+| 3 | `SKA4` | 0 | 0 |
+| 4 | `SCRI` | 0 | 0 |
+| 5 | `MER1` | 26 | 5 |
+| 6 | `DWA1` | 23 | 12 |
+| 7 | `DWA2` | 25 | 17 |
+| 8 | `DWA3` | 47 | 5 |
+| 9 | `DWA4` | 30 | 21 |
+| 10 | `GOTR` | 20 | 6 |
+| 11 | `ELF1` | 29 | 5 |
+| 12 | `BRIW` | 41 | 16 |
+| 13 | `MER2` | 16 | 5 |
+| 14 | `REIK` | 19 | 4 |
+| 15 | `ORC2` | 0 | 0 |
+| 16 | `GOB1` | 0 | 0 |
+| 17 | `BERN` | 23 | 11 |
+| 18 | `CER2` | 24 | 3 |
+| 19 | `BERI` | 0 | 0 |
+| 20 | `HOLG` | 26 | 20 |
+| 21 | `ENGR` | 24 | 14 |
+| 22 | `AZGU` | 24 | 8 |
+| 23 | `AMBE` | 23 | 12 |
+| 24 | `GINF` | 22 | 9 |
+| 25 | `RAMO` | 23 | 7 |
+| 26 | `CARO` | 23 | 6 |
+| 27 | `ART1` | 35 | 16 |
+| 28 | `CELE` | 24 | 5 |
+| 29 | `HALB` | 17 | 8 |
+| 30 | `KEEL` | 23 | 9 |
+| 31 | `XBOW` | 25 | 9 |
+| 32 | `TREE` | 21 | 30 |
+| 33 | `HAMM` | 31 | 9 |
+| 34 | `IRON` | 13 | 18 |
+| 35 | `KING` | 0 | 0 |
+| 36 | `BACKALL` | 0 | 0 |
+
+Lookup: the roster book searches this list linearly for the sprite-table index stored in the regiment's leader block; the
+match position gives the window. Without a match: no portrait, the background window defaults to (25, 5), and the regiment's
+banner is drawn at full size in the box instead (🟡: how often this happens with shipped `.MRC` data).
 
 ## 2. `bkindex` and the background frames ✅
 

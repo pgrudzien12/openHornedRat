@@ -11,10 +11,10 @@ MRC = """[MERCARMY]
 addunit:Grudgebringer<Cavalry
 set:whoami=2
 set:hired=1
+set:s_Exp=77
 banner:COMM,0
 setstats:s_side=2,12,12,4
 setstats:s_pntval=13
-setstats:s_Exp=77
 setstats:s_armr=5
 setstats:s_weponame=17
 endunit:

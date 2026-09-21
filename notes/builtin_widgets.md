@@ -114,10 +114,14 @@ from code, not measured on a screen.
 - Closing re-shows the parent window if it is hidden (troop selection). The palette is **not** switched back on that path, so the
   troop window keeps palette 9 (`BK2`) after the book closes 🟡 (see the palette notes; the glue-path exit resets palette 2).
 
-**Open research item:** the roster-book leader portrait requires a background, but the documented 72×104
-box does not yet identify its bitmap/frame or the mapping from a leader portrait to that background. The
-two per-portrait roster-book values noted in `notes/glue_portraits.md` §1 may supply that mapping. Do not
-substitute an arbitrary `BACKALL` frame in implementation.
+**Leader portrait box ✅** (both pages: Information at x = 470, Statistics at x = 350, same routine, destination 72×104):
+1. Background: frame 0 of `BACKALL` (sprite-table index 123, a hills landscape; the same for every regiment), cropped with the
+   window of `notes/glue_portraits.md` §1.3. 🟡 that frame 0 is really the one shown (inferred from load order; confirm in the original).
+2. Portrait: frame 0 of the leader's portrait set, cropped with the same window and drawn over the background.
+3. No scaling, border or frame. Raw palette indices are copied (BK2 palette 9), index 0 is transparent, no colour map.
+4. Draw order: background, portrait (or banner when the portrait set is not in the resident list, §1.3), then the name.
+5. Information page: drawn whenever the regiment has a leader; a single-model leader is *not* excluded (🟡 confirm in the original).
+Implemented in `whshr/frontend/army_records_view.py` (`_leader_box`/`_draw_crop`): crops, does not scale. No other window uses this routine.
 
 ### 2.4 Reinforcement sub-window (answers "layout and interaction") ✅
 

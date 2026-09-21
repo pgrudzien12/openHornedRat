@@ -12,6 +12,24 @@ PORTRAIT_SPRITES = {
     32: "TREE", 33: "HAMM", 34: "IRON", 35: "KING",
 }
 
+# Roster-book crop window: x, y origin of the 72x104 box cropped from a set's 120x152 frame 0,
+# shared by the background (BACKALL frame 0) and the leader portrait so the face stays centred;
+# notes/glue_portraits.md §1.3, notes/builtin_widgets.md §2.3. Keyed by set name (upper case).
+LEADER_BOX_SIZE = (72, 104)
+BACKGROUND_SET = "BACKALL"
+NO_MATCH_CROP_WINDOW = (25, 5)  # background origin when the leader's portrait set has no entry below
+CROP_WINDOWS = {
+    "CER1": (0, 0), "CARL": (0, 0), "COMM": (26, 6), "SKA4": (0, 0), "SCRI": (0, 0),
+    "MER1": (26, 5), "DWA1": (23, 12), "DWA2": (25, 17), "DWA3": (47, 5), "DWA4": (30, 21),
+    "GOTR": (20, 6), "ELF1": (29, 5), "BRIW": (41, 16), "MER2": (16, 5), "REIK": (19, 4),
+    "ORC2": (0, 0), "GOB1": (0, 0), "BERN": (23, 11), "CER2": (24, 3), "BERI": (0, 0),
+    "HOLG": (26, 20), "ENGR": (24, 14), "AZGU": (24, 8), "AMBE": (23, 12), "GINF": (22, 9),
+    "RAMO": (23, 7), "CARO": (23, 6), "ART1": (35, 16), "CELE": (24, 5), "HALB": (17, 8),
+    "KEEL": (23, 9), "XBOW": (25, 9), "TREE": (21, 30), "HAMM": (31, 9), "IRON": (13, 18),
+    "KING": (0, 0), BACKGROUND_SET: (0, 0),
+}
+
+
 def load_sprite_sheet(game, name):
     """Decode one installation-resident FOL/BOP sprite set."""
     return read_sprite_sheet(

@@ -232,6 +232,53 @@ class GlueSceneTests(unittest.TestCase):
         self.assertIn(("BKTXT", 501, (100, 10)), calls)
         self.assertIn(("BKTXT", 500, (77,)), calls)
 
+    def test_leader_box_crops_background_and_portrait_at_the_same_matched_window(self):
+        from whshr.portraits import BACKGROUND_SET
+
+        regiment = Regiment(2, "Commander", True, 10, 10, 0,
+                            RosterRow(2, keep=False, for_hire=False, wizard=False, artillery=False, base_price=10),
+                            leader_portrait="Commander,0")
+        view = ArmyRecordsView.__new__(ArmyRecordsView)
+        calls = []
+        view._resolve_sprite_base = lambda _name: "COMM"
+        view._draw_crop = lambda base, origin, position: calls.append(("crop", base, origin, position))
+        view._sprite = lambda *args, **kwargs: calls.append(("sprite", args, kwargs))
+
+        view._leader_box(470, 100, regiment)
+
+        window = (26, 6)  # notes/glue_portraits.md §1.3: COMM
+        self.assertEqual(calls, [
+            ("crop", BACKGROUND_SET, window, (470, 100)),
+            ("crop", "COMM", window, (470, 100)),
+        ])
+
+    def test_leader_box_with_no_matched_portrait_falls_back_to_the_default_window_and_the_banner(self):
+        from whshr.portraits import BACKGROUND_SET, NO_MATCH_CROP_WINDOW
+
+        regiment = Regiment(5, "Recruit", True, 10, 10, 0,
+                            RosterRow(5, keep=False, for_hire=True, wizard=False, artillery=False, base_price=10),
+                            leader_portrait="Nobody,0", banner="SomeBanner,0")
+        view = ArmyRecordsView.__new__(ArmyRecordsView)
+        calls = []
+        view._resolve_sprite_base = lambda _name: None
+        view._draw_crop = lambda base, origin, position: calls.append(("crop", base, origin, position))
+        view._sprite = lambda name, position: calls.append(("sprite", name, position))
+
+        view._leader_box(350, 100, regiment)
+
+        self.assertEqual(calls, [
+            ("crop", BACKGROUND_SET, NO_MATCH_CROP_WINDOW, (350, 100)),
+            ("sprite", "SomeBanner,0", (350, 100)),
+        ])
+
+    def test_crop_pixels_extracts_the_documented_window_row_major(self):
+        frame = type("Frame", (), {"width": 4, "height": 3,
+                                    "pixels": bytes(range(12))})()  # 4x3: rows [0-3][4-7][8-11]
+
+        cropped = ArmyRecordsView._crop_pixels(frame, (1, 1), (2, 2))
+
+        self.assertEqual(cropped, bytes([5, 6, 9, 10]))
+
     def test_closing_army_records_returns_to_the_same_selection_scene_and_keeps_its_page(self):
         company = tuple(Regiment(whoami, f"Unit {whoami}", True, 10, 10, 0,
                                  RosterRow(whoami, keep=False, for_hire=True, wizard=False,

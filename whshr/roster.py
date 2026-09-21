@@ -112,9 +112,10 @@ def load_company(installation, roster=None, path=STARTING_COMPANY):
                 banner=unit.get("banner"),
                 profile=tuple(fields.get(name, 0) for name in
                               ("s_move", "s_wepn", "s_bals", "s_strn", "s_tuff", "s_wnds", "s_init", "s_atks", "s_lead")),
-                # s_Exp is outside the contiguous profile block consumed by
-                # stat_fields(); Army Records displays it (§8, campaign §1).
-                experience=(unit["stats"].get("s_Exp") or [0])[0],
+                # s_Exp is a scalar `set:` field (FORMATS.md's unit block), not a `setstats:`
+                # block entry, so it lives in unit["set"], not unit["stats"]; Army Records
+                # displays it (§8, campaign.md §1).
+                experience=unit["set"].get("s_Exp", 0),
                 leader_name=leader["name"] if leader else None,
                 leader_portrait=leader["portrait"] if leader else None,
                 leader_profile=tuple(leader_fields.get(name, 0) for name in
