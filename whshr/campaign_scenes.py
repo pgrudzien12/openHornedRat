@@ -5,6 +5,7 @@ from .battle_scene import BattleScene, FIRST_BATTLE
 from .campaign_state import CampaignState
 from .campaign import parse_window_ui
 from .engine import DEFAULT_SEED
+from .glue_runtime import ActivityResult
 from .glue_scene import GlueScene
 from .glue_fonts import glue_font_asset
 from .legacy import module
@@ -47,7 +48,7 @@ class OpeningNarrationScene(Scene):
                              prefetch=(INTRO_CUTSCENE, INTRO_MEDIA))
 
     def __init__(self, successor=None, log_dir=None, seed=DEFAULT_SEED):
-        self.successor = successor or IntroScene(log_dir=log_dir, seed=seed)
+        self.successor = successor or MovieScene("a1", successor=MainMenuScene(log_dir=log_dir, seed=seed))
         self.texts = None
         self.subtitle_font = None
         self.text = None
@@ -65,14 +66,27 @@ class OpeningNarrationScene(Scene):
         return None
 
 
-class IntroScene(Scene):
-    """Play the verified A1 game-intro timeline, then proceed to the main menu."""
+class MovieScene(Scene):
+    """Play one Omni cutscene timeline (notes/si_omni.md) end-to-end, then hand control back.
 
-    manifest = SceneManifest(immediate=(INTRO_CUTSCENE, INTRO_MEDIA, ANIMATION_TEXT, SUBTITLE_FONT),
-                             prefetch=(MAIN_MENU,))
+    Two mutually exclusive completion routes: a fixed ``successor`` scene (the boot-time A1
+    intro), or a parked ``glue_scene`` resumed with an ``ActivityResult`` (``playmovie`` and
+    its variants, notes/glue_interpreter.md §8.3). ``fade`` is accepted but has no observable
+    original effect (notes/glue_interpreter.md §8.3: fade variants unused by shipped scripts).
+    """
 
-    def __init__(self, successor=None, log_dir=None, seed=DEFAULT_SEED):
-        self.successor = successor or MainMenuScene(log_dir=log_dir, seed=seed)
+    def __init__(self, movie, successor=None, glue_scene=None, request_id=None, fade=False):
+        if (successor is None) == (glue_scene is None):
+            raise ValueError("MovieScene needs exactly one successor or glue_scene")
+        self.movie = str(movie)
+        self.cutscene_id = AssetId("vanilla", "cutscene", self.movie.casefold())
+        self.media_id = AssetId("vanilla", "cutscene", f"{self.movie.casefold()}-media")
+        self.successor = successor
+        self.glue_scene = glue_scene
+        self.request_id = request_id
+        self.fade = fade
+        self.manifest = SceneManifest(immediate=(self.cutscene_id, self.media_id, ANIMATION_TEXT, SUBTITLE_FONT),
+                                      prefetch=(MAIN_MENU,) if glue_scene is None else ())
         self.elapsed_seconds = 0.0
         self.duration_seconds = None
         self.container = None
@@ -81,22 +95,28 @@ class IntroScene(Scene):
         self.subtitle_font = None
 
     def enter(self, context):
-        self.container = context.load(INTRO_CUTSCENE)
+        self.container = context.load(self.cutscene_id)
         self.duration_seconds = omni_duration_seconds(self.container)
-        self.media = context.load(INTRO_MEDIA)
+        self.media = context.load(self.media_id)
         self.texts = context.load(ANIMATION_TEXT)
         self.subtitle_font = context.load(SUBTITLE_FONT)
 
+    def _finish(self, reason):
+        if self.glue_scene is not None:
+            self.glue_scene.complete_activity(ActivityResult(self.request_id, "movie"))
+            return Transition(self.glue_scene, reason)
+        return Transition(self.successor, reason)
+
     def handle(self, event, context):
         if event == "skip":
-            return Transition(self.successor, "intro skipped")
+            return self._finish("movie skipped")
         return None
 
     def update(self, seconds, context):
         super().update(seconds, context)
         self.elapsed_seconds += seconds
         if self.elapsed_seconds >= self.duration_seconds:
-            return Transition(self.successor, "intro completed")
+            return self._finish("movie completed")
         return None
 
 

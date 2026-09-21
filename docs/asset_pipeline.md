@@ -128,10 +128,14 @@ Load one Omni `.SI` container and its video, WAV, MIDI, and event-track objects.
 Play the confirmed 8 fps video timing. Skipping the video transitions directly to the menu.
 The manifest identifies the menu as safe to prefetch, but the current engine loads it on transition.
 
-Implemented reference behaviour: `IntroScene` loads the verified game-intro container
-`vanilla:cutscene/a1` (`A1.SI`) through `SceneAssets` and `AssetCache`. Its timeline
-end is calculated from the Omni object schedule; either that end or a `skip` event
-transitions to `MainMenuScene`. Video and audio presentation are native-frontend work.
+Implemented reference behaviour: `MovieScene("a1", successor=...)` loads the verified
+game-intro container `vanilla:cutscene/a1` (`A1.SI`) through `SceneAssets` and
+`AssetCache`. Its timeline end is calculated from the Omni object schedule; either
+that end or a `skip` event transitions to `MainMenuScene`. Video and audio presentation
+are native-frontend work. The same `MovieScene`, parked with a `glue_scene` and
+`request_id` instead of a `successor`, plays any cutscene requested by a glue
+`playmovie` activity and resumes the parked `GlueRuntime` with an `ActivityResult`
+when playback ends or is skipped.
 
 ### 2. Glue campaign front end
 

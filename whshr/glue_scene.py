@@ -5,7 +5,7 @@ that gives a future ``GlueView`` one long-lived runtime rather than recreating
 campaign Python scenes at every window/activity boundary.
 """
 
-from .glue_runtime import ActivityResult, GlueInput, GlueRuntime, StartBattle
+from .glue_runtime import ActivityResult, GlueInput, GlueRuntime, StartBattle, StartMovie
 from .glue_fonts import glue_font_asset
 from .scenes import Scene, Transition
 
@@ -39,6 +39,12 @@ class GlueScene(Scene):
     def take_battle_effect(self):
         for index, effect in enumerate(self._effects):
             if isinstance(effect, StartBattle):
+                return self._effects.pop(index)
+        return None
+
+    def take_movie_effect(self):
+        for index, effect in enumerate(self._effects):
+            if isinstance(effect, StartMovie):
                 return self._effects.pop(index)
         return None
 

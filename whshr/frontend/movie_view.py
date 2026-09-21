@@ -1,8 +1,9 @@
-"""Intro cutscene view: the verified 8 fps Smacker video through a palette-lookup shader, and its
-original WAV cues played through pygame's mixer at their scheduled start.
+"""Movie playback view: the verified 8 fps Smacker video through a palette-lookup shader, and its
+original WAV cues played through pygame's mixer at their scheduled start. Presents any cutscene
+started as the boot-time intro or as a glue ``playmovie`` activity (whshr.campaign_scenes.MovieScene).
 
-The scene's own elapsed time (whshr.campaign_scenes.IntroScene) is the single source of truth for
-both the due video frame and which audio cues have started; this view only presents it.
+The scene's own elapsed time is the single source of truth for both the due video frame and which
+audio cues have started; this view only presents it.
 """
 
 import io
@@ -83,13 +84,14 @@ def _ensure_mixer():
             pygame.mixer.init()
         if pygame.mixer.get_num_channels() < MIXER_CHANNELS:
             pygame.mixer.set_num_channels(MIXER_CHANNELS)
+        
         return True
     except pygame.error:
         return False
 
 
-class IntroView(SceneView):
-    """Plays the A1 cutscene: upright, aspect-correct, letterboxed on black; skip on key or click."""
+class MovieView(SceneView):
+    """Plays one cutscene: upright, aspect-correct, letterboxed on black; skip on key or click."""
 
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
@@ -112,7 +114,7 @@ class IntroView(SceneView):
         for entry in media["objects"].values():
             if "smk" in entry and "blob" in entry:
                 return Smacker(entry["blob"])
-        raise ValueError("intro media has no Smacker video")
+        raise ValueError("movie media has no Smacker video")
 
     @staticmethod
     def _find_cues(media):
@@ -165,7 +167,7 @@ class IntroView(SceneView):
     def status(self):
         audio = f"{self.playing} cues" if self.audio_ok else "no audio device"
         return (
-            f"intro {self.scene.elapsed_seconds:.1f}/{self.scene.duration_seconds:.1f} s, "
+            f"movie {self.scene.elapsed_seconds:.1f}/{self.scene.duration_seconds:.1f} s, "
             f"frame {self.last_frame}/{self.smk.nframes - 1}, {audio}",
         )
 

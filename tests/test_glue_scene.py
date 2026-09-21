@@ -26,15 +26,19 @@ class GlueSceneTests(unittest.TestCase):
         }))
 
     def test_scene_owns_runtime_effects_across_input_and_activity_boundaries(self):
+        # Driven directly through GlueScene rather than SceneMachine: a StartMovie effect here
+        # is a request for the frontend to start a movie activity (SceneMachine routes it to a
+        # MovieScene, notes/glue_engine_integration.md GEI6), not something this scene resolves
+        # itself, so it stays queued for the host to take and act on.
         scene = GlueScene("flow")
-        machine = SceneMachine(scene, self.context)
+        scene.enter(self.context)
 
         self.assertEqual(scene.take_effects(), (OpenWindow("WINDOW", None, 2),))
-        machine.handle(GlueInput("mission-release"))
+        scene.handle(GlueInput("mission-release"), self.context)
         movie = scene.take_effects()[0]
         self.assertIsInstance(movie, StartMovie)
 
-        machine.handle(ActivityResult(movie.request_id, "movie"))
+        scene.handle(ActivityResult(movie.request_id, "movie"), self.context)
         self.assertEqual(scene.take_effects(), (EndGame(),))
 
     def test_snapshot_restore_is_available_at_scene_boundary(self):

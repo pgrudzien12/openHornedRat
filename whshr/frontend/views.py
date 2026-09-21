@@ -2,13 +2,13 @@
 
 from ..battle_scene import BattleScene
 from ..campaign_scenes import (
-    BriefingScene, IntroScene, MainMenuScene, MissionMapScene, OpeningNarrationScene,
+    BriefingScene, MainMenuScene, MissionMapScene, MovieScene, OpeningNarrationScene,
     TroopSelectScene,
 )
 from ..glue_scene import GlueScene
 from ..result_scene import ResultScene
 from .battle_view import BattleView
-from .intro_view import IntroView
+from .movie_view import MovieView
 from .briefing_view import BriefingView
 from .glue_view import GlueView
 from .menu_view import MainMenuView
@@ -19,7 +19,7 @@ from .scene_view import PlaceholderView
 
 VIEWS = {
     OpeningNarrationScene: OpeningNarrationView,
-    IntroScene: IntroView,
+    MovieScene: MovieView,
     MainMenuScene: MainMenuView,
     MissionMapScene: MissionMapView,
     TroopSelectScene: PlaceholderView,

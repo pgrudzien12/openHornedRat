@@ -5,20 +5,22 @@ shared now; text, portraits and executable-owned widgets remain separate
 adapters until their renderer rules are moved out of compatibility views.
 """
 
+import sys
+
 import pygame
 
 from ..campaign_state import CARAVAN_MODE_WINDOWS
 from ..controlpanel import button_y, control_panel
 from ..glue_animation import GlueBitmapAnimator
 from ..glue_render import build_render_model
-from ..glue_runtime import GlueInput, PlayMusic, StopMusic
+from ..glue_runtime import Diagnostic, GlueInput, PlayMusic, StopMusic
 from ..glue_palette import AppPalette
 from .bitmap_font import BitmapFont
 from .glue_bitmap import load_optional_bitmap
 from .gpu import ScreenQuad
 from .scene_view import NativeScreenView
 
-MIXER_CHANNELS = 8  # matches intro_view's cutscene mixer; music runs on pygame's separate music channel
+MIXER_CHANNELS = 8  # matches movie_view's cutscene mixer; music runs on pygame's separate music channel
 MUSIC_VOLUME = 0.01  # engine-level mix setting, not game data: setmidivolume/setwavvolume are unused by any
                      # script (notes/briefing_dialogue.md §2.1) and default 100, so there is no data value to read
 MISSION_ROW_HEIGHT = 88
@@ -107,9 +109,11 @@ class GlueView(NativeScreenView):
         return frames
 
     def _process_music(self):
-        """Drain playmidi/stopmidi effects (notes/briefing_dialogue.md §2.1: replace abruptly, loop forever)."""
+        """Drain playmidi/stopmidi/diagnostic effects (notes/briefing_dialogue.md §2.1: replace abruptly, loop forever)."""
         for effect in self.scene.take_effects():
-            if isinstance(effect, PlayMusic):
+            if isinstance(effect, Diagnostic):
+                print(format_diagnostic(effect), file=sys.stderr)
+            elif isinstance(effect, PlayMusic):
                 self.music_name = effect.name
                 if not self._music_ok:
                     continue
@@ -587,6 +591,11 @@ def _mission_payment(record):
         return f"({int(parts[1])}, {int(parts[2])})"
     except ValueError:
         return ""
+
+
+def format_diagnostic(diagnostic):
+    """Render one interpreter ``Diagnostic`` as a single log line."""
+    return f"glue: {diagnostic.location}: {diagnostic.message}"
 
 
 def resolve_text(content, text):

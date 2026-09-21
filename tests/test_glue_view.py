@@ -47,6 +47,14 @@ class GlueViewTests(unittest.TestCase):
 
         self.assertEqual(rows[0][1:3], ("No payment", ""))
 
+    def test_format_diagnostic_names_the_location_and_message(self):
+        from whshr.frontend.glue_view import format_diagnostic
+        from whshr.glue_runtime import Diagnostic
+
+        line = format_diagnostic(Diagnostic("panel", "'open_book' is not yet implemented"))
+
+        self.assertEqual(line, "glue: panel: 'open_book' is not yet implemented")
+
     def test_dynamic_animation_base_without_a_bitmap_resource_is_transparent(self):
         from whshr.frontend.glue_bitmap import load_optional_bitmap
 
