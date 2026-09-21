@@ -106,10 +106,25 @@ Each row is 4H tall for hit testing: `row = (click_y - 50) / (4H)`, valid for th
 ### 3.3 Icons ✅ / 🟡
 
 The picture on the left is not a `*Pic` bitmap: those belong to the roster book (§8). The row shows the regiment's **banner
-sprite**: the unit record stores a banner sprite id and frame number (`banner:<name>,<n>` in the `.MRC`), the sprite sets are
-loaded once by the front end (its "resident sprites"), and the row draws the **second frame** of the banner set at
-(x + 35, y) with its own size. In the banner `.FOL/.BOP` sets that frame is the 16×24 small marker (frame 0 is the 72×104
-HUD banner, frame 2 the 32×32 marker; `notes/animations.md`). 🟡 for "second frame" (pointer arithmetic to the next record).
+sprite**. Traced from the row-drawing code (one routine shared by P0, P1, P3 and the debrief lists), with `x` = 45 and `y` = the row
+y (`y_i`, §3.1); `cy` = height of the row font:
+
+| Element | Position (top-left unless noted) | Rule |
+|---|---|---|
+| Unit name line | (x + 60, y_i) | |
+| Weapon / armour line | (x + 60, y_i + cy) | |
+| Rank icon `Skull<n>` | centred on (x + 20, y_i + 12): left = 65 - w/2, top = y_i + 12 - h/2 | own bitmap size; `n` as in §3.2 |
+| Banner sprite | (x + 35, y_i) = (80, y_i) | see below |
+| `RingMark` (selected only) | (x, y_i - H) = (45, 0x32 + 4*cy*row) | `H` = height of the title line font; drawn after the row, so it lies over icon and text |
+| Scroll backdrop `BookScroll<k-1>` | only when the row is drawn with a non-zero style (roster-book lists), never on P0 | |
+
+Banner rule ✅: the unit record holds a banner sprite id (`banner:<name>` in the `.MRC`) and a frame number `n`. The front end keeps,
+for each resident banner set, the header record of its **second** record (the first record's address plus one 16-byte record). That
+second record supplies the size and the pixel address; frame `n` from the unit record is added only as a row offset in the sprite
+atlas. All 903 `banner:` entries in the shipped `.MRC` files have `n` = 0, so the row always shows the **second frame of the
+set** (the 16×24 marker, `notes/animations.md`), never the 72×104 HUD banner or the 32×32 marker. A unit whose banner id is not among
+the resident sets shows no banner. The mock render was not made (no on-screen check); coordinates come from the code only, so the
+visual check of the whole row is still open.
 
 ### 3.4 Status text and colours ✅
 
@@ -155,8 +170,29 @@ buttons re-enable (§4.4).
 
 ### 4.3 Ctrl+click on a row ✅
 
-Opens the **roster book** (§8) at that regiment, in *hire/fire enabled, no coffers change* mode. On closing, the selection
-window is drawn again. In P1 the same gesture opens the book for the clicked list entry. In P3 (debrief troops) the book is read-only.
+Ctrl held (checked at click time) routes the click to the roster book instead of the toggle of §4.2: on P0 the row index (row height `4*cy`, first row at y = 0x32) picks the regiment among the rows actually shown; on P1 the list entry. The click does nothing if the row index is beyond the shown rows. The book opens in *hire/fire enabled, no coffers change* mode (mode flag 1 on P0/P1, 0 on P3) and the selection window is repainted when it closes. Pages P3 (debrief troops): read-only.
+
+**Hire/fire button inside the book** (P0/P1 mode, "hire" flag toggles) ✅ traced:
+
+- hire (`hired` 0 -> 1): the regiment is selected **immediately** through the same routine the plain click uses: if `count < limit` then `selected = 1` and it is **appended to the end of the selection list**; if the list is already full nothing is selected (regiment stays hired but unselected) and **no sound plays**.
+- fire (`hired` 1 -> 0): `selected = 0` and it is removed from the list (later entries shift up), whether or not it was selected.
+- The roster-full refusal sound (`B9.WAV`) is played only by the plain-click path (§4.2); the book path never plays it, and shows no message.
+- The coffers are not touched on P0 (the campaign-money variant of the same button, used in the army-records window on the map, pays/refunds; not this path).
+- ✅ Enabling rules (traced, refreshed after every page change and every toggle):
+
+| Condition | Hire/Fire button |
+|---|---|
+| Label | shows Hire (`BRTXT 319`) when `hired` = 0, Fire (`BRTXT 320`) when `hired` = 1; always follows the current flag |
+| Regiment type `forHire` = 0 (RMYI, `notes/campaign.md` §4.5) | disabled (all modes) |
+| `forHire` = 1, selection variant (no coffers change) | **enabled**, whatever the regiment's state |
+| Forced by the mission, excluded by the mission, destroyed | **not tested**: button stays enabled if `forHire` = 1 (forced regiments of whoami 2 etc. are `forHire` = 0 anyway; a mission-forced ordinary regiment can be fired in the book) |
+| Selection list full | **not tested**: enabled; hiring then leaves the regiment hired but unselected (above) |
+| Unaffordable | not tested in the selection variant (no coffers involved) |
+| Hire-only (caravan) variant, hired when the book opened | disabled (cannot be fired) |
+| Hire-only, not hired at open, currently not hired | enabled only if coffers >= the price (else disabled) |
+| Hire-only, not hired at open, hired this visit | enabled (un-hire for a refund) |
+
+Abort exists only in the variants with the Hire/Fire button. Only `forHire` is read from the roster type; the mission-record forced/excluded lists are not consulted by the book at all.
 
 ### 4.4 Button rules ✅
 
@@ -243,11 +279,56 @@ per page in file order.
 | Keys | PageUp/PageDown = previous/next regiment, Home/End = first/last |
 | Left page | name, cost line (`BKTXT 501` "cost / retainer", or `509` for the fee of a not-yet-hired regiment in hire-only mode), experience (`BKTXT 500`), regiment picture (`*Pic` bitmap chosen by whoami from a 38-entry table; `ForHireStamp` 98×61 on regiments not hired), `BKTXT 502` active/wounded counts |
 | Right page | "Statistics" (`BKTXT 503`: M, WS, BS, S, T, W, I, A, Ld with `BRTXT 700–717` labels and the nine stat bytes; leader block at the same layout) or "Information" (`BKTXT 504`: armour/weapon lines and a description text from `BKTXT.DLL` RCDATA keyed by whoami); a banner/leader-portrait box 72×104 |
-| Hire/Fire enabled | only when the regiment's roster `forHire` flag is set; label is Hire when not hired, Fire when hired. In *hire-only* (caravan) mode: a regiment already hired when the book opened cannot be fired, one hired during this visit can be un-hired for a refund, and hiring needs enough coffers; in the selection variant no coffers change |
+| Hire/Fire enabled | rule table in §4.3 (only when the regiment's roster `forHire` flag is set; label is Hire when not hired, Fire when hired. In *hire-only* (caravan) mode: a regiment already hired when the book opened cannot be fired, one hired during this visit can be un-hired for a refund, and hiring needs enough coffers; in the selection variant no coffers change) |
 | Effect of Hire/Fire | toggles `hired`. Firing also deselects the regiment; hiring also **selects** it (subject to the limit). In the hire-only variant the price is charged or refunded |
 | Done | if anything changed, writes `ARMY.MRC`; in hire-only mode also rewrites `MARCH.MRC` from the selection list; closes |
 | Abort | restores the `hired` flags from the snapshot taken at open; closes |
 | Reinforcements | if a regiment has reinforcements (`BKTXT 505`, `507` available, `508` take, `REINFARROW*`, `REINFBUTTON*`, `REINFSCROLL`) a small sub-window lets the player take some; rules in `notes/campaign.md` §2.4 |
+
+### 8.1 Per-whoami name tables (WHSHR.EXE)
+
+Two 38-entry pointer arrays of resource names, indexed by whoami: picture bitmap (`BITMAP.DLL`, `RT_BITMAP`) at VA 0x5B9550 and description text (`BKTXT.DLL`, `RT_RCDATA`) at VA 0x5B9230. Every name resolves to a resource (`scripts/roster_book_check.py`). Whoami 32 has no picture (null pointer) and uses the `NullText` entry.
+
+| whoami | Pic bitmap | Text RCDATA |
+|---|---|---|
+| 0 | `VanheimPic` | `VanheimText` |
+| 1 | `RagnarsWolvesPic` | `RagnarsWolvesText` |
+| 2 | `Grudgebringers1Pic` | `GrudgebringersText` |
+| 3 | `Grudgebringers2Pic` | `GrudgebringersText` |
+| 4 | `BlackAvengersPic` | `BlackAvengersText` |
+| 5 | `GreatswordsPic` | `GreatswordsText` |
+| 6 | `ReiksguardPic` | `ReiksguardText` |
+| 7 | `LeitdorfPic` | `LeitdorfText` |
+| 8 | `WoodElfArchersPic` | `WoodElfArchersText` |
+| 9 | `DwarvenSlayersPic` | `DwarvenSlayersText` |
+| 10 | `DwarvenHammerersPic` | `DwarvenHammerersText` |
+| 11 | `IronBreakersPic` | `IronBreakersText` |
+| 12 | `IronBreakersPic` | `IronBreakersText` |
+| 13 | `GyrocopterSquadronPic` | `GyrocopterSquadronText` |
+| 14 | `CannonCrewPic` | `ImperialCannonCrewText` |
+| 15 | `CannonCrewPic` | `CannonCrewText` |
+| 16 | `MortarCrewPic` | `MortarCrewText` |
+| 17 | `MortarCrewPic` | `MortarCrewText` |
+| 18 | `CelestialWizardPic` | `CelestialWizardText` |
+| 19 | `BrightWizardPic` | `BrightWizardText` |
+| 20 | `AmberWizardPic` | `AmberWizardText` |
+| 21 | `CarlssonPic` | `CarlssonText` |
+| 22 | `CarlssonPic` | `CarlssonText` |
+| 23 | `DwarfWarriorsPic` | `DwarfWarriorsText` |
+| 24 | `DwarfWarriorsPic` | `DwarfWarriorsText` |
+| 25 | `VolleyGunPic` | `VolleyGunText` |
+| 26 | `NulnHalberdiersPic` | `NulnHalberdiersText` |
+| 27 | `MercCrossbowmenPic` | `MercCrossbowmenText` |
+| 28 | `LongbowsPic` | `LongbowsText` |
+| 29 | `CeridanPic` | `CeridanText` |
+| 30 | `DwarfCrossbowPic` | `DwarfCrossbowText` |
+| 31 | `DwarfEnvoyPic` | `DwarfEnvoyText` |
+| 32 | `(none)` | `NullText` |
+| 33 | `DwarfWarriorsPic` | `DwarfWarriorsText` |
+| 34 | `TreemanPic` | `TreemanText` |
+| 35 | `CarlssonPic` | `CarlssonText` |
+| 36 | `GyrocopterSquadronPic` | `GyrocopterSquadronText` |
+| 37 | `GyrocopterSquadronPic` | `GyrocopterSquadronText` |
 
 ## 9. Data versus front-end constants
 
@@ -262,7 +343,7 @@ Legend: **DATA** = comes from resources/files; **TABLE** = front-end constant th
 | Mission name | DATA | `BRTXT 6xx` via the record's `res` |
 | All labels and messages | DATA | `BKTXT` ids in §§2–8, `BRTXT` ids for buttons/hints/weapon/armour names |
 | Background and widget bitmaps: `TroopBook`, `RingMark`, `Skull0..4`, `BookScroll0..2`, `Red/Blue/Green/BrownATab{Up,Dn0}`, `ArmyBook`, `ForHireStamp`, `Reinf*` | DATA (named bitmaps in `BITMAP.DLL`) | the *name* per widget is a TABLE |
-| Regiment `*Pic` and description text per whoami | DATA + TABLE | 38-entry name tables in the executable; bitmaps in `BITMAP.DLL`, texts in `BKTXT.DLL` |
+| Regiment `*Pic` and description text per whoami | DATA + TABLE ✅ | 38-entry name tables in the executable (§8.1: pictures VA 0x5B9550, texts VA 0x5B9230); bitmaps in `BITMAP.DLL`, texts in `BKTXT.DLL` |
 | Button positions, sizes, ids, enable rules per page | TABLE | §2, §4.4 |
 | Row layout (x = 45/65/80/105/345/425/505, y = 25/50/400, 6 rows, 4H pitch, 7 visible in P1, list rect) | TABLE | §3.1, §5.1; H is DERIVED from the body font |
 | Skull index formula, status precedence, colour rules | TABLE | §3.2, §3.4 |
@@ -310,10 +391,8 @@ money delta and marks the mission taken; abort with something selected requires 
 
 ## 11. Open questions
 
-- 🟡 The `RingMark` / rank icon / banner frame placement relative to `y_i`, checked from coordinates only, not on screen.
-- 🟡 Which banner frame is shown on the row (frame index 1 of the set).
-- 🟡 Whether hiring through Ctrl+click during selection really appends to the selection list in the shipped flow (code path
-  read; not observed) and whether the roster-full sound also plays there.
+- ✅ Banner frame on the row: second record of the set (§3.3). Placement offsets of RingMark / rank icon / banner are read from the draw code (§3.3); 🟡 only an on-screen comparison is missing.
+- ✅ Ctrl+click hire appends to the selection list when room, no roster-full sound (§4.3). ✅ book button enabling: only `forHire` (plus hire-only rules); forced/excluded/destroyed/full list/coffers are not checked in the selection variant (§4.3). 🟡 only an in-game confirmation is missing.
 - ⬜ Font slot -> `.FON` file mapping; how the WinG palette mapping treats bitmaps whose embedded colours match `GLUEREND` while
   the screen runs on the BOOK palette (`notes/fonts_glue.md`).
 - ⬜ Use of the `MarchOrderMove` / `MarchOrderMoveDone` names. (Resolved: `tactical.mid` loops, §1.3.)

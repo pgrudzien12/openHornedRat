@@ -127,19 +127,49 @@ of every regiment that is not in the text files.
 | `+0x0C` | artillery | 1 for 14–17 (cannons, mortars) and 25 (Hellblaster) | `FUN_0044b0bb`: an artillery unit with fewer than 2 models counts as destroyed |
 | `+0x10` | `pendingJoin` | 0 | set by glue token 2 (`<keyword>:<whoami>`) in `FUN_0040bd2c`; `FUN_0044ba94` copies such regiments from the roster into `ARMY.MRC` and clears it |
 | `+0x14` | in marching orders | 0 | `FUN_0043b460` (from the `MARCH.MRC` list); read by glue `testforunitinmarch` (token `0x7D`) |
-| `+0x18` | in army | 0 | `FUN_0043b3cb` (from the army units); read by glue `testforunitinarmy` (token `0x7C`) |
+| `+0x18` | in army | 1 for whoami 2 and 3 (the two starting Grudgebringer units), 0 otherwise | `FUN_0043b3cb` (from the army units); read by glue `testforunitinarmy` (token `0x7C`) |
 | `+0x1C` | experience at the start of the mission | 0 | baseline for the doubled-experience reward and the troop book's "Experience" column (`FUN_0043026f`: `s_Exp − baseline`); set to `s_Exp` after each debrief (`FUN_0044a5c8`) |
 | `+0x20` | reinforcements available | 0 | glue `addtroop:<whoami>=<n>` adds `n` (token `0x62`); the Reinforcements window (`FUN_0043b06e`) moves them into the unit; cleared by `FUN_0044b9ba` |
-| `+0x24` | base price per model (gold crowns) | 10, 8, 8, 4, 3, 14, 0, 0, …, 33, 30, 20, 20, 0, 50, 0, …, 18, 12, 10, 9 | scaled once by `FUN_00448741(cost%)` |
+| `+0x24` | base price per model (gold crowns) | full table in "Static roster table" below | scaled once by `FUN_00448741(cost%)` |
 | `+0x28` | current price per model | 0 | set to `+0x24` for a new campaign (`FUN_00437e85`); +5 per troop promotion, +15 per wizard level (`FUN_0044a2aa`) |
 | `+0x2C` | wounded in the last battle | 0 | `FUN_0044b42a` (section 3.3) |
 | `+0x30` | wounded returning to the ranks | 0 | `FUN_0044b4c9` moves `+0x2C` here; `FUN_0044b5ee` adds it to the unit |
 
 Check against the files: in both saves `+0x24` and `+0x28` are exactly **twice** the static value for every
-regiment (20, 16, 16, 8, 6, 28, …, 66, 60, 40, 40, 100, 36, 24, 20, 18) — the default `cost` of 200 %
+one of the 38 regiments (verified by `scripts/roster_check.py`) — the default `cost` of 200 %
 (`FUN_00448741(200)` in `WinMain` `FUN_00442a40`). `+0x18` (army) is 1 for whoami 2 and 3 in `savegame.0`
 (start of the campaign, `ARMY.MRC` holds the two Grudgebringer units), `+0x14` (marching orders) is 1 for the same two
 units in `savegame.5`, whose `MARCH.MRC` holds them.
+
+#### Static roster table (complete, whoami 0–37)
+
+Read from the EXE image (39 × 52 bytes) and cross-checked: the four flag columns match the lists above, and the
+saved `+0x24`/`+0x28` of both `savegame.0` and `savegame.5` equal 2 × the base price for all 38 records. Columns:
+K = keep (`+0x00`), H = forHire (`+0x04`), W = wizard (`+0x08`), A = artillery (`+0x0C`), Ar = in army (`+0x18`),
+Price = base price per model (`+0x24`). All other fields are 0 in the static image.
+
+| whoami | K | H | W | A | Ar | Price | | whoami | K | H | W | A | Ar | Price |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 0 | 1 | 0 | 0 | 0 | 10 | | 19 | 0 | 1 | 1 | 0 | 0 | 50 |
+| 1 | 0 | 1 | 0 | 0 | 0 | 8 | | 20 | 0 | 1 | 1 | 0 | 0 | 0 |
+| 2 | 0 | 0 | 0 | 0 | 1 | 8 | | 21 | 1 | 0 | 0 | 0 | 0 | 0 |
+| 3 | 0 | 1 | 0 | 0 | 1 | 4 | | 22 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 4 | 0 | 1 | 0 | 0 | 0 | 3 | | 23 | 1 | 0 | 0 | 0 | 0 | 0 |
+| 5 | 0 | 1 | 0 | 0 | 0 | 14 | | 24 | 1 | 0 | 0 | 0 | 0 | 0 |
+| 6 | 0 | 1 | 0 | 0 | 0 | 0 | | 25 | 0 | 1 | 0 | 1 | 0 | 18 |
+| 7 | 0 | 1 | 0 | 0 | 0 | 0 | | 26 | 0 | 1 | 0 | 0 | 0 | 12 |
+| 8–13 | 0 | 0 | 0 | 0 | 0 | 0 | | 27 | 0 | 1 | 0 | 0 | 0 | 10 |
+| 14 | 0 | 1 | 0 | 1 | 0 | 33 | | 28 | 0 | 1 | 0 | 0 | 0 | 9 |
+| 15 | 0 | 1 | 0 | 1 | 0 | 30 | | 29 | 1 | 0 | 0 | 0 | 0 | 0 |
+| 16 | 0 | 1 | 0 | 1 | 0 | 20 | | 30 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 17 | 0 | 1 | 0 | 1 | 0 | 20 | | 31 | 1 | 0 | 0 | 0 | 0 | 0 |
+| 18 | 0 | 1 | 1 | 0 | 0 | 0 | | 32 | 0 | 1 | 0 | 0 | 0 | 0 |
+| | | | | | | | | 33 | 1 | 0 | 0 | 0 | 0 | 0 |
+| | | | | | | | | 34–37 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+Price 0 means "not sold per model": the non-hireable story regiments, and hireable whoami 6, 7, 20, 32 (wizards
+18 and 20 and these have no base price; the wizard rows gain +15 per level from 0). Whoami 19 is the only
+priced wizard (50). The table's terminator is record 38 (all `-1`).
 
 ### 4.6 `MISS`: current mission record ✅
 
