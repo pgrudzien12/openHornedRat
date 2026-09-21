@@ -108,6 +108,7 @@ class TroopSelectionView(NativeScreenView):
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
         self.quads, self.labels, self.buttons, self.rows = [], [], [], []
+        self.carried_quads, self.carried_labels = [], []
         self.banner_surfaces = {}
         self.state = None
         self.hover_march_index = None
@@ -134,7 +135,6 @@ class TroopSelectionView(NativeScreenView):
         model = self.scene.model
         state = (self.scene.phase, self.scene.page, self.scene.march_offset, self.scene.picked_whoami,
                  self.hover_march_index, self.pressed_button,
-                 self.pointer if self.scene.picked_whoami is not None else None,
                  tuple(model.selection) if model else (), model.total_cost if model else 0)
         if state == self.state:
             return
@@ -187,16 +187,28 @@ class TroopSelectionView(NativeScreenView):
                 self._center(str(index + 1), y, BLACK, x=83, width=56)
                 self._regiment(model.row(whoami), y, 157, p1=True)
             self.rows.append((pygame.Rect(83, y - height, 482, 4 * height), index))
-        if self.scene.picked_whoami is not None and self.pointer is not None:
-            # notes/troop_selection.md §5.2: "the strip (BookScroll0) with its contents follows
-            # the cursor while the original row is hidden" - only x=145/157 are fixed; y tracks
-            # the cursor, clamped to the visible row band.
-            row_top, row_bottom = 50 + height, 50 + height + 4 * height * (P1_ROWS - 1)
-            y = max(row_top, min(self.pointer[1] - 2 * height, row_bottom))
-            self._bitmap("BookScroll0", (145, y - 10))
-            self._regiment(model.row(self.scene.picked_whoami), y, 157, p1=True)
+        # notes/troop_selection.md §5.2: "the strip (BookScroll0) with its contents follows the
+        # cursor while the original row is hidden". Built once here (only when picked_whoami
+        # changes, since this is part of refresh()'s diffed rebuild); draw() repositions the
+        # already-built pieces from the live pointer every frame instead of rebuilding GPU
+        # textures on every mouse-move event (that rebuild was the cause of a severe FPS drop).
+        if self.scene.picked_whoami is not None:
+            self._build_carried_regiment(self.scene.picked_whoami)
+        else:
+            self.carried_quads, self.carried_labels = [], []
         self._center(self._string("BRTXT", 315), 400, BLUE)
         self._center(self._string("BRTXT", 316), 400 + height, BLUE)
+
+    def _build_carried_regiment(self, whoami):
+        """Draw ``whoami``'s row at y=0 into ``self.carried_quads``/``carried_labels``, so their
+        stored position *is* an offset from the row's own origin (85, 157) for draw() to add the
+        live pointer-derived y to, every frame, without rebuilding GPU textures."""
+        saved_quads, saved_labels = self.quads, self.labels
+        self.quads, self.labels = [], []
+        self._bitmap("BookScroll0", (145, -10))
+        self._regiment(self.scene.model.row(whoami), 0, 157, p1=True)
+        self.carried_quads, self.carried_labels = self.quads, self.labels
+        self.quads, self.labels = saved_quads, saved_labels
 
     def _p5(self):
         """Draw the bankruptcy page; notes/troop_selection.md §7.
@@ -436,11 +448,10 @@ class TroopSelectionView(NativeScreenView):
 
     def _update_march_hover(self, point):
         self.scroll_direction = self._scroll_direction_at(point)
+        self.pointer = point  # cheap; draw() alone consumes this to move the carried strip
         carrying = self.scene.phase == "march_order" and self.scene.picked_whoami is not None
         next_hover = next((index for rect, index in self.rows if rect.collidepoint(point)), None) if carrying else None
-        moved = carrying and point != self.pointer
-        self.pointer = point
-        if next_hover != self.hover_march_index or moved:
+        if next_hover != self.hover_march_index:
             self.hover_march_index = next_hover
             self.refresh()
 
@@ -472,13 +483,30 @@ class TroopSelectionView(NativeScreenView):
             quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
         for label, (x, y) in self.labels:
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
+        self._draw_carried(left, top, scale)
+
+    def _draw_carried(self, left, top, scale):
+        if not self.carried_quads and not self.carried_labels:
+            return
+        height = self.body_font.font.height
+        row_top, row_bottom = 50 + height, 50 + height + 4 * height * (P1_ROWS - 1)
+        carried_y = max(row_top, min((self.pointer or (0, row_top))[1] - 2 * height, row_bottom))
+        for quad, (ox, oy) in self.carried_quads:
+            quad.draw(left + ox * scale, top + (carried_y + oy) * scale, quad.size[0] * scale, quad.size[1] * scale)
+        for label, (ox, oy) in self.carried_labels:
+            label.draw(left + ox * scale, top + (carried_y + oy) * scale, label.size[0] * scale, label.size[1] * scale)
 
     def _release_contents(self):
         for quad, _ in self.quads:
             quad.release()
         for label, _ in self.labels:
             label.release()
+        for quad, _ in self.carried_quads:
+            quad.release()
+        for label, _ in self.carried_labels:
+            label.release()
         self.quads, self.labels, self.buttons, self.rows = [], [], [], []
+        self.carried_quads, self.carried_labels = [], []
 
     def release(self):
         self._release_contents()

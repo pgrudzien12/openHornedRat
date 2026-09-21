@@ -74,7 +74,7 @@ renumber later work.
   §5.3 points 3, 5) on troop-selection Done. Reinforcements still have no standalone-file home in the
   original (only `savegame.N`'s `RMYI` chunk carries them) and stay in-memory pending GEI14's writer.
 
-- [x] **GEI7f — Troop selection view carried-item tracking.** The picked-up P1 regiment visually
+- [x] **GEI7f — Troop sel ection view carried-item tracking.** The picked-up P1 regiment visually
   follows the cursor (`notes/troop_selection.md` §5.2: "the strip... follows the cursor"). The
   interaction itself stays click-to-pick-up/click-to-drop, matching the original's own hint text
   (`BRTXT 315`: "click to pick up, click again to drop") rather than switching to a continuous
@@ -196,11 +196,15 @@ renumber later work.
   original either; the `.MRC` text grammar is reused in `write_company`/`write_march` because it
   is already required for reading, not as a compatibility commitment (CLAUDE.md "Engine rule:
   saves are the engine's own, not the original's").
-- GEI7f: the picked-up P1 row's y position is derived from the raw pointer (`TroopSelectionView.pointer`,
-  updated on every `MOUSEMOTION`), clamped to the visible row band, not quantised to
-  `hover_march_index` (which stays row-granular, for the drop-target highlight only). `refresh()`'s
-  diff state only includes the pointer while a regiment is picked up, so idle mouse movement does
-  not force redraws on P0 or an empty P1.
+- GEI7f, first version: including the raw pointer in `refresh()`'s diffed state made every
+  `MOUSEMOTION` event trigger a full `_p1()` rebuild (every visible row's bitmaps/labels
+  recreated as new GPU textures) while dragging, which dropped FPS to ~0. Fixed by decoupling the
+  carried regiment from that rebuild: `_build_carried_regiment` draws it once, at `y=0`, into a
+  separate `carried_quads`/`carried_labels` pair, so the stored position *is* an offset from the
+  row's own origin; `draw()`'s new `_draw_carried` repositions those same GPU objects from the
+  live pointer every frame (cheap: no texture recreation, no `refresh()`). `refresh()` no longer
+  considers the raw pointer at all — only `hover_march_index` (still row-granular, for the
+  drop-target highlight) triggers a rebuild, at the same cadence as before GEI7f.
 
 ## Working rules
 

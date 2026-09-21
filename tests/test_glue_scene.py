@@ -192,21 +192,29 @@ class GlueSceneTests(unittest.TestCase):
 
         self.assertEqual(called, ["p0", "buttons"])
 
-    def test_p1_carried_regiment_follows_the_cursor_and_is_hidden_from_its_own_slot(self):
+    def test_p1_hides_the_carried_regiment_from_its_own_slot_and_builds_it_once(self):
+        # Regression guard: an earlier version rebuilt the whole page's GPU textures on every
+        # mouse-move event while dragging, which dropped FPS to ~0. The carried regiment must be
+        # built once here (offsets from y=0), not repositioned by rebuilding.
         model = type("Model", (), {"selection": (2, 5, 6), "row": lambda self, whoami: f"row-{whoami}"})()
         view = TroopSelectionView.__new__(TroopSelectionView)
         view.scene = type("Scene", (), {
             "phase": "march_order", "march_offset": 0, "picked_whoami": 5, "model": model, "record": None,
         })()
         view.hover_march_index, view.pointer, view.rows = None, (300, 300), []
+        view.quads, view.labels = [], []
         view.body_font = type("Body", (), {"font": type("Font", (), {"height": 12})()})()
-        bitmaps, regiments = [], []
+        regiments = []
         view._title = lambda _text_id: ""
         view._heading = lambda *_args: None
-        view._bitmap = lambda name, position: bitmaps.append((name, position))
+        view._bitmap = lambda name, position: view.quads.append((name, position))
         view._bitmap_centered = lambda *_a, **_k: None
         view._center = lambda *_args, **_kwargs: None
-        view._regiment = lambda row, y, x, *, p1: regiments.append((row, y, x, p1))
+
+        def fake_regiment(row, y, x, *, p1):
+            regiments.append((row, y, x, p1))
+            view.labels.append((row, (x, y)))
+        view._regiment = fake_regiment
         view._string = lambda table, text_id, *args: ""
 
         view._p1()
@@ -215,9 +223,27 @@ class GlueSceneTests(unittest.TestCase):
         self.assertNotIn(("row-5", 110, 157, True), regiments)
         self.assertIn(("row-2", 62, 157, True), regiments)
         self.assertIn(("row-6", 158, 157, True), regiments)
-        # It instead follows the pointer (y=300), clamped and centred: y = 300 - 2*12 = 276.
-        self.assertIn(("row-5", 276, 157, True), regiments)
-        self.assertIn(("BookScroll0", (145, 266)), bitmaps)
+        # Built once at y=0, x fixed, so its stored position *is* the offset draw() will add
+        # the live pointer-derived y to; it does not end up in the page's own quads/labels.
+        self.assertIn(("row-5", 0, 157, True), regiments)
+        self.assertEqual(view.carried_quads, [("BookScroll0", (145, -10))])
+        self.assertEqual(view.carried_labels, [("row-5", (157, 0))])
+        self.assertNotIn(("BookScroll0", (145, -10)), view.quads)
+        self.assertNotIn(("row-5", (157, 0)), view.labels)
+
+    def test_draw_carried_positions_pieces_from_the_live_pointer_without_rebuilding(self):
+        view = TroopSelectionView.__new__(TroopSelectionView)
+        drawn = []
+        piece = type("Piece", (), {"size": (72, 104), "draw": lambda self, x, y, w, h: drawn.append((x, y, w, h))})()
+        view.carried_quads = [(piece, (145, -10))]
+        view.carried_labels = []
+        view.pointer = (300, 300)
+        view.body_font = type("Body", (), {"font": type("Font", (), {"height": 12})()})()
+
+        view._draw_carried(0, 0, 1.0)
+
+        # y = clamp(300 - 2*12, row_top=62, row_bottom=350) = 276.
+        self.assertEqual(drawn, [(145, 266, 72, 104)])
 
     def test_army_records_button_enablement_follows_for_hire_not_selection_or_capacity(self):
         commander = Regiment(2, "Commander", True, 10, 10, 0,
