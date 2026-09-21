@@ -398,6 +398,16 @@ class TroopSelectionView(NativeScreenView):
             self.pressed_button = next((action for rect, action in self.buttons if rect.collidepoint(point)), None)
             if self.pressed_button is not None:
                 self.refresh()
+                return ()
+            if self.scene.phase == "march_order" and not pygame.key.get_mods() & pygame.KMOD_CTRL:
+                # notes/troop_selection.md §5.2: "pressing on a row picks that regiment up" /
+                # "a second click drops it" - both ends of the pick-up/drop pair fire on press,
+                # not release.
+                for rect, value in self.rows:
+                    if rect.collidepoint(point):
+                        picking_up = self.scene.picked_whoami is None
+                        self._set_cursor("HANDCLOSECURSOR" if picking_up else "HANDOPENCURSOR")
+                        return (f"pickup:{value}" if picking_up else f"drop:{value}",)
             return ()
         if event.type != pygame.MOUSEBUTTONUP or event.button != 1:
             return ()
@@ -419,9 +429,7 @@ class TroopSelectionView(NativeScreenView):
                     return (f"book:{whoami}",)
                 if self.scene.phase == "select":
                     return (f"toggle:{value}",)
-                picking_up = self.scene.picked_whoami is None
-                self._set_cursor("HANDCLOSECURSOR" if picking_up else "HANDOPENCURSOR")
-                return (f"pickup:{value}" if picking_up else f"drop:{value}",)
+                # march_order rows pick up/drop on MOUSEBUTTONDOWN, above.
         return ()
 
     def _set_cursor_at(self, point):

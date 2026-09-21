@@ -205,6 +205,11 @@ renumber later work.
   live pointer every frame (cheap: no texture recreation, no `refresh()`). `refresh()` no longer
   considers the raw pointer at all — only `hover_march_index` (still row-granular, for the
   drop-target highlight) triggers a rebuild, at the same cadence as before GEI7f.
+- P1 pick-up/drop also moved from `MOUSEBUTTONUP` to `MOUSEBUTTONDOWN`, matching notes/troop_selection.md
+  §5.2's own wording ("pressing on a row picks that regiment up"; drop is the symmetric second
+  press). P0's toggle and both pages' Ctrl+click book-open stay on release; only march_order's
+  plain row click moved, so the `MOUSEBUTTONUP` row loop no longer has a pickup/drop branch (it
+  would otherwise double-fire on the release of the same click).
 
 ## Working rules
 

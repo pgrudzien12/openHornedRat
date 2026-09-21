@@ -154,6 +154,24 @@ class TroopSelectionTests(unittest.TestCase):
         with patch("whshr.frontend.troop_selection_view.pygame.key.get_mods", return_value=pygame.KMOD_CTRL):
             self.assertEqual(view.events(event), ("book:5",))
 
+    def test_march_order_row_picks_up_on_mouse_down_not_mouse_up(self):
+        # notes/troop_selection.md §5.2: "pressing on a row picks that regiment up".
+        view = TroopSelectionView.__new__(TroopSelectionView)
+        view.scene = type("Scene", (), {"phase": "march_order", "picked_whoami": None})()
+        view.rows, view.buttons, view.pressed_button = [(pygame.Rect(0, 0, 100, 100), 5)], [], None
+        view.scroll_direction = view.scroll_elapsed = None
+        view._native_point = lambda _position: (10, 10)
+        view._scroll_direction_at = lambda _point: None
+        view._set_cursor = lambda _name: None
+        view.refresh = lambda: None
+
+        with patch("whshr.frontend.troop_selection_view.pygame.key.get_mods", return_value=0):
+            down = view.events(type("Event", (), {"type": pygame.MOUSEBUTTONDOWN, "button": 1, "pos": (10, 10)})())
+            self.assertEqual(down, ("pickup:5",))
+
+            up = view.events(type("Event", (), {"type": pygame.MOUSEBUTTONUP, "button": 1, "pos": (10, 10)})())
+            self.assertEqual(up, ())  # not fired again on release of the same click
+
 
 if __name__ == "__main__":
     unittest.main()
