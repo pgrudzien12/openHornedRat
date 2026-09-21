@@ -44,9 +44,33 @@ renumber later work.
   movie scene/view. Route `StartMovie`, support its fade flag, and resume the requesting Glue
   runtime with an `ActivityResult` when playback ends or is skipped.
 
-- [ ] **GEI7 — Troop selection.** Replace briefing Accept's direct-battle route with troop
-  selection. Choose the marching force, apply costs, update roster state, mark the mission taken,
-  and launch the selected battle or continuation.
+- [ ] **GEI7 — Troop selection core flow.** Replace briefing Accept's direct-battle route with a
+  headless `TroopSelection` model (`notes/troop_selection.md` §10) and `TroopSelectionScene`:
+  load the company roster (GEI7a), compute P0 rows/pricing/limit and P1 marching order, and on
+  Done commit costs, roster flags and mission-taken state to `CampaignState`, then launch the
+  selected battle or continuation. Present it with a placeholder view (scoped down from the full
+  spec; GEI7b-GEI7e below cover the deferred parts).
+
+- [ ] **GEI7a — Company roster loading.** Give `CampaignState` an initial unit roster: parse
+  `STRTARMY.MRC` for a new campaign (`notes/campaign.md`, `whshr/rules.py:decode_unit`) into unit
+  records with stats, price-per-model, `forHire`, and `whoami`, keyed the same way
+  `testforunitinarmy`/`testforunitinmarch` already key `army_units`/`march_units`. Prerequisite
+  for GEI7's pricing and forced/excluded regiment rules.
+
+- [ ] **GEI7b — Troop selection view (P0 + P1).** Render the real regiment-select and
+  marching-order pages (`notes/troop_selection.md` §2-§5): background, rows, buttons, status
+  text/colours, and P1 reordering (click-to-pick-up/drop, not live drag-and-drop).
+
+- [ ] **GEI7c — Bankruptcy page (P5).** Render `notes/troop_selection.md` §7 and route the forced
+  regiments over-budget case to it at open.
+
+- [ ] **GEI7d — Roster book.** The separate "Army Records" window opened by Ctrl+click during
+  selection (`notes/troop_selection.md` §8): stat/info pages, hire/fire, reinforcements. Shared
+  later by the caravan's own book hotspots (part of GEI9's deferred books).
+
+- [ ] **GEI7e — Durable roster and marching order.** Write `ARMY.MRC`/`MARCH.MRC` and persist
+  reinforcements instead of only updating in-memory `CampaignState`; belongs with GEI14's save/load
+  persistence model rather than GEI7's in-memory commit.
 
 - [ ] **GEI8 — Debrief activity.** Present `StartDebrief`, apply the payment and result effects,
   and resume the requesting Glue runtime.
@@ -95,6 +119,10 @@ renumber later work.
   than missing rendering. A `...WINDOW` resource is not a standalone program.
 - Returning from a battle or nested briefing must reuse the existing `GlueScene`; recreating it
   loses its selected mission, windows, and interpreter position.
+- GEI7a is blocked on real RE work, not just plumbing: `notes/campaign.md` §4.5 documents the
+  `RMYI` roster table's *layout* but only a handful of its 39 `base price per model` values (the
+  rest are elided as "…"); the full whoami-indexed table needs to be read from the EXE's static
+  data before regiment pricing can be correct. Do that as part of GEI7a, not deferred further.
 - `IntroScene`/`IntroView` (boot-time A1 playback) generalized to `MovieScene`/`MovieView`
   (`whshr/campaign_scenes.py`, `whshr/frontend/movie_view.py`): a `MovieScene` completes into
   either a fixed `successor` (boot flow) or a parked `glue_scene` resumed with an
