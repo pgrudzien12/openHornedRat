@@ -117,9 +117,9 @@ from phases 1–3.
   acceptable.
 - **Runtime**: **Python is the engine language** (decided September 2026): pygame-ce (SDL2) for window,
   input and audio, zengl (OpenGL 3.3 core) for rendering, FluidSynth for MIDI. Readers, rules and the
-  simulation stay stdlib-only; only the frontend subpackage has third-party dependencies. The earlier C++
-  SDL2/OpenGL prototype is parked. Godot may be used as a disposable visualization client, but must not
-  own the authoritative rules, assets, saves, or mod format.
+  simulation stay stdlib-only; only the frontend subpackage has third-party dependencies. Godot may be
+  used as a disposable visualization client, but must not own the authoritative rules, assets, saves, or
+  mod format.
 - **Modding**: support ordered declarative data packages with stable namespaced identifiers, schemas,
   validation, dependencies, and deterministic merge/override rules. Original formats remain vanilla
   inputs, not the public mod authoring format. Defer a sandboxed, versioned mission scripting API until

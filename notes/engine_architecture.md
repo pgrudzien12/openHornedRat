@@ -39,9 +39,8 @@ content.
 
 **Python is the main engine language.** The `whshr` package is not only the reference
 implementation but the engine itself: format readers, normalized models, rules, the behaviour
-bytecode interpreter, the deterministic simulation, and the runtime frontend. This supersedes the
-earlier plan for a C++ SDL2/OpenGL frontend (`CMakeLists.txt`, `engine/src/main.cpp`,
-`horned-rat-engine`), which is **parked**: kept in the repository for reference, not developed further.
+bytecode interpreter, the deterministic simulation, and the runtime frontend. The runtime has one
+supported implementation, maintained in Python.
 
 The runtime frontend will use:
 
@@ -237,8 +236,7 @@ The frontend now plays `A1.SI` itself (see "Scene flow (engine step 4)" below); 
 `whshr game` command and its `ffplay` stopgap are removed. `scripts/run_engine.sh <WARFB>` launches
 `python3 -m whshr engine` through the repository's local `.venv`.
 
-The C++ SDL2/OpenGL movement prototype (`CMakeLists.txt`, `engine/src/main.cpp`) is parked. Original
-mission DLLs are data inputs only: the engine will never execute them as native code.
+Original mission DLLs are data inputs only: the engine will never execute them as native code.
 
 ## Movement (engine step 3)
 

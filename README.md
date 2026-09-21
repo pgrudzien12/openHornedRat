@@ -1,144 +1,97 @@
-# openHornedRat
+# Open Horned Rat
 
-An open, fan-made engine for **Warhammer: Shadow of the Horned Rat** (Mindscape, 1995),
-the first real-time strategy game set in the Warhammer Fantasy world.
+**Open Horned Rat** is an early, fan-made reimplementation of *Warhammer: Shadow of the Horned Rat* (Mindscape, 1995). Our aim is to make the original campaign playable on modern systems—Linux included—without emulation or the original engine's crashes and sound problems.
 
-We follow in the footsteps of projects such as [OpenMW](https://openmw.org) (Morrowind),
-[OpenRA](https://www.openra.net) (Command & Conquer), and OpenXcom. The goal is to make the
-original game comfortably playable on modern systems, including Linux, without emulation,
-without Wine and without the old engine's bugs, such as missing sound or random crashes. In
-the longer term, it aims to support open, data-driven extensions and mods beyond the original
-campaign.
+> **Early playtest build — source only.** This is not yet a replacement for the original game. It is useful for testing the opening campaign flow and the first battle, and we especially need reports from people who can spend time with it. The first packaged playable release is targeted for **the end of October 2026**.
 
-## Project status
+## Help us test
 
-The project is at an early stage. For now we are **reverse-engineering the game's file
-formats** rather than writing the engine itself. The scripts in `scripts/` can already read
-almost all of the game's data: palettes, backgrounds and animated unit sprites, battle and
-army scripts, UI bitmaps and texts, fonts, music and sound effects, the 3D battle terrain,
-textures and scenery meshes, and the cutscene videos. What is still missing is the game logic
-(mission scripts, combat rules, save games). Details:
+Campaign games take hours, so early feedback is incredibly valuable. Please try the build if you own the original game and tell us:
 
-- [`FORMATS.md`](FORMATS.md): description of the reverse-engineered and still unknown file formats;
-- [`ROADMAP.md`](ROADMAP.md): plan of further work and milestones.
-- [`notes/engine_architecture.md`](notes/engine_architecture.md): engine, original-mission
-  compatibility, and modding direction.
-- [`docs/testing.md`](docs/testing.md): behaviour-driven development rules for the engine.
+- whether it starts on your system and which version of the original game you used;
+- where the campaign flow, controls, visuals, audio, or battle rules feel wrong;
+- what happened immediately before a crash, freeze, or broken screen; and
+- the battle log from `logs/` if one was created.
 
-## Original game required
+Once the repository is public, please [open an issue](../../issues) for a reproducible problem. Screenshots and short screen recordings are welcome, but do not upload or distribute original game assets. If you would like to help with code, research, documentation, or compatibility testing, start with an issue or Discussion so we can coordinate work while the contribution licensing policy is finalized.
 
-**This repository does not contain any files from the game and never will.**
-The graphics, sound, maps and mission scripts are the property of their owners (Games Workshop
-and others). Like OpenMW or OpenRA, the engine will load assets from **your own legally
-purchased copy of the game**.
+## What you can play today
 
-You can buy the game, for example, here:
+Start a new campaign and the build plays the opening prologue and intro, shows the main menu, and takes you through the early campaign screens into the first battle (`BF001`). In battle you can select regiments, move, charge, shoot, and finish with a victory or defeat result. It is a development prototype: saves, a complete campaign, faithful rules, and broad platform testing are still in progress.
 
-- **GOG.com**: [Warhammer: Shadow of the Horned Rat](https://www.gog.com/en/game/warhammer_shadow_of_the_horned_rat),
-  a DRM-free version. All work so far is based on this version (GOG v1.0).
-- **Steam**: [Warhammer: Shadow of the Horned Rat (Classic)](https://store.steampowered.com/app/4280870/Warhammer_Shadow_of_the_Horned_Rat_Classic/),
-  a 2026 re-release. We have not yet checked whether its files are identical to the GOG version.
+| Area | Status | What to expect |
+|---|---|---|
+| Original game data | Works | Reads assets from your own installation; no game data is included here. |
+| Opening and menu | Works | Prologue, intro movie, main menu, and first mission briefing are playable. |
+| Campaign screens | In progress | The early campaign flow is implemented; many screens and choices still need validation. |
+| First battle (`BF001`) | Playable | Movement, selection, charges, ranged attacks, basic morale/routing, enemy AI, and a result screen. |
+| Battle rules and missions | In progress | Rules and AI are simplified; original mission behaviour is not yet fully reproduced. |
+| Full campaign and saves | Not ready | Do not expect to complete or save a campaign yet. |
+| Audio and presentation | In progress | Some original presentation is used; expect gaps and rough edges. |
+| Packaged downloads | Not available | Run from source for now. |
 
-The original 1995 CD-ROM release should also work, but it has not been tested.
+## Run it from source
 
-## Using the tools
+### You need
 
-The individual scripts in `scripts/` remain available while they are migrated into the `whshr`
-package. The package provides the common entry points:
+- Python 3 and a system capable of creating an OpenGL 3.3 window.
+- A legal local copy of *Warhammer: Shadow of the Horned Rat*. The GOG v1.0 release is the version we actively test. The 1995 CD edition may work; the Steam/SNEG re-release has not yet been verified.
+- A checkout of this repository. There is no release binary yet.
+
+The project never ships original game files. Point the engine at the `WARFB` directory in your own installation.
+
+### Install and start
+
+From the repository root, create an isolated Python environment and install the small frontend dependency set:
 
 ```sh
-python3 -m whshr check /path/to/WARFB
-python3 -m whshr extract /path/to/WARFB extracted
-python3 -m whshr catalog /path/to/WARFB ~/.cache/openhornedrat/catalog.json
-python3 -m whshr viewer /path/to/WARFB BF001.BTS battle.png
-python3 -m whshr viewer /path/to/WARFB BF001.BTS battle-debug.png --diagnostic
-python3 -m whshr viewer /path/to/WARFB BF001.BTS camera.png --projection perspective --yaw 225 --pitch 32 --distance 160 --fov 50
-python3 -m whshr viewer /path/to/WARFB BF001.BTS topdown.png --projection orthographic --yaw 180 --pitch 85
-python3 -m whshr viewer-web /path/to/WARFB BF001.BTS
-python3 -m whshr viewer-2d /path/to/WARFB BF001.BTS game-view.png --target-x 1100 --target-y 600
-python3 -m whshr terrain-check /path/to/WARFB
+python3 -m venv .venv
+.venv/bin/pip install --only-binary=:all: -r requirements-engine.txt
 ```
 
-Both commands take the `WARFB/` directory of the GOG installation. Extraction output, such as
-sprites, maps, and the battle atlas, must remain local. The directories holding such output
-(`samples/`, `battles/`, `extracted/`) are in
-`.gitignore`. They contain data extracted from the game, so they must not be committed or
-distributed. `viewer` writes a static, textured PNG from a battle's terrain, scenery, and initial
-units; its output must also remain local. `--diagnostic` adds scenery-pivot and unit origin markers
-and writes a JSON sidecar. `terrain-check` verifies that each `GRND.PBX` vertex height agrees with
-`GRND.GD`. `--projection perspective` matches the game's camera model: a look-at eye positioned
-from the selected ground target by yaw, pitch, and `--distance` (mesh units), framed by vertical
-`--fov`. `--projection orthographic` is a diagnostic view, e.g. top-down (`--yaw 180 --pitch 85`,
-north up) for comparison with plan maps. Both modes accept
-`--yaw`, `--pitch`, `--target-x`, and `--target-y`; `--zoom` applies only to orthographic mode.
-`--ambient` and `--light X Y Z` control lighting.
-`--scenery-scale` is a temporary multiplier for calibrating scenery meshes independently.
-`viewer-web` opens local projection, look-at camera, and lighting controls at
-`http://127.0.0.1:8765/`; its field mini-map can set the ground target by clicking. It only
-serves the local browser and renders from the local game installation.
-
-`viewer-2d` is a separate top-down game-view pipeline: it samples the battle's `loadplanmap`
-(`MAP*.FOL/.BOP`) in a 544×386 viewport by default, then composites directional unit sprites in
-their `.BTS`/`.MRC` formations. Use `--target-x`, `--target-y`, and `--zoom` to select a view;
-`--spacing` and `--direction-offset` support visual calibration. It does not use PBX terrain or
-scenery and does not alter the independent `viewer`/`viewer-web` 3D asset viewer.
-
-`catalog` writes a metadata-only index for lazy asset loading. It records logical asset IDs,
-original-relative paths, decoder types, and source fingerprints; it neither copies nor decodes
-game assets and should be written outside the repository.
-
-## Engine prototype
-
-The engine is written in Python: the `whshr` package holds the readers, rules and simulation, and the
-runtime frontend (`whshr/frontend/`) uses pygame-ce (SDL2) and zengl (OpenGL 3.3 core); see
-[`notes/engine_architecture.md`](notes/engine_architecture.md). The frontend is the only part with
-third-party dependencies. Install them into a local virtual environment and start the engine against a
-local game installation:
+Then run the engine, replacing `/path/to/WARFB` with your game's `WARFB` directory:
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install --only-binary=:all: -r requirements-engine.txt
 .venv/bin/python -m whshr engine /path/to/WARFB
 ```
 
-It opens a window driven by the scene state machine, with a debug overlay (FPS, tick count, scene). The
-flow opens with the original text prologue, then plays the original `A1.SI` intro inside the engine at the
-verified 8 fps with its WAV sound (any key or click skips it), then a simple main menu (New Campaign: N or Enter; Quit: Q or Escape), the BF001
-mission briefing with its campaign text (Enter or a click starts the battle), and the BF001 battle, with
-a short fade after each scene change. Ctrl+Q or closing the window quits at any time.
-
-In battle, left-click a player regiment to select it and left-click the ground (or right-click without
-dragging) to order it there; with a selection, clicking an enemy regiment orders a charge. Escape deselects. Regiments move at the documented real-time speeds and walk
-in formation with walking and idle animations. Pan with the arrow keys or WASD or a right-drag, rotate
-with Q/E or a middle-drag, tilt with Page Up/Page Down, zoom with the mouse wheel, and reset with Home.
-Regiments in contact fight simplified close combat, losers test Leadership and may rout, crossbows shoot
-in range, and a simple enemy AI holds, then advances and charges; the battle ends on a Victory or Defeat
-screen that returns to the main menu. The rules are simplified from `notes/game_rules.md`.
-
-Development options: `--battle BF001` starts directly in a battle, `--camera YAW PITCH DISTANCE` sets its
-initial camera, `--skip-intro` starts in the menu, `--width`/`--height` set the window size, and
-`--hidden --frames N --frame-time S --screenshot out.png` renders reproducible local screenshots.
-`./scripts/run_engine.sh /path/to/WARFB [options]` runs the same command through `.venv`.
-
-Every battle is recorded by default as a JSON Lines log under `logs/` (`--battle-log DIR` to choose a
-different directory, `--no-battle-log` to disable, `--seed N` to change the deterministic RNG seed); the
-engine prints the log path on exit. `python3 -m whshr battle-replay /path/to/WARFB logs/battle-....jsonl`
-rebuilds the battle from the log and reports `replay identical` or the first divergence; add `--timeline`
-for a readable per-tick account of orders and events, or `--until TICK` to stop early. See
-[`notes/engine_architecture.md`](notes/engine_architecture.md), "Battle logs and replay".
-
-The earlier C++ SDL2/OpenGL movement prototype is parked (kept for reference, no longer developed):
+Or use the convenience script after completing the install step:
 
 ```sh
-cmake -S . -B build
-cmake --build build
-./build/horned-rat-engine /path/to/WARFB BF001.BTS
+./scripts/run_engine.sh /path/to/WARFB
 ```
 
-It requires the SDL2 and OpenGL development packages plus CMake. It currently validates the
-supplied installation, opens a native window, and provides a deterministic fixed-tick click-to-move
-loop; press `Escape` to quit.
+If the game files are elsewhere, you can set `WARFB` instead:
 
-## License and rights
+```sh
+export WARFB=/path/to/WARFB
+.venv/bin/python -m whshr engine
+```
 
-This is a hobby, non-commercial project, not affiliated with Games Workshop, Mindscape, GOG
-or SNEG. Warhammer and Shadow of the Horned Rat are trademarks of their respective owners.
+The window opens with the prologue and intro. Any key or click skips the intro; choose **New Campaign** with `N` or Enter. Use Ctrl+Q or close the window to quit.
+
+### Battle controls
+
+| Action | Control |
+|---|---|
+| Select a regiment | Left-click it |
+| Move selected regiment / charge an enemy | Left-click the ground / an enemy regiment |
+| Move without a selection | Right-click the ground |
+| Deselect | Escape |
+| Pan camera | Arrow keys, WASD, or right-drag |
+| Rotate camera | Q/E or middle-drag |
+| Tilt camera | Page Up / Page Down |
+| Zoom | Mouse wheel |
+| Reset camera | Home |
+
+Battle sessions create a JSON Lines log in `logs/` by default. Attach the relevant log to a bug report when possible; it helps us reproduce deterministic battle behaviour. You can begin directly in the first battle for a quick test with `--battle BF001`.
+
+## Original game required
+
+This repository contains no original game files and never will. *Warhammer* and *Shadow of the Horned Rat* are trademarks of their respective owners. Open Horned Rat is a non-commercial fan project and is not affiliated with Games Workshop, Mindscape, GOG, or SNEG.
+
+You can buy a compatible copy from [GOG.com](https://www.gog.com/en/game/warhammer_shadow_of_the_horned_rat). We have not yet verified the [Steam/SNEG re-release](https://store.steampowered.com/app/4280870/Warhammer_Shadow_of_the_Horned_Rat_Classic/).
+
+## Project details
+
+The reverse-engineering notes, format coverage, and longer-term technical roadmap are kept for contributors and researchers in [ROADMAP.md](ROADMAP.md), [FORMATS.md](FORMATS.md), and [`notes/`](notes/). They are intentionally separate from these player instructions.
