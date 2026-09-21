@@ -1,6 +1,6 @@
 # Open Horned Rat
 
-**Open Horned Rat** is an early, fan-made reimplementation of *Warhammer: Shadow of the Horned Rat* (Mindscape, 1995). Our aim is to make the original campaign playable on modern systems—Linux included—without emulation or the original engine's crashes and sound problems.
+**Open Horned Rat** is an early, reimplementation of *Warhammer: Shadow of the Horned Rat* (Mindscape, 1995). Our aim is to make the original campaign playable on modern systems—Linux included—without emulation or the original engine's crashes and sound problems.
 
 > **Early playtest build — source only.** This is not yet a replacement for the original game. It is useful for testing the opening campaign flow and the first battle, and we especially need reports from people who can spend time with it. The first packaged playable release is targeted for **the end of October 2026**.
 
