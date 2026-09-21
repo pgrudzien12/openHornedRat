@@ -154,7 +154,8 @@ class MainMenuScene(Scene):
                 # briefing; a real installation derives the full initial flow.
                 self.campaign = (
                     CampaignState.single_mission(self.briefing) if self.briefing is not None
-                    else CampaignState.from_installation(context.locator.installation, self.content)
+                    else CampaignState.from_installation(context.locator.installation, self.content,
+                                                         save_dir=getattr(context, "save_dir", None))
                 )
             return Transition(GlueScene(campaign=self.campaign, window="STARTCARAVAN"), "new campaign started")
         if event == "quit":

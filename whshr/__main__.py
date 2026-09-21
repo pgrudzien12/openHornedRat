@@ -10,8 +10,11 @@ from . import legacy
 from . import audio, battle2d, battle3d, battle_replay, behaviour, campaign, catalog, engine, glue_spec, pbx, rules, si, viewer_web
 from .paths import Installation
 
-# Battle logs default to the git-ignored logs/ of this checkout, wherever the engine is started from.
+# Battle logs and saves default to the git-ignored logs//saves/ of this checkout, wherever the
+# engine is started from. Saves never go into the original installation (GEI7e): the engine keeps
+# its own save directory, not the original's SAVE/.
 REPOSITORY_LOGS = Path(__file__).resolve().parents[1] / "logs"
+REPOSITORY_SAVES = Path(__file__).resolve().parents[1] / "saves"
 
 
 def _check(name, callback):
@@ -115,6 +118,9 @@ def main(argv=None):
     engine_parser.add_argument("--no-battle-log", action="store_true", help="disable battle logging")
     engine_parser.add_argument("--seed", type=int, default=engine.DEFAULT_SEED,
                                help=f"battle RNG seed (default: {engine.DEFAULT_SEED})")
+    engine_parser.add_argument("--save-dir", type=Path, default=REPOSITORY_SAVES,
+                               help="directory for engine saves, e.g. ARMY.MRC/MARCH.MRC "
+                                    "(default: saves/; never the original installation's SAVE/)")
     viewer_parser = commands.add_parser("viewer", help="render a static 3D battle scene to PNG")
     viewer_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     viewer_parser.add_argument("battle", help="BTS filename or path")
@@ -226,7 +232,7 @@ def main(argv=None):
         log_dir = None if args.no_battle_log else args.battle_log
         result = app.run(args.installation, (args.width, args.height), args.skip_intro, args.hidden,
                          args.frames, args.screenshot, args.frame_time, args.battle, args.camera,
-                         log_dir, args.seed, args.glue_program)
+                         log_dir, args.seed, args.glue_program, args.save_dir)
         print(f"{result['frames']} frames, {result['ticks']} ticks, final scene {result['scene']}")
         return 0
     if args.command == "viewer":

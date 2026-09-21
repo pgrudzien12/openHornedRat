@@ -83,6 +83,9 @@ class CampaignState:
     hints: dict[int, str] = field(default_factory=dict)
     content: object = field(default=None, repr=False, compare=False)
     company: tuple = field(default_factory=tuple)
+    # The engine's own save directory (never the original installation's SAVE/, GEI7e); None
+    # (e.g. focused tests, --glue-program runs) means troop selection stays in-memory only.
+    save_dir: object = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
         if self.mission_window is None:
@@ -118,15 +121,15 @@ class CampaignState:
         self.coffers += deployment.money_delta
         self.march_units = set(deployment.units)
         self.army_units = set(deployment.hired)
-        installation = getattr(self.content, "installation", None)
-        if installation is not None:
-            # notes/troop_selection.md §5.3 points 3, 5: durable ARMY.MRC/MARCH.MRC
+        if self.save_dir is not None:
+            # notes/troop_selection.md §5.3 points 3, 5: durable ARMY.MRC/MARCH.MRC, written to
+            # the engine's own save directory, never the original installation
             # (notes/glue_engine_integration.md GEI7e). Reinforcements have no standalone-file
             # home in the original either (only the savegame.N RIFF's RMYI chunk carries them,
             # notes/campaign.md §4.5), so they stay in-memory until GEI14 defines that writer.
             hired = {whoami: whoami in self.army_units for whoami in {r.whoami for r in self.company}}
-            roster.write_company(installation, self.company, hired)
-            roster.write_march(installation, deployment.units, self.company)
+            roster.write_company(self.save_dir, self.company, hired)
+            roster.write_march(self.save_dir, deployment.units, self.company)
 
     def autosave(self, runtime_state):
         self.autosave_state = deepcopy(runtime_state)
@@ -179,7 +182,7 @@ class CampaignState:
         return text % format_args if format_args else text
 
     @classmethod
-    def from_installation(cls, installation, content=None):
+    def from_installation(cls, installation, content=None, save_dir=None):
         game = installation if isinstance(installation, Installation) else Installation(installation)
         content = content or GlueContent(game)
         wnd = content.resources
@@ -192,7 +195,8 @@ class CampaignState:
             # Focused scene tests can supply a minimal installation without STRTARMY.MRC/WHSHR.EXE.
             company = ()
         return cls(build_campaign_graph(str(game.root), wnd=wnd, string_tables=tables),
-                   flow=initial_flow(hotspots), hints=hints, content=content, company=company)
+                   flow=initial_flow(hotspots), hints=hints, content=content, company=company,
+                   save_dir=save_dir)
 
     @classmethod
     def single_mission(cls, briefing):

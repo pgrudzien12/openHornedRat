@@ -12,7 +12,7 @@ class GlueCliTests(unittest.TestCase):
             ])
 
         self.assertEqual(result, 0)
-        self.assertEqual(run.call_args.args[-1], "FLOWSCRIPTBP01")
+        self.assertEqual(run.call_args.args[-2], "FLOWSCRIPTBP01")
 
     def test_engine_rejects_battle_and_glue_program_together(self):
         with self.assertRaises(SystemExit):

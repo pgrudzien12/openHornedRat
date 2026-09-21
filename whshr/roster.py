@@ -1,12 +1,19 @@
-"""Company roster: the static per-``whoami`` RMYI table and the starting company (STRTARMY.MRC).
+"""Company roster: the static per-``whoami`` RMYI table, the starting company (STRTARMY.MRC),
+and writing the engine's own roster/marching-order saves.
 
 Behavioral source: notes/campaign.md sections 3.1 (whoami/hired unit fields) and 4.5 (the RMYI
 static roster table). Data is read from the user's own installation at runtime; nothing here is
 copied game content (`notes/campaign.md` §4.5's full table already lives in that note as a fact,
-not as copyrightable expression).
+not as copyrightable expression). Writes (``write_company``/``write_march``) never touch the
+original installation: they go to the engine's own save directory, not the original's `SAVE/`
+(notes/glue_engine_integration.md GEI7e). The engine keeps no other save/load compatibility
+promise toward the original (format included); reusing the readable `.MRC` grammar here is a
+convenient current implementation choice, not a compatibility commitment (GEI14 owns the actual
+save/load design).
 """
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .paths import Installation
 from .rules import PeImage, stat_fields
@@ -144,28 +151,29 @@ def _with_hired(node, hired):
     return copy
 
 
-def write_company(installation, regiments, hired, path=("SAVE", "ARMY.MRC")):
+def write_company(save_dir, regiments, hired, filename="ARMY.MRC"):
     """Write the company roster (notes/troop_selection.md §5.3 point 5: hired regiments only).
 
-    ``hired`` is a ``{whoami: bool}`` mapping (the confirmed troop-selection state); regiments
-    without a ``raw`` node (not loaded from a real .MRC, e.g. in tests) are skipped.
+    ``save_dir`` is the engine's own save directory (never the original installation: this
+    engine does not keep save-format or save-location compatibility with the original game,
+    notes/glue_engine_integration.md GEI7e). ``hired`` is a ``{whoami: bool}`` mapping (the
+    confirmed troop-selection state); regiments without a ``raw`` node (not loaded from a real
+    .MRC, e.g. in tests) are skipped.
     """
-    game = installation if isinstance(installation, Installation) else Installation(installation)
     units = [_with_hired(regiment.raw, True) for regiment in regiments
              if regiment.raw is not None and hired.get(regiment.whoami, regiment.hired)]
-    _write_units_file(game, path, units, "Mercenary Army")
+    _write_units_file(save_dir, filename, units, "Mercenary Army")
 
 
-def write_march(installation, ordered_whoami, regiments, path=("SAVE", "MARCH.MRC")):
+def write_march(save_dir, ordered_whoami, regiments, filename="MARCH.MRC"):
     """Write the marching order (notes/troop_selection.md §5.3 point 3), in list order."""
-    game = installation if isinstance(installation, Installation) else Installation(installation)
     by_whoami = {regiment.whoami: regiment for regiment in regiments}
     units = [_with_hired(by_whoami[whoami].raw, True) for whoami in ordered_whoami
              if by_whoami.get(whoami) is not None and by_whoami[whoami].raw is not None]
-    _write_units_file(game, path, units, "Mercenary Army (Marching Orders)")
+    _write_units_file(save_dir, filename, units, "Mercenary Army (Marching Orders)")
 
 
-def _write_units_file(game, path, units, label):
-    target = game.root.joinpath(*path)
+def _write_units_file(save_dir, filename, units, label):
+    target = Path(save_dir) / filename
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(script.write(_unit_section(units, label)))

@@ -34,6 +34,7 @@ class RosterTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
+        self.save_dir = self.root / "saves"  # separate from self.root: never the "installation"
         path = self.root / "FILE/SCRIPT/STRTARMY.MRC"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(MRC)
@@ -80,9 +81,9 @@ class RosterTests(unittest.TestCase):
     def test_given_a_fired_regiment_when_the_company_is_written_then_it_is_dropped(self):
         company = load_company(self.root, roster=self.roster)
 
-        write_company(self.root, company, hired={2: True, 14: False})
+        write_company(self.save_dir, company, hired={2: True, 14: False})
 
-        written = script.parse(str(self.root / "SAVE/ARMY.MRC"))
+        written = script.parse(str(self.save_dir / "ARMY.MRC"))
         units = script.units_of(written)
         self.assertEqual([script.unit_view(u)["set"]["whoami"] for u in units], [2])
 
@@ -91,9 +92,9 @@ class RosterTests(unittest.TestCase):
         cavalry = next(r for r in company if r.whoami == 2)
         self.assertTrue(cavalry.hired)  # was already hired=1 in the source file
 
-        write_company(self.root, company, hired={2: False, 14: True})
+        write_company(self.save_dir, company, hired={2: False, 14: True})
 
-        written = script.parse(str(self.root / "SAVE/ARMY.MRC"))
+        written = script.parse(str(self.save_dir / "ARMY.MRC"))
         views = {script.unit_view(u)["set"]["whoami"]: script.unit_view(u) for u in script.units_of(written)}
         self.assertEqual([w for w in views], [14])  # 2 dropped (fired), 14 kept (hired)
         self.assertEqual(views[14]["set"]["hired"], 1)
@@ -101,17 +102,17 @@ class RosterTests(unittest.TestCase):
     def test_given_a_marching_order_when_written_then_units_appear_in_that_order(self):
         company = load_company(self.root, roster=self.roster)
 
-        write_march(self.root, (14, 2), company)
+        write_march(self.save_dir, (14, 2), company)
 
-        written = script.parse(str(self.root / "SAVE/MARCH.MRC"))
+        written = script.parse(str(self.save_dir / "MARCH.MRC"))
         self.assertEqual([script.unit_view(u)["set"]["whoami"] for u in script.units_of(written)], [14, 2])
 
     def test_given_a_regiment_loaded_from_a_synthetic_source_with_no_raw_node_then_writing_skips_it(self):
         synthetic = Regiment(99, "Synthetic", True, 1, 1, 0, self.roster[2])
 
-        write_company(self.root, (synthetic,), hired={99: True})
+        write_company(self.save_dir, (synthetic,), hired={99: True})
 
-        written = script.parse(str(self.root / "SAVE/ARMY.MRC"))
+        written = script.parse(str(self.save_dir / "ARMY.MRC"))
         self.assertEqual(script.units_of(written), [])
 
 

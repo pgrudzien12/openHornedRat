@@ -108,7 +108,7 @@ class GlueScene(Scene):
                 from .campaign_state import CampaignState
 
                 campaign = self.campaign or CampaignState.from_installation(
-                    context.locator.installation, self.runtime.content
+                    context.locator.installation, self.runtime.content, save_dir=getattr(context, "save_dir", None)
                 )
                 return Transition(GlueScene(campaign=campaign, window="STARTCARAVAN"),
                                   "generic mission map dismissed")

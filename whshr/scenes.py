@@ -51,6 +51,8 @@ class SceneAssets:
     cache: AssetCache
     loaders: dict
     glue: object = None
+    # The engine's own save directory (never the original installation's SAVE/, GEI7e).
+    save_dir: object = None
 
     def load(self, identifier):
         record = self.catalog.get(identifier)

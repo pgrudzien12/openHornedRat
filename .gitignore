@@ -20,6 +20,9 @@ run-local.sh
 # Battle logs (whshr.battle_log): JSON Lines recordings of real battles, contain game data - local only.
 logs/
 
+# Engine saves (whshr.roster write_company/write_march): player-specific campaign state - local only.
+saves/
+
 # Temporary git worktrees of parallel agent sessions.
 .claude/worktrees/
 

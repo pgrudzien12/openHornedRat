@@ -11,8 +11,12 @@ from .scenes import SceneAssets
 from .si import process_si
 
 
-def scene_context(installation, loaders=None):
-    """Validate an installation and return the lazy asset access shared by all scenes."""
+def scene_context(installation, loaders=None, save_dir=None):
+    """Validate an installation and return the lazy asset access shared by all scenes.
+
+    ``save_dir`` is the engine's own save directory (never the original installation's SAVE/,
+    notes/glue_engine_integration.md GEI7e).
+    """
     locator = AssetLocator(installation)
     locator.validate()
     glue = GlueContent(locator.installation)
@@ -38,4 +42,4 @@ def scene_context(installation, loaders=None):
             ),
             "glue-content": load_glue,
         }
-    return SceneAssets(locator, build(locator.installation), AssetCache(), loaders, glue=glue)
+    return SceneAssets(locator, build(locator.installation), AssetCache(), loaders, glue=glue, save_dir=save_dir)

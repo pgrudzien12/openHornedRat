@@ -64,9 +64,9 @@ unknown formats. In short:
 ## Repository layout
 
 GitHub repository: https://github.com/pgrudzien12/openHornedRat (private).
-`samples/`, `battles/`, `extracted/` and `logs/` are in `.gitignore`: they contain data extracted from
-the game (or, for `logs/`, JSON Lines battle logs naming regiments and units from the game) and are kept
-locally only.
+`samples/`, `battles/`, `extracted/`, `logs/` and `saves/` are in `.gitignore`: they contain data
+extracted from the game (or, for `logs/`, JSON Lines battle logs, and for `saves/`, engine campaign
+saves — see "Engine saves" below — naming regiments and units from the game) and are kept locally only.
 
 ```
 README.md          - project description (goal, required original game, where to buy it)
@@ -178,6 +178,17 @@ Assets follow the same rule: the engine and its tests load original data from th
 `AssetId`/catalog/loader (`docs/asset_pipeline.md`), never from `extracted/` PNGs or other extractor output. `extracted/` is
 a debug/verification artefact only, absent on a fresh checkout. Glue bitmaps come from `BITMAP.DLL` via a `pe-bitmap`
 loader (design: `notes/data_driven_audit.md` §3.1); take sizes and frame counts from the asset, not from literals.
+
+## Engine rule: saves are the engine's own, not the original's
+
+The engine never writes into the original installation (no autosaves, no `SAVE/ARMY.MRC`/`MARCH.MRC`/`savegame.N`
+overwritten in place). Writes go to the engine's own save directory (`python3 -m whshr engine --save-dir`, default
+`saves/` of this checkout, threaded as `SceneAssets.save_dir` / `CampaignState.save_dir`) — read-only game data stays
+in `$WARFB`, mutable player state stays in the engine's own directory. The engine does not promise save-format
+compatibility with the original either (mods may later need a different shape); reusing the original's readable
+`.MRC` text grammar to write `ARMY.MRC`/`MARCH.MRC` (`whshr/roster.py`, `notes/glue_engine_integration.md` GEI7e) is a
+convenient current implementation choice, not a compatibility commitment. The full save/load model is still open
+(GEI7e's item in `notes/glue_engine_integration.md`, owned overall by GEI14).
 
 ## Clean-room policy (all agents must follow this)
 
