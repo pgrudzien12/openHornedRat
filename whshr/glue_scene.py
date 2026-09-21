@@ -13,7 +13,8 @@ from .scenes import Scene, Transition
 class GlueScene(Scene):
     """Own one ``GlueRuntime`` and expose its ordered effects to a presentation host."""
 
-    def __init__(self, program=None, campaign=None, *, window=None, speech_enabled=True, accept_battle=None, return_scene=None):
+    def __init__(self, program=None, campaign=None, *, window=None, speech_enabled=True, accept_battle=None,
+                 accept_mission=None, return_scene=None):
         if (program is None) == (window is None):
             raise ValueError("GlueScene needs exactly one program or window")
         self.program = str(program).upper() if program is not None else None
@@ -21,6 +22,7 @@ class GlueScene(Scene):
         self.campaign = campaign
         self.speech_enabled = speech_enabled
         self.accept_battle = accept_battle
+        self.accept_mission = accept_mission
         self.return_scene = return_scene
         self.runtime = None
         self.context = None
@@ -61,6 +63,9 @@ class GlueScene(Scene):
             raise RuntimeError("GlueScene must be entered before completing an activity")
         self._effects.extend(self.runtime.resume(result))
 
+    def start_battle(self, battle):
+        self._effects.extend(self.runtime.start_battle(battle))
+
     def font(self, slot):
         """Load one verified glue font slot only when a view needs it."""
         slot = int(slot)
@@ -80,14 +85,21 @@ class GlueScene(Scene):
                                                    "optionsdialog"}:
                     return Transition(GlueScene(event.target, self.campaign), "generic caravan mission map opened")
             if event.kind == "panel-action" and event.target in ("accept_briefing", "open_troop_select") and self.accept_battle:
-                self._effects.extend(self.runtime.start_battle(self.accept_battle))
+                from .campaign_scenes import TroopSelectionScene
+
+                return Transition(TroopSelectionScene(self.campaign, self.accept_mission, self.accept_battle, self),
+                                  "troop selection opened")
             elif event.kind == "panel-action" and event.target == "open_troop_select" and self.runtime.state.selected_mission:
-                self._effects.extend(self.runtime.start_battle(self._selected_battle()))
+                from .campaign_scenes import TroopSelectionScene
+
+                return Transition(TroopSelectionScene(self.campaign, self.runtime.state.selected_mission,
+                                                       self._selected_battle(), self),
+                                  "troop selection opened")
             elif event.kind == "panel-action" and event.target == "open_briefing" and self.runtime.state.selected_mission:
                 briefing = self._selected_briefing()
                 if briefing:
-                    return Transition(GlueScene(briefing, self.campaign,
-                                                accept_battle=self._selected_battle(), return_scene=self),
+                    return Transition(GlueScene(briefing, self.campaign, accept_battle=self._selected_battle(),
+                                                accept_mission=self.runtime.state.selected_mission, return_scene=self),
                                       "generic mission briefing opened")
             elif event.kind == "panel-action" and event.target in ("abort_briefing", "return_to_caravan") and self.return_scene:
                 self._effects.extend(self.runtime.handle(GlueInput("panel-action", "abort_briefing")))

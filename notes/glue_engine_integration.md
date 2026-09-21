@@ -44,15 +44,15 @@ renumber later work.
   movie scene/view. Route `StartMovie`, support its fade flag, and resume the requesting Glue
   runtime with an `ActivityResult` when playback ends or is skipped.
 
-- [ ] **GEI7 — Troop selection core flow.** Replace briefing Accept's direct-battle route with a
+- [x] **GEI7 — Troop selection core flow.** Replace briefing Accept's direct-battle route with a
   headless `TroopSelection` model (`notes/troop_selection.md` §10) and `TroopSelectionScene`:
   load the company roster (GEI7a), compute P0 rows/pricing/limit and P1 marching order, and on
   Done commit costs, roster flags and mission-taken state to `CampaignState`, then launch the
   selected battle or continuation. Present it with a placeholder view (scoped down from the full
   spec; GEI7b-GEI7e below cover the deferred parts).
 
-- [ ] **GEI7a — Company roster loading.** Give `CampaignState` an initial unit roster: parse
-  `STRTARMY.MRC` for a new campaign (`notes/campaign.md`, `whshr/rules.py:decode_unit`) into unit
+- [x] **GEI7a — Company roster loading.** Give `CampaignState` an initial unit roster: parse
+  `STRTARMY.MRC` for a new campaign (`whshr/roster.py`, `notes/campaign.md` §3.1/§4.5) into unit
   records with stats, price-per-model, `forHire`, and `whoami`, keyed the same way
   `testforunitinarmy`/`testforunitinmarch` already key `army_units`/`march_units`. Prerequisite
   for GEI7's pricing and forced/excluded regiment rules.
@@ -119,10 +119,21 @@ renumber later work.
   than missing rendering. A `...WINDOW` resource is not a standalone program.
 - Returning from a battle or nested briefing must reuse the existing `GlueScene`; recreating it
   loses its selected mission, windows, and interpreter position.
-- GEI7a is blocked on real RE work, not just plumbing: `notes/campaign.md` §4.5 documents the
-  `RMYI` roster table's *layout* but only a handful of its 39 `base price per model` values (the
-  rest are elided as "…"); the full whoami-indexed table needs to be read from the EXE's static
-  data before regiment pricing can be correct. Do that as part of GEI7a, not deferred further.
+- GEI7's core flow is entirely front-end-owned (notes/troop_selection.md §9: "nothing on this
+  screen is placed by WND.DLL scripts"), so it is not a `GlueRuntime` activity/effect like
+  `StartBattle`/`StartMovie`. `GlueScene.handle()` routes Accept directly to a
+  `Transition(TroopSelectionScene(...), ...)` instead, and `TroopSelectionScene` calls the new
+  `GlueScene.start_battle(battle)` (queues a `StartBattle` effect on the parked scene) before
+  transitioning back to it; `SceneMachine._start_glue_battle` then picks it up on the next tick,
+  same as any other queued battle.
+- A `GlueScene` with no `CampaignState` (development `--glue-program` runs, and tests) has no
+  company either: `TroopSelectionScene` mirrors the original's own mode-0 rule (notes/troop_selection.md
+  §1.1, "if the file cannot be loaded... skip the screen and run Done immediately") and starts the
+  battle directly rather than crashing or silently doing nothing.
+- `whshr/roster.py`'s `load_company()` takes an optional pre-built `roster` mapping so its MRC-merge
+  logic is testable without a real `WHSHR.EXE` PE image; only `static_roster()` (the RMYI reader)
+  needs the real installation, consistent with `rules.py`'s untested-at-unit-level `PeImage` reads
+  (verified instead by `scripts/roster_check.py` against the real game, notes/campaign.md §4.5).
 - `IntroScene`/`IntroView` (boot-time A1 playback) generalized to `MovieScene`/`MovieView`
   (`whshr/campaign_scenes.py`, `whshr/frontend/movie_view.py`): a `MovieScene` completes into
   either a fixed `successor` (boot flow) or a parked `glue_scene` resumed with an

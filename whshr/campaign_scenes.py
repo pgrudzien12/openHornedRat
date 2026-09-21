@@ -11,6 +11,7 @@ from .glue_fonts import glue_font_asset
 from .legacy import module
 from .scenes import Quit, Scene, SceneManifest, Transition
 from .si import load_si, walk_objects
+from .troop_selection import TroopSelection
 
 INTRO_CUTSCENE = AssetId("vanilla", "cutscene", "a1")
 INTRO_MEDIA = AssetId("vanilla", "cutscene", "a1-media")
@@ -321,6 +322,83 @@ class BriefingScene(Scene):
             self.dialogue_elapsed = 0.0
             self.dialogue_finished = self.turn_index >= len(turns)
         return None
+
+
+class TroopSelectionScene(Scene):
+    """The front-end-owned troop-selection screen, reached by Accept (notes/troop_selection.md).
+
+    Core in-memory flow only (notes/glue_engine_integration.md GEI7): the real P0/P1 view, the
+    bankruptcy page's presentation, and the roster book are deferred to GEI7b-GEI7d.
+    """
+
+    def __init__(self, campaign, mission_ref, battle, glue_scene):
+        self.campaign = campaign
+        self.mission_ref = mission_ref
+        self.battle = battle
+        self.glue_scene = glue_scene
+        self.model = None
+        self.phase = "select"
+
+    def enter(self, context):
+        if not self.campaign or not self.campaign.company:
+            # notes/troop_selection.md §1.1: no company file skips the screen and runs Done immediately.
+            self.glue_scene.start_battle(self.battle)
+            self.phase = "skip"
+            return
+        record = self.glue_scene.runtime.content.mission(self.mission_ref)
+        forced = tuple(int(field.argument) for field in record.fields if field.command == "forceunits")
+        excluded = tuple(int(field.argument) for field in record.fields if field.command == "excludeunits")
+        self.model = TroopSelection(self.campaign.company, forced=forced, excluded=excluded,
+                                    coffers=self.campaign.coffers, prepaid=_prepaid_payment(record))
+        if self.model.bankrupt:
+            self.phase = "bankrupt"
+
+    def handle(self, event, context):
+        if self.phase == "skip":
+            return Transition(self.glue_scene, "troop selection skipped (no company)")
+        if event == "abort":
+            return Transition(self.glue_scene, "troop selection aborted")
+        if self.phase == "bankrupt":
+            # notes/troop_selection.md §7: only Done exists; its exact destination is still open (🟡).
+            if event == "done":
+                return Transition(self.glue_scene, "troop selection bankrupt")
+            return None
+        if isinstance(event, str) and event.startswith("toggle:"):
+            self.model.toggle(int(event.split(":", 1)[1]))
+            return None
+        if isinstance(event, str) and event.startswith("move:"):
+            whoami, index = event.split(":", 1)[1].split(",")
+            self.model.move(int(whoami), int(index))
+            return None
+        if event == "done":
+            if self.phase == "select":
+                if self.model.selection:
+                    self.phase = "march_order"
+                return None
+            deployment = self.model.confirm()
+            self.campaign.commit_troop_selection(deployment)
+            self.campaign.mark_mission_taken(self.mission_ref)
+            self.glue_scene.start_battle(self.battle)
+            return Transition(self.glue_scene, "troop selection done")
+        return None
+
+    def update(self, seconds, context):
+        super().update(seconds, context)
+        if self.phase == "skip":
+            return Transition(self.glue_scene, "troop selection skipped (no company)")
+        return None
+
+
+def _prepaid_payment(mission_record):
+    """The initial cash payment, credited at troop-selection Done; notes/campaign.md §2.2-2.3."""
+    cash = next((field.argument for field in mission_record.fields if field.command == "cash"), None)
+    if not cash:
+        return 0
+    parts = [part.strip() for part in cash.split(",")]
+    try:
+        return int(parts[1])
+    except (IndexError, ValueError):
+        return 0
 
 
 def default_scene_loaders():

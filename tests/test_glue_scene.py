@@ -1,8 +1,11 @@
 import unittest
 
+from whshr.campaign_scenes import TroopSelectionScene
+from whshr.campaign_state import CampaignState
 from whshr.glue_content import GlueContent
 from whshr.glue_runtime import ActivityResult, EndGame, GlueInput, OpenWindow, StartBattle, StartMovie, StopMusic
 from whshr.glue_scene import GlueScene
+from whshr.roster import Regiment, RosterRow
 from whshr.scenes import SceneMachine, Transition
 
 
@@ -20,7 +23,7 @@ class GlueSceneTests(unittest.TestCase):
             "WINDOW": "[WINDOW]\n[POSITION]\nset:palindex=2\n[END]\n[END]",
             "FLOW": "[RUN]\n[START]\nopenwindow:res=WINDOW\nwaitforrelease:\nplaymovie:A2\nendgame:\n[END]",
             "BRIEFING": "[RUN]\n[START]\nwaitforrelease:\n[END]",
-            "MAP": "[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n[MISSION]\nset:res=601\nres:BRIEFING\nsetbattlescript:BF001\n[END]",
+            "MAP": "[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n[MISSION]\nset:res=601\nres:BRIEFING\nsetbattlescript:BF001\ncash:1,100,50\n[END]",
             "MAP_FLOW": "[RUN]\n[START]\nopenwindow:res=MAP\nwaitforrelease:\n[END]",
             "STARTCARAVAN": "[WINDOW]\n[END]",
         }))
@@ -51,16 +54,58 @@ class GlueSceneTests(unittest.TestCase):
 
         self.assertEqual(scene.runtime.state.wait_reason, "mission-release")
 
-    def test_briefing_accept_starts_the_configured_battle(self):
+    def test_briefing_accept_without_a_campaign_skips_troop_selection_and_starts_the_battle(self):
+        # notes/troop_selection.md §1.1: no company file skips the screen and runs Done immediately;
+        # a development GlueScene has no CampaignState/company either.
         scene = GlueScene("BRIEFING", accept_battle="bf001")
-        SceneMachine(scene, self.context)
+        scene.enter(self.context)
 
-        scene.handle(GlueInput("panel-action", "open_troop_select"), self.context)
+        transition = scene.handle(GlueInput("panel-action", "open_troop_select"), self.context)
+        self.assertIsInstance(transition.scene, TroopSelectionScene)
+        selection = transition.scene
+        selection.enter(self.context)
+        self.assertEqual(selection.phase, "skip")
 
+        done = selection.update(0, self.context)
+
+        self.assertIs(done.scene, scene)
         effects = scene.take_effects()
         self.assertEqual(effects[0], StopMusic())
         self.assertIsInstance(effects[1], StartBattle)
         self.assertEqual(effects[1].battle, "BF001")
+
+    def test_briefing_accept_with_a_campaign_opens_troop_selection_and_commits_on_done(self):
+        commander = Regiment(2, "Grudgebringer Cavalry", True, 10, 10, 0,
+                             RosterRow(2, keep=False, for_hire=False, wizard=False, artillery=False, base_price=8))
+        reserve = Regiment(5, "Reserve", True, 10, 10, 0,
+                           RosterRow(5, keep=False, for_hire=True, wizard=False, artillery=False, base_price=10))
+        campaign = CampaignState({"flow_scripts": {}, "mission_windows": {}}, mission_window="MAP", coffers=500,
+                                 company=(commander, reserve))
+        map_scene = GlueScene("MAP_FLOW", campaign)
+        machine = SceneMachine(map_scene, self.context)
+        machine.handle(GlueInput("mission-select", "map.0"))
+        machine.handle(GlueInput("panel-action", "open_briefing"))
+        briefing_scene = machine.active
+        self.assertIsInstance(briefing_scene, GlueScene)
+
+        transition = briefing_scene.handle(GlueInput("panel-action", "accept_briefing"), self.context)
+        self.assertIsInstance(transition.scene, TroopSelectionScene)
+        selection = transition.scene
+        selection.enter(self.context)
+        self.assertEqual(selection.model.selection, [2])  # only the always-forced commander at open
+
+        self.assertIsNone(selection.handle("done", self.context))  # P0 -> P1
+        self.assertEqual(selection.phase, "march_order")
+        done = selection.handle("done", self.context)
+
+        self.assertIs(done.scene, briefing_scene)
+        self.assertEqual(campaign.march_units, {2})
+        self.assertEqual(campaign.army_units, {2, 5})
+        self.assertEqual(campaign.coffers, 510)  # 500 + prepaid 100 - (commander 80 + reserve retainer 10)
+        self.assertIn(map_scene.runtime.state.selected_mission, campaign.taken_missions)
+        effects = briefing_scene.take_effects()
+        self.assertIn(StopMusic(), effects)
+        self.assertTrue(any(isinstance(e, StartBattle) and e.battle == "BF001" for e in effects))
 
     def test_briefing_return_restores_its_configured_scene(self):
         return_scene = object()

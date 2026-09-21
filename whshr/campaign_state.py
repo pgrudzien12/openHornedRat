@@ -12,6 +12,7 @@ from .campaign import build_campaign_graph, parse_window_ui
 from .glue import MissionRef
 from .glue_content import GlueContent
 from .paths import Installation
+from .roster import load_company
 
 
 FIRST_FLOW = "FLOWSCRIPTBP01"
@@ -80,6 +81,7 @@ class CampaignState:
     tentpos: int = 0
     hints: dict[int, str] = field(default_factory=dict)
     content: object = field(default=None, repr=False, compare=False)
+    company: tuple = field(default_factory=tuple)
 
     def __post_init__(self):
         if self.mission_window is None:
@@ -109,6 +111,12 @@ class CampaignState:
 
     def mark_mission_taken(self, mission):
         self.taken_missions.add(mission)
+
+    def commit_troop_selection(self, deployment):
+        """Apply a confirmed troop_selection.Deployment; notes/troop_selection.md §5.3."""
+        self.coffers += deployment.money_delta
+        self.march_units = set(deployment.units)
+        self.army_units = set(deployment.hired)
 
     def autosave(self, runtime_state):
         self.autosave_state = deepcopy(runtime_state)
@@ -168,8 +176,13 @@ class CampaignState:
         tables = {name: content.strings(name) for name in ("BRTXT", "BKTXT", "GMTXT")}
         hints = tables["BRTXT"]
         hotspots = tuple(parse_window_ui(wnd, "STARTCARAVAN")["hotspots"])
+        try:
+            company = load_company(game)
+        except (FileNotFoundError, OSError, ValueError):
+            # Focused scene tests can supply a minimal installation without STRTARMY.MRC/WHSHR.EXE.
+            company = ()
         return cls(build_campaign_graph(str(game.root), wnd=wnd, string_tables=tables),
-                   flow=initial_flow(hotspots), hints=hints, content=content)
+                   flow=initial_flow(hotspots), hints=hints, content=content, company=company)
 
     @classmethod
     def single_mission(cls, briefing):
