@@ -1,5 +1,9 @@
 import unittest
+from unittest.mock import patch
 
+import pygame
+
+from whshr.frontend.troop_selection_view import TroopSelectionView
 from whshr.roster import Regiment, RosterRow
 from whshr.troop_selection import TroopSelection, STATUS_AVAILABLE, STATUS_DESTROYED, STATUS_EXCLUDED, STATUS_NOT_HIRED
 
@@ -85,6 +89,7 @@ class TroopSelectionTests(unittest.TestCase):
         selection = TroopSelection([regiment(2, base_price=1000, models=10)], coffers=0, prepaid=0)
 
         self.assertTrue(selection.bankrupt)
+        self.assertEqual(selection.forced_cost, 10_000)
 
     def test_given_enough_coffers_then_it_is_not_bankrupt(self):
         selection = TroopSelection([regiment(2, base_price=10, models=10)], coffers=1000)
@@ -114,6 +119,40 @@ class TroopSelectionTests(unittest.TestCase):
         selection = TroopSelection([regiment(2, base_price=1000, models=10)], coffers=0, prepaid=0)
 
         self.assertFalse(selection.affordable)
+
+    def test_given_book_hiring_at_the_selection_limit_then_it_hires_without_selecting_or_refusing(self):
+        company = [regiment(2)] + [regiment(w, hired=False) for w in range(3, 16)]
+        selection = TroopSelection(company, coffers=1000, limit=13)
+        for whoami in range(3, 15):
+            selection.hired[whoami] = True
+            selection.selection.append(whoami)
+
+        changed = selection.set_hired_from_book(15, True)
+
+        self.assertTrue(changed)
+        self.assertTrue(selection.hired[15])
+        self.assertNotIn(15, selection.selection)
+
+    def test_given_a_hired_selected_book_regiment_when_fired_then_it_is_deselected(self):
+        selection = TroopSelection([regiment(2), regiment(5)], coffers=1000)
+        selection.toggle(5)
+
+        selection.set_hired_from_book(5, False)
+
+        self.assertFalse(selection.hired[5])
+        self.assertNotIn(5, selection.selection)
+
+    def test_ctrl_click_routes_a_select_row_to_the_book_without_a_toggle(self):
+        view = TroopSelectionView.__new__(TroopSelectionView)
+        view.scene = type("Scene", (), {"phase": "select"})()
+        view.rows, view.buttons, view.pressed_button = [(pygame.Rect(0, 0, 100, 100), 5)], [], None
+        view.scroll_direction = view.scroll_elapsed = None
+        view._native_point = lambda _position: (10, 10)
+        view.refresh = lambda: None
+
+        event = type("Event", (), {"type": pygame.MOUSEBUTTONUP, "button": 1, "pos": (10, 10)})()
+        with patch("whshr.frontend.troop_selection_view.pygame.key.get_mods", return_value=pygame.KMOD_CTRL):
+            self.assertEqual(view.events(event), ("book:5",))
 
 
 if __name__ == "__main__":

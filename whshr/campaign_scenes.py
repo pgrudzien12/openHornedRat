@@ -327,8 +327,8 @@ class BriefingScene(Scene):
 class TroopSelectionScene(Scene):
     """The front-end-owned troop-selection screen, reached by Accept (notes/troop_selection.md).
 
-    Core in-memory flow only (notes/glue_engine_integration.md GEI7): the real P0/P1 view, the
-    bankruptcy page's presentation, and the roster book are deferred to GEI7b-GEI7d.
+    P0/P1/P5 are presented by ``frontend.troop_selection_view``; Ctrl-click parks this scene
+    beneath :class:`ArmyRecordsScene` (notes/troop_selection.md §8).
     """
 
     def __init__(self, campaign, mission_ref, battle, glue_scene):
@@ -338,33 +338,74 @@ class TroopSelectionScene(Scene):
         self.glue_scene = glue_scene
         self.model = None
         self.phase = "select"
+        self.page = 0
+        self.march_offset = 0
+        self.picked_whoami = None
+        self.record = None
 
     def enter(self, context):
+        # Army Records returns to this exact scene instance.  It must not rebuild the
+        # selection model or lose P0/P1 page state on that return.
+        if self.model is not None:
+            return
         if not self.campaign or not self.campaign.company:
             # notes/troop_selection.md §1.1: no company file skips the screen and runs Done immediately.
             self.glue_scene.start_battle(self.battle)
             self.phase = "skip"
             return
-        record = self.glue_scene.runtime.content.mission(self.mission_ref)
-        forced = tuple(int(field.argument) for field in record.fields if field.command == "forceunits")
-        excluded = tuple(int(field.argument) for field in record.fields if field.command == "excludeunits")
+        self.record = self.glue_scene.runtime.content.mission(self.mission_ref)
+        forced = tuple(int(field.argument) for field in self.record.fields if field.command == "forceunits")
+        excluded = tuple(int(field.argument) for field in self.record.fields if field.command == "excludeunits")
         self.model = TroopSelection(self.campaign.company, forced=forced, excluded=excluded,
-                                    coffers=self.campaign.coffers, prepaid=_prepaid_payment(record))
+                                    coffers=self.campaign.coffers, prepaid=_prepaid_payment(self.record))
         if self.model.bankrupt:
             self.phase = "bankrupt"
 
     def handle(self, event, context):
         if self.phase == "skip":
             return Transition(self.glue_scene, "troop selection skipped (no company)")
-        if event == "abort":
-            return Transition(self.glue_scene, "troop selection aborted")
         if self.phase == "bankrupt":
-            # notes/troop_selection.md §7: only Done exists; its exact destination is still open (🟡).
+            # notes/troop_selection.md §§4.4, 7: P5 has no Abort, paging, or row actions.
+            # Its ultimate campaign-ending destination is open; retain the current parked-scene
+            # return until that behaviour is specified.
             if event == "done":
                 return Transition(self.glue_scene, "troop selection bankrupt")
             return None
+        if event == "abort":
+            return Transition(self.glue_scene, "troop selection aborted")
+        if event == "page:next" and self.phase == "select":
+            self.page = min(self.page + 1, self.page_count - 1)
+            return None
+        if event == "page:back":
+            if self.phase == "select":
+                self.page = max(0, self.page - 1)
+            elif self.phase == "march_order":
+                self.phase = "select"
+                self.page = self.page_count - 1
+                self.picked_whoami = None
+            return None
         if isinstance(event, str) and event.startswith("toggle:"):
             self.model.toggle(int(event.split(":", 1)[1]))
+            return None
+        if isinstance(event, str) and event.startswith("book:"):
+            whoami = int(event.split(":", 1)[1])
+            if whoami in self.model.company:
+                return Transition(ArmyRecordsScene(self, whoami), "army records opened")
+            return None
+        if isinstance(event, str) and event.startswith("pickup:") and self.phase == "march_order":
+            index = int(event.split(":", 1)[1])
+            if 0 <= index < len(self.model.selection):
+                self.picked_whoami = self.model.selection[index]
+            return None
+        if isinstance(event, str) and event.startswith("drop:") and self.phase == "march_order":
+            index = int(event.split(":", 1)[1])
+            if self.picked_whoami is not None:
+                self.model.move(self.picked_whoami, index)
+                self.picked_whoami = None
+            return None
+        if event in ("scroll:up", "scroll:down") and self.phase == "march_order":
+            delta = -1 if event == "scroll:up" else 1
+            self.march_offset = max(0, min(self.march_offset + delta, self.max_march_offset))
             return None
         if isinstance(event, str) and event.startswith("move:"):
             whoami, index = event.split(":", 1)[1].split(",")
@@ -382,10 +423,64 @@ class TroopSelectionScene(Scene):
             return Transition(self.glue_scene, "troop selection done")
         return None
 
+    @property
+    def page_count(self):
+        """P0 pages include every company file record; notes/troop_selection.md §3.1."""
+        return max(1, (len(self.model.company) + 5) // 6)
+
+    @property
+    def max_march_offset(self):
+        """Keep P1's final seven-row viewport full where possible (§5.1)."""
+        return max(0, len(self.model.selection) - 7)
+
     def update(self, seconds, context):
         super().update(seconds, context)
         if self.phase == "skip":
             return Transition(self.glue_scene, "troop selection skipped (no company)")
+        return None
+
+
+class ArmyRecordsScene(Scene):
+    """One-regiment-per-page Army Records screen for troop selection (§8).
+
+    It owns only book page and stat/info presentation mode.  Hiring and marching
+    selection continue to belong to the parked :class:`TroopSelectionScene` model.
+    """
+
+    def __init__(self, selection_scene, whoami):
+        self.selection_scene = selection_scene
+        self.whoami = whoami
+        self.hired_at_open = dict(selection_scene.model.hired)
+
+    @property
+    def model(self):
+        return self.selection_scene.model
+
+    @property
+    def company_ids(self):
+        return tuple(self.model.company)
+
+    @property
+    def index(self):
+        return self.company_ids.index(self.whoami)
+
+    def handle(self, event, context):
+        if event == "book:done":
+            return Transition(self.selection_scene, "army records closed")
+        if event == "book:abort":
+            self.model.restore_book_hired(self.hired_at_open)
+            return Transition(self.selection_scene, "army records aborted")
+        if event == "book:hire-fire":
+            self.model.set_hired_from_book(self.whoami, not self.model.hired[self.whoami])
+            return None
+        if event in ("book:previous", "book:first", "book:last", "book:next"):
+            if event == "book:first":
+                target = 0
+            elif event == "book:last":
+                target = len(self.company_ids) - 1
+            else:
+                target = self.index + (-1 if event == "book:previous" else 1)
+            self.whoami = self.company_ids[max(0, min(target, len(self.company_ids) - 1))]
         return None
 
 

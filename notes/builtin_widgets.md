@@ -114,6 +114,11 @@ from code, not measured on a screen.
 - Closing re-shows the parent window if it is hidden (troop selection). The palette is **not** switched back on that path, so the
   troop window keeps palette 9 (`BK2`) after the book closes 🟡 (see the palette notes; the glue-path exit resets palette 2).
 
+**Open research item:** the roster-book leader portrait requires a background, but the documented 72×104
+box does not yet identify its bitmap/frame or the mapping from a leader portrait to that background. The
+two per-portrait roster-book values noted in `notes/glue_portraits.md` §1 may supply that mapping. Do not
+substitute an arbitrary `BACKALL` frame in implementation.
+
 ### 2.4 Reinforcement sub-window (answers "layout and interaction") ✅
 
 Shown **automatically** on top of the roster book whenever the regiment on screen has offered reinforcements and the book is in a

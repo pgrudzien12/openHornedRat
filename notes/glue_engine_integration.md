@@ -57,20 +57,23 @@ renumber later work.
   `testforunitinarmy`/`testforunitinmarch` already key `army_units`/`march_units`. Prerequisite
   for GEI7's pricing and forced/excluded regiment rules.
 
-- [ ] **GEI7b — Troop selection view (P0 + P1).** Render the real regiment-select and
+- [x] **GEI7b — Troop selection view (P0 + P1).** Render the real regiment-select and
   marching-order pages (`notes/troop_selection.md` §2-§5): background, rows, buttons, status
   text/colours, and P1 reordering (click-to-pick-up/drop, not live drag-and-drop).
 
-- [ ] **GEI7c — Bankruptcy page (P5).** Render `notes/troop_selection.md` §7 and route the forced
+- [x] **GEI7c — Bankruptcy page (P5).** Render `notes/troop_selection.md` §7 and route the forced
   regiments over-budget case to it at open.
 
-- [ ] **GEI7d — Roster book.** The separate "Army Records" window opened by Ctrl+click during
-  selection (`notes/troop_selection.md` §8): stat/info pages, hire/fire, reinforcements. Shared
-  later by the caravan's own book hotspots (part of GEI9's deferred books).
+- [x] **GEI7d — Selection roster book.** The separate "Army Records" window opened by Ctrl+click
+  during selection (`notes/troop_selection.md` §8): stat/info pages and the no-coffers-change
+  Hire/Fire variant. Caravan book hotspots, reinforcement controls, and durable roster writes
+  remain deferred to their separately scoped work.
 
 - [ ] **GEI7e — Durable roster and marching order.** Write `ARMY.MRC`/`MARCH.MRC` and persist
   reinforcements instead of only updating in-memory `CampaignState`; belongs with GEI14's save/load
   persistence model rather than GEI7's in-memory commit.
+
+- [ ] **GEI7f — Troop selection view** live drag-and-drop for P1 reordering.
 
 - [ ] **GEI8 — Debrief activity.** Present `StartDebrief`, apply the payment and result effects,
   and resume the requesting Glue runtime.
@@ -130,6 +133,17 @@ renumber later work.
   company either: `TroopSelectionScene` mirrors the original's own mode-0 rule (notes/troop_selection.md
   §1.1, "if the file cannot be loaded... skip the screen and run Done immediately") and starts the
   battle directly rather than crashing or silently doing nothing.
+- GEI7b is a native `TroopSelectionView` (`whshr/frontend/troop_selection_view.py`), registered
+  in the scene-view registry rather than a `GlueView` extension: TroopBook is a built-in screen,
+  not a WND.DLL resource. It uses the BOOK palette and runtime `BITMAP.DLL`/`BKTXT`/`BRTXT` resources.
+  P0/P1 use body font slot 2, while the heading font remains confined to later debrief/bankruptcy
+  pages. P0 uses the model's canonical price/status/selection state;
+  P1 uses click-to-pick-up and click-to-drop events. `TroopSelectionScene` owns P0 paging and the
+  P1 viewport/reorder state, keeping the view presentation-only. `Regiment` now retains the
+  weapon, armour, and banner fields from the runtime-loaded MRC; the view resolves the two text
+  ids and resolves a banner resource through the game's banner sprite-name table before rendering
+  its documented second-frame (16×24) marker. P1's documented scroll zones advance the owned viewport at 250 ms while held, and only
+  the row currently under a picked-up regiment uses the drop-target scroll art.
 - `whshr/roster.py`'s `load_company()` takes an optional pre-built `roster` mapping so its MRC-merge
   logic is testable without a real `WHSHR.EXE` PE image; only `static_roster()` (the RMYI reader)
   needs the real installation, consistent with `rules.py`'s untested-at-unit-level `PeImage` reads
@@ -140,6 +154,25 @@ renumber later work.
   `ActivityResult` (glue `playmovie`). `SceneMachine._start_glue_movie` (`whshr/scenes.py`)
   routes a `GlueScene`'s queued `StartMovie` effect the same way `_start_glue_battle` already
   routed `StartBattle`.
+- GEI7c uses the same runtime-loaded `TroopBook` bitmap and BOOK palette as P0/P1.  P5 centres
+  `BKTXT 601` at `50 + 8H` in glue font slot 4 and places the two formatted monetary messages
+  beneath it in slot 2.  The displayed available coffer amount is `coffers + prepaid`, matching
+  the documented bankruptcy comparison and P0's coffer line; the required amount is the price of
+  the still-living forced regiments.  P5 creates only Done.  Until the specification resolves its
+  campaign-ending destination, Done returns to the parked `GlueScene`, with no commitment or
+  battle effect.
+- GEI7d adds `ArmyRecordsScene` and its native `ArmyRecordsView`, using `ArmyBook`, palette 9,
+  glue body/heading fonts, named regiment pictures, and named BKTXT RCDATA descriptions from the
+  original installation at runtime. The roster merge retains `s_Exp` separately from `s_pntval`,
+  so the book's Experience line does not reuse the rank/points value; its selection-mode cost line
+  always shows the documented price and retainer pair. Ctrl-click routes a valid displayed P0 or P1 row to that
+  scene without performing the row action. The book parks and later resumes the same selection
+  scene, so its P0 page and P1 ordering state survive. Its Hire/Fire action changes only the
+  `TroopSelection` model: `forHire` controls enablement, hire appends a selection when capacity
+  permits, fire deselects, and a full selection leaves a newly hired regiment unselected without
+  a refusal sound or coffer change. Done keeps the in-memory changes; Abort restores the book-open
+  hired snapshot and removes any cancelled hire from the selection. No ARMY/MARCH file write,
+  caravan economy, or reinforcement UI was added.
 
 ## Working rules
 

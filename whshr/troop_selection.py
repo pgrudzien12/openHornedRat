@@ -98,6 +98,33 @@ class TroopSelection:
         self.selection.append(whoami)
         return False
 
+    def set_hired_from_book(self, whoami, hired):
+        """Apply the selection-variant Army Records Hire/Fire action (§4.3, §8).
+
+        This deliberately does not use :meth:`toggle`: book hiring never makes the
+        full-roster refusal sound, and hiring is allowed even when the list is full.
+        """
+        regiment = self.company[whoami]
+        if not regiment.row.for_hire:
+            return False
+        self.hired[whoami] = bool(hired)
+        if hired:
+            if whoami not in self.selection and not self.roster_full:
+                self.selection.append(whoami)
+        elif whoami in self.selection:
+            self.selection.remove(whoami)
+        return True
+
+    def restore_book_hired(self, snapshot):
+        """Restore only the documented hired snapshot, retaining valid picks (§8).
+
+        The specification does not state that Abort restores a prior marching
+        order.  In particular, a fire/re-hire may already have appended a unit;
+        do not invent an unverified ordering rollback here.
+        """
+        self.hired.update(snapshot)
+        self.selection[:] = [whoami for whoami in self.selection if self.hired[whoami]]
+
     def move(self, whoami, new_index):
         """notes/troop_selection.md §5.2: reorder the marching-order list."""
         if whoami not in self.selection:
@@ -117,9 +144,13 @@ class TroopSelection:
     @property
     def bankrupt(self):
         """notes/troop_selection.md §4.1, §7: forced-selected cost exceeds coffers + prepaid."""
-        forced_cost = sum(self.company[whoami].price for whoami in self.forced
-                          if self.hired[whoami] and not self._destroyed(whoami))
-        return forced_cost > self.coffers + self.prepaid
+        return self.forced_cost > self.coffers + self.prepaid
+
+    @property
+    def forced_cost(self):
+        """P5's required amount: price of still-living forced regiments (§7)."""
+        return sum(self.company[whoami].price for whoami in self.forced
+                   if self.hired[whoami] and not self._destroyed(whoami))
 
     def confirm(self):
         """notes/troop_selection.md §5.3 (money in notes/campaign.md §2.3). Assumes affordable."""

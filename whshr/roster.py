@@ -53,6 +53,16 @@ class Regiment:
     orgsize: int
     points: int
     row: RosterRow
+    weapon_name: int = 0
+    armour: int = 0
+    banner: str | None = None
+    profile: tuple = ()
+    experience: int = 0
+    leader_name: str | None = None
+    leader_portrait: str | None = None
+    leader_profile: tuple = ()
+    leader_armour: int = 0
+    leader_weapon: int = 0
 
     @property
     def destroyed(self):
@@ -92,9 +102,24 @@ def load_company(installation, roster=None, path=STARTING_COMPANY):
             if row is None:
                 continue
             fields = stat_fields(unit["stats"])[0]
+            leader = unit.get("leader")
+            leader_fields = stat_fields(leader["stats"])[0] if leader is not None else {}
             regiments.append(Regiment(
                 whoami=whoami, name=unit["name"], hired=bool(unit["set"].get("hired", 0)),
                 models=fields.get("s_size", 0), orgsize=fields.get("s_orgsize", 0),
                 points=fields.get("s_pntval", 0), row=row,
+                weapon_name=fields.get("s_weponame", 0), armour=fields.get("s_armr", 0),
+                banner=unit.get("banner"),
+                profile=tuple(fields.get(name, 0) for name in
+                              ("s_move", "s_wepn", "s_bals", "s_strn", "s_tuff", "s_wnds", "s_init", "s_atks", "s_lead")),
+                # s_Exp is outside the contiguous profile block consumed by
+                # stat_fields(); Army Records displays it (§8, campaign §1).
+                experience=(unit["stats"].get("s_Exp") or [0])[0],
+                leader_name=leader["name"] if leader else None,
+                leader_portrait=leader["portrait"] if leader else None,
+                leader_profile=tuple(leader_fields.get(name, 0) for name in
+                                     ("s_move", "s_wepn", "s_bals", "s_strn", "s_tuff", "s_wnds", "s_init", "s_atks", "s_lead")),
+                leader_armour=leader_fields.get("s_armr", 0),
+                leader_weapon=leader_fields.get("s_weponame", 0),
             ))
     return tuple(regiments)

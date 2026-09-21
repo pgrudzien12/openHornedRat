@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 from whshr.roster import Regiment, RosterRow, load_company
+from whshr.script import resource_name
 
 MRC = """[MERCARMY]
 [UNITS]
@@ -10,8 +11,12 @@ MRC = """[MERCARMY]
 addunit:Grudgebringer<Cavalry
 set:whoami=2
 set:hired=1
+banner:COMM,0
 setstats:s_side=2,12,12,4
 setstats:s_pntval=13
+setstats:s_Exp=77
+setstats:s_armr=5
+setstats:s_weponame=17
 endunit:
 addunit:Cannon<Crew
 set:whoami=14
@@ -45,6 +50,9 @@ class RosterTests(unittest.TestCase):
         self.assertEqual(len(company), 2)
         cavalry = next(r for r in company if r.whoami == 2)
         self.assertEqual((cavalry.name, cavalry.hired, cavalry.models, cavalry.points), ("Grudgebringer Cavalry", True, 12, 13))
+        self.assertEqual(cavalry.experience, 77)
+        self.assertEqual((cavalry.weapon_name, cavalry.armour, cavalry.banner), (17, 5, "COMM,0"))
+        self.assertEqual(resource_name(cavalry.banner), "COMM")
         self.assertEqual(cavalry.row.base_price, 8)
 
     def test_given_a_unit_with_no_matching_roster_row_then_it_is_skipped(self):

@@ -61,10 +61,16 @@ Pages: **P0** select regiments (6 per page), **P1** marching order, **P2** debri
 | Element | Value | Status |
 |---|---|---|
 | Background | bitmap `TroopBook`, 640×480: a blank parchment page of an open book (green cover edge visible bottom/right, gold corner ornaments, thin double rule frame); everything else is drawn on it | ✅ (bitmap viewed) |
-| Title | centred at x = 320, y = 25, black. P0: `BKTXT 400` with the mission name; P1: `BKTXT 401`; debrief pages: `BKTXT 403` | ✅ |
+| Title | centred at x = 320, y = 25, black, **body font slot 2**. P0: `BKTXT 400` with the mission name; P1: `BKTXT 401`; debrief pages: `BKTXT 403` | ✅ |
 | Buttons | four owner-drawn buttons 84×32 at y = 448: **Abort** (225, id 0x103, `BRTXT 307`; created only for open mode 0), **Done** (325, id 0x102, `BRTXT 304`), **Back** (425, id 0x101, `BRTXT 301`), **Next** (525, id 0x100, `BRTXT 300`) | ✅ |
-| Button art | Abort = `BrownATabUp/Dn0`, Done = `GreenATabUp/Dn0`, Back = `BlueATabUp/Dn0`, Next = `RedATabUp/Dn0` (84×32 tabs: coloured leather with gold scroll trim); label centred, offset (2,4) released and (3,3) pressed; label colour yellow enabled, grey (192,192,192) disabled | ✅ |
+| Button art | Abort = `BrownATabUp/Dn0`, Done = `GreenATabUp/Dn0`, Back = `BlueATabUp/Dn0`, Next = `RedATabUp/Dn0` (84×32 tabs: coloured leather with gold scroll trim); label centred, offset (4,3) released and (0,3) pressed; every enabled label is yellow and every disabled label light grey (192,192,192) | ✅ |
 | Cursor | window default = sword; while Ctrl is held = help cursor; over P0 rows: pencil if the regiment can be toggled, "no pencil" otherwise; over P1 rows: open hand / closed hand while dragging, up/down arrows in the scroll zones | ✅ |
+
+Cursor resource mapping ✅: the named `WHSHR.EXE` cursor groups are `SWORDCURSOR` (default),
+`HELPCURSOR` (Ctrl), `PENCILCURSOR` / `NOPENCILCURSOR` (P0), `HANDOPENCURSOR` /
+`HANDCLOSECURSOR` (P1), and `UPARROWCURSOR` / `DOWNARROWCURSOR` (P1 scroll zones). They are
+32×32 monochrome cursor resources with their own hotspots; load them from the user's installation,
+never substitute copied cursor artwork.
 
 Colours are Win32 COLORREFs in the code (BGR); the values above are converted to RGB.
 
@@ -339,7 +345,8 @@ Legend: **DATA** = comes from resources/files; **TABLE** = front-end constant th
 |---|---|---|
 | Unit list, names, models, sizes, stats, weapon/armour ids, banner id/frame, `s_pntval`, `s_size`, `s_routed`, `whoami` | DATA | `SAVE/ARMY.MRC` (+ `PLAY.MRC` for flags) |
 | Price per model, `forHire`, artillery, reinforcements | DATA | roster flags (`RMYI`) and stats |
-| `maxselect`, forced list (8), excluded list (8), `cash` line | DATA | mission record and command line; default 13, clamp 8..38 is a TABLE constant |
+| forced list (8), excluded list (8), `cash` line | DATA | mission record |
+| `maxselect` | TABLE | process command-line option; default 13, clamp 8..38 (`notes/campaign.md` §2.1). The WND.DLL mission record does not carry it. |
 | Mission name | DATA | `BRTXT 6xx` via the record's `res` |
 | All labels and messages | DATA | `BKTXT` ids in §§2–8, `BRTXT` ids for buttons/hints/weapon/armour names |
 | Background and widget bitmaps: `TroopBook`, `RingMark`, `Skull0..4`, `BookScroll0..2`, `Red/Blue/Green/BrownATab{Up,Dn0}`, `ArmyBook`, `ForHireStamp`, `Reinf*` | DATA (named bitmaps in `BITMAP.DLL`) | the *name* per widget is a TABLE |
