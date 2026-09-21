@@ -32,11 +32,11 @@ At that point, having some free time, instead of patching Wine any further we st
 **reverse-engineering the game's own file formats** — the first step towards a fan-made
 open-source engine, as other projects of this kind have done.
 
-The game installation (GOG v1.0) lives in a Wine prefix:
+Set `WARFB` to the root directory of a local GOG v1.0 installation:
 ```
-~/snap/steam/common/.local/share/Steam/steamapps/compatdata/3605483607/pfx/drive_c/GOG Games/Warhammer - Shadow of the Horned Rat/WARFB/
+$WARFB/
 ```
-(this prefix is also the data source for further work — `.BOP`/`.FOL`/`.PAL` files
+(That installation is the data source for further work — `.BOP`/`.FOL`/`.PAL` files
 in `FILE/BINARY/`, `UPDATE/BINARY/`, `REMOTE/BINARY/`).
 
 ## Current status

@@ -13,7 +13,7 @@ Campaign games take hours, so early feedback is incredibly valuable. Please try 
 - what happened immediately before a crash, freeze, or broken screen; and
 - the battle log from `logs/` if one was created.
 
-Once the repository is public, please [open an issue](../../issues) for a reproducible problem. Screenshots and short screen recordings are welcome, but do not upload or distribute original game assets. If you would like to help with code, research, documentation, or compatibility testing, start with an issue or Discussion so we can coordinate work while the contribution licensing policy is finalized.
+Once the repository is public, please [open an issue](../../issues) for a reproducible problem. Screenshots and short screen recordings are welcome, but do not upload or distribute original game assets. If you would like to help with code, research, documentation, or compatibility testing, start with an issue or Discussion so we can coordinate work.
 
 ## What you can play today
 
@@ -91,6 +91,10 @@ Battle sessions create a JSON Lines log in `logs/` by default. Attach the releva
 This repository contains no original game files and never will. *Warhammer* and *Shadow of the Horned Rat* are trademarks of their respective owners. Open Horned Rat is a non-commercial fan project and is not affiliated with Games Workshop, Mindscape, GOG, or SNEG.
 
 You can buy a compatible copy from [GOG.com](https://www.gog.com/en/game/warhammer_shadow_of_the_horned_rat). We have not yet verified the [Steam/SNEG re-release](https://store.steampowered.com/app/4280870/Warhammer_Shadow_of_the_Horned_Rat_Classic/).
+
+## License
+
+The Open Horned Rat source code is licensed under the GNU General Public License, version 3 or later (`GPL-3.0-or-later`), the same license family used by OpenXcom. See [LICENSE](LICENSE). This license applies to this project's code, not to the original game's assets or trademarks.
 
 ## Project details
 

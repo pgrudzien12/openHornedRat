@@ -22,28 +22,28 @@ Rough cost: about 300k tokens per agent (batches 1 and 2 used 0.9–1.0 M tokens
 Give each agent this context, then its own section below.
 
 - **Project**: hobby reverse engineering of an owned copy of "Warhammer: Shadow of the Horned Rat" (1995) for
-  an open-source engine. Repository `R=/home/pawel/code/whshr-reverse-engineering`; read `CLAUDE.md`,
+  an open-source engine. Repository root `$REPO`; read `CLAUDE.md`,
   `notes/game_rules.md` (and `notes/engine_architecture.md` for J/K) and the relevant earlier reports in
-  `$R/extracted/agent_reports/` (A close combat, B morale and behaviour VM, C shooting, D flags and orders,
+  `$REPO/extracted/agent_reports/` (A close combat, B morale and behaviour VM, C shooting, D flags and orders,
   E time and movement, F magic, and later G/H/I).
-- **Game installation** (read-only): `~/snap/steam/common/.local/share/Steam/steamapps/compatdata/3605483607/pfx/drive_c/GOG Games/Warhammer - Shadow of the Horned Rat/WARFB/`.
+- **Game installation** (read-only): `$WARFB/`.
 - **Resources** (research agents only; implementation agents must not read decompiled output, see CLAUDE.md clean-room policy):
-  - `$R/extracted/decompiled/gamef_all.c` and `exe_all.c`: Ghidra decompilation of all functions of
+  - `$REPO/extracted/decompiled/gamef_all.c` and `exe_all.c`: Ghidra decompilation of all functions of
     `GAMEF.DLL` and `WHSHR.EXE`, with a header per function (`// ==== FUN_x @ addr callers:`).
-  - `$R/extracted/agent_reports/fn.py` prints whole functions; `D/gamef.asm` is a full objdump of `GAMEF.DLL`.
+  - `$REPO/extracted/agent_reports/fn.py` prints whole functions; `D/gamef.asm` is a full objdump of `GAMEF.DLL`.
   - `objdump -d -M intel --start-address=… --stop-address=…`.
   - `whshr/rules.py` `PeImage` (`.read`, `.u32`, `.cstring`); `.data` VA `0x100E7000` ↔ file offset
     `0x69400`, `.rdata` `0x100E6000` ↔ `0x68C00`, `.text` `0x10001000` ↔ `0x400`.
-  - Text resources: `$R/extracted/pe_resources/{GMTXT,BRTXT,BKTXT}/strings.txt`.
+  - Text resources: `$REPO/extracted/pe_resources/{GMTXT,BRTXT,BKTXT}/strings.txt`.
   - Parsers: `whshr/script.py` (BTS/MRC), `whshr/campaign.py` (glue scripts), `whshr/behaviour.py`
     (`python3 -m whshr scripts <installation> [DLL] [ids…]`; catalogues `extracted/agent_reports/G/opcodes_0_115.json`,
     `H/opcodes_116_231.json`, `H/aiquery.json`, library table in `I_behaviour_tool.md`).
-- **Ghidra** 12.1.3 headless (`~/tools/ghidra_12.1.3_PUBLIC`, JDK `~/tools/jdk-21.0.12.1+1`, scripts in
-  `$R/tools/ghidra/`). Agents run in parallel, so an agent never opens `~/tools/ghidra_projects/*`
+- **Ghidra** 12.1.3 headless (`$GHIDRA_HOME`, JDK `$JAVA_HOME`, scripts in
+  `$REPO/tools/ghidra/`). Agents run in parallel, so an agent never opens `$GHIDRA_PROJECTS/*`
   directly; it copies the `.gpr` and `.rep` into its own scratch directory first.
 - **Rules**:
   - Do not modify tracked files (except where a brief says so); do not install anything.
-  - Write under `$R/extracted/agent_reports/` (report `<letter>_<topic>.md`, scratch in `<letter>/`).
+  - Write under `$REPO/extracted/agent_reports/` (report `<letter>_<topic>.md`, scratch in `<letter>/`).
   - **Write the report incrementally.**
   - Mark claims ✅ established (code path: address, what it reads, formula; or data consistent across all
     files), 🟡 hypothesis, or ⬜ unresolved.

@@ -1,3 +1,4 @@
+import os
 import struct
 
 def decode_rowwise_triples(data, w, h):
@@ -56,12 +57,13 @@ def test(name, fn, fol_path, bop_path):
         if match: ok += 1
     print(f"{name}: {ok}/{n_frames} match\n")
 
-DIR = "/home/pawel/snap/steam/common/.local/share/Steam/steamapps/compatdata/3605483607/pfx/drive_c/GOG Games/Warhammer - Shadow of the Horned Rat/WARFB/FILE/BINARY"
+DIR = os.environ.get("WARFB_BINARY")
+if not DIR:
+    raise SystemExit("Set WARFB_BINARY to the installation's FILE/BINARY directory.")
 test("rowwise triples", decode_rowwise_triples, DIR+"/SPARKLE.FOL", DIR+"/SPARKLE.BOP")
 test("rowwise A/B", decode_rowwise_AB, DIR+"/SPARKLE.FOL", DIR+"/SPARKLE.BOP")
 
 print("=== checking for a second layer (continuation after the first pass) ===")
-DIR = "/home/pawel/snap/steam/common/.local/share/Steam/steamapps/compatdata/3605483607/pfx/drive_c/GOG Games/Warhammer - Shadow of the Horned Rat/WARFB/FILE/BINARY"
 fol = open(DIR+"/SPARKLE.FOL", 'rb').read()
 bop = open(DIR+"/SPARKLE.BOP", 'rb').read()
 n_frames = len(fol)//16

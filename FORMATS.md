@@ -8,9 +8,9 @@ disassembled; only static data tables in the executables and the sound library `
 (the `.SFX` loader) were read. This file is the reference; the full reports on the
 individual formats, including how each claim was verified, are in `notes/`.
 
-The game is installed (GOG v1.0) in a Wine prefix:
+The examples use `$WARFB` for the root of a local GOG v1.0 installation:
 ```
-~/snap/steam/common/.local/share/Steam/steamapps/compatdata/3605483607/pfx/drive_c/GOG Games/Warhammer - Shadow of the Horned Rat/WARFB/
+$WARFB/
 ```
 Game data lives in `FILE/` (`BINARY/`, `DLL/`, `MESH/`, `SCRIPT/`), `UPDATE/BINARY/` and
 `REMOTE/BINARY/` (cutscenes and speech, despite the name). `UPDATE/BINARY/` is a byte-identical

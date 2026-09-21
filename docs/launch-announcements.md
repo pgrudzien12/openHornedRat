@@ -38,7 +38,7 @@ Open Horned Rat is now open for early testers: a modern, source-only reimplement
 
 ## Launch checklist
 
-- [ ] Add a source-code license before accepting external code contributions.
+- [x] Add a GPL-3.0-or-later source-code license before accepting external code contributions.
 - [ ] Push the README, issue template, and this launch copy.
 - [ ] Make the GitHub repository public.
 - [ ] Set the repository description and suggested topics.
