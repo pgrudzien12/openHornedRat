@@ -40,3 +40,13 @@ $H ~/tools/ghidra_projects gamef -process GAMEF.DLL -noanalysis -readOnly \
 |---|---|---|
 | `DumpStringRefs.java` | `<regex> <output file>` | every defined string matching the regex, its references, and for pointer-table slots the probable table start with its references |
 | `Decompile.java` | `<output file> all \| <address>...` | decompiled C of the functions (containing) the addresses, each headed by its entry point and callers |
+| `DecompileCreate.java` | `<output file> <address>...` | like `Decompile.java`, but creates a `Function` at each address first if none exists yet (needed for code reached only via a data pointer table, e.g. a function-pointer array, which auto-analysis may not have found as a function on its own) |
+| `DumpObjectiveTable.java` | `<table addr> <record count> <record size> <evaluator field offset> <output file>` | one line per fixed-size record: every `undefined4` field plus the evaluator field pointer resolved to a function name, if one exists at that address. Written for `GAMEF.DLL`'s mission-objective table (26 letters × 40-byte records at `0x100F4D48`, evaluator at `+0x10`) but generic to any array-of-structs-with-a-function-pointer pattern |
+| `DecompileObjectiveTable.java` | `<table addr> <record count> <record size> <evaluator field offset> <output file>` | combines the two above for the specific objective-table shape: for every record, creates a `Function` at its evaluator address if needed and decompiles it, headed by the record's letter and flags/caption fields |
+
+`DecompileObjectiveTable.java` was used to read all 26 mission-objective evaluators for
+`notes/game_rules.md` §"Missions and objectives" (GitHub issue #14): `DumpObjectiveTable.java` first
+located the real letter→evaluator-address table (a plain data array, not something built by code — no
+amount of grepping the `Decompile.java --all` dump would have found it), then `DecompileObjectiveTable.java`
+decompiled every entry in one pass, since most of the 26 evaluator addresses had no pre-existing `Function`
+in the auto-analyzed project (only 3 of 26 did).

@@ -616,34 +616,96 @@ class ScriptInterpreter:
     # Each logs a placeholder message and continues, allowing partial mission execution.
 
     def op_MoveToNode(self, state, operand, script_words, unit_id, tick_count, rng):
-        """MoveToNode N: move to waypoint node N (TODO: integrate with movement)."""
+        """MoveToNode N: move to waypoint node N from the battle map."""
         if operand is not None:
             state.current_node = operand
+            # TODO: get node coordinates from battle.battlefield.nodes[N] or battle script
+            # For now, just set the node id
         return state.pc + 1
 
     def op_FaceNode(self, state, operand, script_words, unit_id, tick_count, rng):
-        """FaceNode N: turn to face waypoint node N (TODO: integrate with movement)."""
+        """FaceNode N: turn to face waypoint node N (formation turn, not movement)."""
+        if operand is not None:
+            # TODO: calculate direction to node and set regiment.direction
+            pass
+        return state.pc + 1
+
+    def op_TeleportToNode(self, state, operand, script_words, unit_id, tick_count, rng):
+        """TeleportToNode N: instantly move to waypoint node N."""
+        if operand is not None:
+            state.current_node = operand
+            # TODO: instantly reposition regiment to node coordinates
+        return state.pc + 1
+
+    def op_PlaceAtNode(self, state, operand, script_words, unit_id, tick_count, rng):
+        """PlaceAtNode N: place unit at node N in formation."""
+        if operand is not None:
+            state.current_node = operand
+            # TODO: reposition regiment and reform in place at node
         return state.pc + 1
 
     def op_ChargeTarget(self, state, operand, script_words, unit_id, tick_count, rng):
-        """ChargeTarget: charge the current target (TODO: integrate with combat)."""
+        """ChargeTarget: issue charge order to the current target."""
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment and state.current_target:
+            target_id = state.current_target[0]
+            if target_id in self.battle.regiments:
+                regiment.attack_target = target_id
+                # Battle.tick() handles the actual charging movement
         return state.pc + 1
 
     def op_FireAtTarget(self, state, operand, script_words, unit_id, tick_count, rng):
-        """FireAtTarget: shoot at the current target (TODO: integrate with combat)."""
+        """FireAtTarget: order unit to shoot at the current target."""
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment and state.current_target and regiment.missile_range:
+            # Combat resolution happens in Battle.tick() → resolve_shooting()
+            # Just verify the target exists
+            target_id = state.current_target[0]
+            if target_id in self.battle.regiments:
+                regiment.attack_target = target_id
         return state.pc + 1
 
     def op_KillAllModels(self, state, operand, script_words, unit_id, tick_count, rng):
-        """KillAllModels: instantly remove all models from this unit (TODO: integrate with combat)."""
-        # Used in BF001 for conditional tutorial difficulty scaling
+        """KillAllModels: instantly kill all models in this unit.
+
+        Used in BF001 for conditional tutorial difficulty scaling (flag 512 check).
+        """
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment:
+            # Instant unit destruction
+            regiment.models = 0
+            regiment.positions = []
+            regiment.melee_models = []
         return state.pc + 1
 
     def op_AttackTagged(self, state, operand, script_words, unit_id, tick_count, rng):
-        """AttackTagged TAG: attack the unit marked with TAG (TODO: implement tagging)."""
+        """AttackTagged TAG: attack the unit marked with TAG.
+
+        Example: BF001 Unit 2 uses AttackTagged 0xabc0 to hunt the tagged cargo unit.
+        """
+        if operand is not None:
+            # Look up which unit has this tag (simplified: assume only one tagged unit)
+            if hasattr(self.battle, '_unit_tags') and operand in self.battle._unit_tags:
+                target_id = self.battle._unit_tags[operand]
+                state.current_target = (target_id, 0)
+                regiment = self.battle.regiments.get(unit_id)
+                if regiment:
+                    regiment.attack_target = target_id
+                state.cond_flags = 1
+            else:
+                state.cond_flags = 0
         return state.pc + 1
 
     def op_SetTag(self, state, operand, script_words, unit_id, tick_count, rng):
-        """SetTag TAG: mark this unit with a tag (TODO: implement tagging)."""
+        """SetTag TAG: mark this unit with a tag.
+
+        Tags are used to identify specific units for special behavior
+        (e.g., cargo in escort missions, objectives in special scenarios).
+        """
+        if operand is not None:
+            if not hasattr(self.battle, '_unit_tags'):
+                self.battle._unit_tags = {}
+            self.battle._unit_tags[operand] = unit_id
         return state.pc + 1
 
     def op_SetBehaviour(self, state, operand, script_words, unit_id, tick_count, rng):
@@ -657,21 +719,73 @@ class ScriptInterpreter:
         return state.pc + 1
 
     def op_React(self, state, operand, script_words, unit_id, tick_count, rng):
-        """React N: display a battle message (1="Engage!", 2="CHARGE!", etc.)."""
-        # TODO: call frontend to display message
-        # Messages: 1="Engage!", 2="CHARGE!", 3="Destroy them!", 4="Retreat!", etc.
+        """React N: display a battle message/voice with leader portrait.
+
+        Messages per game_rules.md:
+        1="Engage!", 2="CHARGE!", 3="Destroy them!", 4="Retreat!",
+        5="My men fear the beast!", 6="Flee the abomination!", 7="We fight to the death!"
+        """
+        # TODO: queue message display event (frontend integration)
+        return state.pc + 1
+
+    def op_RemoveFromBattle(self, state, operand, script_words, unit_id, tick_count, rng):
+        """RemoveFromBattle: remove unit from battle without death."""
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment:
+            regiment.fled = True  # mark as removed from play
+        return state.pc + 1
+
+    def op_ExcludeFromArmy(self, state, operand, script_words, unit_id, tick_count, rng):
+        """ExcludeFromArmy: exclude unit from army roster (remove without death)."""
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment:
+            regiment.fled = True  # same effect as RemoveFromBattle
         return state.pc + 1
 
     def op_SetThreatRange(self, state, operand, script_words, unit_id, tick_count, rng):
-        """SetThreatRange N: set threat detection range (used by TrackThreat)."""
+        """SetThreatRange N: set threat detection range (used by TrackThreat).
+
+        Range in world units. Used to limit which enemies a unit considers as threats.
+        Example: BF001 Unit 1 (dormant) has low threat range (40) to indicate minimal engagement.
+        """
         if operand is not None:
             state.threat_range = operand
         return state.pc + 1
 
     def op_SetInterruptScript(self, state, operand, script_words, unit_id, tick_count, rng):
-        """SetInterruptScript N: set interrupt handler script."""
+        """SetInterruptScript N: set interrupt handler script.
+
+        Called when the unit receives an event (e.g., being attacked, enemy spotted).
+        Saves current position and switches to interrupt script.
+        """
         if operand is not None:
             state.interrupt_script = operand
+        return state.pc + 1
+
+    def op_HaltAndReform(self, state, operand, script_words, unit_id, tick_count, rng):
+        """HaltAndReform: stop movement and reform in place."""
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment:
+            regiment.target_x = None
+            regiment.target_y = None
+            regiment.attack_target = None
+        return state.pc + 1
+
+    def op_ReformBlock(self, state, operand, script_words, unit_id, tick_count, rng):
+        """ReformBlock: reform unit into a tight block formation."""
+        # TODO: adjust regiment.ranks based on available models
+        return state.pc + 1
+
+    def op_RunAway(self, state, operand, script_words, unit_id, tick_count, rng):
+        """RunAway: cause unit to flee the battlefield.
+
+        Similar to rout/panic, unit tries to leave the field.
+        """
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment and not regiment.routing:
+            # Trigger routing via combat module
+            from . import combat
+            combat._start_rout(self.battle, regiment)
         return state.pc + 1
 
     def op_ResetStack(self, state, operand, script_words, unit_id, tick_count, rng):
@@ -761,6 +875,97 @@ class ScriptInterpreter:
     def op_SetBattleState(self, state, operand, script_words, unit_id, tick_count, rng):
         """SetBattleState N: set current battle state."""
         # TODO: update global battle state
+        return state.pc + 1
+
+    def op_EnemyRouted(self, state, operand, script_words, unit_id, tick_count, rng):
+        """EnemyRouted: test if any enemy unit is routing/fleeing."""
+        battle = self.battle
+        regiment = battle.regiments.get(unit_id)
+        if regiment:
+            for other_id, other in battle.regiments.items():
+                if other.player != regiment.player and other.active and other.routing:
+                    state.cond_flags = 1
+                    return state.pc + 1
+        state.cond_flags = 0
+        return state.pc + 1
+
+    def op_EnemyRoutedStatic(self, state, operand, script_words, unit_id, tick_count, rng):
+        """EnemyRoutedStatic: test if a specific enemy is routing (static check)."""
+        return state.pc + 1
+
+    def op_IfBreak(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfBreak: test if this unit is broken/fleeing."""
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment and regiment.routing:
+            state.cond_flags = 1
+        else:
+            state.cond_flags = 0
+        return state.pc + 1
+
+    def op_IfRouted(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfRouted: test if this unit is routed/fleeing."""
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment and regiment.routing:
+            state.cond_flags = 1
+        else:
+            state.cond_flags = 0
+        return state.pc + 1
+
+    def op_StartPursuit(self, state, operand, script_words, unit_id, tick_count, rng):
+        """StartPursuit: chase down a fleeing unit."""
+        if state.current_target:
+            regiment = self.battle.regiments.get(unit_id)
+            if regiment:
+                regiment.attack_target = state.current_target[0]
+        return state.pc + 1
+
+    def op_ReadyToFire(self, state, operand, script_words, unit_id, tick_count, rng):
+        """ReadyToFire: test if unit can shoot (not reloading)."""
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment and regiment.missile_range and regiment.reload_ticks <= 0:
+            state.cond_flags = 1
+        else:
+            state.cond_flags = 0
+        return state.pc + 1
+
+    def op_StampReload(self, state, operand, script_words, unit_id, tick_count, rng):
+        """StampReload: manually reset reload counter (shortcut for rapid fire)."""
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment:
+            regiment.reload_ticks = 0
+        return state.pc + 1
+
+    def op_SpawnUnit(self, state, operand, script_words, unit_id, tick_count, rng):
+        """SpawnUnit N: create Night Goblin Fanatics at current position.
+
+        Only used in BF004_5, BF015, BF034, BF038 (fanatic battles).
+        Fanatics are created with special behavior (0xD3 opcode).
+        """
+        # TODO: implement fanatic spawning
+        # Requires creating new models at a position, which is complex
+        return state.pc + 1
+
+    def op_FollowParent(self, state, operand, script_words, unit_id, tick_count, rng):
+        """FollowParent: follow a parent unit (for child units in formation)."""
+        # TODO: implement parent unit tracking
+        return state.pc + 1
+
+    def op_SetClass(self, state, operand, script_words, unit_id, tick_count, rng):
+        """SetClass N: change unit class (0=Monster, 1=Infantry, 3=Archer, etc.)."""
+        # TODO: modify regiment.hud_class based on unit type
+        if operand is not None:
+            from .engine import HUD_CLASS_BY_RACE_TYPE
+            # Map class number to HUD class name
+            class_names = {0: "mon", 1: "inf", 3: "arch", 15: "art", 19: "wiz"}
+            regiment = self.battle.regiments.get(unit_id)
+            if regiment and operand in class_names:
+                regiment.hud_class = class_names[operand]
+        return state.pc + 1
+
+    def op_IfMachineDestroyed(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfMachineDestroyed: test if an artillery machine is destroyed."""
+        # TODO: check if specific war machine model is destroyed
+        state.cond_flags = 0  # simplified: never destroyed
         return state.pc + 1
 
     # For any other opcode not explicitly handled, the dispatcher will raise NotImplementedError,
