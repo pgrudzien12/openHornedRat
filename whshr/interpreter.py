@@ -106,6 +106,47 @@ class EventBus:
                         unit_state.event_queue.append(event)
 
 
+class LibraryBehaviors:
+    """Standard library behaviors (scripts 100-170) that are used across missions.
+
+    Behavior 15 (TrackThreat) is the primary AI for 290+ missions:
+    Keep the best threat and attack when its score exceeds the unit's worth.
+    """
+
+    def __init__(self, interpreter):
+        self.interpreter = interpreter
+
+    def track_threat(self, unit_id: str, state: UnitScriptState, tick_count: int, rng):
+        """Behavior 15: TrackThreat AI - seek and attack best threat.
+
+        Threat score = worth × (range − distance) / round(range / 4)
+        Only attack if score > unit's worth (simplified: always attack if threat found).
+        Distance metric: octagonal (max(|dx|, |dy|) + min(|dx|, |dy|) / 2).
+        """
+        battle = self.interpreter.battle
+        regiment = battle.regiments.get(unit_id)
+        if not regiment or regiment.player or not regiment.active:
+            return
+
+        # Find best threat (nearest active enemy)
+        best_threat = None
+        best_distance = float('inf')
+
+        for other_id, other in battle.regiments.items():
+            if other.player == regiment.player or not other.active:
+                continue
+            dx = other.x - regiment.x
+            dy = other.y - regiment.y
+            distance = max(abs(dx), abs(dy)) + min(abs(dx), abs(dy)) / 2.0  # octagonal
+            if distance < best_distance:
+                best_threat = other_id
+                best_distance = distance
+
+        if best_threat:
+            state.current_target = (best_threat, 0)
+            regiment.attack_target = best_threat
+
+
 class ScriptInterpreter:
     """Executes one unit's behaviour script for one tick.
 
@@ -121,6 +162,7 @@ class ScriptInterpreter:
         self.battle = battle
         self.event_bus = event_bus
         self.script_dll = script_dll
+        self.behaviors = LibraryBehaviors(self)
 
     def run(self, unit_id: str, state: UnitScriptState, tick_count: int, rng):
         """Execute one unit's script for one tick.
@@ -365,9 +407,30 @@ class ScriptInterpreter:
             self.event_bus.queue_event(unit_id, event, route="self")
         return state.pc + 1
 
+    def op_SendEventSelfIfTrue(self, state, operand, script_words, unit_id, tick_count, rng):
+        """SendEventSelfIfTrue CODE: queue event to self if cond_flags is true."""
+        if state.cond_flags and operand is not None:
+            event = Event(code=operand, source=int(unit_id) if unit_id.isdigit() else 0)
+            self.event_bus.queue_event(unit_id, event, route="self")
+        return state.pc + 1
+
+    def op_SendEventSelfIfFalse(self, state, operand, script_words, unit_id, tick_count, rng):
+        """SendEventSelfIfFalse CODE: queue event to self if cond_flags is false."""
+        if not state.cond_flags and operand is not None:
+            event = Event(code=operand, source=int(unit_id) if unit_id.isdigit() else 0)
+            self.event_bus.queue_event(unit_id, event, route="self")
+        return state.pc + 1
+
     def op_SendEventToOwnSide(self, state, operand, script_words, unit_id, tick_count, rng):
         """SendEventToOwnSide CODE: broadcast event to own-side units."""
         if operand is not None:
+            event = Event(code=operand, source=int(unit_id) if unit_id.isdigit() else 0)
+            self.event_bus.queue_event(unit_id, event, route="side")
+        return state.pc + 1
+
+    def op_SendEventToOwnSideIfTrue(self, state, operand, script_words, unit_id, tick_count, rng):
+        """SendEventToOwnSideIfTrue CODE: broadcast event to own-side if cond_flags is true."""
+        if state.cond_flags and operand is not None:
             event = Event(code=operand, source=int(unit_id) if unit_id.isdigit() else 0)
             self.event_bus.queue_event(unit_id, event, route="side")
         return state.pc + 1
@@ -487,6 +550,67 @@ class ScriptInterpreter:
             return state.return_stack[-1][0]
         return state.pc + 1
 
+    # ===== Targeting and threat opcodes =====
+
+    def op_FindTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+        """FindTarget: find the nearest valid enemy target."""
+        # TODO: implement proper targeting (check visibility, range, etc.)
+        # Simplified: set cond_flags to indicate target found
+        state.cond_flags = 1  # assume target found
+        return state.pc + 1
+
+    def op_FindTargetNear(self, state, operand, script_words, unit_id, tick_count, rng):
+        """FindTargetNear: find nearest enemy within threat range."""
+        state.cond_flags = 1  # assume target found
+        return state.pc + 1
+
+    def op_FindNewTargetNear(self, state, operand, script_words, unit_id, tick_count, rng):
+        """FindNewTargetNear: find a new target, ignoring current one."""
+        state.cond_flags = 1  # assume target found
+        return state.pc + 1
+
+    def op_TargetNearestEnemy(self, state, operand, script_words, unit_id, tick_count, rng):
+        """TargetNearestEnemy: set current target to nearest enemy."""
+        state.cond_flags = 1
+        return state.pc + 1
+
+    def op_TargetValid(self, state, operand, script_words, unit_id, tick_count, rng):
+        """TargetValid: test if current target is still valid."""
+        # Simplified: assume target is valid
+        state.cond_flags = 1 if state.current_target else 0
+        return state.pc + 1
+
+    def op_KeepThreat(self, state, operand, script_words, unit_id, tick_count, rng):
+        """KeepThreat: keep current threat (don't search for new one)."""
+        return state.pc + 1
+
+    def op_TargetGone(self, state, operand, script_words, unit_id, tick_count, rng):
+        """TargetGone: test if target is no longer visible/alive."""
+        # For now, assume target still exists
+        state.cond_flags = 0
+        return state.pc + 1
+
+    def op_InRange(self, state, operand, script_words, unit_id, tick_count, rng):
+        """InRange: test if current target is in weapon range."""
+        # TODO: check distance to current target against weapon range
+        state.cond_flags = 0  # assume out of range for now
+        return state.pc + 1
+
+    def op_IfTargetInChargeReach(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfTargetInChargeReach: test if target is close enough to charge."""
+        # TODO: check distance to target (within charge reach)
+        state.cond_flags = 0
+        return state.pc + 1
+
+    def op_TakeEventTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+        """TakeEventTarget: use the source of the current event as target."""
+        if state.current_event.source:
+            state.current_target = (state.current_event.source, 0)
+            state.cond_flags = 1
+        else:
+            state.cond_flags = 0
+        return state.pc + 1
+
     # ===== Placeholder opcodes (stubs for future implementation) =====
     # These are high-priority opcodes needed by missions but not yet integrated with the battle engine.
     # Each logs a placeholder message and continues, allowing partial mission execution.
@@ -499,10 +623,6 @@ class ScriptInterpreter:
 
     def op_FaceNode(self, state, operand, script_words, unit_id, tick_count, rng):
         """FaceNode N: turn to face waypoint node N (TODO: integrate with movement)."""
-        return state.pc + 1
-
-    def op_FindTarget(self, state, operand, script_words, unit_id, tick_count, rng):
-        """FindTarget: find and set attack target (TODO: implement targeting)."""
         return state.pc + 1
 
     def op_ChargeTarget(self, state, operand, script_words, unit_id, tick_count, rng):
@@ -526,9 +646,20 @@ class ScriptInterpreter:
         """SetTag TAG: mark this unit with a tag (TODO: implement tagging)."""
         return state.pc + 1
 
+    def op_SetBehaviour(self, state, operand, script_words, unit_id, tick_count, rng):
+        """SetBehaviour N: set explicit behavior (e.g., 15=TrackThreat).
+
+        Instead of gosub to library script, applies the behavior inline.
+        Behavior 15 (TrackThreat) is the most common.
+        """
+        if operand == 15:  # TrackThreat
+            self.behaviors.track_threat(unit_id, state, tick_count, self.battle.rng)
+        return state.pc + 1
+
     def op_React(self, state, operand, script_words, unit_id, tick_count, rng):
         """React N: display a battle message (1="Engage!", 2="CHARGE!", etc.)."""
         # TODO: call frontend to display message
+        # Messages: 1="Engage!", 2="CHARGE!", 3="Destroy them!", 4="Retreat!", etc.
         return state.pc + 1
 
     def op_SetThreatRange(self, state, operand, script_words, unit_id, tick_count, rng):
@@ -541,6 +672,95 @@ class ScriptInterpreter:
         """SetInterruptScript N: set interrupt handler script."""
         if operand is not None:
             state.interrupt_script = operand
+        return state.pc + 1
+
+    def op_ResetStack(self, state, operand, script_words, unit_id, tick_count, rng):
+        """ResetStack: clear the return stack."""
+        state.return_stack = []
+        return state.pc + 1
+
+    def op_ExecuteOrder(self, state, operand, script_words, unit_id, tick_count, rng):
+        """ExecuteOrder: apply pending player order (if any)."""
+        # TODO: check if player has issued an order and apply it
+        # Player orders override script commands
+        return state.pc + 1
+
+    def op_RestartAfterOrder(self, state, operand, script_words, unit_id, tick_count, rng):
+        """RestartAfterOrder: restart script after player order completes."""
+        # ExecuteOrder applies a player order, then this restarts at the restart point
+        state.pc = state.restart_pc
+        return state.pc
+
+    def op_Query(self, state, operand, script_words, unit_id, tick_count, rng):
+        """Query N: ask the AI routine (cases 11-14 for threat detection)."""
+        # Simplified: Query is used by FindTarget* opcodes to ask "is there a valid target?"
+        # For now, set cond_flags based on operand (TODO: implement real threat scoring)
+        if operand is not None:
+            # Cases 11-14: threat detection queries
+            # Set cond_flags to indicate whether a threat exists (simplified: always false for now)
+            state.cond_flags = 0
+        return state.pc + 1
+
+    def op_IfObjective(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfObjective N: test if objective letter N is defined in the battle."""
+        # TODO: check battle's objective letters (from .BTS file)
+        # For now, assume objectives A-F always exist (simplified)
+        if operand is not None and operand < 6:  # A=0, B=1, ..., F=5
+            state.cond_flags = 1
+        else:
+            state.cond_flags = 0
+        return state.pc + 1
+
+    def op_IfClass(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfClass N: test if this unit's class matches N."""
+        # TODO: check regiment's class from HUD_CLASS_BY_RACE_TYPE
+        # For now, simplified: set cond_flags based on class
+        state.cond_flags = 1  # assume matches for now
+        return state.pc + 1
+
+    def op_IfTag(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfTag TAG: test if this unit has the specified tag."""
+        # TODO: implement unit tagging system
+        state.cond_flags = 0  # no tags implemented yet
+        return state.pc + 1
+
+    def op_IfTagExists(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfTagExists TAG: test if any unit has this tag."""
+        # TODO: implement unit tagging system
+        state.cond_flags = 0  # no tags implemented yet
+        return state.pc + 1
+
+    def op_IfEventSource(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfEventSource: test if current event came from a specific source."""
+        if operand is not None and state.current_event.source == operand:
+            state.cond_flags = 1
+        else:
+            state.cond_flags = 0
+        return state.pc + 1
+
+    def op_IfGameMode(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfGameMode N: test current game mode (1=deployment, 2=real time)."""
+        # TODO: check battle's game mode
+        # For now, assume real-time mode (2)
+        if operand is not None and operand == 2:
+            state.cond_flags = 1
+        else:
+            state.cond_flags = 0
+        return state.pc + 1
+
+    def op_IfBattleState(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfBattleState N: test current battle state."""
+        # TODO: track battle state (0=initial, 4=in progress, 5=gate reached, etc.)
+        # For now, assume state 4 (in progress)
+        if operand is not None and operand == 4:
+            state.cond_flags = 1
+        else:
+            state.cond_flags = 0
+        return state.pc + 1
+
+    def op_SetBattleState(self, state, operand, script_words, unit_id, tick_count, rng):
+        """SetBattleState N: set current battle state."""
+        # TODO: update global battle state
         return state.pc + 1
 
     # For any other opcode not explicitly handled, the dispatcher will raise NotImplementedError,
