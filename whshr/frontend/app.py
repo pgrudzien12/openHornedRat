@@ -89,7 +89,7 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
                BattleScene(AssetId("vanilla", "battle", Path(battle).stem.casefold()), log_dir=log_dir, seed=seed)
                if battle else OpeningNarrationScene(log_dir=log_dir, seed=seed))
     machine = SceneMachine(initial, context)
-    options = {"camera": camera}
+    options = {"camera": camera, "installation": context.locator.installation}
     view = view_for(gpu, machine.active, options)
     clock = FixedStepClock(FIXED_STEP, MAX_STEPS_PER_FRAME)
     rate = FrameRate()

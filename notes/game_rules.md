@@ -724,6 +724,16 @@ orders. `whshr.frontend.battle_view.BattleView._minimap_click()` does not yet mi
 charge" behaviour — on the minimap that click is currently a no-op — a known gap, not a deliberate
 choice.
 
+The four cursors ("Feedback" above) are loaded from `GMCUR.DLL`'s own `RT_GROUP_CURSOR` resources
+(`notes/pe_resources.md`, IDs 100-103) via `whshr.frontend.cursors.GameCursors` (shared with
+`TroopSelectionView`'s `WHSHR.EXE`-named cursors), never substitute artwork. `BattleView._set_cursor()`
+switches it purely on `order_mode` (Attack armed → attack cursor; an immediately-issued order, no
+action, or Escape → default) - Fire/Magic have their own cursor group ids wired up too, but nothing
+currently arms those modes (no engine order exists for them yet, `ORDER_SUPPORTED`). The DLL's own
+group→id mapping is not otherwise named anywhere, so the 100=default/101=attack/102=fire/103=magic
+order (matching this note's own listed order) is 🟡 PROVISIONAL - verify visually against the
+running game and correct `BATTLE_CURSOR_GROUPS` in `battle_view.py` if any of the four looks wrong.
+
 ## 5. Close combat
 
 ### Order of blows ✅

@@ -5,15 +5,13 @@ The screen is deliberately a renderer: selection, affordability and marching ord
 because this is a front-end-owned window rather than a WND.DLL-defined one.
 """
 
-import struct
-
 import pygame
 
 from ..glue_palette import AppPalette
-from ..legacy import module
 from ..script import resource_name
 from ..troop_selection import STATUS_AVAILABLE, STATUS_DESTROYED, STATUS_EXCLUDED, STATUS_NOT_HIRED
 from .bitmap_font import BitmapFont
+from .cursors import GameCursors
 from .glue_bitmap import load_optional_bitmap
 from .gpu import ScreenQuad
 from .scene_view import NativeScreenView
@@ -28,78 +26,6 @@ BUTTONS = (
 BUTTON_Y, BUTTON_SIZE = 448, (84, 32)
 P0_ROWS, P1_ROWS = 6, 7
 STATUS_TEXT = {STATUS_NOT_HIRED: 415, STATUS_EXCLUDED: 416, STATUS_DESTROYED: 417}
-
-
-class GameCursors:
-    """Runtime decoder for the named EXE cursor groups in notes/troop_selection.md §2."""
-
-    def __init__(self, installation):
-        self.installation = installation
-        self._cursors = {}
-        self._resources = None
-
-    def set(self, name):
-        if name not in self._cursors:
-            try:
-                self._cursors[name] = self._load(name)
-            except (FileNotFoundError, IndexError, OSError, StopIteration, ValueError, struct.error, pygame.error):
-                self._cursors[name] = False
-        cursor = self._cursors[name]
-        if cursor:
-            try:
-                pygame.mouse.set_cursor(cursor)
-            except pygame.error:
-                pass
-
-    def _load(self, name):
-        if self._resources is None:
-            image = module("pe_resources").PE(self.installation.require("WHSHR.EXE"))
-            self._resources = tuple(image.resources()), image
-        resources, image = self._resources
-        group = next(resource for resource in resources
-                     if resource.type == 12 and str(resource.name).upper() == name)
-        group_data = image.data(group)
-        count = struct.unpack_from("<H", group_data, 4)[0]
-        if count < 1:
-            raise ValueError(f"empty cursor group {name}")
-        member = struct.unpack_from("<H", group_data, 18)[0]
-        cursor = next(resource for resource in resources if resource.type == 1 and resource.name == member)
-        return _cursor_from_dib(image.data(cursor))
-
-
-def _cursor_from_dib(data):
-    """Convert a Win32 monochrome cursor resource to pygame's colour-cursor form."""
-    hotspot_x, hotspot_y = struct.unpack_from("<HH", data)
-    data = data[4:]
-    header, width, doubled_height, planes, bpp, compression, *_ = struct.unpack_from("<IiiHHIIiiII", data)
-    if header != 40 or planes != 1 or bpp != 1 or compression != 0 or doubled_height <= 0:
-        raise ValueError("unsupported cursor DIB")
-    height = doubled_height // 2
-    palette_count = 2
-    palette = tuple((data[40 + index * 4 + 2], data[40 + index * 4 + 1], data[40 + index * 4])
-                    for index in range(palette_count))
-    offset = 40 + 4 * palette_count
-    stride = (width + 31) // 32 * 4
-    if len(data) < offset + stride * doubled_height:
-        raise ValueError("truncated cursor DIB")
-    surface = pygame.Surface((width, height), pygame.SRCALPHA, 32)
-    for y in range(height):
-        # The XOR and AND halves of an icon/cursor DIB are both bottom-up.
-        source_y = height - 1 - y
-        xor = data[offset + source_y * stride:offset + (source_y + 1) * stride]
-        and_offset = offset + stride * height
-        and_ = data[and_offset + source_y * stride:and_offset + (source_y + 1) * stride]
-        for x in range(width):
-            xor_bit = (xor[x // 8] >> (7 - x % 8)) & 1
-            and_bit = (and_[x // 8] >> (7 - x % 8)) & 1
-            if and_bit and not xor_bit:
-                surface.set_at((x, y), (0, 0, 0, 0))
-            elif and_bit:
-                # Win32's invert-screen pixels have no exact alpha equivalent; use white.
-                surface.set_at((x, y), (255, 255, 255, 255))
-            else:
-                surface.set_at((x, y), (*palette[xor_bit], 255))
-    return pygame.cursors.Cursor((min(hotspot_x, width - 1), min(hotspot_y, height - 1)), surface)
 
 
 class TroopSelectionView(NativeScreenView):

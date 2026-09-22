@@ -441,6 +441,7 @@ class BattleViewHudInputTests(unittest.TestCase):
             regiments={"player": SimpleNamespace(player=True), "enemy": SimpleNamespace(player=False)}))
         view.camera = SimpleNamespace()
         view.order_mode = None
+        view.cursors, view._cursor_mode = None, None
         view._ground_click = Mock(return_value=(("ground",),))
         return view
 
@@ -545,6 +546,76 @@ class BattleViewHudInputTests(unittest.TestCase):
         view._ground_click.assert_not_called()
 
 
+class BattleCursorTests(unittest.TestCase):
+    """notes/game_rules.md "Feedback": the cursor reflects the pending order mode - Attack gets
+    its own cursor, an immediately-issued order (or no action at all) uses the default."""
+
+    def _view(self, hud):
+        view = BattleView.__new__(BattleView)
+        view.hud = hud
+        view.scene = SimpleNamespace(selected_id="player", battle=SimpleNamespace(
+            regiments={"player": SimpleNamespace(player=True)}))
+        view.camera = SimpleNamespace()
+        view.order_mode = None
+        view.cursors = Mock()
+        view._cursor_mode = None
+        view._ground_click = Mock(return_value=(("ground",),))
+        return view
+
+    def _hud_mock(self, **overrides):
+        base = dict(
+            click_minimap_tab=lambda pos: False, minimap_position=lambda pos: None,
+            minimap_regiment_at=lambda pos: None, hit_test=lambda pos: None,
+            occupies=lambda pos: True, set_pressed=Mock(), press=lambda name: None,
+            order_completed=Mock(),
+        )
+        base.update(overrides)
+        return SimpleNamespace(**base)
+
+    def test_given_an_attack_button_when_pressed_then_the_attack_cursor_is_set(self):
+        from whshr.frontend.battle_view import BATTLE_CURSOR_GROUPS
+        hud = self._hud_mock(hit_test=lambda pos: "attack", press=lambda name: None)
+        view = self._view(hud)
+        down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+
+        view.events(down)
+
+        view.cursors.set.assert_called_with(BATTLE_CURSOR_GROUPS["attack"])
+
+    def test_given_an_immediately_issued_order_then_the_default_cursor_is_restored(self):
+        from whshr.frontend.battle_view import BATTLE_CURSOR_GROUPS
+        hud = self._hud_mock(hit_test=lambda pos: "halt", press=lambda name: "halt")
+        view = self._view(hud)
+        down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+
+        view.events(down)
+
+        view.cursors.set.assert_called_with(BATTLE_CURSOR_GROUPS["default"])
+
+    def test_given_escape_then_the_default_cursor_is_restored(self):
+        from whshr.frontend.battle_view import BATTLE_CURSOR_GROUPS
+        hud = self._hud_mock()
+        view = self._view(hud)
+        view.order_mode, view._cursor_mode = "attack", "attack"
+        escape = SimpleNamespace(type=pygame.KEYDOWN, key=pygame.K_ESCAPE)
+
+        view.events(escape)
+
+        view.cursors.set.assert_called_with(BATTLE_CURSOR_GROUPS["default"])
+
+    def test_given_the_same_mode_again_then_the_cursor_is_not_reloaded(self):
+        hud = self._hud_mock(hit_test=lambda pos: "attack", press=lambda name: None)
+        view = self._view(hud)
+        down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+        view.events(down)
+        view.cursors.set.reset_mock()
+        view.hud.set_pressed(None)  # a second press of the same still-armed button
+
+        view._set_cursor("attack")
+
+        view.cursors.set.assert_not_called()
+
+
 class EnemyInspectionSelectionTests(unittest.TestCase):
     """An enemy regiment can be selected for its HUD readout/banner/stats, but never given
     orders: whshr.battle_scene.BattleScene.handle() no longer restricts "select" to player
@@ -559,6 +630,7 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
                                       distance=100.0, fov=45.0, projection=lambda *a, **k: None)
         view.gpu = SimpleNamespace(target=SimpleNamespace(size=(640, 480)))
         view.order_mode = order_mode
+        view.cursors, view._cursor_mode = None, None
         view.hud = SimpleNamespace(order_completed=Mock())
         return view
 

@@ -22,6 +22,7 @@ from ..battle3d import SPRITE_DEPTH_BIAS
 from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, sprite_direction
 from ..camera import BattleCamera
 from ..formation import SPRITE_PIXEL_WORLD_UNITS
+from .cursors import GameCursors
 from .scene_view import SceneView
 from .hud import Hud
 
@@ -33,6 +34,11 @@ TILT_SPEED = 30.0  # degrees per second
 WHEEL_ZOOM = 0.9
 DRAG_ROTATE = 0.3  # degrees per pixel
 CLICK_DRAG_THRESHOLD = 4  # pixels; a right button press/release closer than this counts as a click
+# notes/game_rules.md "Feedback": 4 custom cursors (default, attack, fire, magic), GMCUR.DLL's 4
+# RT_GROUP_CURSOR resources, IDs 100-103 (notes/pe_resources.md). The DLL's own group->id mapping
+# is not otherwise named, so this order (matching the note's own listed order) is PROVISIONAL -
+# verify against the running game and correct here if any of the four looks wrong.
+BATTLE_CURSOR_GROUPS = {"default": 100, "attack": 101, "fire": 102, "magic": 103}
 # Frames per second of the walking animation while a regiment is not settled in formation. The original
 # per-frame animation timing is not traced (notes/game_rules.md, "Animation bytecode"): this is a
 # documented placeholder, not a measured value.
@@ -210,6 +216,20 @@ class BattleView(SceneView):
         self.hud = Hud(self.gpu, field)
         self.hud.bind_battle(scene.battle)
 
+        installation = self.options.get("installation")
+        self.cursors = GameCursors(installation, dll="GMCUR.DLL") if installation is not None else None
+        self._cursor_mode = None
+        self._set_cursor("default")
+
+    def _set_cursor(self, mode):
+        """Feedback (notes/game_rules.md "Battle HUD layout"): the cursor reflects the pending
+        order mode, not hover position - Attack/Fire/Magic get their own cursor, everything else
+        (including Move, which has none of its own) uses the default."""
+        if self.cursors is None or self._cursor_mode == mode:
+            return
+        self._cursor_mode = mode
+        self.cursors.set(BATTLE_CURSOR_GROUPS.get(mode, BATTLE_CURSOR_GROUPS["default"]))
+
     def events(self, event):
         camera = self.camera
         if event.type == pygame.MOUSEWHEEL:
@@ -225,6 +245,7 @@ class BattleView(SceneView):
             self.camera = replace(self.initial_camera)
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             self.order_mode = None
+            self._set_cursor("default")
             self.hud.set_pressed(None)
             self.hud.order_completed()
             return (("deselect",),)
@@ -240,9 +261,11 @@ class BattleView(SceneView):
                 order = self.hud.press(action)
                 if action in {"move", "attack"}:
                     self.order_mode = action
+                    self._set_cursor(action)
                     return ()
                 if order is not None:
                     self.order_mode = None
+                    self._set_cursor("default")
                     self.hud.order_completed()
                     return ((order,),)
                 return ()
@@ -284,6 +307,7 @@ class BattleView(SceneView):
         if self.scene.selected_id is not None:
             enemy_id = self.scene.battle.regiment_at(x, y, player_only=False)
             mode, self.order_mode = self.order_mode, None
+            self._set_cursor("default")
             self.hud.order_completed()
             if mode == "attack":
                 return (("attack", enemy_id),) if enemy_id is not None else ()
@@ -316,6 +340,7 @@ class BattleView(SceneView):
         if world is None or self.scene.selected_id is None:
             return ()
         mode, self.order_mode = self.order_mode, None
+        self._set_cursor("default")
         self.hud.order_completed()
         if mode == "attack":
             return (("attack", regiment_id),) if regiment_id is not None else ()
@@ -424,3 +449,8 @@ class BattleView(SceneView):
                          self.textures, self.atlas, self.palette):
             self.gpu.ctx.release(resource)
         self.hud.release()
+        if self.cursors is not None:
+            try:
+                pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_ARROW)
+            except pygame.error:
+                pass
