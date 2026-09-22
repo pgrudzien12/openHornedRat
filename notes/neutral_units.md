@@ -25,28 +25,36 @@
 
 **Unit side code (s_side[0] byte):**
 ```
-bit 7 (0x80) = ENEMY side flag
-bit 6 (0x40) = NEUTRAL / NPC side flag
+bits 7,6 = 00 (0x00) → PLAYER side
+bits 7,6 = 01 (0x40) → NEUTRAL / NPC side  ← bits 6 set, bit 7 clear
+bits 7,6 = 10 (0x80) → ENEMY side
+bits 7,6 = 11 (0xC0) → UNUSED (no units found)
 bits 0-5 (0x3F) = unit type code
 ```
 
 ### Three-Way Side System
 
-| Side | Condition | Range | Examples |
-|------|-----------|-------|----------|
-| **Player** | bit7=0, bit6=0 | 0x00–0x3F | Player units (Clanrats, Greatswords) |
-| **Enemy** | bit7=1 | 0x80–0xBF | Enemy units (Goblins, Skaven) |
-| **Neutral/NPC** | bit7=0, bit6=1 | 0x40–0x53 | Peasants, dwarves, cannons, mercenaries |
+| Side | Bits 7,6 | Encoding | Count | Range | Examples |
+|------|----------|----------|-------|-------|----------|
+| **Player** | 00 | 0x00–0x3F | ? | 0x00–0x3F | Player units (no explicit side in .BTS) |
+| **Neutral/NPC** | 01 | 0x40–0x5F | 101 | 0x40–0x53 | Peasants, dwarves, cannons, mercenaries |
+| **Enemy** | 10 | 0x80–0xBF | 430 | 0x80–0x92 | Enemy units (Goblins, Skaven, etc.) |
+| **Reserved** | 11 | 0xC0–0xFF | 0 | none | Unused |
 
 ### Evidence
 
-**All 101 NPC units observed:**
-- Side codes range from 0x40 to 0x53
-- Bit 6 always set (0x40 present in side code)
-- Bit 7 always clear (0x80 absent from side code)
-- This is distinct from both player (0x00–0x3F) and enemy (0x80+) ranges
+**Distribution across all units in all battles:**
+- **Player units:** no explicit s_side found (or 0x00–0x3F, pattern 00)
+- **Neutral/NPC units:** 101 total, side codes 0x40–0x53 (pattern 01: bits 7,6 = 01)
+- **Enemy units:** 430 total, side codes 0x80–0x92 (pattern 10: bits 7,6 = 10)
+- **Reserved (pattern 11):** zero units found with 0xC0+ range
 
-**Interpretation:** The original game recognizes three distinct sides via the bit flags, not a binary player/enemy system.
+**Verification:**
+- All 101 NPC units: bits 7,6 = 01 (0x40 set, 0x80 clear)
+- All 430 enemy units: bits 7,6 = 10 (0x80 set, 0x40 clear)
+- Clean separation: no overlap between patterns
+
+**Interpretation:** The original game uses a **2-bit side code (bits 7,6)** to represent three distinct sides: player (00), neutral (01), enemy (10), with pattern 11 reserved/unused.
 
 ---
 
@@ -180,33 +188,29 @@ Current model (insufficient):
 regiment.player: bool  # True = player, False = enemy
 ```
 
-Required model (three-way sides):
+Required model (2-bit side + type code):
 ```python
 class Side(Enum):
-    PLAYER = 0       # bit7=0, bit6=0
-    ENEMY = 1        # bit7=1
-    NEUTRAL = 2      # bit6=1, bit7=0
+    PLAYER = 0       # bits 7,6 = 00
+    NEUTRAL = 1      # bits 7,6 = 01
+    ENEMY = 2        # bits 7,6 = 10
+    RESERVED = 3     # bits 7,6 = 11 (unused)
 
-regiment.side: Side
-regiment.type_code: int  # 0x00–0x13 for NPC, varies for others
+regiment.side: Side  # extracted from s_side[0] >> 6
+regiment.type_code: int  # bits 0-5 of s_side[0]
 ```
 
 ### Parser Changes
 
 ```python
-# Identify NPC units:
-is_npc = (s_side[0] & 0x40) != 0 and (s_side[0] & 0x80) == 0
+# Extract side as 2-bit value from bits 7,6:
+side_bits = (s_side[0] >> 6) & 0x3  # shift right 6, mask to get 2-bit value
+type_code = s_side[0] & 0x3F         # bits 0-5
 
-# Extract side and type:
-if is_npc:
-    side = Side.NEUTRAL
-    type_code = s_side[0] & 0x3F
-elif (s_side[0] & 0x80) != 0:
-    side = Side.ENEMY
-    type_code = s_side[0] & 0x3F
-else:
-    side = Side.PLAYER
-    type_code = s_side[0] & 0x3F
+# Map to Side enum:
+side_map = {0: Side.PLAYER, 1: Side.NEUTRAL, 2: Side.ENEMY, 3: Side.RESERVED}
+regiment.side = side_map[side_bits]
+regiment.type_code = type_code
 ```
 
 ### Behavior Handling

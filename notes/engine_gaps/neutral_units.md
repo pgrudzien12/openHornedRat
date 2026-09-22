@@ -33,10 +33,11 @@ there is no third relation (neutral, or "become allied mid-battle").
 - **Behavior is script-driven:** each NPC runs an assigned mission script (scripts 2–8), not hardcoded neutral AI
 - **Different NPC categories:** peasants, dwarves, mercenaries, wizards, supply units, artillery
 
-**Three-way side system required:**
-- PLAYER: bit7=0, bit6=0
-- ENEMY: bit7=1
-- NEUTRAL: bit7=0, bit6=1
+**Three-way side system (2-bit side code, bits 7,6):**
+- PLAYER: bits 7,6 = 00
+- NEUTRAL: bits 7,6 = 01
+- ENEMY: bits 7,6 = 10
+- RESERVED: bits 7,6 = 11 (no units found)
 
 See `notes/neutral_units.md` for full data, type codes, and implementation guidance.
 
