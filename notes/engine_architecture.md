@@ -261,7 +261,11 @@ constant, and models walk to their own formation slot rather than teleporting wi
   distance — matching `MoveModels`' "never faster than the unit's `s_rlmv`" rule in game_rules.md. A
   regiment therefore visibly reforms while turning or after arrival, instead of snapping into shape;
   `tests/test_engine.py` (`FormationMovementTests`) asserts a turning order leaves models short of their
-  ideal slots after one tick and that they do settle back into the exact block after enough ticks.
+  ideal slots after one tick and that they do settle back into the exact block after enough ticks. This
+  means the anchor visibly outruns the models while charging (`CHARGING_K = 2.5`x the catch-up
+  speed): `BattleView._instances()`'s banner marker is placed over the mean of the regiment's
+  current `model_positions()`, not the anchor, so it stays over the rendered troops instead of
+  floating ahead of them mid-charge.
 - **Facing and animation**: a regiment's `direction` still only changes while its anchor is actively
   moving (as before); `Regiment.walking` is true whenever the anchor is moving or any model has not yet
   settled into its slot (`engine.SETTLE_EPSILON`), and `Regiment.animation_seconds` accumulates while

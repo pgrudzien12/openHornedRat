@@ -439,6 +439,12 @@ class BattleView(SceneView):
         for regiment in self.scene.battle.regiments.values():
             sheet = field.sprite_sheet(regiment.sprite)
             selected = 1.0 if regiment.identifier == selected_id else 0.0
+            # The anchor (regiment.x/y) can visibly outrun the models during a charge (they only
+            # ever catch up to it at the unit's base speed, notes/game_rules.md "Formations": "
+            # MoveModels... never faster than the unit's s_rlmv", notes/engine_architecture.md
+            # "Formation catch-up") - the banner should hover over the rendered troops themselves,
+            # not the anchor, or it visibly floats ahead of/behind the block it marks.
+            positions = regiment.model_positions() if regiment.active else []
             if sheet is not None and regiment.active:
                 if regiment.in_melee:
                     action, phase = "attack", int(regiment.animation_seconds * WALK_ANIMATION_FPS)
@@ -450,7 +456,7 @@ class BattleView(SceneView):
                     action, phase = "stand", 0
                 index = sheet.frame_index(action, phase, sprite_direction(yaw, regiment.direction))
                 frame, rect = sheet.frames[index], sheet.rects[index]
-                for x, y in regiment.model_positions():
+                for x, y in positions:
                     data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
                                           *rect, frame.anchor_x, frame.anchor_y, selected)
             if sheet is not None:
@@ -461,12 +467,14 @@ class BattleView(SceneView):
                     data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
                                           *rect, frame.anchor_x, frame.anchor_y, 0.0)
             banner = field.ui_sheets.get((regiment.banner or "").casefold())
-            if regiment.active and banner is not None and len(banner.frames) > 2 and banner.rects:
+            if regiment.active and banner is not None and len(banner.frames) > 2 and banner.rects and positions:
                 frame, rect = banner.frames[2], banner.rects[2]
+                center_x = sum(x for x, _ in positions) / len(positions)
+                center_y = sum(y for _, y in positions) / len(positions)
                 banner_instances.append((regiment.identifier, INSTANCE.pack(
-                    regiment.x / WORLD_PER_MESH,
-                    field.ground_height(regiment.x, regiment.y) + BANNER_MARKER_RAISE,
-                    regiment.y / WORLD_PER_MESH,
+                    center_x / WORLD_PER_MESH,
+                    field.ground_height(center_x, center_y) + BANNER_MARKER_RAISE,
+                    center_y / WORLD_PER_MESH,
                     *rect, frame.width / 2, frame.height, selected,
                 )))
         # The original promotes the focused banner in z-order and leaves it promoted after deselecting.

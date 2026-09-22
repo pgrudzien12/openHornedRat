@@ -45,8 +45,8 @@ FIXED_BUTTONS = {
     # to any other measurement.
     "toggle_a": ((337, 66), (64, 65), (32, 48)),
     "toggle_b": ((337, 66), (66, 67), (32, 48)),
-    "scroll_up": ((224, 9), (68, 69), (20, 20)),
-    "scroll_down": ((224, 34), (70, 71), (20, 20)),
+    "scroll_up": ((424, 9), (68, 69), (20, 20)),
+    "scroll_down": ((424, 34), (70, 71), (20, 20)),
 }
 # The pause/resume button at (11, 118) changes frame pair by context; it is not in FIXED_BUTTONS.
 PAUSE_POS, PAUSE_SIZE = (11, 118), (52, 52)

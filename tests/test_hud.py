@@ -918,6 +918,30 @@ class BattleBannerVisibilityTests(unittest.TestCase):
         self.assertEqual(instance[3:7], (0.0, 0.0, 32.0, 32.0))
         self.assertEqual(instance[7:], (16.0, 32.0, 1.0))
 
+    def test_given_models_lagging_behind_a_charging_anchor_then_the_banner_follows_the_models(self):
+        # The anchor (regiment.x/y) can visibly outrun the models during a charge (they only ever
+        # catch up to it at the unit's base speed - notes/game_rules.md "Formations", "MoveModels
+        # ... never faster than the unit's s_rlmv"); the banner must hover over the rendered
+        # troops' actual current positions, not the anchor, or it visibly floats ahead of the block.
+        from whshr.battlefield import SpriteFrame, SpriteSheet
+        from whshr.frontend.battle_view import BANNER_MARKER_RAISE, INSTANCE
+        regiment = Regiment("player", "Player", 100, 200, 0, True, models=2, banner="banner")
+        regiment.positions = [(80.0, 180.0), (90.0, 190.0)]  # lagging behind the (100, 200) anchor
+        marker = SpriteFrame(32, 32, 0, 32, bytes(32 * 32))
+        banner = SpriteSheet("BANNER", [marker, marker, marker], [], rects=[(0, 0, 32, 32)] * 3)
+        field = SimpleNamespace(ui_sheets={"banner": banner}, sprite_sheet=lambda resource: None,
+                               ground_height=lambda x, y: 2.0)
+        view = BattleView.__new__(BattleView)
+        view.scene = SimpleNamespace(field=field, battle=Battle(1000, 800, [regiment]), selected_id="player")
+        view.camera = SimpleNamespace(yaw=180)
+        view.capacity = 1
+
+        instance = INSTANCE.unpack(view._instances())
+
+        center_x, center_y = 85.0, 185.0  # mean of the two lagging model positions, not the anchor
+        self.assertEqual(instance[:3], (center_x / WORLD_PER_MESH, 2.0 + BANNER_MARKER_RAISE,
+                                        center_y / WORLD_PER_MESH))
+
     def test_given_a_destroyed_bannered_regiment_when_the_battle_view_draws_then_no_banner_marker_is_visible(self):
         self.assertEqual(self._view_with_banner(active=False)._instances(), b"")
 
