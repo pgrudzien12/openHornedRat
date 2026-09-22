@@ -295,7 +295,15 @@ constant, and models walk to their own formation slot rather than teleporting wi
   `intersect_ground` marches that ray against a terrain height function (`Battlefield.ground_height`,
   called through a small wrapper converting BTS world units to mesh units and back) and bisects the
   crossing. `tests/test_picking.py` exercises it against flat and sloped synthetic ground, independent of
-  any real battle data.
+  any real battle data. This ground-plane pick alone only ever lands on a regiment's own ground
+  footprint (`Regiment.contains`, `formation.footprint_frame`); troop sprites are billboards
+  standing well above that anchor (`SPRITE_VERTEX_SHADER`, `battle_view.py`), so a click on the
+  visible body rather than the feet misses it. `BattleView._sprite_pick()` is a screen-space
+  fallback, tried only when the ground-plane pick misses: it approximates each active regiment as
+  a circle at half its sprite height (`SPRITE_MID_HEIGHT`) above the ground and sized to its own
+  formation footprint (`Regiment.bounding_radius()`), projected to screen space at that regiment's
+  own depth (`battle3d.Projection.view`/`.project`), and picks whichever covers the click point,
+  nearest to the camera first if more than one does (the one actually visible there).
 - **Collisions**: `Battle._resolve_collisions`, run once per tick after movement, is a simplified,
   deterministic `PushApart` (game_rules.md, "Routes, collisions and visibility"): when the bounding circles
   (`formation.bounding_radius`) of two regiments overlap, only the regiments under a move order give way,

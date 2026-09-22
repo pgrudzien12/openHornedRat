@@ -785,6 +785,7 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
     def test_given_an_armed_attack_order_and_empty_ground_then_it_cancels_and_logs_cannot(self):
         regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10)]
         view = self._view(regiments, selected_id="player", order_mode="attack")
+        view._sprite_pick = lambda pixel, projection: None  # the stubbed projection isn't real
 
         events = self._click_at(view, 900, 900)  # nothing there
 
@@ -826,6 +827,69 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
         scene.handle(("move_to", 300.0, 300.0), context=None)
 
         self.assertIsNone(scene.battle.regiments["enemy"].target_x)
+
+
+class SpritePickTests(unittest.TestCase):
+    """BattleView._sprite_pick(): a screen-space fallback for _ground_click() when the ground-plane
+    pick misses a regiment's own footprint - troop sprites are billboards standing well above
+    their ground anchor (SPRITE_VERTEX_SHADER), so clicking the visible body, not just the feet,
+    needs its own hit test against each regiment's rendered sprite block."""
+
+    def _projection_factory(self):
+        from whshr.battle3d import Projection
+
+        def make_projection(w, h, fw, fh, th=0.0):
+            return Projection(w, h, fw, fh, 180.0, 45.0, 1.0, 500.0 / WORLD_PER_MESH, 400.0 / WORLD_PER_MESH,
+                              "perspective", 100.0, 45.0, th)
+
+        return make_projection
+
+    def _view(self, regiments):
+        view = BattleView.__new__(BattleView)
+        field = SimpleNamespace(width=1000, height=800, ground_height=lambda x, y: 0.0)
+        view.scene = SimpleNamespace(field=field, battle=Battle(1000, 800, regiments))
+        view.camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=180.0, pitch=45.0,
+                                      distance=100.0, fov=45.0, projection=self._projection_factory())
+        view.gpu = SimpleNamespace(target=SimpleNamespace(size=(640, 480)))
+        return view
+
+    def test_given_a_pixel_on_the_rendered_sprite_body_then_the_regiment_is_picked(self):
+        from whshr.frontend.battle_view import SPRITE_MID_HEIGHT
+        regiments = [Regiment("player", "Player", 500, 400, 0, True, models=10)]
+        view = self._view(regiments)
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+        mesh_x, mesh_z = 500 / WORLD_PER_MESH, 400 / WORLD_PER_MESH
+        pixel = projection.project(projection.view(mesh_x, SPRITE_MID_HEIGHT, mesh_z))[:2]
+
+        self.assertEqual(view._sprite_pick(pixel, projection), "player")
+
+    def test_given_a_pixel_far_from_any_regiment_then_nothing_is_picked(self):
+        regiments = [Regiment("player", "Player", 500, 400, 0, True, models=10)]
+        view = self._view(regiments)
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+
+        self.assertIsNone(view._sprite_pick((0, 0), projection))
+
+    def test_given_an_inactive_regiment_then_its_sprite_is_never_picked(self):
+        from whshr.frontend.battle_view import SPRITE_MID_HEIGHT
+        regiments = [Regiment("player", "Player", 500, 400, 0, True, models=0)]  # destroyed
+        view = self._view(regiments)
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+        mesh_x, mesh_z = 500 / WORLD_PER_MESH, 400 / WORLD_PER_MESH
+        pixel = projection.project(projection.view(mesh_x, SPRITE_MID_HEIGHT, mesh_z))[:2]
+
+        self.assertIsNone(view._sprite_pick(pixel, projection))
+
+    def test_given_two_overlapping_regiments_then_the_nearer_to_the_camera_wins(self):
+        from whshr.frontend.battle_view import SPRITE_MID_HEIGHT
+        near = Regiment("near", "Near", 500, 400, 0, True, models=10)
+        far = Regiment("far", "Far", 500, 460, 0, False, models=10)  # further from the camera, same spot-ish
+        view = self._view([near, far])
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+        mesh_x, mesh_z = 500 / WORLD_PER_MESH, 400 / WORLD_PER_MESH
+        pixel = projection.project(projection.view(mesh_x, SPRITE_MID_HEIGHT, mesh_z))[:2]
+
+        self.assertEqual(view._sprite_pick(pixel, projection), "near")
 
 
 class BattleBannerVisibilityTests(unittest.TestCase):

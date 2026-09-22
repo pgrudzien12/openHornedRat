@@ -49,6 +49,7 @@ BATTLE_CURSOR_GROUPS = {"default": 100, "attack": 101, "fire": 102, "magic": 103
 # documented placeholder, not a measured value.
 WALK_ANIMATION_FPS = 8.0
 BANNER_MARKER_RAISE = 4.0  # mesh units: above a 64-pixel troop sprite, below the camera's horizon
+SPRITE_MID_HEIGHT = BANNER_MARKER_RAISE / 2  # mesh units: halfway up that ~64px sprite, for picking
 EVENT_LOG_LINES = 3  # battle events shown in the debug overlay (whshr.engine.Battle.events, per tick)
 INSTANCE = struct.Struct("10f")  # foot position (mesh), atlas rectangle (pixels), anchor (pixels), selected
 CAMERA = struct.Struct("24f")
@@ -322,6 +323,12 @@ class BattleView(SceneView):
             return ()
         x, y = ground[0] * WORLD_PER_MESH, ground[1] * WORLD_PER_MESH
         regiment_id = self.scene.battle.regiment_at(x, y, player_only=False)
+        if regiment_id is None:
+            # The ground-plane pick above only ever lands on a regiment's own ground footprint;
+            # troop sprites are billboards standing well above that (SPRITE_VERTEX_SHADER), so a
+            # click on the visible body - not just the feet - misses it entirely. Fall back to a
+            # screen-space hit test against each regiment's actual rendered sprite block.
+            regiment_id = self._sprite_pick(pixel, projection)
         if direct:
             if self.scene.selected_id is None:
                 return ()
@@ -339,6 +346,32 @@ class BattleView(SceneView):
         if mode == "move":
             return (("move_to", x, y),)
         return ()
+
+    def _sprite_pick(self, pixel, projection):
+        """Screen-space fallback for _ground_click(): which active regiment's rendered sprite
+        block, if any, covers this raw window pixel - approximated as a circle around each
+        regiment's centre, at half its sprite height (SPRITE_MID_HEIGHT) above the ground and
+        sized to its actual formation footprint (Regiment.bounding_radius()), projected to screen
+        space at that regiment's own depth. Nearest to the camera wins when more than one
+        regiment's circle covers the point (the one actually visible there, same as occlusion)."""
+        field = self.scene.field
+        best_id, best_depth = None, None
+        for regiment in self.scene.battle.regiments.values():
+            if not regiment.active:
+                continue
+            mesh_x, mesh_z = regiment.x / WORLD_PER_MESH, regiment.y / WORLD_PER_MESH
+            ground_height = field.ground_height(regiment.x, regiment.y)  # already mesh-space
+            view = projection.view(mesh_x, ground_height + SPRITE_MID_HEIGHT, mesh_z)
+            depth = view[2]
+            if depth <= projection.near:
+                continue  # behind (or at) the camera
+            screen_x, screen_y, _ = projection.project(view)
+            radius = regiment.bounding_radius() / WORLD_PER_MESH * projection.focal_length / depth
+            if math.hypot(pixel[0] - screen_x, pixel[1] - screen_y) > radius:
+                continue
+            if best_depth is None or depth < best_depth:
+                best_id, best_depth = regiment.identifier, depth
+        return best_id
 
     def _minimap_click(self, pixel):
         """A minimap click behaves like a 3D-view ground click (notes/game_rules.md "Battle HUD
