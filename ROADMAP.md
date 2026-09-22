@@ -165,6 +165,13 @@ Phase 2 is closed (M2 reached). Priorities, as decided by the project owner:
    (4.1), a Wine instrumentation session for 1.5a/3.3 and other open questions only when one blocks
    work, 1.5b effect sprites once magic is needed, save games (4.4) for M6.
 
+**Closing the "battle feels like a demo" gap** (mission scripts/scripted events, pre-battle deployment,
+neutral units, terrain-aware routing and off-table removal, objective-driven win/lose, formation/movement
+fidelity) is tracked as a set of GitHub epics, each with research and implementation tasks
+(`type:epic`/`type:task`, `track:research`/`track:implementation`, `area:*` labels). Per-gap known facts,
+open questions and implementation notes live in `notes/engine_gaps/` (see its `README.md`), separate from
+the WFB rule math in `notes/game_rules.md`.
+
 ## Open research questions
 
 One register of every open item (🟡 inferred, ⬜ unknown, ⚠ conflicting evidence) from the notes, so nothing is lost inside a

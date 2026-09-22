@@ -76,6 +76,11 @@ ROADMAP.md         - work plan: game file inventory, phases 0-5 with status, mil
 notes/             - full per-format reports (how each claim was verified, per-file tables, open questions)
   animations.md, battle_viewer.md, btp_sprite_leftovers.md, campaign.md, data_driven_audit.md, mission_selection.md, campaign_tent.md, glue_keywords.md, glue_interpreter.md, palette_selection.md, activity_results.md, debrief_evaluation.md, builtin_widgets.md, save_resume.md, troop_selection.md, briefing_dialogue.md, glue_portraits.md, fonts_glue.md, game_rules.md, music.md, pbx_rnc.md, research_plan.md,
   pe_resources.md, scene_scripts.md, sfx.md, si_omni.md, sprite_names.md, terrain_gd.md
+  engine_gaps/     - one file per real-time-engine gap (mission scripts, deployment, neutral units, terrain
+                     navigation, objectives/win-lose, formation movement): known facts (pointers into the
+                     reports above), open questions, and behavioural implementation notes. Tracked as GitHub
+                     epics/tasks (labels `type:epic`/`type:task`, `track:research`/`track:implementation`,
+                     `area:*`); see `engine_gaps/README.md`
 whshr/             - unified package and CLI: python3 -m whshr check|extract|catalog|engine|battle-replay|viewer|
                      viewer-web|viewer-2d|viewer-2d-web|terrain-check|rules|scripts|glue-spec (3D battle viewer: battle3d.py, 2D: battle2d.py,
                      GAMEF.DLL rule tables and unit stat decoding: rules.py,
