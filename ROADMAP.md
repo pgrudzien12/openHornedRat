@@ -142,6 +142,8 @@ The M6 implementation architecture and its phased, testable migration from the c
 ---
 
 ## Proposed order of the next steps
+> **Tracked on GitHub**: see issue #45 (management) for the mapping of these open items to epics.
+
 
 Phase 2 is closed (M2 reached). Priorities, as decided by the project owner:
 
@@ -173,6 +175,8 @@ open questions and implementation notes live in `notes/engine_gaps/` (see its `R
 the WFB rule math in `notes/game_rules.md`.
 
 ## Open research questions
+> **Tracked on GitHub**: see issue #45 (management) for the mapping of these open items to epics.
+
 
 One register of every open item (🟡 inferred, ⬜ unknown, ⚠ conflicting evidence) from the notes, so nothing is lost inside a
 per-topic note. Each row: id, question, where it is documented, what engine feature it blocks, and how to settle it. Priority: **P1**

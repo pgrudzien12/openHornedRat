@@ -246,6 +246,9 @@ python3 scripts/pbx_extract.py --check ".../WARFB"                              
   Sprites use `UPDATE/BINARY/STANDARD.PAL`; the battle's `loadpal` (night etc.) is ignored.
 
 ## Open questions
+> **Tracked on GitHub**: these open items are tracked as issue #38 (`topic:sprites-animation`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - The `0x01` byte before `RNC`, and header fields `unk8` (always 0) and `version = 207`.
 - Texture trailer: `trailer_count`/`trailer_depth` pairs (96/8, 97/8, 256/1), the exact meaning of

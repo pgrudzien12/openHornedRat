@@ -249,6 +249,9 @@ first/last data chunk time, end time, speech file + duration, text), `check_scen
 Output: `extracted/scene_scripts/<SCENE>.json` (30 files; game data, not for distribution).
 
 ## Open questions
+> **Tracked on GitHub**: these open items are tracked as issue #42 (`topic:cutscenes`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - Contents of `.evt` chunks (20/24/4/8 B): subtitle trigger / text id? To be checked by whoever extracts `.SI`.
 - Meaning of the `u16` SI type values (3/4/7/8/9) and of the remaining `MxOb` header fields: `.SI` task (ROADMAP 3.1).

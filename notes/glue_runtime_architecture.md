@@ -403,6 +403,9 @@ Exit criteria:
 - Tests inject fake movie/battle results without creating a frontend.
 
 ### Phase 7 — Remaining built-in widgets and save support
+> **Tracked on GitHub**: these open items are tracked as issue #34 (`topic:campaign-glue`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 Deliverables:
 

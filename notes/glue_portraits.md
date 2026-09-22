@@ -279,6 +279,9 @@ the view draws frame 0, then the current mouth overlay, then the current eye ove
 - `frame=3` = "no ornaments" (§3.4). The two extra integers per resident-list record stay ⬜.
 
 ## 6. Open questions
+> **Tracked on GitHub**: these open items are tracked as issue #29 (`topic:campaign-glue`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - ⬜ The story reason for `CeridanWindow` and `IlmarinWindow` using the hooded portrait (§1.2) and whether the two extra
   integers in each resident-list record are the roster book's per-portrait offsets.

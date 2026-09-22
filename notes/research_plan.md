@@ -1,4 +1,7 @@
 # Research plan: remaining agent batches
+> **Tracked on GitHub**: these open items are tracked as issue #44 (`topic:combat-rules`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 > Research-agent instructions only. This is not an implementation specification. Follow
 > the role boundary in [`docs/research-boundary.md`](../docs/research-boundary.md): private

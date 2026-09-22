@@ -199,6 +199,9 @@ the battle/army formats (`notes/game_rules.md`).
 - Treat `setmask`, `bkindex` (bitmap), `[SUBWINDOW]`, `[MIDI] volume` and hotspot `textx/texty` as no-ops until something needs them.
 
 ## 6. Open questions
+> **Tracked on GitHub**: these open items are tracked as issue #30 (`topic:campaign-glue`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - 🟡 `script:` versus `res:` precedence in hotspots and mission records (which is tried first and what counts as "not found").
 - 🟡 Hotspot `res=-1` / `-2` special values (gold hint, no hint) were read from usage, not from the hint code.

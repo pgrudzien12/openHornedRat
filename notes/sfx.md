@@ -184,6 +184,61 @@ Script: `scripts/sfx_wavstats.py` (manual RIFF walk + cross-check with the `wave
 
   Full list: `python3 scripts/sfx_parse.py <WARFB>`.
 
+### Listening catalogue: `RACE` and creature WAVs
+
+The following identifications are from listening.  Text in **Notes** records uncertain transcription
+or contextual observations; it is deliberately not normalized to an assumed in-game command.
+
+| Filename | Contents | Notes |
+|---|---|---|
+| `B9501.WAV` | Fire! | |
+| `B9504.WAV` | Rally | |
+| `B9507.WAV` | Regoup | |
+| `B9509.WAV` | Hold | |
+| `B9512.WAV` | Charge | |
+| `B9514.WAV` | I cannot | |
+| `B9516.WAV` | To the death | |
+| `B9518.WAV` | Attack | |
+| `B9527.WAV` | Reload | |
+| `B9529.WAV` | Retreat | |
+| `B9530.WAV` | I sir | |
+| `B9534.WAV` | Yes my lord | |
+| `B9535.WAV` | Flee | |
+| `B9537.WAV` | Destroy them | |
+| `B9539.WAV` | All is lost | |
+| `B9544.WAV` | Smash them | |
+| `B9547.WAV` | Crush them | |
+| `B9550.WAV` | No mercy | |
+| `B9556.WAV` | Enemy sighted | |
+| `B9559.WAV` | Mission compete | |
+| `B9564.WAV` | Engage | |
+| `B9567.WAV` | Totehoooo | |
+| `B9570.WAV` | Run | |
+| `B9572.WAV` | Die you will | |
+| `B9578A.WAV` | Eeeehh | |
+| `B9580.WAV` | Um blath | Possibly orc. |
+| `B9582.WAV` | Die you be | |
+| `B9583.WAV` | Blee | |
+| `B9584.WAV` | Bleeee eeeh | |
+| `B9592.WAV` | Uahhh | |
+| `B9596.WAV` | Ooooh | Sounds like a wounded person. |
+| `B9615.WAV` | Die die | |
+| `BOAR02.WAV` | Boar sound | |
+| `FART01.WAV` | Fart | |
+| `FEAR01.WAV` | My men fear the best | |
+| `GRUNT02.WAV` | Grunt | |
+| `GRUNT07.WAV` | Grunt | |
+| `GRUNT09.WAV` | Grunt | |
+| `HORSE02.WAV` | Horse | When a cavalry unit dies. |
+| `LAUGH08.WAV` | | |
+| `LAUGH09.WAV` | | When an orc(?) starts chasing. |
+| `LAUGH10.WAV` | | |
+| `ROAR01.WAV` | | |
+| `ROAR03.WAV` | | Beast dies. |
+| `SQUEAL01.WAV` | | |
+| `SQUIG02.WAV` | | |
+| `WARGH1.WAV` | | |
+
 ## How it was verified
 
 - **All 18 `.SFX` files** parsed by `sfx_parse.py --check`. 17 files have 0 problems. The only file with
@@ -230,6 +285,9 @@ python3 scripts/sfx_wavstats.py ".../WARFB" [--list] --json extracted/sfx/wavsta
   `extracted/sfx/wavstats.json`.
 
 ## Open questions
+> **Tracked on GitHub**: these open items are tracked as issue #40 (`topic:audio`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - `param_a`/`param_b` (+36/+38): values `0x0a00/0x0a00` (most), `0/0`, `0xffff/0xffff`
   (`Mole_Crash`, `Zhuf_Inside`, both with priority 0), `0x07eb/0x07dc` (`SFX_Gallop2`),

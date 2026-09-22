@@ -1700,6 +1700,9 @@ chart for shooting).
 | Artillery | projectile hits every model of a unit it lands in or flies through (no bounce, no template); blast margin S/2; misfire on 6 then 1 | ✅ adapted |
 
 ## 11. Open points
+> **Tracked on GitHub**: these open items are tracked as issue #44 (`topic:combat-rules`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 Everything that is not established, as a register for the next sessions. **Priority** is for an
 engine that reproduces the battles: *high* = changes outcomes noticeably, *medium* = visible in some

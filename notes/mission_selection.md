@@ -375,6 +375,9 @@ fixed layout.
    to the separate in-caravan Dietrich animation, not to `[ANIM]`.
 
 ## 10. Open questions
+> **Tracked on GitHub**: these open items are tracked as issue #27 (`topic:campaign-glue`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 Resolved by this note (kept for the record): input handling of the list, the panel actions of every `controlpanel` value, the built-in
 window table, `PopContext` / `PopContextCheckResume` (identical), `UnwindMission`, the music after Abort (silent), the "which windows use

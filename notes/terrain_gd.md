@@ -125,6 +125,9 @@ Outputs from the game data (local only, in `.gitignore`): `extracted/terrain_gd/
 (44 battles), `extracted/terrain_gd/mesh/*.obj|json` (45 meshes).
 
 ## Open questions
+> **Tracked on GitHub**: these open items are tracked as issue #37 (`topic:sprites-animation`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - **Height scale.** Using ×8 like the horizontal axes makes the largest cliffs about 200–640
   world units tall. That is plausible but unconfirmed. It should be checked against scenery

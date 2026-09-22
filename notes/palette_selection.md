@@ -198,6 +198,9 @@ engine that wants the authored look could substitute `GLUEREND` for these icons;
    belong in one documented table (this note's §2.1).
 
 ## 9. Open items
+> **Tracked on GitHub**: these open items are tracked as issue #32 (`topic:campaign-glue`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - After the roster book returns to the troop window the palette appears to stay at id 9 (`notes/builtin_widgets.md`); unverified.
 - Whether the original game visibly shows the troop-screen icons with `BOOK` colours (§7.3) needs a run under Wine, or a render of

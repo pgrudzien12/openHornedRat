@@ -90,6 +90,9 @@ the caravan's contexts on the stacks. Description text and slot rules: `notes/bu
 | `testmission` autosaves | slot 5 is overwritten by the branch test | reproduce |
 
 ## 8. Open items
+> **Tracked on GitHub**: these open items are tracked as issue #31 (`topic:campaign-glue`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - ⬜ The remaining item/army-file relationships (`RMYI` fields against `ARMY.MRC`/`PLAY.MRC`, item lists) are covered only by `notes/campaign.md` §3-§4.5.
 - 🟡 The load-then-resume rule was read from code; no run confirmed it (only two saves exist, both from the first mission).

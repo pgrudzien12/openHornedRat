@@ -267,6 +267,9 @@ Per-object details: `extracted/si/INDEX.md` and `extracted/si/<SI>/objects.json`
   versions (`musicawe\`), selected by the `MIDIType` variable (FM vs AWE32 setup).
 
 ## Open questions
+> **Tracked on GitHub**: these open items are tracked as issue #41 (`topic:cutscenes`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - `MxHd` second u32 (`0x100`), `MxOb.unk14` (1 for Events), `unk_a/unk_b` (always 0),
   `palette_mgmt` (always 1), `sustain` (−1 for films), `flags` (2 vs 0/1), WAV header field `44`.

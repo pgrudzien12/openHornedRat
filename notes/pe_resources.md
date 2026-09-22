@@ -277,6 +277,9 @@ API: `pe_resources.PE(path).resources()/data(res)`; `pe_extract.string_block`, `
 `parse_dialog`, `parse_menu`; `pe_missions.mission_blocks`, `glue_lines`, `battle_objectives`.
 
 ## Open questions
+> **Tracked on GitHub**: these open items are tracked as issue #43 (`topic:pe-resources`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - Runtime palette: confirm that the game realizes `GLUE<X>`+`WIND<X>` per screen and what
   `palindex` 1/2/3 maps to; where the palettes of `OPTIONSCREEN`/`DEADSCREEN`/creature pics come from.

@@ -397,6 +397,9 @@ money delta and marks the mission taken; abort with something selected requires 
 **several mission records** (e.g. one with forced units, one with exclusions) to avoid hardcoding the first mission.
 
 ## 11. Open questions
+> **Tracked on GitHub**: these open items are tracked as issue #26 (`topic:campaign-glue`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - ✅ Banner frame on the row: second record of the set (§3.3). Placement offsets of RingMark / rank icon / banner are read from the draw code (§3.3); 🟡 only an on-screen comparison is missing.
 - ✅ Ctrl+click hire appends to the selection list when room, no roster-full sound (§4.3). ✅ book button enabling: only `forHire` (plus hire-only rules); forced/excluded/destroyed/full list/coffers are not checked in the selection variant (§4.3). 🟡 only an in-game confirmation is missing.

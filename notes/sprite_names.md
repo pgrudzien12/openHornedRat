@@ -209,6 +209,9 @@ banner, frame 1 the compact vertical minimap marker, and frame 2 the square in-w
   base name, and `names['placefurniture'][n]['file']` gives the `.XOF` object in the battle's `SCENERY.PBX`.
 
 ## Open questions
+> **Tracked on GitHub**: these open items are tracked as issue #36 (`topic:sprites-animation`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - **Second number `,N`**. It is 0 in all 3314 uses (including `SAVE/*.MRC`). The editor writes it
   with the format `%s:%s,%d`. When it is missing (`loadspr:Wagon`), the file is not packed

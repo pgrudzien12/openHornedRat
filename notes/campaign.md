@@ -775,6 +775,9 @@ Only Escort Engrol releases the flow script, so the player works through the oth
 the scroll pile counts down.
 
 ## 8. Open questions
+> **Tracked on GitHub**: these open items are tracked as issue #24 (`topic:campaign-glue`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - ✅ `SHDR+0xC8` is `tentpos` (`notes/campaign_tent.md`). ⬜ The two `u32` per script in `STAX`.
 - 🟡 Whether the taken flags (`+0xA4`) of the *other* missions in a window survive a save/load. `STAX` stores

@@ -227,6 +227,9 @@ GM Choir Aahs / Synth Voice / Trombone. `music_render.py commands … --run` run
 steps once the tools exist.
 
 ## Open questions
+> **Tracked on GitHub**: these open items are tracked as issue #39 (`topic:audio`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+
 
 - SF1 units of the filter (`initialFilterFc` 0, `modEnvToFilterFc` 47–63), modulation envelope,
   LFO and volume envelope generators. Also, is gen 55 really "root key in cents" or a related
