@@ -731,8 +731,13 @@ switches it purely on `order_mode` (Attack armed → attack cursor; an immediate
 action, or Escape → default) - Fire/Magic have their own cursor group ids wired up too, but nothing
 currently arms those modes (no engine order exists for them yet, `ORDER_SUPPORTED`). The DLL's own
 group→id mapping is not otherwise named anywhere, so the 100=default/101=attack/102=fire/103=magic
-order (matching this note's own listed order) is 🟡 PROVISIONAL - verify visually against the
-running game and correct `BATTLE_CURSOR_GROUPS` in `battle_view.py` if any of the four looks wrong.
+order (matching this note's own listed order) is 🟡 PROVISIONAL, and a first round of visual
+testing against the running game (2026) found it wrong: id 100 showed the bow/arrow shape where
+the hand (default) shape was expected. Confirmed shapes: default = hand, attack = sword, fire =
+bow/arrow (magic's shape not seen yet) - the id for each is still open. Get the real ids by running
+`python3 scripts/pe_extract.py "$WARFB/FILE/DLL/GMCUR.DLL" extracted/pe_resources/GMCUR` (repo
+root) and comparing `extracted/pe_resources/GMCUR/cursor/*.png` against `groups.json`'s member id
+lists, then correct `BATTLE_CURSOR_GROUPS` in `battle_view.py`.
 `GameCursors` resolves every `*.DLL` target under `FILE/DLL` (`whshr.paths.Installation.file_dir`,
 matching every other `*.DLL` resource load in this codebase) and only `WHSHR.EXE` itself at the
 installation root - an initial version resolved `GMCUR.DLL` at the root too, so it silently never

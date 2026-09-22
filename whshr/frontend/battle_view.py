@@ -35,9 +35,13 @@ WHEEL_ZOOM = 0.9
 DRAG_ROTATE = 0.3  # degrees per pixel
 CLICK_DRAG_THRESHOLD = 4  # pixels; a right button press/release closer than this counts as a click
 # notes/game_rules.md "Feedback": 4 custom cursors (default, attack, fire, magic), GMCUR.DLL's 4
-# RT_GROUP_CURSOR resources, IDs 100-103 (notes/pe_resources.md). The DLL's own group->id mapping
-# is not otherwise named, so this order (matching the note's own listed order) is PROVISIONAL -
-# verify against the running game and correct here if any of the four looks wrong.
+# RT_GROUP_CURSOR resources, IDs 100-103 (notes/pe_resources.md). Confirmed shapes (in-game,
+# 2026): default = hand, attack = sword, fire = bow/arrow (magic's shape not seen yet). The DLL's
+# own group->id mapping is not otherwise named, so which numeric id is which shape is PROVISIONAL
+# and, per the first round of visual testing, WRONG as shipped (100 showed the arrow/fire shape
+# where the hand/default shape was expected) - this table needs the real ids. Get them with
+# `python3 scripts/pe_extract.py "$WARFB/FILE/DLL/GMCUR.DLL" extracted/pe_resources/GMCUR` (repo
+# root), then check extracted/pe_resources/GMCUR/cursor/*.png against groups.json's id lists.
 BATTLE_CURSOR_GROUPS = {"default": 100, "attack": 101, "fire": 102, "magic": 103}
 # Frames per second of the walking animation while a regiment is not settled in formation. The original
 # per-frame animation timing is not traced (notes/game_rules.md, "Animation bytecode"): this is a
