@@ -273,3 +273,4 @@ Practical rules:
   normal installed game files, stop and flag it instead of working around protection.
 - When unsure whether something is a fact/interoperability requirement vs. copyrightable
   expression, don't commit it — flag it for the user to review instead.
+- **GitHub issues are public resources.** All issue descriptions, comments, and linked reports are visible to the repository (and potentially distributed). Never mention decompilation, binary analysis, disassembly, internal function addresses, Ghidra/IDA output, or other private research methodology in GitHub issues. Only reference publicly observable findings, data-extracted facts, and published notes files. GitHub issues document *what was found* (game behaviour, file formats, data facts), never *how it was found* (tools used, code analysis methods, addresses referenced).

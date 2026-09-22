@@ -24,19 +24,24 @@ From `notes/game_rules.md` §"Routes, collisions and visibility":
 
 ## Open questions
 
-- **Which terrain types block movement**, specifically whether wooded/forest areas are marked with a
-  boundary flag, a scenery collision object, or a `GRND.GD` height/type value — not yet identified as a
-  public fact. `notes/terrain_gd.md` documents the height field but not a passability/terrain-type layer;
-  this needs a targeted look at whether `GRND.GD` or the `.BTS`/`OBJECTS` scenery placement carries a
-  terrain-type or passability byte, and/or a data grep correlating forest scenery meshes with boundary
-  records in battles that describe woods (e.g. BF024 "Protect the forest", `FORMATS.md`).
-- Exact rule for units reaching the `0x20` "leaving the table" boundary while routing: removed
-  immediately, after a delay, or only past both this boundary and `BATTLEEDGE`? Not yet documented as a
-  public fact beyond the existence of the flag and event 0x0E.
-- Whether player units that flee off-table are gone for the rest of the *battle* only, or whether it
-  interacts with the campaign-layer "routed models always return" rule (`notes/campaign.md` §3) — i.e.
-  does fleeing off the table protect a model from being counted a casualty in the debrief? Cross-reference
-  needed, not yet done.
+- ✅ **Which terrain types block movement:** **RESOLVED.** `notes/terrain_passability.md` findings:
+  - Forests are **NOT impassable** (BF024 has 187 tree scenery but zero movement boundaries)
+  - Impassable terrain (rivers, cliffs, walls, lakes) uses explicit **terrain-named boundaries** when needed
+  - `Nav*` boundaries are secondary hand-placed obstacles with unclear purpose
+  - GRND.GD contains only height data, no passability layer
+  - Movement blocking is boundary-membership only (no terrain-type discrimination)
+
+- ✅ **Exact leave-the-table rule:** **RESOLVED.** Routed units are removed immediately when they cross the `0x20`
+  ("leaving the table") boundary flag, which corresponds to the **BattleEdge** field rectangle. Event 0x0E is
+  broadcast to other units at that moment. Once removed, units are permanently marked `fled = True` and
+  excluded from all game logic (no rally, no orders, no movement, no rendering).
+  Reference: `notes/terrain_passability.md` Section 2.
+
+- 🟡 **Campaign interaction of off-table routed units:** Whether fleeing off the table protects a model from
+  being counted a casualty in the debrief — this interacts with the campaign-layer "routed models always
+  return" rule (`notes/campaign.md` §3). Likely that off-table routed units do NOT count as casualties
+  (they are `fled = True` permanently), but debrief logic needs to be cross-checked.
+  Reference: `notes/terrain_passability.md` Section 2 (Campaign Interaction subsection).
 
 ## Implementation notes
 
