@@ -537,6 +537,19 @@ class BattleViewHudInputTests(unittest.TestCase):
         self.assertEqual(view.events(event), ())
         view._ground_click.assert_not_called()
 
+    def test_given_a_banner_marker_outside_the_map_area_rect_then_it_still_selects_the_regiment(self):
+        # A regiment's banner is anchored above and left of its dot (notes/game_rules.md) and can
+        # hang outside the minimap's strict inner map-area rect near an edge - minimap_position()
+        # alone (gated on that inner rect) would then miss the click entirely and it would fall
+        # through to hit_test()/occupies() and be silently swallowed as plain HUD chrome. Routing
+        # must also check minimap_regiment_at(), which has no such inner-rect restriction.
+        hud = self._hud_mock(minimap_regiment_at=lambda pos: "enemy", minimap_position=lambda pos: None)
+        view = self._view(hud, selected_id=None)
+        event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+
+        self.assertEqual(view.events(event), (("select", "enemy"),))
+        view._ground_click.assert_not_called()
+
     def test_given_a_minimap_tab_click_then_it_is_consumed_without_a_ground_or_move_order(self):
         hud = self._hud_mock(click_minimap_tab=lambda pos: True)
         view = self._view(hud)

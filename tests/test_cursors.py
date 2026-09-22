@@ -37,11 +37,37 @@ class FakeImage:
 
 class GameCursorsTests(unittest.TestCase):
     def _installation(self):
-        return SimpleNamespace(require=lambda name: f"/fake/{name}")
+        return SimpleNamespace(require=lambda name: f"/fake/{name}",
+                               file_dir=lambda *parts: "/fake/" + "/".join(parts))
 
     def _patch_pe(self, image):
         fake_module = SimpleNamespace(PE=lambda path: image)
         return patch("whshr.frontend.cursors.module", return_value=fake_module)
+
+    def test_given_a_dll_target_then_it_is_resolved_under_file_dll_not_the_installation_root(self):
+        # Every other *.DLL resource load in this codebase resolves through file_dir("DLL", name)
+        # (FILE/DLL/<name>.DLL), not require(name) directly against the installation root - only
+        # WHSHR.EXE, the game's own executable, sits at the root.
+        installation = Mock()
+        installation.file_dir.return_value = "/fake/path"
+        cursors = GameCursors(installation, dll="GMCUR.DLL")
+
+        with self._patch_pe(FakeImage([], {})):
+            cursors.set(100)
+
+        installation.file_dir.assert_called_once_with("DLL", "GMCUR.DLL")
+        installation.require.assert_not_called()
+
+    def test_given_whshr_exe_then_it_is_resolved_at_the_installation_root(self):
+        installation = Mock()
+        installation.require.return_value = "/fake/path"
+        cursors = GameCursors(installation, dll="WHSHR.EXE")
+
+        with self._patch_pe(FakeImage([], {})):
+            cursors.set("SWORDCURSOR")
+
+        installation.require.assert_called_once_with("WHSHR.EXE")
+        installation.file_dir.assert_not_called()
 
     def test_given_a_numeric_key_then_the_matching_numbered_group_is_selected(self):
         member = 42

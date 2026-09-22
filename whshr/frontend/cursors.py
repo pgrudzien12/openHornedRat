@@ -37,7 +37,12 @@ class GameCursors:
 
     def _load(self, key):
         if self._resources is None:
-            image = module("pe_resources").PE(self.installation.require(self.dll))
+            # WHSHR.EXE is the game's main executable, at the installation root; every other
+            # resource DLL (GMCUR.DLL included) lives under FILE/DLL (whshr.paths.Installation;
+            # matches how every other *.DLL resource load in this codebase resolves its path).
+            path = (self.installation.require(self.dll) if self.dll.upper() == "WHSHR.EXE"
+                   else self.installation.file_dir("DLL", self.dll))
+            image = module("pe_resources").PE(path)
             self._resources = tuple(image.resources()), image
         resources, image = self._resources
         matches = str(key).upper() if isinstance(key, str) else key

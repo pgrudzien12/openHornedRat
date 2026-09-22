@@ -733,6 +733,18 @@ currently arms those modes (no engine order exists for them yet, `ORDER_SUPPORTE
 group→id mapping is not otherwise named anywhere, so the 100=default/101=attack/102=fire/103=magic
 order (matching this note's own listed order) is 🟡 PROVISIONAL - verify visually against the
 running game and correct `BATTLE_CURSOR_GROUPS` in `battle_view.py` if any of the four looks wrong.
+`GameCursors` resolves every `*.DLL` target under `FILE/DLL` (`whshr.paths.Installation.file_dir`,
+matching every other `*.DLL` resource load in this codebase) and only `WHSHR.EXE` itself at the
+installation root - an initial version resolved `GMCUR.DLL` at the root too, so it silently never
+found the file and the cursor never changed.
+
+A regiment's banner marker on the minimap is anchored 8px left, 24px above its dot and can hang
+outside the minimap's strict inner map-area rect near an edge (more often an enemy regiment's, in
+a battle whose armies start apart along that axis). `BattleView.events()`'s minimap-click routing
+now checks `Hud.minimap_regiment_at()` (no inner-rect restriction) as well as `minimap_position()`
+(inner-rect only, for "move" world coordinates), or such a banner click fell through to
+`hit_test()`/`occupies()` and was silently swallowed as plain HUD chrome - the click never reached
+`_minimap_click()` at all, regardless of the fix earlier in this section.
 
 ## 5. Close combat
 

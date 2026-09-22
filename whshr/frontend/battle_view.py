@@ -253,7 +253,13 @@ class BattleView(SceneView):
             self.hud.set_pressed(None)
             if self.hud.click_minimap_tab(event.pos):
                 return ()
-            if self.hud.minimap_position(event.pos) is not None:
+            # A regiment's banner marker can hang outside the strict inner map-area rect (it is
+            # anchored 8px left, 24px above its dot - notes/game_rules.md), so minimap_position()
+            # alone (which only resolves points inside that inner rect) would miss a click on a
+            # banner near the map's edge; check minimap_regiment_at() too, or such a click falls
+            # through to hit_test()/occupies() below and is silently swallowed as HUD chrome.
+            if (self.hud.minimap_position(event.pos) is not None
+                    or self.hud.minimap_regiment_at(event.pos) is not None):
                 return self._minimap_click(event.pos)
             action = self.hud.hit_test(event.pos)
             if action is not None:
@@ -337,7 +343,9 @@ class BattleView(SceneView):
                 return (("select", regiment_id),)
             return ()
         world = self.hud.minimap_position(pixel)
-        if world is None or self.scene.selected_id is None:
+        # A regiment marker (target for "attack") can resolve without a world point (its banner
+        # hangs outside the strict inner map-area rect); only "move" actually needs one.
+        if (world is None and regiment_id is None) or self.scene.selected_id is None:
             return ()
         mode, self.order_mode = self.order_mode, None
         self._set_cursor("default")
@@ -345,7 +353,7 @@ class BattleView(SceneView):
         if mode == "attack":
             return (("attack", regiment_id),) if regiment_id is not None else ()
         if mode == "move":
-            return (("move_to", *world),)
+            return (("move_to", *world),) if world is not None else ()
         return ()
 
     def animate(self, seconds):
