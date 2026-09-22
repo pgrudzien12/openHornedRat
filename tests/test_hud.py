@@ -343,6 +343,73 @@ class MinimapTests(unittest.TestCase):
 
         self.assertEqual(hud.minimap_regiment_at(_map_pos(hud, *banner_point)), "player")
 
+    def _stacked_hud(self, regiments):
+        """3+ regiments at the exact same position, so every hit test finds all of them."""
+        return _hud(regiments=regiments)
+
+    def test_given_a_stack_of_markers_then_the_topmost_one_not_yet_selected_wins(self):
+        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, False, models=10, hud_class="inf"),
+                    Regiment("friendly_b", "FriendlyB", 500, 500, 0, True, models=10, hud_class="inf"),
+                    Regiment("friendly_c", "FriendlyC", 500, 500, 0, True, models=10, hud_class="inf")]
+        hud = self._stacked_hud(regiments)
+        pixel = hud._world_to_map_pixel(500, 500)
+
+        self.assertEqual(hud.minimap_regiment_at(_map_pos(hud, *pixel)), "friendly_c")
+
+    def test_given_the_topmost_is_already_selected_then_the_bottom_most_friendly_is_picked_next(self):
+        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, False, models=10, hud_class="inf"),
+                    Regiment("friendly_b", "FriendlyB", 500, 500, 0, True, models=10, hud_class="inf"),
+                    Regiment("friendly_c", "FriendlyC", 500, 500, 0, True, models=10, hud_class="inf")]
+        hud = self._stacked_hud(regiments)
+        hud.selected = "friendly_c"  # already on top
+        pixel = hud._world_to_map_pixel(500, 500)
+
+        self.assertEqual(hud.minimap_regiment_at(_map_pos(hud, *pixel)), "friendly_b")
+
+    def test_given_repeated_clicks_on_the_same_stack_then_selection_cycles_through_every_friendly(self):
+        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, False, models=10, hud_class="inf"),
+                    Regiment("friendly_b", "FriendlyB", 500, 500, 0, True, models=10, hud_class="inf"),
+                    Regiment("friendly_c", "FriendlyC", 500, 500, 0, True, models=10, hud_class="inf")]
+        hud = self._stacked_hud(regiments)
+        pixel = hud._world_to_map_pixel(500, 500)
+        seen = []
+        for _ in range(4):
+            picked = hud.minimap_regiment_at(_map_pos(hud, *pixel))
+            seen.append(picked)
+            hud.set_selected(picked)  # promotes it to the top, as battle_view.py's real flow would
+
+        self.assertEqual(seen, ["friendly_c", "friendly_b", "friendly_c", "friendly_b"])
+
+    def test_given_no_friendly_unit_in_the_stack_then_it_cycles_through_any_side(self):
+        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, False, models=10, hud_class="inf"),
+                    Regiment("enemy_b", "EnemyB", 500, 500, 0, False, models=10, hud_class="inf")]
+        hud = self._stacked_hud(regiments)
+        hud.selected = "enemy_b"  # already on top
+        pixel = hud._world_to_map_pixel(500, 500)
+
+        self.assertEqual(hud.minimap_regiment_at(_map_pos(hud, *pixel)), "enemy_a")
+
+    def test_given_a_single_unit_stack_already_selected_then_it_is_reselected(self):
+        regiments = [Regiment("player", "Player", 500, 500, 0, True, models=10, hud_class="inf")]
+        hud = self._stacked_hud(regiments)
+        hud.selected = "player"
+        pixel = hud._world_to_map_pixel(500, 500)
+
+        self.assertEqual(hud.minimap_regiment_at(_map_pos(hud, *pixel)), "player")
+
+    def test_given_the_selection_is_in_the_stack_but_not_on_top_then_the_top_still_wins(self):
+        # Not one of the two rules the user described; treated the same as "not in the stack at
+        # all" rather than a third special case - topmost wins whenever the exact previously
+        # picked regiment isn't being re-clicked.
+        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, False, models=10, hud_class="inf"),
+                    Regiment("friendly_b", "FriendlyB", 500, 500, 0, True, models=10, hud_class="inf"),
+                    Regiment("friendly_c", "FriendlyC", 500, 500, 0, True, models=10, hud_class="inf")]
+        hud = self._stacked_hud(regiments)
+        hud.selected = "friendly_b"  # in the stack, but not on top
+        pixel = hud._world_to_map_pixel(500, 500)
+
+        self.assertEqual(hud.minimap_regiment_at(_map_pos(hud, *pixel)), "friendly_c")
+
     def test_given_marker_mode_0_then_every_regiment_shows_its_banner(self):
         hud = _hud()
         player, enemy = hud.battle.regiments.values()

@@ -758,6 +758,19 @@ now checks `Hud.minimap_regiment_at()` (no inner-rect restriction) as well as `m
 `hit_test()`/`occupies()` and was silently swallowed as plain HUD chrome - the click never reached
 `_minimap_click()` at all, regardless of the fix earlier in this section.
 
+Markers (dots and/or banners) can overlap on the minimap - most often several regiments' banners
+near each other - so a click can land on more than one regiment at once. `Hud.minimap_regiment_at()`
+(engine addition, not derived from the original: there is nothing in the research to say how the
+original handled this, if it came up at all given its markers are smaller/sparser) resolves the
+whole hit stack, in normal top-to-bottom paint order: the topmost hit regiment wins, unless it is
+already selected, in which case the click instead selects the bottom-most *other* regiment in the
+stack that is friendly (falling back to the bottom-most of any side if none is friendly) - normal
+selection promotes the picked regiment to the top of the paint order (`Hud._promote_marker()`,
+already wired through `Hud.set_selected()`), so repeated clicks on the same spot step through
+every regiment there, friendly ones first, without ever getting stuck reselecting the same one. If
+the already-selected regiment is elsewhere in the stack but not on top, that is treated the same
+as it not being in the stack at all (the topmost one wins) rather than a third special case.
+
 ## 5. Close combat
 
 ### Order of blows ✅

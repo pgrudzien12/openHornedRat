@@ -442,24 +442,50 @@ class Hud:
             order.remove(identifier)
         order.append(identifier)
 
+    def _marker_hit(self, regiment, native):
+        """Whether *native* (already minimap-local) lands on this regiment's dot or, when shown,
+        its banner - the banner is hit over its own drawn rect, not just the dot underneath it,
+        since it is the larger and more obvious target on screen."""
+        px, py = self._world_to_map_pixel(regiment.x, regiment.y)
+        if abs(native[0] - px) <= 4 and abs(native[1] - py) <= 4:
+            return True
+        if self._shows_banner(regiment):
+            marker = self._minimap_marker(regiment)
+            if marker is not None:
+                banner_rect = pygame.Rect(px - 8, py - 24, marker.width, marker.height)
+                if banner_rect.collidepoint(native):
+                    return True
+        return False
+
     def minimap_regiment_at(self, pos):
-        """Return the active regiment whose visible marker (dot or banner) was clicked, if any.
-        The banner (when shown) is clickable over its own drawn rect, not just the dot underneath
-        it, since it is the larger and more obvious target on screen."""
+        """Return the active regiment a click at *pos* should select, or None if none is hit.
+
+        Several markers (dots and/or banners) can overlap at one point - most often several
+        regiments' banners near each other on the minimap. Clicking there always hits the whole
+        stack, in its normal top-to-bottom paint order (whichever marker is drawn last is "on
+        top"): if the topmost hit regiment is not already selected, it wins, same as a single
+        unambiguous hit. If it *is* already selected, clicking again cycles one step down the
+        stack instead of doing nothing: it picks the bottom-most other regiment in the stack that
+        is friendly (falling back to the bottom-most of any side if none is), which
+        set_selected()/_promote_marker() then promote to the top of the paint order - so repeated
+        clicks on the same spot step through every regiment there, friendly ones first.
+
+        If the selected regiment is elsewhere in the stack but not on top, this treats it the same
+        as not being in the stack at all (selects the top one) rather than special-casing a third
+        rule - simpler, and topmost-wins is the expected default whenever the exact previously
+        picked regiment isn't being re-clicked."""
         if self.battle is None or self._draw_size is None or not self._minimap_screen_rect().collidepoint(pos):
             return None
         native = self._native_map_point(pos)
-        for regiment in reversed(self._minimap_regiments()):
-            px, py = self._world_to_map_pixel(regiment.x, regiment.y)
-            if abs(native[0] - px) <= 4 and abs(native[1] - py) <= 4:
-                return regiment.identifier
-            if self._shows_banner(regiment):
-                marker = self._minimap_marker(regiment)
-                if marker is not None:
-                    banner_rect = pygame.Rect(px - 8, py - 24, marker.width, marker.height)
-                    if banner_rect.collidepoint(native):
-                        return regiment.identifier
-        return None
+        hits = [regiment for regiment in self._minimap_regiments() if self._marker_hit(regiment, native)]
+        if not hits:
+            return None
+        top = hits[-1]
+        if top.identifier != self.selected:
+            return top.identifier
+        others = hits[:-1]
+        pool = [regiment for regiment in others if regiment.player] or others
+        return pool[0].identifier if pool else top.identifier
 
     def click_minimap_tab(self, pos):
         """Handle a click on a marker-display-mode tab or the book; returns True if one was hit."""
