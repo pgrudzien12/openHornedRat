@@ -43,8 +43,8 @@ FIXED_BUTTONS = {
     # second's x inferred as immediately to the right); moved here to the panel's horizontal
     # center for a first visual pass at the user's request - adjust freely, this pair is not tied
     # to any other measurement.
-    "toggle_a": ((288, 4), (64, 65), (32, 48)),
-    "toggle_b": ((320, 4), (66, 67), (32, 48)),
+    "toggle_a": ((337, 66), (64, 65), (32, 48)),
+    "toggle_b": ((337, 66), (66, 67), (32, 48)),
     "scroll_up": ((224, 9), (68, 69), (20, 20)),
     "scroll_down": ((224, 34), (70, 71), (20, 20)),
 }
