@@ -332,7 +332,10 @@ class BattleView(SceneView):
         self._set_cursor("default")
         self.hud.order_completed()
         if mode == "attack":
-            return (("attack", regiment_id),) if regiment_id is not None else ()
+            if regiment_id is None:
+                self._log_cannot("attack")
+                return ()
+            return (("attack", regiment_id),)
         if mode == "move":
             return (("move_to", x, y),)
         return ()
@@ -342,22 +345,36 @@ class BattleView(SceneView):
         layout": "a left click on the minimap is handled exactly like a click in the 3D view"),
         sourced from the HUD's own marker hit-testing instead of 3D picking - see _ground_click's
         own docstring for why a plain click (no pending order) always just selects."""
-        regiment_id = self.hud.minimap_regiment_at(pixel)
         if self.order_mode is None:
+            regiment_id = self.hud.minimap_regiment_at(pixel)
             return (("select", regiment_id),) if regiment_id is not None else ()
         world = self.hud.minimap_position(pixel)
-        # A regiment marker (target for "attack") can resolve without a world point (its banner
-        # hangs outside the strict inner map-area rect); only "move" actually needs one.
-        if (world is None and regiment_id is None) or self.scene.selected_id is None:
+        # An attack target is always whatever is topmost at the click point, ignoring current
+        # selection (Hud.minimap_target_at()'s own docstring); it can resolve without a world
+        # point too (its banner can hang outside the strict inner map-area rect near an edge).
+        target_id = self.hud.minimap_target_at(pixel)
+        if (world is None and target_id is None) or self.scene.selected_id is None:
             return ()
         mode, self.order_mode = self.order_mode, None
         self._set_cursor("default")
         self.hud.order_completed()
         if mode == "attack":
-            return (("attack", regiment_id),) if regiment_id is not None else ()
+            if target_id is None:
+                self._log_cannot("attack")
+                return ()
+            return (("attack", target_id),)
         if mode == "move":
             return (("move_to", *world),) if world is not None else ()
         return ()
+
+    def _log_cannot(self, order):
+        # notes/game_rules.md's "Feedback" documents no tooltips/hover highlight and a click sound
+        # on button press, but not a specific failed-order message; this mirrors the classic WFB
+        # UI convention of a "Cannot!" cue on a targetless order, in the same debug event log the
+        # HUD's own message-text window would show it in if that window were wired
+        # (notes/game_rules.md's "Implemented" paragraph already lists it as not wired). No sound
+        # plays yet: which SFX resource is the UI feedback cue is not identified in notes/sfx.md.
+        self.event_log.append(f"Cannot {order}!")
 
     def animate(self, seconds):
         keys = pygame.key.get_pressed()

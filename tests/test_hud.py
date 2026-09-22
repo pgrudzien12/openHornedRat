@@ -410,6 +410,17 @@ class MinimapTests(unittest.TestCase):
 
         self.assertEqual(hud.minimap_regiment_at(_map_pos(hud, *pixel)), "friendly_c")
 
+    def test_given_an_order_target_lookup_then_the_topmost_wins_even_if_it_is_already_selected(self):
+        # minimap_target_at() (order targeting, e.g. Attack) never cycles like minimap_regiment_at()
+        # (plain-click selection) does: an order always hits whatever is visually on top.
+        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, False, models=10, hud_class="inf"),
+                    Regiment("enemy_b", "EnemyB", 500, 500, 0, False, models=10, hud_class="inf")]
+        hud = self._stacked_hud(regiments)
+        hud.selected = "enemy_b"  # already selected/on top - must not trigger any cycling here
+        pixel = hud._world_to_map_pixel(500, 500)
+
+        self.assertEqual(hud.minimap_target_at(_map_pos(hud, *pixel)), "enemy_b")
+
     def test_given_marker_mode_0_then_every_regiment_shows_its_banner(self):
         hud = _hud()
         player, enemy = hud.battle.regiments.values()
@@ -509,15 +520,16 @@ class BattleViewHudInputTests(unittest.TestCase):
         view.camera = SimpleNamespace()
         view.order_mode = None
         view.cursors, view._cursor_mode = None, None
+        view.event_log = []
         view._ground_click = Mock(return_value=(("ground",),))
         return view
 
     def _hud_mock(self, **overrides):
         base = dict(
             click_minimap_tab=lambda pos: False, minimap_position=lambda pos: None,
-            minimap_regiment_at=lambda pos: None, hit_test=lambda pos: None,
-            occupies=lambda pos: True, set_pressed=Mock(), press=lambda name: None,
-            order_completed=Mock(),
+            minimap_regiment_at=lambda pos: None, minimap_target_at=lambda pos: None,
+            hit_test=lambda pos: None, occupies=lambda pos: True, set_pressed=Mock(),
+            press=lambda name: None, order_completed=Mock(),
         )
         base.update(overrides)
         return SimpleNamespace(**base)
@@ -606,12 +618,23 @@ class BattleViewHudInputTests(unittest.TestCase):
         view._ground_click.assert_not_called()
 
     def test_given_an_armed_attack_order_then_clicking_an_enemy_marker_fires_the_order_not_a_selection(self):
-        hud = self._hud_mock(minimap_regiment_at=lambda pos: "enemy", minimap_position=lambda pos: (1.0, 2.0))
+        hud = self._hud_mock(minimap_target_at=lambda pos: "enemy", minimap_position=lambda pos: (1.0, 2.0))
         view = self._view(hud, selected_id="player")
         view.order_mode = "attack"
         event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
 
         self.assertEqual(view.events(event), (("attack", "enemy"),))
+        view._ground_click.assert_not_called()
+
+    def test_given_an_armed_attack_order_and_no_minimap_target_then_it_cancels_and_logs_cannot(self):
+        hud = self._hud_mock(minimap_target_at=lambda pos: None, minimap_position=lambda pos: (1.0, 2.0))
+        view = self._view(hud, selected_id="player")
+        view.order_mode = "attack"
+        event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+
+        self.assertEqual(view.events(event), ())
+        self.assertIsNone(view.order_mode)
+        self.assertEqual(view.event_log[-1], "Cannot attack!")
         view._ground_click.assert_not_called()
 
     def test_given_a_banner_marker_outside_the_map_area_rect_then_it_still_selects_the_regiment(self):
@@ -721,6 +744,7 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
         view.gpu = SimpleNamespace(target=SimpleNamespace(size=(640, 480)))
         view.order_mode = order_mode
         view.cursors, view._cursor_mode = None, None
+        view.event_log = []
         view.hud = SimpleNamespace(order_completed=Mock())
         return view
 
@@ -757,6 +781,25 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
         events = self._click_at(view, 200, 200)
 
         self.assertEqual(events, (("attack", "enemy"),))
+
+    def test_given_an_armed_attack_order_and_empty_ground_then_it_cancels_and_logs_cannot(self):
+        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10)]
+        view = self._view(regiments, selected_id="player", order_mode="attack")
+
+        events = self._click_at(view, 900, 900)  # nothing there
+
+        self.assertEqual(events, ())
+        self.assertIsNone(view.order_mode)  # the order is cancelled, not left armed
+        self.assertEqual(view.event_log[-1], "Cannot attack!")
+
+    def test_given_an_armed_attack_order_and_a_target_then_nothing_is_logged(self):
+        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10),
+                    Regiment("enemy", "Enemy", 200, 200, 0, False, models=10)]
+        view = self._view(regiments, selected_id="player", order_mode="attack")
+
+        self._click_at(view, 200, 200)
+
+        self.assertEqual(view.event_log, [])
 
     def test_given_a_right_click_direct_order_then_clicking_an_enemy_charges_it_without_arming_attack(self):
         # The right-click shortcut (direct=True) bypasses the Move/Attack HUD buttons entirely -

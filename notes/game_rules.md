@@ -771,6 +771,19 @@ every regiment there, friendly ones first, without ever getting stuck reselectin
 the already-selected regiment is elsewhere in the stack but not on top, that is treated the same
 as it not being in the stack at all (the topmost one wins) rather than a third special case.
 
+That cycling rule is only for a plain click (selecting/inspecting a regiment); resolving an
+order's target (Attack) uses a separate lookup, `Hud.minimap_target_at()`, that always just
+returns whichever regiment in the hit stack is topmost, ignoring current selection entirely - an
+order's own acting regiment (`Hud.selected`) is essentially never one of its own targets, so the
+cycling rule (meant to make an otherwise-stuck plain-click selection reachable) does not apply.
+Issuing an order never changes the current selection either way, on either the minimap or the 3D
+view. An Attack order with no regiment under the click point (`BattleView._ground_click()`,
+`_minimap_click()`) is simply cancelled - the order mode clears exactly as if the order had fired
+- and logs a `"Cannot attack!"` line to the same debug event log the HUD's own message-text window
+would show it in, if that window were wired (see the "Implemented" paragraph above). This mirrors
+the classic Warhammer UI's "Cannot!" cue on a targetless order, but only the log line: which SFX
+resource plays that cue is not identified anywhere in `notes/sfx.md`, so no sound plays yet.
+
 ## 5. Close combat
 
 ### Order of blows ✅

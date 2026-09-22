@@ -457,8 +457,16 @@ class Hud:
                     return True
         return False
 
+    def _marker_hits(self, pos):
+        """Regiments whose marker (dot or banner) covers the raw window pixel *pos*, in normal
+        bottom-to-top paint order, or None if *pos* is not on the minimap at all."""
+        if self.battle is None or self._draw_size is None or not self._minimap_screen_rect().collidepoint(pos):
+            return None
+        native = self._native_map_point(pos)
+        return [regiment for regiment in self._minimap_regiments() if self._marker_hit(regiment, native)]
+
     def minimap_regiment_at(self, pos):
-        """Return the active regiment a click at *pos* should select, or None if none is hit.
+        """Return the active regiment a plain click at *pos* should select, or None if none is hit.
 
         Several markers (dots and/or banners) can overlap at one point - most often several
         regiments' banners near each other on the minimap. Clicking there always hits the whole
@@ -474,10 +482,7 @@ class Hud:
         as not being in the stack at all (selects the top one) rather than special-casing a third
         rule - simpler, and topmost-wins is the expected default whenever the exact previously
         picked regiment isn't being re-clicked."""
-        if self.battle is None or self._draw_size is None or not self._minimap_screen_rect().collidepoint(pos):
-            return None
-        native = self._native_map_point(pos)
-        hits = [regiment for regiment in self._minimap_regiments() if self._marker_hit(regiment, native)]
+        hits = self._marker_hits(pos)
         if not hits:
             return None
         top = hits[-1]
@@ -486,6 +491,17 @@ class Hud:
         others = hits[:-1]
         pool = [regiment for regiment in others if regiment.player] or others
         return pool[0].identifier if pool else top.identifier
+
+    def minimap_target_at(self, pos):
+        """Return the topmost active regiment at *pos*, ignoring current selection entirely - for
+        resolving an order's target (Attack). Unlike a plain click (minimap_regiment_at()'s
+        cycle-when-already-selected rule, meant for picking a unit to inspect or command),
+        commanding an attack against an overlapping stack of enemies always targets whichever one
+        is visually on top, with no cycling: the cycling rule exists to make an otherwise-stuck
+        selection reachable, which does not apply here since the order's own acting regiment
+        (self.selected) is essentially never the one being targeted."""
+        hits = self._marker_hits(pos)
+        return hits[-1].identifier if hits else None
 
     def click_minimap_tab(self, pos):
         """Handle a click on a marker-display-mode tab or the book; returns True if one was hit."""
