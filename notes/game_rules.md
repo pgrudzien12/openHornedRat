@@ -713,16 +713,23 @@ a large zoom distance cannot push it past the minimap chrome. A small "x" (the I
 after the 8 camera-marker frames) also marks the look-at target itself, at the lowest z-order
 above the plan map so every other minimap element paints over it.
 
-An enemy regiment can be selected too (3D-view or minimap click, when no player regiment is
-selected to act with instead), for its HUD readout/banner/minimap highlight only: the original
-lets a player inspect any regiment this way. `whshr.battle_scene.BattleScene.handle()`'s "select"
-no longer restricts the identifier to a player regiment, but `whshr.engine.Battle`'s
+An enemy regiment can be selected too (3D-view or minimap left-click, at any time - not only with
+no player regiment already selected), for its HUD readout/banner/minimap highlight only: the
+original lets a player inspect any regiment this way. `whshr.battle_scene.BattleScene.handle()`'s
+"select" no longer restricts the identifier to a player regiment, but `whshr.engine.Battle`'s
 `order_move`/`order_attack`/`order_halt` (and `Hud._button_enabled()`, independently) all still
 refuse a command for a non-player regiment, so selecting one for inspection never grants it
-orders. `whshr.frontend.battle_view.BattleView._minimap_click()` does not yet mirror
-`_ground_click()`'s "click an enemy while a player regiment is selected orders an immediate
-charge" behaviour — on the minimap that click is currently a no-op — a known gap, not a deliberate
-choice.
+orders. A first version of this only allowed an enemy click to select (rather than immediately
+charge) when nothing player-owned was already selected — the pre-existing "click an enemy with a
+selection orders a charge" shortcut took priority otherwise, so re-selecting an enemy while a
+friendly regiment was selected silently failed. That shortcut was never part of this note's own
+"Player orders and the command panel" (every order needs its own HUD button pressed first, then a
+click executes it — "Move (boots) + click", "Attack (crossed swords) + click"); it was an engine
+invention (`notes/engine_architecture.md`'s "Controls"). Removed for left-click: a plain left-click
+(`BattleView.order_mode is None`) now always just selects whatever is under it, player or enemy,
+and only ever issues an order when a HUD button armed one first. The pre-existing right-click
+shortcut (`_ground_click(pixel, direct=True)`) keeps its old direct-order behaviour unchanged,
+since it is a distinct, deliberate convenience the user did not report as broken.
 
 The four cursors ("Feedback" above) are loaded from `GMCUR.DLL`'s own `RT_GROUP_CURSOR` resources
 (`notes/pe_resources.md`, IDs 100-103) via `whshr.frontend.cursors.GameCursors` (shared with

@@ -279,12 +279,17 @@ constant, and models walk to their own formation slot rather than teleporting wi
   "blocked orders preserve a clear observable state" per docs/testing.md). The view never touches
   `Battle` state directly; it only turns pygame input into these three events using a screen-to-ground
   pick (see below) and `Battle.regiment_at`, which is a read-only query, not a rule.
-- **Controls** (`frontend/battle_view.py`): left-click picks the ground under the cursor; if it hits a
-  player regiment's footprint the regiment is selected (tinted yellow in the sprite shader, a per-instance
-  `selected` flag blended into the palette colour), otherwise the click orders the current selection there.
-  A right-button press and release within `CLICK_DRAG_THRESHOLD` pixels (no drag) does the same; a right
-  *drag* still pans the camera, and a middle drag still rotates it, unchanged from the battle-view
-  prototype. Escape deselects. The debug overlay's `selected` line names the current selection.
+- **Controls** (`frontend/battle_view.py`): left-click picks the ground under the cursor; whatever
+  regiment (player or enemy) is under it is selected (a player regiment tints yellow in the sprite
+  shader, a per-instance `selected` flag blended into the palette colour; an enemy regiment shows
+  only its HUD readout/banner/minimap highlight, never orders - `notes/game_rules.md`'s "Player
+  orders and the command panel" documents every order needing its own HUD button pressed first,
+  so a plain click is never itself an order). A right-button press and release within
+  `CLICK_DRAG_THRESHOLD` pixels (no drag) is a separate, pre-existing engine convenience: it
+  orders the current selection there directly (move, or attack if it lands on an enemy),
+  bypassing those HUD buttons entirely. A right *drag* still pans the camera, and a middle drag
+  still rotates it, unchanged from the battle-view prototype. Escape deselects. The debug
+  overlay's `selected` line names the current selection.
 - **Picking** (`whshr/picking.py`, stdlib-only, no frontend import): `screen_ray` inverts the verified
   `battle3d.Projection` perspective camera to a mesh-space ray through a screen pixel, and
   `intersect_ground` marches that ray against a terrain height function (`Battlefield.ground_height`,

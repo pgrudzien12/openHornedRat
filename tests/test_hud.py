@@ -525,16 +525,26 @@ class BattleViewHudInputTests(unittest.TestCase):
         self.assertEqual(view.events(event), (("select", "enemy"),))
         view._ground_click.assert_not_called()
 
-    def test_given_a_player_selection_then_clicking_an_enemy_marker_does_not_select_it(self):
-        # notes/game_rules.md: "a left click on the minimap is handled exactly like a click in the
-        # 3D view" - with a player unit selected, an enemy marker click is a targeting click, not
-        # an inspection one (whshr.frontend.battle_view._minimap_click's own limitation: unlike
-        # _ground_click, it does not yet turn this into an immediate charge order either).
+    def test_given_a_player_selection_but_no_pending_order_then_clicking_an_enemy_marker_still_selects_it(self):
+        # notes/game_rules.md "Player orders and the command panel": every order needs its own
+        # button pressed first ("Attack (crossed swords) + click"), so a plain click with no
+        # pending order (self.order_mode is None) always just (re)selects whatever is under it,
+        # regardless of what was already selected - there is no "click an enemy to charge"
+        # shortcut without first arming Attack.
         hud = self._hud_mock(minimap_regiment_at=lambda pos: "enemy", minimap_position=lambda pos: (1.0, 2.0))
         view = self._view(hud, selected_id="player")
         event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
 
-        self.assertEqual(view.events(event), ())
+        self.assertEqual(view.events(event), (("select", "enemy"),))
+        view._ground_click.assert_not_called()
+
+    def test_given_an_armed_attack_order_then_clicking_an_enemy_marker_fires_the_order_not_a_selection(self):
+        hud = self._hud_mock(minimap_regiment_at=lambda pos: "enemy", minimap_position=lambda pos: (1.0, 2.0))
+        view = self._view(hud, selected_id="player")
+        view.order_mode = "attack"
+        event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+
+        self.assertEqual(view.events(event), (("attack", "enemy"),))
         view._ground_click.assert_not_called()
 
     def test_given_a_banner_marker_outside_the_map_area_rect_then_it_still_selects_the_regiment(self):
@@ -661,12 +671,36 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
 
         self.assertEqual(events, (("select", "enemy"),))
 
-    def test_given_a_player_selection_then_clicking_an_enemy_charges_it_instead_of_selecting_it(self):
+    def test_given_a_player_selection_but_no_pending_order_then_clicking_an_enemy_still_selects_it(self):
+        # notes/game_rules.md "Player orders and the command panel": there is no "just click an
+        # enemy to charge" shortcut - Attack must be armed first, via the HUD button.
         regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10),
                     Regiment("enemy", "Enemy", 200, 200, 0, False, models=10)]
         view = self._view(regiments, selected_id="player")
 
         events = self._click_at(view, 200, 200)
+
+        self.assertEqual(events, (("select", "enemy"),))
+
+    def test_given_an_armed_attack_order_then_clicking_an_enemy_charges_it(self):
+        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10),
+                    Regiment("enemy", "Enemy", 200, 200, 0, False, models=10)]
+        view = self._view(regiments, selected_id="player", order_mode="attack")
+
+        events = self._click_at(view, 200, 200)
+
+        self.assertEqual(events, (("attack", "enemy"),))
+
+    def test_given_a_right_click_direct_order_then_clicking_an_enemy_charges_it_without_arming_attack(self):
+        # The right-click shortcut (direct=True) bypasses the Move/Attack HUD buttons entirely -
+        # a pre-existing engine convenience, distinct from the documented button-driven flow.
+        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10),
+                    Regiment("enemy", "Enemy", 200, 200, 0, False, models=10)]
+        view = self._view(regiments, selected_id="player")
+
+        with patch("whshr.frontend.battle_view.picking.pick_ground",
+                  return_value=(200.0 / WORLD_PER_MESH, 200.0 / WORLD_PER_MESH)):
+            events = view._ground_click((0, 0), direct=True)
 
         self.assertEqual(events, (("attack", "enemy"),))
 

@@ -1,12 +1,13 @@
 """Battle view: terrain, scenery and troop sprite billboards on the GPU, with a free battle camera.
 
-Controls: arrow keys or WASD pan, Q/E rotate, Page Up/Page Down tilt, mouse wheel zooms, right-drag pans,
-middle-drag rotates, Home resets the camera. Left-click a player regiment to select it (tinted yellow);
-left-click, or right-click without dragging, on the ground with a regiment selected orders it there.
-With no player regiment selected, left-click an enemy regiment to inspect it (its HUD readout,
-banner and minimap highlight, same as a player selection) - this never grants it orders, since
-whshr.engine.Battle's order_move/order_attack/order_halt and Hud._button_enabled() both refuse
-commands for a non-player regiment. Escape deselects.
+Controls: arrow keys or WASD pan, Q/E rotate, Page Up/Page Down tilt, mouse wheel zooms, middle-drag
+rotates, Home resets the camera. Left-click any regiment (player or enemy) to select it - a player
+regiment tints yellow and can then be given orders (via the HUD's Move/Attack buttons, or the
+right-click shortcut below); an enemy regiment only shows its HUD readout/banner/minimap highlight,
+never orders, since whshr.engine.Battle's order_move/order_attack/order_halt and
+Hud._button_enabled() both refuse commands for a non-player regiment. Right-drag pans the camera;
+a right-button press and release without dragging is instead a direct move/attack shortcut for the
+current selection, bypassing the HUD buttons. Escape deselects.
 """
 
 from collections import deque
@@ -290,16 +291,25 @@ class BattleView(SceneView):
             start, self._right_down = self._right_down, None
             if (start is not None and not self.hud.occupies(event.pos)
                     and math.dist(start, event.pos) <= CLICK_DRAG_THRESHOLD):
-                return self._ground_click(event.pos)
+                return self._ground_click(event.pos, direct=True)
         return ()
 
-    def _ground_click(self, pixel):
-        """Translate a screen click into a ("select", id), ("attack", id) or ("move_to", x, y) scene
-        event, if it hits ground. A click on an enemy regiment with a player selection orders a
-        charge; with no player selection to charge with, it instead selects the enemy regiment for
-        its readout/banner/stats only - the original game lets you inspect any regiment this way,
-        and whshr.engine.Battle's order_move/order_attack/order_halt and Hud._button_enabled()
-        already refuse commands for a non-player regiment, so this never grants it orders."""
+    def _ground_click(self, pixel, direct=False):
+        """Translate a screen click into a ("select", id), ("attack", id) or ("move_to", x, y)
+        scene event, if it hits ground.
+
+        Left click (direct=False): notes/game_rules.md "Player orders and the command panel" -
+        every order needs its own button pressed first, then a click executes it ("Move (boots) +
+        click", "Attack (crossed swords) + click"...); there is no documented "just click an enemy
+        to charge" shortcut, so with no pending order this always just selects whatever regiment,
+        player or enemy, is under it (for the enemy's readout/banner/stats only -
+        whshr.engine.Battle's order_move/order_attack/order_halt and Hud._button_enabled() both
+        refuse commands for a non-player regiment regardless of selection), never issuing an order
+        by itself.
+
+        Right click (direct=True, no drag): a pre-existing engine convenience, not part of that
+        documented button flow - orders the current selection there directly, bypassing the
+        Move/Attack HUD buttons entirely."""
         field, camera = self.scene.field, self.camera
         width, height = self.gpu.target.size
         projection = camera.projection(width, height, field.width, field.height,
@@ -311,41 +321,30 @@ class BattleView(SceneView):
         if ground is None:
             return ()
         x, y = ground[0] * WORLD_PER_MESH, ground[1] * WORLD_PER_MESH
-        regiment_id = self.scene.battle.regiment_at(x, y)
-        if regiment_id is not None and self.order_mode is None:
-            return (("select", regiment_id),)
-        if self.scene.selected_id is not None:
-            enemy_id = self.scene.battle.regiment_at(x, y, player_only=False)
-            mode, self.order_mode = self.order_mode, None
-            self._set_cursor("default")
-            self.hud.order_completed()
-            if mode == "attack":
-                return (("attack", enemy_id),) if enemy_id is not None else ()
-            if mode == "move":
-                return (("move_to", x, y),)
-            if enemy_id is not None:
-                return (("attack", enemy_id),)
-        elif self.order_mode is None:
-            enemy_id = self.scene.battle.regiment_at(x, y, player_only=False)
-            if enemy_id is not None:
-                return (("select", enemy_id),)
-        return (("move_to", x, y),)
+        regiment_id = self.scene.battle.regiment_at(x, y, player_only=False)
+        if direct:
+            if self.scene.selected_id is None:
+                return ()
+            return (("attack", regiment_id),) if regiment_id is not None else (("move_to", x, y),)
+        if self.order_mode is None:
+            return (("select", regiment_id),) if regiment_id is not None else ()
+        mode, self.order_mode = self.order_mode, None
+        self._set_cursor("default")
+        self.hud.order_completed()
+        if mode == "attack":
+            return (("attack", regiment_id),) if regiment_id is not None else ()
+        if mode == "move":
+            return (("move_to", x, y),)
+        return ()
 
     def _minimap_click(self, pixel):
         """A minimap click behaves like a 3D-view ground click (notes/game_rules.md "Battle HUD
         layout": "a left click on the minimap is handled exactly like a click in the 3D view"),
-        sourced from the HUD's own marker hit-testing instead of 3D picking - except an empty
-        click with no pending order never issues a direct move."""
+        sourced from the HUD's own marker hit-testing instead of 3D picking - see _ground_click's
+        own docstring for why a plain click (no pending order) always just selects."""
         regiment_id = self.hud.minimap_regiment_at(pixel)
-        if regiment_id is not None and self.order_mode is None:
-            regiment = self.scene.battle.regiments.get(regiment_id)
-            if regiment is not None and regiment.player:
-                return (("select", regiment_id),)
-            # No player selection to act with: select the enemy regiment for its info only, as
-            # _ground_click does for the same case.
-            if regiment is not None and self.scene.selected_id is None:
-                return (("select", regiment_id),)
-            return ()
+        if self.order_mode is None:
+            return (("select", regiment_id),) if regiment_id is not None else ()
         world = self.hud.minimap_position(pixel)
         # A regiment marker (target for "attack") can resolve without a world point (its banner
         # hangs outside the strict inner map-area rect); only "move" actually needs one.
