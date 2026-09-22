@@ -1,12 +1,16 @@
 # Research plan: remaining agent batches
 
+> Research-agent instructions only. This is not an implementation specification. Follow
+> the role boundary in [`docs/research-boundary.md`](../docs/research-boundary.md): private
+> research material may inform a public behavioural report, but never implementation directly.
+
 Plan for the static-analysis work that is still open after the first rules pass and the research batches
 A–F (September 2026). Results so far are in `notes/game_rules.md` (open-point register in section 11); the
 full agent reports are kept locally in `extracted/agent_reports/` (git-ignored, derived from the binaries).
 
 Batches are run with three agents at a time. Each agent writes its report incrementally, so work survives a
-spend-limit interruption. After a batch, its results are merged into `notes/`, `FORMATS.md`, `ROADMAP.md`
-and `CLAUDE.md` before the next batch starts.
+spend-limit interruption. After a batch, its conclusions are distilled into a public behavioural
+report before an implementation task may use them. Private evidence and working notes remain untracked.
 
 | Batch | Agents | Status | Depends on |
 |---|---|---|---|
@@ -21,6 +25,8 @@ Rough cost: about 300k tokens per agent (batches 1 and 2 used 0.9–1.0 M tokens
 
 Give each agent this context, then its own section below.
 
+- **Role**: research only. Do not implement or alter engine code. Your work produces a
+  private evidence report and a separate public hand-off report.
 - **Project**: hobby reverse engineering of an owned copy of "Warhammer: Shadow of the Horned Rat" (1995) for
   an open-source engine. Repository root `$REPO`; read `CLAUDE.md`,
   `notes/game_rules.md` (and `notes/engine_architecture.md` for J/K) and the relevant earlier reports in
@@ -41,15 +47,23 @@ Give each agent this context, then its own section below.
 - **Ghidra** 12.1.3 headless (`$GHIDRA_HOME`, JDK `$JAVA_HOME`, scripts in
   `$REPO/tools/ghidra/`). Agents run in parallel, so an agent never opens `$GHIDRA_PROJECTS/*`
   directly; it copies the `.gpr` and `.rep` into its own scratch directory first.
+- **Address index**: `$REPO/extracted/agent_reports/address_index.md` is a private, git-ignored map of
+  known addresses/function names by topic, harvested from past research so an agent can jump straight to a
+  known entry point instead of re-locating it. Check it before searching from scratch, and add any new
+  time-saving address you find under its topic before finishing. It is a research shortcut only — never cite
+  it, or any address, in `notes/*.md` or code (clean-room policy).
 - **Rules**:
   - Do not modify tracked files (except where a brief says so); do not install anything.
   - Write under `$REPO/extracted/agent_reports/` (report `<letter>_<topic>.md`, scratch in `<letter>/`).
-  - **Write the report incrementally.**
-  - Mark claims ✅ established (code path: address, what it reads, formula; or data consistent across all
-    files), 🟡 hypothesis, or ⬜ unresolved.
+  - **Write private evidence incrementally.**
+  - Mark claims ✅ established (with private evidence), 🟡 hypothesis, or ⬜ unresolved.
   - Compare with Warhammer Fantasy Battle 4th edition where relevant.
   - No large decompiled listings; English only.
-  - Final message: a compact per-question summary and the report path.
+  - Before hand-off, write a public report containing only behavioural conclusions, data
+    facts, test cases, and uncertainty. Do not include executable addresses, internal labels,
+    pseudocode, assembly, decompiler/tool output, or a path/instruction to obtain them.
+  - Final message: a compact per-question summary, the private report path, and the public
+    hand-off report path.
 
 ## Batch 3: behaviour bytecode catalogue and disassembler
 

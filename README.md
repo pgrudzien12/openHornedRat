@@ -98,4 +98,4 @@ The Open Horned Rat source code is licensed under the GNU General Public License
 
 ## Project details
 
-The reverse-engineering notes, format coverage, and longer-term technical roadmap are kept for contributors and researchers in [ROADMAP.md](ROADMAP.md), [FORMATS.md](FORMATS.md), and [`notes/`](notes/). They are intentionally separate from these player instructions.
+The format coverage, behavioural specifications, and longer-term technical roadmap are kept for contributors in [ROADMAP.md](ROADMAP.md), [FORMATS.md](FORMATS.md), and [`notes/`](notes/). They are intentionally separate from these player instructions. Contributors should also read the [research and implementation boundary](docs/research-boundary.md): implementation uses public behavioural reports and must not use executable-analysis material.

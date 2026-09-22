@@ -190,31 +190,43 @@ compatibility with the original either (mods may later need a different shape); 
 convenient current implementation choice, not a compatibility commitment. The full save/load model is still open
 (GEI7e's item in `notes/glue_engine_integration.md`, owned overall by GEI14).
 
-## Clean-room policy (all agents must follow this)
+## Research and implementation boundary (all agents must follow this)
 
 The goal is **compatibility with a legally owned installation**, not reproduction of the
-original code or assets. Keep a hard boundary between two phases:
+original code or assets. There are two roles with a one-way hand-off:
 
-1. **Research** (`notes/`, `tools/ghidra/`): original binary → disassembly/decompilation/
-   dynamic observation → written up as a **behavioral spec** in `notes/*.md` — formulas,
-   tables, byte layouts, state machines, file formats. Describe *what the game does*
-   ("WS vs WS is looked up in an 11×11 to-hit table"), not *how the original code expresses
-   it* ("FUN_00412340 does..."). Raw decompiler/assembly output stays only in
-   `tools/ghidra/` working files and is **never committed** (already a repo rule) and never
-   pasted into implementation-facing docs or prompts.
-2. **Implementation** (`whshr/`, `scripts/`): written from the `notes/*.md` spec only.
-   Never translate/rename decompiled or disassembled code into Python — same behavior is
-   fine (and often the point), same implementation structure is not. When implementing,
-   read the spec, decide the externally observable behavior, then write it independently.
-   Code comments/docstrings cite `notes/game_rules.md` sections, never original function names or
-   addresses (`FUN_*`). Any step-by-step procedure the code follows must be written up in the notes first.
+1. **Research agents** may use private working material, game-data inspection, runtime
+   observation, and—when assigned—static analysis of the user's locally installed binaries.
+   They must not implement engine code from that material. Their private scratch output stays
+   untracked under `extracted/`; it may contain research locations and tooling output.
+2. **Implementers** work only from public behavioural specifications, documented file
+   formats, and independently written tests. They must not inspect or use binary-analysis
+   tools, private research reports, executable addresses, function labels, decompiler output,
+   or assembly as implementation input.
+
+The hand-off is a **public implementation report** in `notes/` (and, where useful,
+`FORMATS.md`). It describes only externally observable behaviour and independently useful
+data facts: formulas, small tables, file layouts, state machines, test cases, uncertainties,
+and gameplay examples. It must never contain executable virtual addresses, internal runtime
+locations, `FUN_*`/`DAT_*` labels, decompiler-derived pseudocode, assembly, tool output, or
+directions for recovering any of those. Describe *what the game does* ("WS vs WS uses an
+11×11 to-hit table"), never how its executable implements it.
+
+Implementation in `whshr/` and `scripts/` must be written independently from that public
+report. Same behaviour is the objective; the original program's structure is not. Code
+comments and docstrings may cite a public report section, never source locations or internal
+names. If a required fact exists only in private research material, request a public hand-off
+report before implementing it.
 
 Practical rules:
 
 - **Don't feed decompiled/assembly code to an LLM as implementation context.** A research
-  agent may read it to produce a spec; a coding agent should only ever see the resulting
-  `notes/*.md`. If the only source available is raw decompiled code, say so and produce a
-  spec first instead of implementing from it directly.
+  agent may use it privately to produce a public hand-off report; an implementation agent
+  should only ever see that report. If the only source available is private research material,
+  stop implementation and produce a report first.
+- **Research agents may consult private research indexes** under `extracted/` to avoid repeating
+  analysis. They are research-speed shortcuts only. Never copy an address, internal name, or
+  analysis artefact from them into a public report or implementation code.
 - **Prefer reading data from the user's own installation at runtime** over baking constants
   into the repo, especially for anything closer to "content" than "fact" (e.g. a lookup
   table of numbers is fine to record as a fact in `notes/`; large blocks of text/art/audio
