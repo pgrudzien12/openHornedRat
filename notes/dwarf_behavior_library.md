@@ -310,6 +310,138 @@ This suggests the engine has **unit-type-specific behavior libraries** that can 
 
 ---
 
+## Implementation Guidance — Bytecode-Based Requirements
+
+### Research Methodology Note
+
+This analysis is based entirely on **bytecode script observation** (what scripts do), not engine decompilation (how the engine implements it). The design hints below are derived from **what Script 151 and related scripts require**, not from reading internal engine code.
+
+### Observable Requirements (Bytecode Level)
+
+Script 151 executes this sequence repeatedly:
+```
+ClearCondFlags 8
+PushPC
+GetEvent              ← Must retrieve next pending event (or indicate none)
+CaseEvent 19          ← Must branch based on event's type value
+[event-specific handling: SwitchScript, React, etc.]
+ConsumeEvent          ← Must mark event as processed
+LoopIfTrue            ← Must loop while events remain (or some condition is true)
+ReturnInterrupt       ← Must exit interrupt handler
+```
+
+**What this sequence requires:**
+
+1. **Event Source / Queue**
+   - There must be a way to check "are there more events?" (for LoopIfTrue)
+   - GetEvent must retrieve the next event
+   - Events must have a type field (at least) that CaseEvent can inspect
+   - ConsumeEvent must mark an event processed (or remove it from further processing)
+
+2. **Script Context Management**
+   - SetInterruptScript must register a handler script per unit
+   - When events arrive, the interpreter must pause main script execution
+   - Run the interrupt handler instead
+   - Either resume main script or stay on the new script (if SwitchScript occurred)
+
+3. **Event Type Dispatch**
+   - CaseEvent must compare event.type against case constants (19, 23, 3, 4, 7, 12, 13, 15)
+   - Each case can branch to different opcodes (Query, React, SwitchScript, etc.)
+   - Unknown event types should probably fall through or jump to default handler
+
+4. **Script Switching During Interrupt**
+   - SwitchScript 159 must change the active script mid-execution
+   - IfSwitchScript 158 must conditionally switch
+   - This can happen **from inside an interrupt handler** (not just main scripts)
+   - Affects what runs after ReturnInterrupt (does it resume main, or continue on new script?)
+
+### Design Hints (Not Specifications)
+
+**Per-unit state must track:**
+- Which script is currently executing (main_script? interrupt_script? other?)
+- Position within that script (instruction pointer)
+- Some way to know "are there pending events?" without actually retrieving
+
+**Event handling flow must support:**
+```
+[Battle engine generates event]
+  ↓
+[Event added to unit's pending queue/source]
+  ↓
+[Interpreter checks: does this unit have interrupt handler registered?]
+  ↓
+[If yes: pause main script, switch to interrupt script, continue execution]
+  ↓
+[Interrupt script runs GetEvent, CaseEvent, etc.]
+  ↓
+[Script does ConsumeEvent, LoopIfTrue continues if more events]
+  ↓
+[ReturnInterrupt: resume main script OR stay on new script if SwitchScript happened]
+```
+
+**Event data must include at minimum:**
+- Event type (int) — used by CaseEvent
+- Target/source info — used by "take event target" and similar opcodes
+- Optional: data field for event-specific parameters
+
+**No specification on:**
+- Whether events are stored in array, queue, list, or other structure
+- Whether GetEvent moves a pointer or returns by position
+- Whether ConsumeEvent removes from queue or just marks a flag
+- Whether LoopIfTrue checks queue size, or GetEvent returns null/error on empty
+- Exact timing of when events are delivered (per-tick? per-opcode? batched?)
+
+These are **implementation choices** that should be made independently based on engine architecture, not inferred from bytecode.
+
+### What NOT to Do
+
+- Do not assume data structure details from this analysis (no `event_queue_index` or specific member names)
+- Do not infer timing or concurrency model (when exactly do events arrive?)
+- Do not copy any implementation patterns from decompiler output if you have access to it
+- Do not treat this as "the way the original does it" — treat it as "requirements this design must satisfy"
+
+### Validation Test Cases (From Script 151)
+
+Once the interpreter is implemented, use Script 151 to verify:
+
+1. **Register Interrupt Handler**
+   ```
+   Unit runs script N (main)
+   SetInterruptScript 151
+   Verify: interrupt_script_id is set to 151
+   ```
+
+2. **Event Delivery & Processing**
+   ```
+   Generate Event(type=3, target=unit)
+   Unit's event queue now has 1 event
+   Verify: next GetEvent retrieves event type 3
+   ```
+
+3. **Event Dispatch**
+   ```
+   Script 151 reaches: CaseEvent 3
+   Verify: branch to opcode for event type 3
+   ```
+
+4. **Script Switching During Interrupt**
+   ```
+   Event 3 handler reaches: SwitchScript 159
+   Verify: active script changes to 159
+   ReturnInterrupt: does 159 continue, or switch back to main?
+   ```
+
+5. **Loop While Events**
+   ```
+   Queue has 2 events
+   Process event 1, ConsumeEvent
+   LoopIfTrue: should continue (event 2 pending)
+   Process event 2, ConsumeEvent
+   LoopIfTrue: should exit (queue empty)
+   ```
+
+---
+
 ## Conclusion
 
 **Script 151 is a production-quality behavior library** for dwarf units across multiple campaign missions. It demonstrates that:
