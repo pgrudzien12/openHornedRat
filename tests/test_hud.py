@@ -249,6 +249,29 @@ class HitTestAndOccupiesTests(unittest.TestCase):
 
         self.assertIsNone(hud.hit_test(pos))
 
+    def test_given_a_window_larger_than_native_size_then_hit_test_still_scales_correctly(self):
+        # BattleView renders at full window resolution; the HUD must letterbox its own native
+        # 640x480 layout onto that window (matching NativeScreenView._layout()) for both drawing
+        # and hit-testing, the same way every other screen already does.
+        hud = _hud()
+        hud._draw_size = (1280, 800)  # exact*scale: min(1280/640, 800/480)=1.666 -> integer scale 1
+        left, top, scale = hud._layout()
+        self.assertEqual(scale, 1)
+        pos, _frames, _size = FIXED_BUTTONS["options"]
+        window_pos = (left + (PANEL_RECT[0] + pos[0] + 1) * scale, top + (PANEL_RECT[1] + pos[1] + 1) * scale)
+
+        self.assertEqual(hud.hit_test(window_pos), "options")
+
+    def test_given_an_exact_multiple_window_then_hit_test_uses_the_integer_scale(self):
+        hud = _hud()
+        hud._draw_size = (1280, 960)  # exactly 2x native
+        left, top, scale = hud._layout()
+        self.assertEqual((left, top, scale), (0, 0, 2))
+        pos, _frames, _size = FIXED_BUTTONS["options"]
+        window_pos = ((PANEL_RECT[0] + pos[0] + 1) * scale, (PANEL_RECT[1] + pos[1] + 1) * scale)
+
+        self.assertEqual(hud.hit_test(window_pos), "options")
+
 
 class MinimapTests(unittest.TestCase):
     def test_given_a_minimap_pixel_when_converted_then_it_maps_to_the_battlefield_axes(self):
@@ -300,6 +323,28 @@ class MinimapTests(unittest.TestCase):
 
         self.assertTrue(hud._shows_banner(player))
         self.assertFalse(hud._shows_banner(enemy))
+
+    def test_given_a_camera_at_north_yaw_then_its_eye_is_pulled_back_opposite_its_look_direction(self):
+        # whshr.camera.BattleCamera.pan()'s look (eye-to-target) direction is
+        # (-sin yaw, -cos yaw); the eye sits `distance` back along the opposite direction, so it
+        # must never coincide with the target it looks at (the pre-fix behavior drew the marker
+        # at the target itself).
+        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=180.0, distance=50.0)
+        from whshr.battlefield import WORLD_PER_MESH
+
+        eye_x, eye_y = Hud._camera_eye_position(camera)
+
+        self.assertAlmostEqual(eye_x, 500.0, places=6)
+        self.assertAlmostEqual(eye_y, 400.0 - 50.0 * WORLD_PER_MESH, places=6)
+
+    def test_given_a_camera_at_east_yaw_then_its_eye_offsets_along_x(self):
+        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=90.0, distance=50.0)
+        from whshr.battlefield import WORLD_PER_MESH
+
+        eye_x, eye_y = Hud._camera_eye_position(camera)
+
+        self.assertAlmostEqual(eye_x, 500.0 + 50.0 * WORLD_PER_MESH, places=6)
+        self.assertAlmostEqual(eye_y, 400.0, places=6)
 
     def test_given_a_fighting_player_regiment_then_its_dot_frame_is_the_fighting_friendly_base_plus_facing(self):
         hud = _hud()

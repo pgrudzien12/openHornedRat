@@ -695,7 +695,15 @@ scrolled native-scale viewport (no pan yet); message/scroll text windows and the
 not wired (their content/resource is not specified here); `whshr.engine.Regiment` has one
 `target_x`/`target_y`, not a waypoint queue, so only the end marker is drawn, never numbered
 waypoints; there is no deployment phase yet, so deployment zone squares and the deployment panel
-state are unreachable.
+state are unreachable; the spell/item list window at (200, 64) is left as background-only chrome
+for the same no-spell/item-system reason. The HUD is designed at a fixed 640×480 and is scaled and
+letterboxed onto the actual window (matching `NativeScreenView._layout()`'s integer-snap algorithm
+in `scene_view.py`, since `BattleView` itself renders its 3D scene at full window resolution rather
+than through that letterbox) for both drawing and hit-testing. The minimap's selected-marker
+highlight is a brightness tint on the dot rather than a separate white-rim sprite (no such frame is
+documented). The camera marker shows the eye position (pulled back from the look-at target along yaw by the
+orbit distance, converted mesh-to-world units as in `battle_view.py`'s panning; the marker is a
+flat minimap so pitch does not affect it), not the target itself.
 
 ## 5. Close combat
 

@@ -107,7 +107,7 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
     if skip_intro and not battle:
         machine.handle("skip")
         view = synchronise(view)
-    frame, last, overlay_time, running = 0, time.perf_counter(), float("-inf"), True
+    frame, last, overlay_time, running, show_overlay = 0, time.perf_counter(), float("-inf"), True, True
     battle_log_path = None  # tracked across scene transitions so it survives a battle -> result switch
     try:
         while running:
@@ -120,6 +120,9 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
                     event.type == pygame.KEYDOWN and event.key == pygame.K_q and event.mod & pygame.KMOD_CTRL
                 ):
                     running = False
+                    continue
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
+                    show_overlay = not show_overlay
                     continue
                 for scene_event in view.events(event):
                     machine.handle(scene_event)
@@ -154,7 +157,8 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
             if fade_remaining > 0:
                 alpha = fade_remaining / FADE_SECONDS
                 gpu.fade.draw(0, 0, *gpu.target.size, tint=(0.0, 0.0, 0.0, alpha))
-            overlay.draw(8, 8)
+            if show_overlay:
+                overlay.draw(8, 8)
             gpu.target.present()
             ctx.end_frame()
             frame += 1

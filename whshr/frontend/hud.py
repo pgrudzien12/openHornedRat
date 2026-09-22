@@ -14,8 +14,11 @@ sub-panel is shown) is implemented in full, since that is pure UI state independ
 orders the engine can actually carry out.
 """
 
+import math
+
 import pygame
 
+from ..battlefield import WORLD_PER_MESH
 from .gpu import ScreenQuad
 
 # Documented for completeness; battle_view.py's 3D pipeline does not yet clip its viewport to this
@@ -175,6 +178,37 @@ class Hud:
         self.pressed = None
         self._marker_order = []
 
+    def _layout(self):
+        """Scale/offset mapping this HUD's native 640x480 layout onto the actual window, matching
+        NativeScreenView._layout() (scene_view.py). BattleView renders its 3D scene at full window
+        resolution rather than through that native-screen letterboxing, but the HUD chrome itself
+        is designed at the original's fixed 640x480, so it needs the same transform applied
+        independently, for both drawing and hit-testing (a draw-only fix would leave clicks
+        matching the wrong screen position)."""
+        screen_width, screen_height = self._draw_size
+        native_width, native_height = 640, 480
+        exact = min(screen_width / native_width, screen_height / native_height)
+        scale = max(1, round(exact))
+        while scale > 1 and (native_width * scale > screen_width or native_height * scale > screen_height):
+            scale -= 1
+        if native_width * scale > screen_width or native_height * scale > screen_height:
+            scale = exact
+        return ((screen_width - native_width * scale) / 2, (screen_height - native_height * scale) / 2, scale)
+
+    def _native_point(self, pos):
+        """A raw window pixel converted into this HUD's native 640x480 space."""
+        left, top, scale = self._layout()
+        return ((pos[0] - left) / scale, (pos[1] - top) / scale)
+
+    def _draw(self, quad, x, y, w=None, h=None, **kwargs):
+        """Draw one quad at a native-space (x, y[, w, h]) rect, scaled onto the actual window."""
+        if quad is None:
+            return
+        left, top, scale = self._layout()
+        w = quad.size[0] if w is None else w
+        h = quad.size[1] if h is None else h
+        quad.draw(left + x * scale, top + y * scale, w * scale, h * scale, **kwargs)
+
     def _sheet(self, name):
         return self.field.ui_sheets.get(name.casefold()) if name else None
 
@@ -290,6 +324,7 @@ class Hud:
         """Whether *pos* lands on any HUD chrome, including non-actionable pixels."""
         if self._draw_size is None:
             return False
+        pos = self._native_point(pos)
         left, top, width, height = MINIMAP_RECT
         if pygame.Rect(left, top, width, height).collidepoint(pos):
             return True
@@ -301,6 +336,7 @@ class Hud:
         command name), otherwise None."""
         if self._draw_size is None:
             return None
+        pos = self._native_point(pos)
         for name, rect in self._fixed_button_rects():
             if rect.collidepoint(pos):
                 return name
@@ -340,9 +376,10 @@ class Hud:
         return map_left, map_top, width, height
 
     def minimap_position(self, pos):
-        """Convert a minimap pixel to BTS world coordinates, or return ``None`` off-map."""
+        """Convert a raw window pixel to BTS world coordinates, or return ``None`` off-map."""
         if self._draw_size is None or not self.field.width or not self.field.height:
             return None
+        pos = self._native_point(pos)
         map_left, map_top, width, height = self._map_scale()
         if not pygame.Rect(map_left, map_top, width, height).collidepoint(pos):
             return None
@@ -379,16 +416,23 @@ class Hud:
 
     def minimap_regiment_at(self, pos):
         """Return the active regiment whose visible marker (dot or banner) was clicked, if any."""
-        if self.battle is None or self.minimap_position(pos) is None:
+        if self.battle is None or self._draw_size is None:
+            return None
+        native = self._native_point(pos)
+        map_left, map_top, width, height = self._map_scale()
+        if not pygame.Rect(map_left, map_top, width, height).collidepoint(native):
             return None
         for regiment in reversed(self._minimap_regiments()):
             px, py = self._world_to_map_pixel(regiment.x, regiment.y)
-            if abs(pos[0] - px) <= 4 and abs(pos[1] - py) <= 4:
+            if abs(native[0] - px) <= 4 and abs(native[1] - py) <= 4:
                 return regiment.identifier
         return None
 
     def click_minimap_tab(self, pos):
         """Handle a click on a marker-display-mode tab or the book; returns True if one was hit."""
+        if self._draw_size is None:
+            return False
+        pos = self._native_point(pos)
         left, top = MINIMAP_RECT[0], MINIMAP_RECT[1]
         for index, ((x, y), _frames) in enumerate(MINIMAP_TABS):
             rect = pygame.Rect(left + x, top + y, *MINIMAP_TAB_SIZE)
@@ -420,12 +464,11 @@ class Hud:
     def _draw_minimap(self, regiment):
         left, top = MINIMAP_RECT[0], MINIMAP_RECT[1]
         for index, position, _size in MINIMAP_LAYERS:
-            quad = self.minimap_layers.get(index)
-            if quad:
-                quad.draw(left + position[0], top + position[1], *quad.size)
+            self._draw(self.minimap_layers.get(index), left + position[0], top + position[1])
         if self.planmap and self.planmap.frames:
             frame = self.planmap.frames[0]
-            self._sheet_frame_quad(frame).draw(*self._map_scale()[:2], *self._map_scale()[2:])
+            map_left, map_top, map_width, map_height = self._map_scale()
+            self._draw(self._sheet_frame_quad(frame), map_left, map_top, map_width, map_height)
         # Deployment zone squares (ICONS frame 160) are skipped: this engine has no deployment
         # phase yet (battles start already deployed, whshr.engine.Battle.from_battle_file), so the
         # "deployment only" condition never holds.
@@ -438,29 +481,31 @@ class Hud:
                     quad = self._icon(WAYPOINT_END_FRAME)
                     if quad:
                         px, py = self._world_to_map_pixel(*waypoint)
-                        quad.draw(px - quad.size[0] // 2, py - quad.size[1] // 2, *quad.size)
+                        self._draw(quad, px - quad.size[0] // 2, py - quad.size[1] // 2)
             for member in self._minimap_regiments():
                 self._draw_regiment_marker(member)
             if regiment is not None and regiment.active:
                 self._draw_regiment_marker(regiment)
         for (x, y), frames in MINIMAP_TABS:
-            quad = self._icon(frames[0])
-            if quad:
-                quad.draw(left + x, top + y, *MINIMAP_TAB_SIZE)
-        book = self._icon(MINIMAP_BOOK_FRAMES[0])
-        if book:
-            book.draw(left + MINIMAP_BOOK_POS[0], top + MINIMAP_BOOK_POS[1], *MINIMAP_BOOK_SIZE)
+            self._draw(self._icon(frames[0]), left + x, top + y, *MINIMAP_TAB_SIZE)
+        self._draw(self._icon(MINIMAP_BOOK_FRAMES[0]), left + MINIMAP_BOOK_POS[0], top + MINIMAP_BOOK_POS[1],
+                  *MINIMAP_BOOK_SIZE)
 
     def _draw_regiment_marker(self, regiment):
         px, py = self._world_to_map_pixel(regiment.x, regiment.y)
         dot = self._icon(self._regiment_dot_frame(regiment))
+        selected = regiment.identifier == self.selected
         if dot:
-            dot.draw(px - dot.size[0] // 2, py - dot.size[1] // 2, *dot.size)
+            # notes/game_rules.md does not document a selection indicator on the minimap; the
+            # original had a white rim around the selected marker (a bright tint on the dot
+            # approximates it here without inventing an undocumented extra frame).
+            tint = (2.0, 2.0, 2.0, 1.0) if selected else (1.0, 1.0, 1.0, 1.0)
+            self._draw(dot, px - dot.size[0] // 2, py - dot.size[1] // 2, tint=tint)
         if self._shows_banner(regiment):
             marker = self._minimap_marker(regiment)
             if marker is not None:
                 quad = self._sheet_frame_quad(marker)
-                quad.draw(px - 8, py - 24, *quad.size)
+                self._draw(quad, px - 8, py - 24)
 
     # ------------------------------------------------------------------ readout
 
@@ -483,29 +528,24 @@ class Hud:
         rx, ry = panel_x + READOUT_RECT[0], panel_y + READOUT_RECT[1]
         if regiment is None:
             for quad in self.compass_quads:
-                if quad:
-                    quad.draw(rx + 4, ry + 12, *quad.size)
+                self._draw(quad, rx + 4, ry + 12)
             return
-        if self.portrait_bg_quad:
-            self.portrait_bg_quad.draw(rx + 4, ry + 12, *self.portrait_bg_quad.size)
+        self._draw(self.portrait_bg_quad, rx + 4, ry + 12)
         portrait_sheet = self._sheet(regiment.portrait)
         if portrait_sheet is not None and portrait_sheet.frames:
             portrait_quad = self._sheet_frame_quad(portrait_sheet.frames[0])
-            portrait_quad.draw(rx + 4, ry + 12, *portrait_quad.size)
+            self._draw(portrait_quad, rx + 4, ry + 12)
         for frame_index in self._readout_ornament_frames(regiment) or ():
-            quad = self._icon(frame_index)
-            if quad:
-                # Ornament piece offsets within the readout are not individually given by
-                # notes/game_rules.md ("fixed offsets"); PROVISIONAL until confirmed.
-                quad.draw(rx, ry, *quad.size)
+            # Ornament piece offsets within the readout are not individually given by
+            # notes/game_rules.md ("fixed offsets"); PROVISIONAL until confirmed.
+            self._draw(self._icon(frame_index), rx, ry)
 
     # ------------------------------------------------------------------ draw
 
     def draw(self, width, height, camera=None):
         self._draw_size = (width, height)
         panel_x, panel_y = self._panel_origin()
-        if self.panel_bg:
-            self.panel_bg.draw(panel_x, panel_y, *self.panel_bg.size)
+        self._draw(self.panel_bg, panel_x, panel_y)
         regiment = self._regiment(self.selected)
         self._draw_readout(regiment)
         self._draw_fixed_buttons()
@@ -519,14 +559,12 @@ class Hud:
         for name, (pos, frames, size) in FIXED_BUTTONS.items():
             pressed = self.pressed == name
             quad = self._icon(frames[1] if pressed else frames[0])
-            if quad:
-                quad.draw(panel_x + pos[0], panel_y + pos[1], *size)
+            self._draw(quad, panel_x + pos[0], panel_y + pos[1], *size)
         deployment = self.panel_state()[0] == "deployment"
         pause_frames = PAUSE_FRAMES["deployment" if deployment else "battle"]
         pressed = self.pressed == "pause"
         quad = self._icon(pause_frames[1] if pressed else pause_frames[0])
-        if quad:
-            quad.draw(panel_x + PAUSE_POS[0], panel_y + PAUSE_POS[1], *PAUSE_SIZE)
+        self._draw(quad, panel_x + PAUSE_POS[0], panel_y + PAUSE_POS[1], *PAUSE_SIZE)
 
     def _draw_slots(self, regiment):
         panel_x, panel_y = self._panel_origin()
@@ -540,15 +578,30 @@ class Hud:
             pressed = self.pressed == command
             frame_index = frames[1] if pressed and frames[1] != frames[0] else frames[0]
             quad = self._icon(frame_index)
-            if quad:
-                quad.draw(sub_x + x, sub_y + y, *SLOT_SIZE, tint=(1, 1, 1, 1) if enabled else (0.4, 0.4, 0.4, 0.85))
+            self._draw(quad, sub_x + x, sub_y + y, *SLOT_SIZE,
+                      tint=(1, 1, 1, 1) if enabled else (0.4, 0.4, 0.4, 0.85))
 
     def _draw_camera_marker(self, camera):
-        px, py = self._world_to_map_pixel(camera.target_x, camera.target_y)
+        # The marker shows the camera's eye position, not its look-at target: the eye sits
+        # pulled back from the target along yaw by the (mesh-to-world scaled) orbit distance,
+        # matching how whshr/frontend/battle_view.py positions the camera for panning. The
+        # marker is a flat minimap dot, so pitch does not affect its position.
+        eye_x, eye_y = self._camera_eye_position(camera)
+        px, py = self._world_to_map_pixel(eye_x, eye_y)
         facing = round((camera.yaw % 360) / 45) % 8
         quad = self._icon(CAMERA_MARKER_FRAMES[facing])
-        if quad:
-            quad.draw(px - quad.size[0] // 2, py - quad.size[1] // 2, *quad.size)
+        self._draw(quad, px - (quad.size[0] // 2 if quad else 0), py - (quad.size[1] // 2 if quad else 0))
+
+    @staticmethod
+    def _camera_eye_position(camera):
+        # whshr.camera.BattleCamera.pan()'s forward (eye-to-target) direction is
+        # (-sin yaw, -cos yaw); the eye sits `distance` back along the opposite direction.
+        yaw = math.radians(camera.yaw)
+        distance = camera.distance * WORLD_PER_MESH
+        return (
+            camera.target_x + distance * math.sin(yaw),
+            camera.target_y + distance * math.cos(yaw),
+        )
 
     def release(self):
         quads = [self.panel_bg, self.portrait_bg_quad, *self.compass_quads,
