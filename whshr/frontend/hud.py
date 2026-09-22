@@ -178,13 +178,11 @@ class Hud:
         self.pressed = None
         self._marker_order = []
 
-    def _layout(self):
-        """Scale/offset mapping this HUD's native 640x480 layout onto the actual window, matching
-        NativeScreenView._layout() (scene_view.py). BattleView renders its 3D scene at full window
+    def _scale(self):
+        """The same integer-snap scale NativeScreenView._layout() uses (scene_view.py), applied to
+        this HUD's native 640x480 design size. BattleView renders its 3D scene at full window
         resolution rather than through that native-screen letterboxing, but the HUD chrome itself
-        is designed at the original's fixed 640x480, so it needs the same transform applied
-        independently, for both drawing and hit-testing (a draw-only fix would leave clicks
-        matching the wrong screen position)."""
+        is designed at the original's fixed 640x480, so its own pieces need scaling independently."""
         screen_width, screen_height = self._draw_size
         native_width, native_height = 640, 480
         exact = min(screen_width / native_width, screen_height / native_height)
@@ -193,21 +191,59 @@ class Hud:
             scale -= 1
         if native_width * scale > screen_width or native_height * scale > screen_height:
             scale = exact
-        return ((screen_width - native_width * scale) / 2, (screen_height - native_height * scale) / 2, scale)
+        return scale
 
-    def _native_point(self, pos):
-        """A raw window pixel converted into this HUD's native 640x480 space."""
-        left, top, scale = self._layout()
+    def _panel_screen_origin(self):
+        """(left, top, scale) placing the command panel's own (0, 0) on screen, pinned to the
+        bottom of the actual window and centered horizontally - not assuming the window itself is
+        640x480, per the user's report that a centered 640x480 letterbox left the panel and
+        minimap stranded in the middle of a larger window instead of hugging its edges."""
+        scale = self._scale()
+        screen_width, screen_height = self._draw_size
+        panel_width, panel_height = PANEL_RECT[2] * scale, PANEL_RECT[3] * scale
+        return (screen_width - panel_width) / 2, screen_height - panel_height, scale
+
+    def _minimap_screen_origin(self):
+        """(left, top, scale) placing the minimap's own (0, 0) on screen, pinned to the top-right
+        corner of the actual window (keeping the original's own top inset)."""
+        scale = self._scale()
+        screen_width, _screen_height = self._draw_size
+        return screen_width - MINIMAP_RECT[2] * scale, MINIMAP_RECT[1] * scale, scale
+
+    def _panel_screen_rect(self):
+        left, top, scale = self._panel_screen_origin()
+        return pygame.Rect(left, top, PANEL_RECT[2] * scale, PANEL_RECT[3] * scale)
+
+    def _minimap_screen_rect(self):
+        left, top, scale = self._minimap_screen_origin()
+        return pygame.Rect(left, top, MINIMAP_RECT[2] * scale, MINIMAP_RECT[3] * scale)
+
+    def _native_panel_point(self, pos):
+        """A raw window pixel converted into the command panel's own native-space coordinates."""
+        left, top, scale = self._panel_screen_origin()
         return ((pos[0] - left) / scale, (pos[1] - top) / scale)
 
-    def _draw(self, quad, x, y, w=None, h=None, **kwargs):
-        """Draw one quad at a native-space (x, y[, w, h]) rect, scaled onto the actual window."""
+    def _native_map_point(self, pos):
+        """A raw window pixel converted into the minimap's own native-space coordinates."""
+        left, top, scale = self._minimap_screen_origin()
+        return ((pos[0] - left) / scale, (pos[1] - top) / scale)
+
+    @staticmethod
+    def _draw_at(origin, quad, x, y, w=None, h=None, **kwargs):
         if quad is None:
             return
-        left, top, scale = self._layout()
+        left, top, scale = origin
         w = quad.size[0] if w is None else w
         h = quad.size[1] if h is None else h
         quad.draw(left + x * scale, top + y * scale, w * scale, h * scale, **kwargs)
+
+    def _draw_panel(self, quad, x, y, w=None, h=None, **kwargs):
+        """Draw one quad at a panel-native (x, y[, w, h]) rect, scaled onto the actual window."""
+        self._draw_at(self._panel_screen_origin(), quad, x, y, w, h, **kwargs)
+
+    def _draw_map(self, quad, x, y, w=None, h=None, **kwargs):
+        """Draw one quad at a minimap-native (x, y[, w, h]) rect, scaled onto the actual window."""
+        self._draw_at(self._minimap_screen_origin(), quad, x, y, w, h, **kwargs)
 
     def _sheet(self, name):
         return self.field.ui_sheets.get(name.casefold()) if name else None
@@ -305,18 +341,13 @@ class Hud:
 
     # ------------------------------------------------------------------ hit testing
 
-    def _panel_origin(self):
-        return PANEL_RECT[0], PANEL_RECT[1]
-
     def _fixed_button_rects(self):
-        panel_x, panel_y = self._panel_origin()
         for name, (pos, _frames, size) in FIXED_BUTTONS.items():
-            yield name, pygame.Rect(panel_x + pos[0], panel_y + pos[1], *size)
-        yield "pause", pygame.Rect(panel_x + PAUSE_POS[0], panel_y + PAUSE_POS[1], *PAUSE_SIZE)
+            yield name, pygame.Rect(pos[0], pos[1], *size)
+        yield "pause", pygame.Rect(PAUSE_POS[0], PAUSE_POS[1], *PAUSE_SIZE)
 
     def _slot_rects(self):
-        panel_x, panel_y = self._panel_origin()
-        sub_x, sub_y = panel_x + COMMAND_SUBWINDOW[0], panel_y + COMMAND_SUBWINDOW[1]
+        sub_x, sub_y = COMMAND_SUBWINDOW[0], COMMAND_SUBWINDOW[1]
         for slot, (x, y) in SLOT_POSITIONS.items():
             yield slot, pygame.Rect(sub_x + x, sub_y + y, *SLOT_SIZE)
 
@@ -324,19 +355,14 @@ class Hud:
         """Whether *pos* lands on any HUD chrome, including non-actionable pixels."""
         if self._draw_size is None:
             return False
-        pos = self._native_point(pos)
-        left, top, width, height = MINIMAP_RECT
-        if pygame.Rect(left, top, width, height).collidepoint(pos):
-            return True
-        panel_left, panel_top, panel_width, panel_height = PANEL_RECT
-        return pygame.Rect(panel_left, panel_top, panel_width, panel_height).collidepoint(pos)
+        return self._minimap_screen_rect().collidepoint(pos) or self._panel_screen_rect().collidepoint(pos)
 
     def hit_test(self, pos):
         """Return an enabled semantic command under *pos* ("pause", a fixed-button name, or a
         command name), otherwise None."""
-        if self._draw_size is None:
+        if self._draw_size is None or not self._panel_screen_rect().collidepoint(pos):
             return None
-        pos = self._native_point(pos)
+        pos = self._native_panel_point(pos)
         for name, rect in self._fixed_button_rects():
             if rect.collidepoint(pos):
                 return name
@@ -371,15 +397,14 @@ class Hud:
     # ------------------------------------------------------------------ minimap
 
     def _map_scale(self):
-        left, top, width, height = MAP_AREA_RECT
-        map_left, map_top = MINIMAP_RECT[0] + left, MINIMAP_RECT[1] + top
-        return map_left, map_top, width, height
+        return MAP_AREA_RECT
 
     def minimap_position(self, pos):
         """Convert a raw window pixel to BTS world coordinates, or return ``None`` off-map."""
-        if self._draw_size is None or not self.field.width or not self.field.height:
+        if (self._draw_size is None or not self.field.width or not self.field.height
+                or not self._minimap_screen_rect().collidepoint(pos)):
             return None
-        pos = self._native_point(pos)
+        pos = self._native_map_point(pos)
         map_left, map_top, width, height = self._map_scale()
         if not pygame.Rect(map_left, map_top, width, height).collidepoint(pos):
             return None
@@ -415,31 +440,35 @@ class Hud:
         order.append(identifier)
 
     def minimap_regiment_at(self, pos):
-        """Return the active regiment whose visible marker (dot or banner) was clicked, if any."""
-        if self.battle is None or self._draw_size is None:
+        """Return the active regiment whose visible marker (dot or banner) was clicked, if any.
+        The banner (when shown) is clickable over its own drawn rect, not just the dot underneath
+        it, since it is the larger and more obvious target on screen."""
+        if self.battle is None or self._draw_size is None or not self._minimap_screen_rect().collidepoint(pos):
             return None
-        native = self._native_point(pos)
-        map_left, map_top, width, height = self._map_scale()
-        if not pygame.Rect(map_left, map_top, width, height).collidepoint(native):
-            return None
+        native = self._native_map_point(pos)
         for regiment in reversed(self._minimap_regiments()):
             px, py = self._world_to_map_pixel(regiment.x, regiment.y)
             if abs(native[0] - px) <= 4 and abs(native[1] - py) <= 4:
                 return regiment.identifier
+            if self._shows_banner(regiment):
+                marker = self._minimap_marker(regiment)
+                if marker is not None:
+                    banner_rect = pygame.Rect(px - 8, py - 24, marker.width, marker.height)
+                    if banner_rect.collidepoint(native):
+                        return regiment.identifier
         return None
 
     def click_minimap_tab(self, pos):
         """Handle a click on a marker-display-mode tab or the book; returns True if one was hit."""
-        if self._draw_size is None:
+        if self._draw_size is None or not self._minimap_screen_rect().collidepoint(pos):
             return False
-        pos = self._native_point(pos)
-        left, top = MINIMAP_RECT[0], MINIMAP_RECT[1]
+        pos = self._native_map_point(pos)
         for index, ((x, y), _frames) in enumerate(MINIMAP_TABS):
-            rect = pygame.Rect(left + x, top + y, *MINIMAP_TAB_SIZE)
+            rect = pygame.Rect(x, y, *MINIMAP_TAB_SIZE)
             if rect.collidepoint(pos):
                 self.marker_mode = MARKER_MODES[index]
                 return True
-        book_rect = pygame.Rect(left + MINIMAP_BOOK_POS[0], top + MINIMAP_BOOK_POS[1], *MINIMAP_BOOK_SIZE)
+        book_rect = pygame.Rect(MINIMAP_BOOK_POS[0], MINIMAP_BOOK_POS[1], *MINIMAP_BOOK_SIZE)
         return bool(book_rect.collidepoint(pos))
 
     def _regiment_dot_frame(self, regiment):
@@ -462,13 +491,12 @@ class Hud:
         return False  # mode 3: banners only in deployment, which this engine does not model yet
 
     def _draw_minimap(self, regiment):
-        left, top = MINIMAP_RECT[0], MINIMAP_RECT[1]
         for index, position, _size in MINIMAP_LAYERS:
-            self._draw(self.minimap_layers.get(index), left + position[0], top + position[1])
+            self._draw_map(self.minimap_layers.get(index), position[0], position[1])
         if self.planmap and self.planmap.frames:
             frame = self.planmap.frames[0]
             map_left, map_top, map_width, map_height = self._map_scale()
-            self._draw(self._sheet_frame_quad(frame), map_left, map_top, map_width, map_height)
+            self._draw_map(self._sheet_frame_quad(frame), map_left, map_top, map_width, map_height)
         # Deployment zone squares (ICONS frame 160) are skipped: this engine has no deployment
         # phase yet (battles start already deployed, whshr.engine.Battle.from_battle_file), so the
         # "deployment only" condition never holds.
@@ -481,31 +509,32 @@ class Hud:
                     quad = self._icon(WAYPOINT_END_FRAME)
                     if quad:
                         px, py = self._world_to_map_pixel(*waypoint)
-                        self._draw(quad, px - quad.size[0] // 2, py - quad.size[1] // 2)
+                        self._draw_map(quad, px - quad.size[0] // 2, py - quad.size[1] // 2)
             for member in self._minimap_regiments():
                 self._draw_regiment_marker(member)
             if regiment is not None and regiment.active:
                 self._draw_regiment_marker(regiment)
         for (x, y), frames in MINIMAP_TABS:
-            self._draw(self._icon(frames[0]), left + x, top + y, *MINIMAP_TAB_SIZE)
-        self._draw(self._icon(MINIMAP_BOOK_FRAMES[0]), left + MINIMAP_BOOK_POS[0], top + MINIMAP_BOOK_POS[1],
-                  *MINIMAP_BOOK_SIZE)
+            self._draw_map(self._icon(frames[0]), x, y, *MINIMAP_TAB_SIZE)
+        self._draw_map(self._icon(MINIMAP_BOOK_FRAMES[0]), MINIMAP_BOOK_POS[0], MINIMAP_BOOK_POS[1],
+                       *MINIMAP_BOOK_SIZE)
 
     def _draw_regiment_marker(self, regiment):
         px, py = self._world_to_map_pixel(regiment.x, regiment.y)
-        dot = self._icon(self._regiment_dot_frame(regiment))
         selected = regiment.identifier == self.selected
+        # notes/game_rules.md does not document a selection indicator on the minimap; the
+        # original had a white rim around the selected marker. A brightness tint on whichever
+        # marker(s) are actually visible (dot and/or banner) approximates it without inventing an
+        # undocumented extra frame.
+        tint = (2.0, 2.0, 2.0, 1.0) if selected else (1.0, 1.0, 1.0, 1.0)
+        dot = self._icon(self._regiment_dot_frame(regiment))
         if dot:
-            # notes/game_rules.md does not document a selection indicator on the minimap; the
-            # original had a white rim around the selected marker (a bright tint on the dot
-            # approximates it here without inventing an undocumented extra frame).
-            tint = (2.0, 2.0, 2.0, 1.0) if selected else (1.0, 1.0, 1.0, 1.0)
-            self._draw(dot, px - dot.size[0] // 2, py - dot.size[1] // 2, tint=tint)
+            self._draw_map(dot, px - dot.size[0] // 2, py - dot.size[1] // 2, tint=tint)
         if self._shows_banner(regiment):
             marker = self._minimap_marker(regiment)
             if marker is not None:
                 quad = self._sheet_frame_quad(marker)
-                self._draw(quad, px - 8, py - 24)
+                self._draw_map(quad, px - 8, py - 24, tint=tint)
 
     # ------------------------------------------------------------------ readout
 
@@ -524,28 +553,26 @@ class Hud:
         return tuple(range(base, base + 8))
 
     def _draw_readout(self, regiment):
-        panel_x, panel_y = self._panel_origin()
-        rx, ry = panel_x + READOUT_RECT[0], panel_y + READOUT_RECT[1]
+        rx, ry = READOUT_RECT[0], READOUT_RECT[1]
         if regiment is None:
             for quad in self.compass_quads:
-                self._draw(quad, rx + 4, ry + 12)
+                self._draw_panel(quad, rx + 4, ry + 12)
             return
-        self._draw(self.portrait_bg_quad, rx + 4, ry + 12)
+        self._draw_panel(self.portrait_bg_quad, rx + 4, ry + 12)
         portrait_sheet = self._sheet(regiment.portrait)
         if portrait_sheet is not None and portrait_sheet.frames:
             portrait_quad = self._sheet_frame_quad(portrait_sheet.frames[0])
-            self._draw(portrait_quad, rx + 4, ry + 12)
+            self._draw_panel(portrait_quad, rx + 4, ry + 12)
         for frame_index in self._readout_ornament_frames(regiment) or ():
             # Ornament piece offsets within the readout are not individually given by
             # notes/game_rules.md ("fixed offsets"); PROVISIONAL until confirmed.
-            self._draw(self._icon(frame_index), rx, ry)
+            self._draw_panel(self._icon(frame_index), rx, ry)
 
     # ------------------------------------------------------------------ draw
 
     def draw(self, width, height, camera=None):
         self._draw_size = (width, height)
-        panel_x, panel_y = self._panel_origin()
-        self._draw(self.panel_bg, panel_x, panel_y)
+        self._draw_panel(self.panel_bg, 0, 0)
         regiment = self._regiment(self.selected)
         self._draw_readout(regiment)
         self._draw_fixed_buttons()
@@ -555,20 +582,18 @@ class Hud:
             self._draw_camera_marker(camera)
 
     def _draw_fixed_buttons(self):
-        panel_x, panel_y = self._panel_origin()
         for name, (pos, frames, size) in FIXED_BUTTONS.items():
             pressed = self.pressed == name
             quad = self._icon(frames[1] if pressed else frames[0])
-            self._draw(quad, panel_x + pos[0], panel_y + pos[1], *size)
+            self._draw_panel(quad, pos[0], pos[1], *size)
         deployment = self.panel_state()[0] == "deployment"
         pause_frames = PAUSE_FRAMES["deployment" if deployment else "battle"]
         pressed = self.pressed == "pause"
         quad = self._icon(pause_frames[1] if pressed else pause_frames[0])
-        self._draw(quad, panel_x + PAUSE_POS[0], panel_y + PAUSE_POS[1], *PAUSE_SIZE)
+        self._draw_panel(quad, PAUSE_POS[0], PAUSE_POS[1], *PAUSE_SIZE)
 
     def _draw_slots(self, regiment):
-        panel_x, panel_y = self._panel_origin()
-        sub_x, sub_y = panel_x + COMMAND_SUBWINDOW[0], panel_y + COMMAND_SUBWINDOW[1]
+        sub_x, sub_y = COMMAND_SUBWINDOW[0], COMMAND_SUBWINDOW[1]
         for slot, command in self.slots().items():
             x, y = SLOT_POSITIONS[slot]
             frames = COMMAND_FRAMES.get(command)
@@ -578,8 +603,8 @@ class Hud:
             pressed = self.pressed == command
             frame_index = frames[1] if pressed and frames[1] != frames[0] else frames[0]
             quad = self._icon(frame_index)
-            self._draw(quad, sub_x + x, sub_y + y, *SLOT_SIZE,
-                      tint=(1, 1, 1, 1) if enabled else (0.4, 0.4, 0.4, 0.85))
+            self._draw_panel(quad, sub_x + x, sub_y + y, *SLOT_SIZE,
+                             tint=(1, 1, 1, 1) if enabled else (0.4, 0.4, 0.4, 0.85))
 
     def _draw_camera_marker(self, camera):
         # The marker shows the camera's eye position, not its look-at target: the eye sits
@@ -588,9 +613,19 @@ class Hud:
         # marker is a flat minimap dot, so pitch does not affect its position.
         eye_x, eye_y = self._camera_eye_position(camera)
         px, py = self._world_to_map_pixel(eye_x, eye_y)
-        facing = round((camera.yaw % 360) / 45) % 8
+        # CAMERA_MARKER_FRAMES' own zero-rotation point sits a half-turn from yaw's (observed
+        # against the running game: the marker pointed the opposite way it should); compensate.
+        facing = (round((camera.yaw % 360) / 45) + 4) % 8
         quad = self._icon(CAMERA_MARKER_FRAMES[facing])
-        self._draw(quad, px - (quad.size[0] // 2 if quad else 0), py - (quad.size[1] // 2 if quad else 0))
+        if quad is None:
+            return
+        # The eye can sit far outside the battlefield (a large zoom distance pulls it well past
+        # the map edge); clamp it to the map area rather than let it spill past the minimap chrome.
+        map_left, map_top, width, height = self._map_scale()
+        half_w, half_h = quad.size[0] // 2, quad.size[1] // 2
+        px = min(max(px, map_left + half_w), map_left + width - 1 - half_w)
+        py = min(max(py, map_top + half_h), map_top + height - 1 - half_h)
+        self._draw_map(quad, px - half_w, py - half_h)
 
     @staticmethod
     def _camera_eye_position(camera):

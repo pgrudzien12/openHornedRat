@@ -217,24 +217,38 @@ class ButtonEnabledTests(unittest.TestCase):
         self.assertFalse(hud._button_enabled("move", None))
 
 
+def _panel_pos(hud, x, y):
+    """Convert command-panel-native (x, y) into a raw window pixel, given the panel's own
+    bottom-pinned, horizontally-centered screen anchor."""
+    left, top, scale = hud._panel_screen_origin()
+    return (left + x * scale, top + y * scale)
+
+
+def _map_pos(hud, x, y):
+    """Convert minimap-native (x, y) into a raw window pixel, given the minimap's own
+    top-right-pinned screen anchor."""
+    left, top, scale = hud._minimap_screen_origin()
+    return (left + x * scale, top + y * scale)
+
+
 class HitTestAndOccupiesTests(unittest.TestCase):
     def test_given_a_point_on_the_minimap_or_panel_then_it_is_occupied(self):
         hud = _hud()
 
-        self.assertTrue(hud.occupies((MINIMAP_RECT[0] + 5, MINIMAP_RECT[1] + 5)))
-        self.assertTrue(hud.occupies((PANEL_RECT[0] + 5, PANEL_RECT[1] + 5)))
-        self.assertFalse(hud.occupies((320, 100)))
+        self.assertTrue(hud.occupies(_map_pos(hud, 5, 5)))
+        self.assertTrue(hud.occupies(_panel_pos(hud, 5, 5)))
+        self.assertFalse(hud.occupies((0, 0)))
 
     def test_given_a_fixed_button_position_then_hit_test_returns_its_name(self):
         hud = _hud()
         pos, _frames, _size = FIXED_BUTTONS["options"]
 
-        self.assertEqual(hud.hit_test((PANEL_RECT[0] + pos[0] + 1, PANEL_RECT[1] + pos[1] + 1)), "options")
+        self.assertEqual(hud.hit_test(_panel_pos(hud, pos[0] + 1, pos[1] + 1)), "options")
 
     def test_given_the_move_slot_position_then_hit_test_returns_move(self):
         hud = _hud()
-        # TL slot: COMMAND_SUBWINDOW (492, 0) + (7, 11), inside the panel at PANEL_RECT's origin.
-        pos = (PANEL_RECT[0] + 492 + 7 + 1, PANEL_RECT[1] + 0 + 11 + 1)
+        # TL slot: COMMAND_SUBWINDOW (492, 0) + (7, 11), relative to the panel's own origin.
+        pos = _panel_pos(hud, 492 + 7 + 1, 0 + 11 + 1)
 
         self.assertEqual(hud.hit_test(pos), "move")
 
@@ -244,33 +258,45 @@ class HitTestAndOccupiesTests(unittest.TestCase):
         hud.press("move")  # move set: BR = halt
         from whshr.frontend.hud import COMMAND_SUBWINDOW, SLOT_POSITIONS, SLOT_SIZE
         x, y = SLOT_POSITIONS["BR"]
-        pos = (PANEL_RECT[0] + COMMAND_SUBWINDOW[0] + x + SLOT_SIZE[0] // 2,
-              PANEL_RECT[1] + COMMAND_SUBWINDOW[1] + y + SLOT_SIZE[1] // 2)
+        pos = _panel_pos(hud, COMMAND_SUBWINDOW[0] + x + SLOT_SIZE[0] // 2,
+                         COMMAND_SUBWINDOW[1] + y + SLOT_SIZE[1] // 2)
 
         self.assertIsNone(hud.hit_test(pos))
 
     def test_given_a_window_larger_than_native_size_then_hit_test_still_scales_correctly(self):
-        # BattleView renders at full window resolution; the HUD must letterbox its own native
-        # 640x480 layout onto that window (matching NativeScreenView._layout()) for both drawing
-        # and hit-testing, the same way every other screen already does.
+        # BattleView renders at full window resolution; the HUD must scale/anchor its own
+        # native-space panel and minimap onto that window for both drawing and hit-testing.
         hud = _hud()
         hud._draw_size = (1280, 800)  # exact*scale: min(1280/640, 800/480)=1.666 -> integer scale 1
-        left, top, scale = hud._layout()
-        self.assertEqual(scale, 1)
+        self.assertEqual(hud._scale(), 1)
         pos, _frames, _size = FIXED_BUTTONS["options"]
-        window_pos = (left + (PANEL_RECT[0] + pos[0] + 1) * scale, top + (PANEL_RECT[1] + pos[1] + 1) * scale)
 
-        self.assertEqual(hud.hit_test(window_pos), "options")
+        self.assertEqual(hud.hit_test(_panel_pos(hud, pos[0] + 1, pos[1] + 1)), "options")
 
     def test_given_an_exact_multiple_window_then_hit_test_uses_the_integer_scale(self):
         hud = _hud()
         hud._draw_size = (1280, 960)  # exactly 2x native
-        left, top, scale = hud._layout()
-        self.assertEqual((left, top, scale), (0, 0, 2))
+        self.assertEqual(hud._scale(), 2)
         pos, _frames, _size = FIXED_BUTTONS["options"]
-        window_pos = ((PANEL_RECT[0] + pos[0] + 1) * scale, (PANEL_RECT[1] + pos[1] + 1) * scale)
 
-        self.assertEqual(hud.hit_test(window_pos), "options")
+        self.assertEqual(hud.hit_test(_panel_pos(hud, pos[0] + 1, pos[1] + 1)), "options")
+
+    def test_given_a_window_larger_than_native_size_then_the_minimap_is_pinned_top_right(self):
+        hud = _hud()
+        hud._draw_size = (1280, 960)  # exactly 2x native, so the minimap has room to spare
+        left, top, scale = hud._minimap_screen_origin()
+
+        self.assertEqual(scale, 2)
+        self.assertEqual(left, 1280 - MINIMAP_RECT[2] * scale)
+        self.assertEqual(top, MINIMAP_RECT[1] * scale)
+
+    def test_given_a_window_larger_than_native_size_then_the_panel_is_pinned_to_the_bottom(self):
+        hud = _hud()
+        hud._draw_size = (1280, 960)
+        left, top, scale = hud._panel_screen_origin()
+
+        self.assertEqual(top, 960 - PANEL_RECT[3] * scale)
+        self.assertEqual(left, (1280 - PANEL_RECT[2] * scale) / 2)
 
 
 class MinimapTests(unittest.TestCase):
@@ -278,16 +304,16 @@ class MinimapTests(unittest.TestCase):
         hud = _hud()
 
         left, top, width, height = hud._map_scale()
-        self.assertEqual(hud.minimap_position((left, top)), (0.0, 800.0))
-        self.assertEqual(hud.minimap_position((left + width - 1, top + height - 1)), (1000.0, 0.0))
+        self.assertEqual(hud.minimap_position(_map_pos(hud, left, top)), (0.0, 800.0))
+        self.assertEqual(hud.minimap_position(_map_pos(hud, left + width - 1, top + height - 1)), (1000.0, 0.0))
         self.assertIsNone(hud.minimap_position((0, 0)))
 
     def test_given_a_regiment_position_then_world_to_map_pixel_round_trips_through_minimap_position(self):
         hud = _hud()
         player = hud.battle.regiments["player"]
 
-        pixel = hud._world_to_map_pixel(player.x, player.y)
-        world = hud.minimap_position(pixel)
+        native_pixel = hud._world_to_map_pixel(player.x, player.y)
+        world = hud.minimap_position(_map_pos(hud, *native_pixel))
 
         self.assertAlmostEqual(world[0], player.x, delta=6.0)
         self.assertAlmostEqual(world[1], player.y, delta=6.0)
@@ -296,10 +322,24 @@ class MinimapTests(unittest.TestCase):
         hud = _hud()
         player = hud.battle.regiments["player"]
 
-        pixel = hud._world_to_map_pixel(player.x, player.y)
+        native_pixel = hud._world_to_map_pixel(player.x, player.y)
 
-        self.assertEqual(hud.minimap_regiment_at(pixel), "player")
+        self.assertEqual(hud.minimap_regiment_at(_map_pos(hud, *native_pixel)), "player")
         self.assertIsNone(hud.minimap_regiment_at((0, 0)))
+
+    def test_given_a_regiment_with_a_visible_banner_then_clicking_the_banner_selects_it(self):
+        # notes/game_rules.md: the banner is anchored 8px left, 24px above the regiment's dot; a
+        # click anywhere on that larger, more visible banner rect should hit the regiment too, not
+        # only the small 8x8 dot underneath it.
+        hud = _hud()
+        player = hud.battle.regiments["player"]
+        marker_frame = SimpleNamespace(width=16, height=32)
+        hud._minimap_marker = lambda regiment: marker_frame if regiment.identifier == "player" else None
+
+        native_pixel = hud._world_to_map_pixel(player.x, player.y)
+        banner_point = (native_pixel[0] - 8 + 2, native_pixel[1] - 24 + 2)  # inside the banner, off the dot
+
+        self.assertEqual(hud.minimap_regiment_at(_map_pos(hud, *banner_point)), "player")
 
     def test_given_marker_mode_0_then_every_regiment_shows_its_banner(self):
         hud = _hud()
@@ -537,6 +577,50 @@ class BattleBannerVisibilityTests(unittest.TestCase):
         view.scene.selected_id = None
         after_deselect = view._instances()
         self.assertEqual(INSTANCE.unpack_from(after_deselect, INSTANCE.size)[3:7], (10.0, 0.0, 32.0, 32.0))
+
+
+class CameraMarkerTests(unittest.TestCase):
+    def test_given_a_camera_eye_far_outside_the_field_then_the_marker_is_clamped_to_the_map_area(self):
+        # A large zoom (orbit distance) can pull the eye far past the battlefield; the marker
+        # should stay pinned at the map's edge rather than spill outside the minimap chrome.
+        hud = _hud()
+        hud._draw_size = (640, 480)
+        quad = SimpleNamespace(size=(8, 8))
+        hud._icon = lambda frame_index: quad
+        calls = []
+        hud._draw_map = lambda q, x, y, w=None, h=None, **kw: calls.append((x, y))
+        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=180.0, distance=600.0)
+
+        hud._draw_camera_marker(camera)
+
+        map_left, map_top, width, height = hud._map_scale()
+        x, y = calls[0]
+        self.assertGreaterEqual(x, map_left)
+        self.assertLessEqual(x + quad.size[0], map_left + width)
+        self.assertGreaterEqual(y, map_top)
+        self.assertLessEqual(y + quad.size[1], map_top + height)
+
+    def test_given_a_camera_yaw_then_the_marker_frame_is_a_half_turn_from_the_raw_yaw_index(self):
+        # The marker sheet's own zero-rotation point sits a half-turn off from yaw's (observed
+        # against the running game); the drawn frame must be offset by 4 (of 8) from a naive
+        # yaw-only index.
+        hud = _hud()
+        hud._draw_size = (640, 480)
+        quad = SimpleNamespace(size=(8, 8))
+        used = {}
+
+        def icon(frame_index):
+            used["frame"] = frame_index
+            return quad
+
+        hud._icon = icon
+        hud._draw_map = lambda *a, **k: None
+        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=0.0, distance=10.0)
+
+        hud._draw_camera_marker(camera)
+
+        from whshr.frontend.hud import CAMERA_MARKER_FRAMES
+        self.assertEqual(used["frame"], CAMERA_MARKER_FRAMES[4])
 
 
 if __name__ == "__main__":

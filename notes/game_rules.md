@@ -696,14 +696,20 @@ not wired (their content/resource is not specified here); `whshr.engine.Regiment
 `target_x`/`target_y`, not a waypoint queue, so only the end marker is drawn, never numbered
 waypoints; there is no deployment phase yet, so deployment zone squares and the deployment panel
 state are unreachable; the spell/item list window at (200, 64) is left as background-only chrome
-for the same no-spell/item-system reason. The HUD is designed at a fixed 640×480 and is scaled and
-letterboxed onto the actual window (matching `NativeScreenView._layout()`'s integer-snap algorithm
-in `scene_view.py`, since `BattleView` itself renders its 3D scene at full window resolution rather
-than through that letterbox) for both drawing and hit-testing. The minimap's selected-marker
-highlight is a brightness tint on the dot rather than a separate white-rim sprite (no such frame is
-documented). The camera marker shows the eye position (pulled back from the look-at target along yaw by the
+for the same no-spell/item-system reason. The HUD's own two chrome pieces (the command panel and
+the minimap) are each designed at their documented native size and scaled with the same
+integer-snap factor as `NativeScreenView._layout()` (`scene_view.py`), since `BattleView` itself
+renders its 3D scene at full window resolution rather than through that letterbox; unlike a plain
+centered letterbox of the whole 640×480 screen, each piece is then pinned to its own edge of the
+actual window — the command panel to the bottom (horizontally centered), the minimap to the
+top-right corner — rather than both floating in the middle of a larger window. The minimap's
+selected-marker highlight is a brightness tint on the dot and banner rather than a separate
+white-rim sprite (no such frame is documented); clicking a regiment's banner on the minimap, not
+only the dot underneath it, selects that regiment (the banner is the larger, more visible target).
+The camera marker shows the eye position (pulled back from the look-at target along yaw by the
 orbit distance, converted mesh-to-world units as in `battle_view.py`'s panning; the marker is a
-flat minimap so pitch does not affect it), not the target itself.
+flat minimap so pitch does not affect it), not the target itself, clamped to the map area rect so
+a large zoom distance cannot push it past the minimap chrome.
 
 ## 5. Close combat
 
