@@ -709,7 +709,9 @@ only the dot underneath it, selects that regiment (the banner is the larger, mor
 The camera marker shows the eye position (pulled back from the look-at target along yaw by the
 orbit distance, converted mesh-to-world units as in `battle_view.py`'s panning; the marker is a
 flat minimap so pitch does not affect it), not the target itself, clamped to the map area rect so
-a large zoom distance cannot push it past the minimap chrome.
+a large zoom distance cannot push it past the minimap chrome. A small "x" (the ICONS frame right
+after the 8 camera-marker frames) also marks the look-at target itself, at the lowest z-order
+above the plan map so every other minimap element paints over it.
 
 ## 5. Close combat
 

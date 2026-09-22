@@ -579,6 +579,41 @@ class BattleBannerVisibilityTests(unittest.TestCase):
         self.assertEqual(INSTANCE.unpack_from(after_deselect, INSTANCE.size)[3:7], (10.0, 0.0, 32.0, 32.0))
 
 
+class CameraTargetTests(unittest.TestCase):
+    def test_given_a_camera_then_its_target_x_mark_is_drawn_at_the_target_world_position(self):
+        hud = _hud()
+        hud._draw_size = (640, 480)
+        quad = SimpleNamespace(size=(8, 8))
+        hud._icon = lambda frame_index: quad
+        calls = []
+        hud._draw_map = lambda q, x, y, w=None, h=None, **kw: calls.append((x, y))
+        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=0.0, distance=10.0)
+
+        hud._draw_camera_target(camera)
+
+        expected_px, expected_py = hud._world_to_map_pixel(camera.target_x, camera.target_y)
+        self.assertEqual(calls, [(expected_px - 4, expected_py - 4)])
+
+    def test_given_a_battle_draw_then_the_target_mark_is_drawn_before_regiment_markers(self):
+        # It must sit at the lowest z-order above the plan map: every other minimap element
+        # (waypoints, regiments, tabs) should paint over it.
+        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10, ranks=2, hud_class="inf")]
+        hud = _hud(regiments=regiments)
+        hud._draw_size = (640, 480)
+        hud.minimap_layers = {}
+        hud.planmap = None
+        hud._icon = lambda frame_index: None
+        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=0.0, distance=10.0)
+        order = []
+        hud._draw_camera_target = lambda cam: order.append("target")
+        hud._draw_regiment_marker = lambda regiment: order.append("regiment")
+
+        hud._draw_minimap(hud._regiment("player"), camera)
+
+        self.assertEqual(order[0], "target")
+        self.assertTrue(all(step == "regiment" for step in order[1:]))
+
+
 class CameraMarkerTests(unittest.TestCase):
     def test_given_a_camera_eye_far_outside_the_field_then_the_marker_is_clamped_to_the_map_area(self):
         # A large zoom (orbit distance) can pull the eye far past the battlefield; the marker

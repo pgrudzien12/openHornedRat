@@ -39,10 +39,12 @@ FIXED_BUTTONS = {
     "options": ((448, 13), (58, 59), (44, 44)),
     "prev_regiment": ((448, 75), (60, 61), (44, 44)),
     "next_regiment": ((448, 121), (62, 63), (44, 44)),
-    # notes/game_rules.md gives one position, (140, 4), for both 32x48 toggles; the second's x is
-    # inferred (placed immediately to the right), not confirmed.
-    "toggle_a": ((140, 4), (64, 65), (32, 48)),
-    "toggle_b": ((172, 4), (66, 67), (32, 48)),
+    # notes/game_rules.md gives one documented position, (140, 4), for both 32x48 toggles (the
+    # second's x inferred as immediately to the right); moved here to the panel's horizontal
+    # center for a first visual pass at the user's request - adjust freely, this pair is not tied
+    # to any other measurement.
+    "toggle_a": ((288, 4), (64, 65), (32, 48)),
+    "toggle_b": ((320, 4), (66, 67), (32, 48)),
     "scroll_up": ((224, 9), (68, 69), (20, 20)),
     "scroll_down": ((224, 34), (70, 71), (20, 20)),
 }
@@ -133,6 +135,7 @@ DEPLOYMENT_ZONE_FRAME = 160  # not drawn yet: no deployment phase (see _draw_min
 WAYPOINT_FRAMES = tuple(range(161, 170))
 WAYPOINT_END_FRAME = 159
 CAMERA_MARKER_FRAMES = tuple(range(170, 178))
+CAMERA_TARGET_FRAME = 178  # small "x", the ICONS frame right after the 8 camera-marker frames
 # Regiment dot base frame per (fighting-or-charging, side); add the 0-7 facing index. Broken adds
 # the same offset from its own base.
 DOT_BASE = {
@@ -490,13 +493,17 @@ class Hud:
             return regiment.player
         return False  # mode 3: banners only in deployment, which this engine does not model yet
 
-    def _draw_minimap(self, regiment):
+    def _draw_minimap(self, regiment, camera=None):
         for index, position, _size in MINIMAP_LAYERS:
             self._draw_map(self.minimap_layers.get(index), position[0], position[1])
         if self.planmap and self.planmap.frames:
             frame = self.planmap.frames[0]
             map_left, map_top, map_width, map_height = self._map_scale()
             self._draw_map(self._sheet_frame_quad(frame), map_left, map_top, map_width, map_height)
+        if camera is not None:
+            # Drawn right above the plan map and nothing else, so every other minimap element
+            # (waypoints, regiments, tabs) paints over it.
+            self._draw_camera_target(camera)
         # Deployment zone squares (ICONS frame 160) are skipped: this engine has no deployment
         # phase yet (battles start already deployed, whshr.engine.Battle.from_battle_file), so the
         # "deployment only" condition never holds.
@@ -577,7 +584,7 @@ class Hud:
         self._draw_readout(regiment)
         self._draw_fixed_buttons()
         self._draw_slots(regiment)
-        self._draw_minimap(regiment)
+        self._draw_minimap(regiment, camera)
         if camera is not None:
             self._draw_camera_marker(camera)
 
@@ -605,6 +612,16 @@ class Hud:
             quad = self._icon(frame_index)
             self._draw_panel(quad, sub_x + x, sub_y + y, *SLOT_SIZE,
                              tint=(1, 1, 1, 1) if enabled else (0.4, 0.4, 0.4, 0.85))
+
+    def _draw_camera_target(self, camera):
+        """A small "x" mark at the camera's look-at target (BattleCamera.target_x/y), the ICONS
+        frame right after the 8 camera-marker frames. Drawn at the lowest z-order of anything but
+        the plan map itself, so waypoints, regiments and the eye marker all paint over it."""
+        px, py = self._world_to_map_pixel(camera.target_x, camera.target_y)
+        quad = self._icon(CAMERA_TARGET_FRAME)
+        if quad is None:
+            return
+        self._draw_map(quad, px - quad.size[0] // 2, py - quad.size[1] // 2)
 
     def _draw_camera_marker(self, camera):
         # The marker shows the camera's eye position, not its look-at target: the eye sits
