@@ -21,17 +21,24 @@ there is no third relation (neutral, or "become allied mid-battle").
 - `.BTS` per-unit fields include a `whoami`/army id already parsed by `whscript.py`, but which battles
   place peasants and what side value/AI behaviour they're given has not been surveyed as a public fact.
 
-## Open questions
+## Findings (Resolved via Task #8) ✅
 
-- Which `.BTS` files place peasant (or other clearly-neutral) units, and what side/behaviour script do
-  they carry there? A grep over parsed `.BTS` files for the peasant unit type, cross-checked against each
-  file's per-unit side field, would answer this without needing a running game.
-- Is "neutral" a real third side value in the original, or are peasants simply enemy-side units with a
-  distinct AI behaviour (e.g. `RunAway`, since 206 "run away" already exists) that only look neutral
-  because they never charge? This changes the engine's data model significantly and should be settled
-  before implementing it.
-- Do neutral units ever change sides during a battle (flee to become non-combatants, or join the player)
-  beyond the one objective-G mechanism already documented?
+**RESOLVED:** `notes/neutral_units.md` documents complete survey of all 54 battles.
+
+**Key findings:**
+- **Neutral IS a real third side:** bit 6 (0x40) set in s_side, distinct from player (neither bit) and enemy (bit 7)
+- **27 battles have NPC units** (101 total placements); 10 have peasants specifically
+- **Peasants use type code 0x0E, side 0x4E**; other NPCs use 0x40–0x53 range
+- **NPC units in "NPC units" .BTS section,** structurally separated from enemies
+- **Behavior is script-driven:** each NPC runs an assigned mission script (scripts 2–8), not hardcoded neutral AI
+- **Different NPC categories:** peasants, dwarves, mercenaries, wizards, supply units, artillery
+
+**Three-way side system required:**
+- PLAYER: bit7=0, bit6=0
+- ENEMY: bit7=1
+- NEUTRAL: bit7=0, bit6=1
+
+See `notes/neutral_units.md` for full data, type codes, and implementation guidance.
 
 ## Implementation notes
 
