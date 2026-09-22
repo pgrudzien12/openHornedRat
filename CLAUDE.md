@@ -140,6 +140,31 @@ samples/           - [local only, not in git] renders from the game files, DO NO
                      WHSHR.EXE and GAMEF.DLL - dictionary of unit/spell/building/banner names
 ```
 
+## Project tracking on GitHub
+
+All active work — bugs, features, research questions, and implementation tasks — is tracked as GitHub
+issues in the private repository [pgrudzien12/openHornedRat](https://github.com/pgrudzien12/openHornedRat).
+This is the single source of truth for "what's left to do"; the notes files below are the detailed
+reference layer. Each issue links to the relevant notes file(s).
+
+**Label scheme:**
+- **`type:epic`** — groups related work (battle-screen gaps, per-research-topic)
+- **`track:research`** — needs investigation before implementation
+- **`track:implementation`** — ready to implement from an existing public report
+- **`screen:battle`** — battle-screen work (engine features like scripting, deployment, objectives)
+- **`topic:*`** — research topic (campaign-glue, sprites-animation, audio, cutscenes, pe-resources, combat-rules)
+- **`area:*`** — battle-engine gap cluster (mission-scripts, deployment, neutral-units, terrain-nav, objectives, formations)
+- **`documentation`**, **`bug`** — (standard labels)
+
+**Finding active work:**
+- Battle-screen gaps: `gh issue list --label screen:battle,type:epic`
+- Research backlog: `gh issue list --label topic:\* --state open`
+- What needs research vs. is ready to code: filter by `track:research` / `track:implementation`
+
+Every notes file's "Open questions/items" section has a banner link to its GitHub issue(s), so you can
+navigate from a problem statement to the live tracking. Conversely, each GitHub issue links back to its
+source notes file for the full context.
+
 ## How to continue
 
 Almost every data format is now reverse-engineered (see the overview table in `FORMATS.md`).
