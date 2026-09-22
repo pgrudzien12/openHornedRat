@@ -104,13 +104,17 @@ InitUnit (64 byte initialization)
 
 | Opcode | Effect | Missions Using |
 |---|---|---|
-| `AttackNearestEnemy` | Attack nearest visible hostile | BF003, BF004, BF005 |
+| `AttackNearestEnemy` | Attack nearest visible hostile | BF001, BF003, BF004, BF005, BF010 |
 | `AttackNearestFlag40Unit` | Attack non-combatants (flag 0x40) | BF003, BF004, BF005 |
-| `AttackTagged <tag>` | Attack specific tagged unit | BF005 (cargo hunting) |
+| `AttackTagged <tag>` | Attack specific tagged unit | BF005, BF010 |
+| `AttackNthNearestEnemy <n>` | Attack nth-nearest target (n=2 for second) | BF010 (skirmisher tactic) |
+| `AttackEnemyOfClass <class>` | Attack enemy unit of type class | BF001 |
 | `MoveToNode <n>` | Pathfind to node n | All missions |
 | `SetWait <ticks>` | Delay n ticks before next opcode | All missions |
 | `Wait` | Execute the wait timer | All missions |
-| `SetBehaviour <type> <param>` | Set AI behavior (15=TrackThreat, 14=scatter, 13=defensive) | All missions |
+| `SetBehaviour <type> <param>` | Set AI behavior (11=defense, 13=cargo, 14=scatter, 15=combat, 33=skirmish) | All missions |
+| `FollowParent <distance>` | Follow parent unit at specified distance | BF010 (support units) |
+| `SetParentByTag <tag>` | Link to unit with specified tag | BF010 (formation coordination) |
 
 ### Control Flow Opcodes
 
@@ -128,12 +132,18 @@ InitUnit (64 byte initialization)
 | Opcode | Effect | Missions Using |
 |---|---|---|
 | `Query <type>` | Test unit/battle state | BF004, BF005 |
-| `GetEvent` | Receive event from event queue | BF005 (interrupt handler) |
-| `CaseEvent <type>` | Branch on event type | BF005 (event routing) |
-| `SendEventToOwnSide <type>` | Broadcast event to allied units | BF005 (coordination) |
-| `SetInterruptScript <script_id>` | Register interrupt handler | All missions |
-| `SetTag <tag>` | Assign identification tag | All missions (for targeting) |
-| `AttackTagged <tag>` | Hunt unit by tag | BF005 |
+| `GetEvent` | Receive event from event queue | BF005, BF010 (interrupt handlers) |
+| `CaseEvent <type>` | Branch on event type | BF005, BF010 (event routing) |
+| `SendEventToOwnSide <type>` | Broadcast event to allied units | BF005 |
+| `SendEventToOwnSideIfTrue <type>` | Broadcast event if condition met | BF001 (alert signal) |
+| `React <type>` | Enter reactive mode (respond to threats, not seek) | BF001, BF010 |
+| `SetInterruptScript <script_id>` | Register interrupt handler (mission or library) | All missions |
+| `SetTag <tag>` | Assign identification tag | All missions |
+| `SetUnitFlags <flags>` | Set unit flags (256=anchored, 0x80000=hidden) | BF003, BF001 |
+| `TestUnitFlags <mask>` | Check unit flags (8=routed, 16=threatened, 512=custom) | BF001, BF010, others |
+| `TestCondFlags <mask>` | Check condition flags (16=reinforcement gate) | BF001, BF010 |
+| `ClearCondFlags <mask>` | Clear condition flags | All missions |
+| `KillAllModels` | Instant death if condition true | BF001 (difficulty scaling) |
 
 ---
 
@@ -146,30 +156,84 @@ The original game treats mission design as **choreographed sequences of unit act
 - Timing is explicit (wait timers, tick counts)
 - Objectives are encoded as behavior sequences (move to node → wait → move to escape)
 - Enemy behavior is deterministic (move to node, attack loop)
-- Reinforcements use explicit delay timers
+- Reinforcements use explicit delay timers or event gates
+- Formation coordination via parent-child links (SetParentByTag, FollowParent)
 
-### 2. Tagging & Targeting
+### 2. Reinforcement Patterns (Three Types)
 
-Units use **tags** to identify each other:
+**Timer-based (BF003, BF005):**
+- Enemy units arrive on hardcoded delays (60 ticks, 350 ticks, etc.)
+- SetWait + Wait creates fixed arrival times
+- Used for predictable multi-wave attacks
+
+**Event-triggered (BF001):**
+- External condition sets CondFlags on unit script
+- Unit awakens when flag is set, not on timer
+- Allows tutorial gates and player-progress-dependent reinforcements
+- 80-tick grace period after activation (React mode)
+
+**Coordinated/Formation (BF010):**
+- Units link to each other via tags (SetParentByTag)
+- Movement is synchronized but asymmetric (different nodes, shared timing)
+- Allows multi-unit formations with complex battlefield tactics
+
+### 3. Tagging & Targeting
+
+Units use **tags** to identify each other for multiple purposes:
 - `SetTag 0xabc0` marks a unit for future reference
 - `AttackTagged 0xabc0` hunts that specific unit
-- This allows mission designers to encode **targeting relationships** without hardcoding unit IDs
+- **SetParentByTag 0xabc1** creates runtime parent-child relationships (BF010)
+- **FollowParent 36** keeps support units tethered to main unit with tight synchronization (every 6 ticks)
+- **AttackNthNearestEnemy 2** allows tactical target prioritization (BF010 skirmisher)
+- This allows mission designers to encode **targeting relationships and formation bonds** without hardcoding unit IDs
 
-### 3. Event Driven Behavior (Hints)
+### 4. Event Driven Behavior & Communication
 
-Script 5 in BF005 demonstrates **event handling**:
-- Event types: threat, targets, items, unit-gone, routed, dispatch
-- Event routing: by side (own/enemy), by event type, by response
-- Event consuming: remove from queue after handling
+Multiple event systems identified:
 
-This suggests the engine has an **event queue system** for inter-unit communication (routed unit notifications, reinforcement signals, etc.).
+**Event Broadcasting (BF001):**
+- `SendEventToOwnSideIfTrue 17` broadcasts alert when condition is true
+- Allows units to signal other units across the battlefield
+- Event type determines routing (own side vs. enemy vs. all)
 
-### 4. Two Initialization Sizes
+**Event-based Activation (BF001):**
+- `TestCondFlags 16` checks if external flag was set
+- Used to gate reinforcement arrival without timers
+- Engine can set flags via campaign layer or victory conditions
 
-- **InitUnit 128:** Combat units (full setup, battle participation)
-- **InitUnit 64:** Non-combatant units (minimal setup, passive roles)
+**Library Event Handlers (BF010):**
+- Script 151 (dwarf interrupt handler) processes events for allied units
+- Library scripts enable shared behavior across multiple instances
 
-This may indicate distinct data structures or initialization pathways for different unit roles.
+### 5. AI Type Diversity & Roles
+
+Beyond the combat TrackThreat (type 15) and scatter (type 14):
+
+| AI Type | Observed In | Behavior | Purpose |
+|---|---|---|---|
+| 11 | BF010 (dwarf ally) | Defensive, reactive (React 20) | Allied unit support |
+| 13 | BF005 (cargo) | Non-combatant, movement-focused | Mobile objectives |
+| 14 | BF003/BF004 (peasants) | Scatter, patrol | Stationary/defensive NPC |
+| 15 | BF001-BF010 (combat, variants 28–30, 33) | Aggressive, seek and attack | Combat units |
+| 33 | BF010 (skirmisher) | Second-target focus (AttackNthNearestEnemy 2) | Ranged/support units |
+
+AI types encode **unit role** at the script level, allowing the engine to apply role-specific logic.
+
+### 6. Initialization Sizes & Conditional State
+
+- **InitUnit 128:** Combat units (full setup, battle participation, damage tracking)
+- **InitUnit 64:** Non-combatant units (minimal setup, movement-focused, passive roles)
+
+**Conditional Unit State Changes (BF001):**
+- `TestUnitFlags 512` checks external conditions
+- `KillAllModels` removes unit instantly if condition is true
+- Allows difficulty scaling without script variants
+- Example: tutorial can automatically kill units on easy difficulty
+
+**Routed State Coordination (BF010):**
+- `WaitWhileUnitFlags 8` halts unit movement if routed
+- Coordinated with parent/follower links for formation coherence
+- Ensures formations don't advance with routed units
 
 ---
 
@@ -223,13 +287,14 @@ Mission designers encode these by:
 ## Coverage
 
 **Missions Analyzed:**
-- ✅ BF003 (defend static objectives)
-- ✅ BF004_1 (direct combat + protect)
-- ✅ BF005 (escort mobile objective)
+- ✅ BF001 (tutorial, event-triggered reinforcements)
+- ✅ BF003 (defend static objectives with phased reinforcements)
+- ✅ BF004_1 (direct combat + protect scattered objectives)
+- ✅ BF005 (escort mobile objective with timed waves)
+- ✅ BF010 (first ally mission, formation coordination)
 
 **Missions to Analyze (Optional):**
 - BF006 (likely similar escort pattern)
-- BF010 (first battle with dwarf allies; investigate side handling)
 - BF015, BF017 (late campaign; mercenary/wizard coordination)
 - BF024 (forest battle; boundary and navigation patterns)
 - BF042 (last battle; final boss encounter structure)
