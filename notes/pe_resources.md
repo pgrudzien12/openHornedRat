@@ -199,12 +199,15 @@ narration captions, `+510` = alternative version (`A12b`, `A16b`).
 | U | Silent The Mission is Impossible. | We did not stand a chance sire | BF012, BF018, BF019 | Black Mountains missions whose debriefs say "abandon this route" |
 | W | Destroy the enemy artillery. | — | BF017, BF027 | Listening Gate (strike on Orc artillery), Counter Attack (Holger's stone throwers) |
 | Z | Silent Stay alive! | — | 50 battles | generic loss condition |
-| K, X | Silent.Get a unit to secret area | — | 14 / 4 | ? |
-| V, Y, F, P, R, J, L | Count Dead Race / If Z then Fail Critical / Silent 'A' / `P_MASTER` / placeholders "Objective R/J/L" | — | few | ? |
+| K, X | Silent.Get a unit to secret area | — | 14 / 4 | ✅ confirmed: reach a target node and collect a named item there (`game_rules.md`) |
+| V, Y, F, P, R, J, L | Count Dead Race / If Z then Fail Critical / Silent 'A' / `P_MASTER` / placeholders "Objective R/J/L" | — | few | see `game_rules.md`: F is a standalone copy of A's "eliminate the enemy" logic; P is a "keep a named unit alive" check; V computes a race-kill tally for the debrief only (always reads "met"); R, L are inert stubs; J is a post-decision cleanup step; Y mirrors a shared flag |
 
 "Silent" captions are apparently hidden from the player. GMTXT 33026–33034 (Protect the
 villagers, Rescue the slaves, …, Free the prisoners) lie past `Z` and are probably substituted
 by the mission DLL for the `*_MASTER` letters.
+
+**Evaluator logic for every letter** (what each one actually counts/checks, the `a`/`b` mechanism, and which
+letters can end the battle) is now public: `notes/game_rules.md` §"Missions and objectives".
 
 **Numbers `a,b` (🟡).** Checked on all 54 `.BTS` with `pe_missions.py --check`:
 - `A,a,b`: `a` = total men (`s_side[1]` sum) and `b` = number of **enemy** regiments (`s_side[0]` bit 7) in **39/47**; `b` alone 41/47.
@@ -284,7 +287,9 @@ API: `pe_resources.PE(path).resources()/data(res)`; `pe_extract.string_block`, `
 - Runtime palette: confirm that the game realizes `GLUE<X>`+`WIND<X>` per screen and what
   `palindex` 1/2/3 maps to; where the palettes of `OPTIONSCREEN`/`DEADSCREEN`/creature pics come from.
 - Masks (`setmask:Mask`, `BorderPrinceMask`) and `BattleMapBorder*` are not in `BITMAP.DLL`.
-- Meaning of `a,b` for `K,X,R,I,P,V,J,L`; what `*_MASTER` objectives do; the `cash:` fields.
+- ✅ Meaning of `a,b` and what each evaluator checks for every letter: resolved, `notes/game_rules.md`
+  §"Missions and objectives". Still open: what `*_MASTER` objectives do (not one of the 26 lettered
+  evaluators — a separate naming convention, unresolved); the `cash:` fields.
 - `setdebrief:N` → debrief text mapping; `[ANIM] index/bkindex/controlpanel` (portrait sprite
   from `BINARY` `.FOL`? `BACK*` backgrounds?).
 - Full glue-language semantics (flags `setgluestatusmask`, `testforunitinarmy`, `bonusadd`…) —
