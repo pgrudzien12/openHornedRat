@@ -327,6 +327,47 @@ class RankAndDirectionBonusTests(unittest.TestCase):
         self.assertEqual(leadership[0].data["regiment"], "loser")
 
 
+class FleeBearingTests(unittest.TestCase):
+    """game_rules.md "Flight and catching fleeing units": the flight "starts... directly away from
+    its opponent" - a bearing fixed once at rout start, not re-aimed every tick at whichever enemy
+    is currently nearest. Recomputing it live let two pursuers converging on the same fleeing unit
+    from different sides flip which one counted as "nearest" every tick as their distances crossed
+    over, reversing the flee bearing each time and stalling everyone in place indefinitely -
+    reported as a cavalry charge that never seemed to catch and kill a fleeing goblin unit while a
+    second friendly regiment was also chasing it."""
+
+    def test_given_a_routing_unit_then_the_flee_bearing_is_computed_once_not_every_tick(self):
+        fleeing = _regiment("f", 500, 500, False, speed_per_tick=4.0)
+        enemy = _regiment("e", 500, 470, True, speed_per_tick=0.0)
+        battle = Battle(1000, 1000, [fleeing, enemy], seed=0)
+        combat._start_rout(fleeing, battle)
+        calls = []
+        original = battle._flee_point
+        battle._flee_point = lambda regiment: calls.append(regiment.identifier) or original(regiment)
+
+        for _ in range(10):
+            battle.tick()
+
+        self.assertEqual(calls, [])  # never recomputed once the rout has started
+
+    def test_given_two_pursuers_converging_from_different_sides_then_the_fugitive_still_escapes(self):
+        fleeing = _regiment("f", 500, 500, False, speed_per_tick=4.0, initiative=5)
+        cavalry = _regiment("cav", 500, 470, True, speed_per_tick=10.0, initiative=5,
+                            attack_target="f")
+        infantry = _regiment("inf", 470, 500, True, speed_per_tick=4.0, initiative=5,
+                             attack_target="f")
+        battle = Battle(1000, 1000, [fleeing, cavalry, infantry], seed=0)
+        fleeing.routing = True
+        fleeing.flee_x, fleeing.flee_y = battle._flee_point(fleeing)
+        start_x, start_y = fleeing.x, fleeing.y
+
+        for _ in range(30):
+            battle.tick()
+
+        moved = math.hypot(fleeing.x - start_x, fleeing.y - start_y)
+        self.assertGreater(moved, 20.0)  # real progress, not stuck oscillating in place
+
+
 class RallyTimingTests(unittest.TestCase):
     """game_rules.md 7.4: the first rally attempt is one full turn after the rout, then every 3 segments."""
 

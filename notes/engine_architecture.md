@@ -420,7 +420,12 @@ byte-faithful port; every simplification is called out in each module's docstrin
 - **Movement modes.** `engine.py` now implements the documented k factors (game_rules.md, "Real time and
   movement"): 1.8 free (unchanged from engine step 3), 2.5 for a charge/attack order (`Battle.order_attack`,
   chased every tick at the target's current position, never "arriving" on its own — contact ends it), and
-  1.5 fleeing (`Regiment.routing`, moving directly away from the nearest active enemy, `Battle._flee_point`).
+  1.5 fleeing (`Regiment.routing`, moving directly away from the nearest active enemy at the moment the
+  rout starts — `Battle._flee_point`, called once from `combat._start_rout` and frozen onto
+  `Regiment.flee_x`/`flee_y`, not re-derived every tick: game_rules.md "Flight and catching fleeing
+  units" documents the bearing as fixed at rout start, and a live per-tick re-derivation let two
+  pursuers converging from different sides flip which counted as "nearest" every tick, stalling the
+  chase indefinitely).
   1.0 "closing" is defined (`CLOSING_K`) but unused: a documented simplification, since this engine does not
   model the original's charge-counter distinction between closing and charging.
 - **Contact** (`combat.resolve_contacts`, game_rules.md "Engagement"): recomputed every tick over every

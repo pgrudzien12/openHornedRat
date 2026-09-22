@@ -513,7 +513,11 @@ def _break_test(regiment, modifier, group_id, breakdown, battle):
 
 
 def _start_rout(regiment, battle):
+    # game_rules.md "Flight and catching fleeing units": the flight starts "directly away from its
+    # opponent" - a one-time bearing, not re-aimed every tick at whichever enemy is momentarily
+    # nearest (whshr.engine.Battle._advance_regiments reads this fixed point back every tick).
     flee_x, flee_y = battle._flee_point(regiment)
+    regiment.flee_x, regiment.flee_y = flee_x, flee_y
     group_id = regiment.melee_group
     opponents = [other for other in battle.regiments.values()
                  if other.active and other.player != regiment.player

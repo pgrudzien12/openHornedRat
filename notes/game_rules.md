@@ -1379,6 +1379,19 @@ lack the "braced" model flag 4), charge bonus included. As the pursuer is steere
 repeats every segment of contact until the fugitive is destroyed, rallies or leaves the table. There is no
 instant "caught = destroyed" rule.
 
+**Implemented**: `whshr.engine.Regiment.flee_x`/`flee_y` freeze that bearing once, in
+`whshr.combat._start_rout()`, matching "starts the flight directly away from its opponent" as a
+one-time determination rather than a live one. An earlier version instead called
+`Battle._flee_point()` (re-deriving "away from the nearest enemy") fresh every tick from
+`Battle._advance_regiments()`; with two pursuers converging on the same fugitive from different
+sides, whichever counted as "nearest" could flip every tick as their distances crossed over,
+reversing the flee bearing each time and stalling the chase indefinitely - reported as a cavalry
+charge that never seemed to catch and kill a fleeing goblin unit while a second friendly regiment
+was also chasing it. `RoutRoute`'s own small per-step deflection around obstacles (±0x20 of 512) is
+still not modelled - the frozen bearing here is exactly straight, an existing, separately-flagged
+simplification of the pathing itself (`notes/engine_architecture.md`'s "Collisions": a simplified
+`PushApart`, not the original's polygon obstruction routing).
+
 ### Charge into the flank or rear ✅
 
 the game is opcode 0x5B, run by the default event handler on **event 0x08**, which `EngageCharging`

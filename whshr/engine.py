@@ -124,6 +124,12 @@ class Regiment:
     melee_group: str | None = None  # id of the shared multi-regiment fight (Battle.fights), if any
     melee_touching: frozenset = field(default_factory=frozenset)  # enemy ids this footprint touches now
     routing: bool = False  # fleeing the field; ignores orders, moves away from the nearest enemy
+    # game_rules.md "Flight and catching fleeing units": the flight bearing is fixed once, "directly
+    # away from its opponent", when the rout starts (combat._start_rout) - not re-aimed every tick
+    # at whichever enemy happens to be nearest at that instant. A far point along that bearing
+    # (Battle._flee_point's own convention); None only before the first rout tick sets it.
+    flee_x: float | None = None
+    flee_y: float | None = None
     fled: bool = False  # a routing regiment that has left the battlefield (removed from play)
     reload_ticks: float = 0.0  # ticks remaining before a missile regiment may shoot again
     corpses: list = field(default_factory=list)  # (x, y, direction) of models that have died, for the view
@@ -410,7 +416,9 @@ class Battle:
             if regiment.in_melee:
                 pass  # frozen in place while fighting; the view shows the attack animation instead
             elif regiment.routing:
-                moved = self._advance_toward(regiment, self._flee_point(regiment),
+                if regiment.flee_x is None:  # self-heal: should only happen for pre-existing state
+                    regiment.flee_x, regiment.flee_y = self._flee_point(regiment)
+                moved = self._advance_toward(regiment, (regiment.flee_x, regiment.flee_y),
                                              regiment.speed_for_mode(FLEEING_K) * scale, arrive=False)
                 if not (0 <= regiment.x <= self.width and 0 <= regiment.y <= self.height):
                     regiment.fled = True
