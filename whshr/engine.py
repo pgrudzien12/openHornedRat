@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import math
 import random
 
-from . import ai, battle_grid, combat, formation
+from . import ai, battle_grid, combat, formation, interpreter
 from .battle_events import BattleEvent
 from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, stat_fields
 from .script import load_battle, resource_name
@@ -257,7 +257,7 @@ class Battle:
     """Authoritative fixed-tick state: movement, and (whshr.combat/whshr.ai) close combat, shooting,
     morale and a simple enemy AI."""
 
-    def __init__(self, width, height, regiments, seed=DEFAULT_SEED):
+    def __init__(self, width, height, regiments, seed=DEFAULT_SEED, script_dll=None):
         if width <= 0 or height <= 0:
             raise ValueError("battle dimensions must be positive")
         self.width = width
@@ -275,6 +275,13 @@ class Battle:
         # and synthetic battles commonly field only one side, which must never auto-resolve).
         self._has_enemy = any(not regiment.player for regiment in regiments)
         self._has_player = any(regiment.player for regiment in regiments)
+
+        # Initialize bytecode interpreter for mission scripts (issue #3)
+        self.script_dll = script_dll
+        self.event_bus = interpreter.EventBus(self)
+        for regiment_id in self.regiments:
+            self.event_bus.unit_states[regiment_id] = interpreter.UnitScriptState()
+        self.interpreter = interpreter.ScriptInterpreter(self, self.event_bus, script_dll) if script_dll else None
 
     @classmethod
     def from_battle_file(cls, path, seed=DEFAULT_SEED):
@@ -392,7 +399,12 @@ class Battle:
             self.tick_count += 1
             return
         scale = seconds / TICK_SECONDS
-        ai.decide_orders(self)
+        # Run behaviour scripts via the bytecode interpreter (issue #3), or fall back to simple AI
+        if self.interpreter:
+            for unit_id, state in self.event_bus.unit_states.items():
+                self.interpreter.run(unit_id, state, self.tick_count, self.rng)
+        else:
+            ai.decide_orders(self)
         combat.refresh_melee_state(self)
         self._advance_regiments(scale, seconds)
         self._resolve_collisions()
