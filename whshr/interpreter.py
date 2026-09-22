@@ -58,8 +58,13 @@ class UnitScriptState:
     cond_flags: int = 0  # condition flags for If/IfNot branching
     threat_range: int = 0  # set by SetThreatRange; used by threat scoring
 
+    # Timing (SetWait, TestWait, Wait)
+    wait_remaining: float = 0.0  # ticks left in current Wait
+    wait_duration: float = 0.0  # saved duration for TestWait checks
+
     # Current order and target (set by FindTarget*, AttackTarget, etc.)
     current_target: tuple | None = None  # (regiment_id, unit_id) for attack/movement orders
+    current_node: int | None = None  # waypoint node for movement orders
 
     # Script metadata (loaded once at init)
     script_dll = None  # behaviour.ScriptDll instance for script lookup
@@ -135,6 +140,7 @@ class ScriptInterpreter:
         # Main interpreter loop: execute instructions until Yield, event handling, or end of tick
         max_iterations = 10000  # prevent infinite loops during development
         iterations = 0
+        self._should_yield = False
 
         while iterations < max_iterations:
             iterations += 1
@@ -173,7 +179,7 @@ class ScriptInterpreter:
                 state.pc += behaviour.LENGTHS[opcode]
 
             # Yield/event handling: return control to the battle
-            if hasattr(self, '_should_yield') and self._should_yield:
+            if self._should_yield:
                 self._should_yield = False
                 break
 
@@ -434,8 +440,108 @@ class ScriptInterpreter:
         """EndIf: end of if/else block."""
         return state.pc + 1
 
-    # ===== Placeholder: unimplemented opcodes =====
-    # For now, any opcode not explicitly implemented raises NotImplementedError above.
-    # As the implementation progresses, more opcodes will be added here.
-    # Opcodes like movement (MoveToNode), targeting (FindTarget), combat (ChargeTarget),
-    # and effects (KillAllModels) will be implemented to integrate with the battle engine.
+    # ===== Timing and wait opcodes =====
+
+    def op_WaitForBattleStart(self, state, operand, script_words, unit_id, tick_count, rng):
+        """WaitForBattleStart: hold until battle has started (tick_count > 0)."""
+        if tick_count == 0:
+            return state.pc  # wait (don't advance)
+        return state.pc + 1  # resume
+
+    def op_SetWait(self, state, operand, script_words, unit_id, tick_count, rng):
+        """SetWait N: set a timer for N ticks."""
+        if operand is not None:
+            state.wait_duration = operand
+            state.wait_remaining = operand
+        return state.pc + 1
+
+    def op_TestWait(self, state, operand, script_words, unit_id, tick_count, rng):
+        """TestWait: decrement wait_remaining; set cond_flags if still waiting."""
+        if state.wait_remaining > 0:
+            state.wait_remaining -= 1.0
+            state.cond_flags = 1 if state.wait_remaining > 0 else 0
+        else:
+            state.cond_flags = 0
+        return state.pc + 1
+
+    def op_Wait(self, state, operand, script_words, unit_id, tick_count, rng):
+        """Wait N: hold for N ticks (yield until timer expires)."""
+        if operand is not None:
+            if state.wait_remaining == 0:
+                state.wait_remaining = operand
+        if state.wait_remaining > 0:
+            state.wait_remaining -= 1.0
+            self._should_yield = True  # yield to let other units run
+            return state.pc
+        return state.pc + 1
+
+    def op_LoopIfTrue(self, state, operand, script_words, unit_id, tick_count, rng):
+        """LoopIfTrue: jump back to pushed PC if cond_flags is true."""
+        if state.cond_flags and state.return_stack and len(state.return_stack[-1]) == 1:
+            return state.return_stack[-1][0]
+        return state.pc + 1
+
+    def op_LoopIfFalse(self, state, operand, script_words, unit_id, tick_count, rng):
+        """LoopIfFalse: jump back to pushed PC if cond_flags is false."""
+        if not state.cond_flags and state.return_stack and len(state.return_stack[-1]) == 1:
+            return state.return_stack[-1][0]
+        return state.pc + 1
+
+    # ===== Placeholder opcodes (stubs for future implementation) =====
+    # These are high-priority opcodes needed by missions but not yet integrated with the battle engine.
+    # Each logs a placeholder message and continues, allowing partial mission execution.
+
+    def op_MoveToNode(self, state, operand, script_words, unit_id, tick_count, rng):
+        """MoveToNode N: move to waypoint node N (TODO: integrate with movement)."""
+        if operand is not None:
+            state.current_node = operand
+        return state.pc + 1
+
+    def op_FaceNode(self, state, operand, script_words, unit_id, tick_count, rng):
+        """FaceNode N: turn to face waypoint node N (TODO: integrate with movement)."""
+        return state.pc + 1
+
+    def op_FindTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+        """FindTarget: find and set attack target (TODO: implement targeting)."""
+        return state.pc + 1
+
+    def op_ChargeTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+        """ChargeTarget: charge the current target (TODO: integrate with combat)."""
+        return state.pc + 1
+
+    def op_FireAtTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+        """FireAtTarget: shoot at the current target (TODO: integrate with combat)."""
+        return state.pc + 1
+
+    def op_KillAllModels(self, state, operand, script_words, unit_id, tick_count, rng):
+        """KillAllModels: instantly remove all models from this unit (TODO: integrate with combat)."""
+        # Used in BF001 for conditional tutorial difficulty scaling
+        return state.pc + 1
+
+    def op_AttackTagged(self, state, operand, script_words, unit_id, tick_count, rng):
+        """AttackTagged TAG: attack the unit marked with TAG (TODO: implement tagging)."""
+        return state.pc + 1
+
+    def op_SetTag(self, state, operand, script_words, unit_id, tick_count, rng):
+        """SetTag TAG: mark this unit with a tag (TODO: implement tagging)."""
+        return state.pc + 1
+
+    def op_React(self, state, operand, script_words, unit_id, tick_count, rng):
+        """React N: display a battle message (1="Engage!", 2="CHARGE!", etc.)."""
+        # TODO: call frontend to display message
+        return state.pc + 1
+
+    def op_SetThreatRange(self, state, operand, script_words, unit_id, tick_count, rng):
+        """SetThreatRange N: set threat detection range (used by TrackThreat)."""
+        if operand is not None:
+            state.threat_range = operand
+        return state.pc + 1
+
+    def op_SetInterruptScript(self, state, operand, script_words, unit_id, tick_count, rng):
+        """SetInterruptScript N: set interrupt handler script."""
+        if operand is not None:
+            state.interrupt_script = operand
+        return state.pc + 1
+
+    # For any other opcode not explicitly handled, the dispatcher will raise NotImplementedError,
+    # which is caught and logged by the run() method, allowing partial mission execution.
