@@ -2,8 +2,11 @@
 
 Controls: arrow keys or WASD pan, Q/E rotate, Page Up/Page Down tilt, mouse wheel zooms, right-drag pans,
 middle-drag rotates, Home resets the camera. Left-click a player regiment to select it (tinted yellow);
-left-click, or right-click without dragging, on the ground with a regiment selected orders it there;
-Escape deselects.
+left-click, or right-click without dragging, on the ground with a regiment selected orders it there.
+With no player regiment selected, left-click an enemy regiment to inspect it (its HUD readout,
+banner and minimap highlight, same as a player selection) - this never grants it orders, since
+whshr.engine.Battle's order_move/order_attack/order_halt and Hud._button_enabled() both refuse
+commands for a non-player regiment. Escape deselects.
 """
 
 from collections import deque
@@ -259,8 +262,11 @@ class BattleView(SceneView):
 
     def _ground_click(self, pixel):
         """Translate a screen click into a ("select", id), ("attack", id) or ("move_to", x, y) scene
-        event, if it hits ground. A click on an enemy regiment with a selection orders a charge; a click
-        on an enemy regiment with no selection is treated as an ordinary ground click (no order issued)."""
+        event, if it hits ground. A click on an enemy regiment with a player selection orders a
+        charge; with no player selection to charge with, it instead selects the enemy regiment for
+        its readout/banner/stats only - the original game lets you inspect any regiment this way,
+        and whshr.engine.Battle's order_move/order_attack/order_halt and Hud._button_enabled()
+        already refuse commands for a non-player regiment, so this never grants it orders."""
         field, camera = self.scene.field, self.camera
         width, height = self.gpu.target.size
         projection = camera.projection(width, height, field.width, field.height,
@@ -285,6 +291,10 @@ class BattleView(SceneView):
                 return (("move_to", x, y),)
             if enemy_id is not None:
                 return (("attack", enemy_id),)
+        elif self.order_mode is None:
+            enemy_id = self.scene.battle.regiment_at(x, y, player_only=False)
+            if enemy_id is not None:
+                return (("select", enemy_id),)
         return (("move_to", x, y),)
 
     def _minimap_click(self, pixel):
@@ -295,7 +305,13 @@ class BattleView(SceneView):
         regiment_id = self.hud.minimap_regiment_at(pixel)
         if regiment_id is not None and self.order_mode is None:
             regiment = self.scene.battle.regiments.get(regiment_id)
-            return (("select", regiment_id),) if regiment is not None and regiment.player else ()
+            if regiment is not None and regiment.player:
+                return (("select", regiment_id),)
+            # No player selection to act with: select the enemy regiment for its info only, as
+            # _ground_click does for the same case.
+            if regiment is not None and self.scene.selected_id is None:
+                return (("select", regiment_id),)
+            return ()
         world = self.hud.minimap_position(pixel)
         if world is None or self.scene.selected_id is None:
             return ()

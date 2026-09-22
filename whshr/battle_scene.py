@@ -75,8 +75,11 @@ class BattleScene(Scene):
             self.logger.write_order(self.battle.tick_count, event)
         kind, *args = event
         if kind == "select":
+            # An enemy regiment can be selected too, for its readout/banner/stats only: the
+            # order handlers below all refuse a non-player identifier (ValueError, caught), so
+            # selecting one never grants it orders.
             (identifier,) = args
-            if identifier in self.battle.regiments and self.battle.regiments[identifier].player:
+            if identifier in self.battle.regiments:
                 self.selected_id = identifier
         elif kind == "deselect":
             self.selected_id = None

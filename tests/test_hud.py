@@ -9,7 +9,7 @@ import sys
 import types
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 try:
     import pygame
@@ -39,6 +39,8 @@ try:
 except ModuleNotFoundError:
     sys.modules["zengl"] = types.ModuleType("zengl")
 
+from whshr.battle_scene import BattleScene
+from whshr.battlefield import WORLD_PER_MESH
 from whshr.engine import Battle, Regiment
 from whshr.frontend.battle_view import BattleView
 from whshr.frontend.hud import FIXED_BUTTONS, MINIMAP_RECT, PANEL_RECT, Hud
@@ -436,7 +438,7 @@ class BattleViewHudInputTests(unittest.TestCase):
         view = BattleView.__new__(BattleView)
         view.hud = hud
         view.scene = SimpleNamespace(selected_id=selected_id, battle=SimpleNamespace(
-            regiments={"player": SimpleNamespace(player=True)}))
+            regiments={"player": SimpleNamespace(player=True), "enemy": SimpleNamespace(player=False)}))
         view.camera = SimpleNamespace()
         view.order_mode = None
         view._ground_click = Mock(return_value=(("ground",),))
@@ -514,6 +516,26 @@ class BattleViewHudInputTests(unittest.TestCase):
         self.assertEqual(view.events(event), (("select", "player"),))
         view._ground_click.assert_not_called()
 
+    def test_given_no_player_selection_then_clicking_an_enemy_marker_selects_it_for_inspection(self):
+        hud = self._hud_mock(minimap_regiment_at=lambda pos: "enemy", minimap_position=lambda pos: (1.0, 2.0))
+        view = self._view(hud, selected_id=None)
+        event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+
+        self.assertEqual(view.events(event), (("select", "enemy"),))
+        view._ground_click.assert_not_called()
+
+    def test_given_a_player_selection_then_clicking_an_enemy_marker_does_not_select_it(self):
+        # notes/game_rules.md: "a left click on the minimap is handled exactly like a click in the
+        # 3D view" - with a player unit selected, an enemy marker click is a targeting click, not
+        # an inspection one (whshr.frontend.battle_view._minimap_click's own limitation: unlike
+        # _ground_click, it does not yet turn this into an immediate charge order either).
+        hud = self._hud_mock(minimap_regiment_at=lambda pos: "enemy", minimap_position=lambda pos: (1.0, 2.0))
+        view = self._view(hud, selected_id="player")
+        event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+
+        self.assertEqual(view.events(event), ())
+        view._ground_click.assert_not_called()
+
     def test_given_a_minimap_tab_click_then_it_is_consumed_without_a_ground_or_move_order(self):
         hud = self._hud_mock(click_minimap_tab=lambda pos: True)
         view = self._view(hud)
@@ -521,6 +543,60 @@ class BattleViewHudInputTests(unittest.TestCase):
 
         self.assertEqual(view.events(event), ())
         view._ground_click.assert_not_called()
+
+
+class EnemyInspectionSelectionTests(unittest.TestCase):
+    """An enemy regiment can be selected for its HUD readout/banner/stats, but never given
+    orders: whshr.battle_scene.BattleScene.handle() no longer restricts "select" to player
+    regiments, and whshr.engine.Battle's order_move/order_attack/order_halt (and
+    Hud._button_enabled()) already refuse commands for a non-player regiment regardless."""
+
+    def _view(self, regiments, selected_id=None, order_mode=None):
+        view = BattleView.__new__(BattleView)
+        field = SimpleNamespace(width=1000, height=800, ground_height=lambda x, y: 0.0)
+        view.scene = SimpleNamespace(field=field, battle=Battle(1000, 800, regiments), selected_id=selected_id)
+        view.camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=180.0, pitch=45.0,
+                                      distance=100.0, fov=45.0, projection=lambda *a, **k: None)
+        view.gpu = SimpleNamespace(target=SimpleNamespace(size=(640, 480)))
+        view.order_mode = order_mode
+        view.hud = SimpleNamespace(order_completed=Mock())
+        return view
+
+    def _click_at(self, view, world_x, world_y):
+        with patch("whshr.frontend.battle_view.picking.pick_ground",
+                  return_value=(world_x / WORLD_PER_MESH, world_y / WORLD_PER_MESH)):
+            return view._ground_click((0, 0))
+
+    def test_given_no_player_selection_then_clicking_an_enemy_selects_it_for_inspection(self):
+        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10),
+                    Regiment("enemy", "Enemy", 200, 200, 0, False, models=10)]
+        view = self._view(regiments, selected_id=None)
+
+        events = self._click_at(view, 200, 200)
+
+        self.assertEqual(events, (("select", "enemy"),))
+
+    def test_given_a_player_selection_then_clicking_an_enemy_charges_it_instead_of_selecting_it(self):
+        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10),
+                    Regiment("enemy", "Enemy", 200, 200, 0, False, models=10)]
+        view = self._view(regiments, selected_id="player")
+
+        events = self._click_at(view, 200, 200)
+
+        self.assertEqual(events, (("attack", "enemy"),))
+
+    def test_given_an_enemy_already_selected_for_inspection_then_it_cannot_be_ordered(self):
+        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10),
+                    Regiment("enemy", "Enemy", 200, 200, 0, False, models=10)]
+        scene = BattleScene()
+        scene.battle = Battle(1000, 800, regiments)
+        scene.selected_id = None
+
+        scene.handle(("select", "enemy"), context=None)
+        self.assertEqual(scene.selected_id, "enemy")
+        scene.handle(("move_to", 300.0, 300.0), context=None)
+
+        self.assertIsNone(scene.battle.regiments["enemy"].target_x)
 
 
 class BattleBannerVisibilityTests(unittest.TestCase):

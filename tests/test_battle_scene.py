@@ -106,13 +106,19 @@ class BattleSceneTests(unittest.TestCase):
 
         self.assertEqual(scene.selected_id, "Grudgebringer_Infantry")
 
-    def test_given_a_click_on_an_enemy_regiment_when_selected_then_the_selection_does_not_change(self):
+    def test_given_a_click_on_an_enemy_regiment_then_it_is_selected_for_inspection_only(self):
+        # Selecting an enemy regiment is allowed (its HUD readout/banner/stats, same as a player
+        # selection), but it must never be usable to issue it orders.
         scene = BattleScene()
         SceneMachine(scene, self.context)
 
         scene.handle(("select", "Clanrat_Warriors"), self.context)
 
-        self.assertIsNone(scene.selected_id)
+        self.assertEqual(scene.selected_id, "Clanrat_Warriors")
+
+        scene.handle(("move_to", 600.0, 600.0), self.context)
+
+        self.assertIsNone(scene.battle.regiments["Clanrat_Warriors"].target_x)
 
     def test_given_a_selected_regiment_when_moved_to_a_ground_point_then_it_is_ordered_there(self):
         scene = BattleScene()
