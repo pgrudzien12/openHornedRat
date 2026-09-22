@@ -684,6 +684,19 @@ there; it never issues a direct move.
 Magic the magic cursor, every other action and Back the default. A click sound plays on button press. There are no tooltips
 and no hover highlight; buttons only have up and down frames. Deployment placement rules (allowed zone) were not read ⬜.
 
+**Implemented** in `whshr/frontend/hud.py` (`whshr/engine.py` adds a `Regiment.hud_class` field for
+the class column, derived from the `s_side` race/type byte since this note's own numeric class
+encoding was not recovered — 🟡, see the note's own comment on the mapping). Deliberate
+simplifications rather than spec gaps: the engine has no spell/item system, so a regiment is always
+in the non-caster attack/melee variant; camera rotate/zoom buttons render but the free WASD/mouse
+camera already in place is unchanged (`notes/engine_architecture.md`'s own decision not to chase
+exact original camera behaviour); the minimap always fits the whole battlefield rather than a
+scrolled native-scale viewport (no pan yet); message/scroll text windows and the click sound are
+not wired (their content/resource is not specified here); `whshr.engine.Regiment` has one
+`target_x`/`target_y`, not a waypoint queue, so only the end marker is drawn, never numbered
+waypoints; there is no deployment phase yet, so deployment zone squares and the deployment panel
+state are unreachable.
+
 ## 5. Close combat
 
 ### Order of blows ✅

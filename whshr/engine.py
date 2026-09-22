@@ -35,6 +35,18 @@ ARCHER_MISSILE_CODES = {1, 2, 9, 18, 19}
 # human infantryman, matching DEFAULT_S_RLMV's M4 I3 example.
 DEFAULT_PROFILE = {"WS": 3, "BS": 3, "S": 3, "T": 3, "W": 1, "I": 3, "A": 1, "Ld": 7}
 
+# The battle HUD's command panel picks a button layout by one of five unit classes (Inf, Arch,
+# Art, Wiz, Mon; notes/game_rules.md "Battle HUD layout"). The note names the classes but does not
+# give their numeric encoding ("classes 0 and 7-9 have no buttons" does not obviously match this
+# byte, since 0 here is Monster, which the HUD's own table gives buttons to) - PROVISIONAL: derived
+# from the s_side race/type byte (script.RACE_TYPES) as the best available signal, not confirmed
+# against the panel's own class numbering.
+HUD_CLASS_BY_RACE_TYPE = {
+    0: "mon", 1: "inf", 2: "inf", 3: "arch", 4: "inf", 5: "arch", 6: "inf", 7: "inf", 8: "inf",
+    9: "inf", 10: "arch", 11: "inf", 12: "inf", 13: "arch", 14: "inf",
+    15: "art", 16: "art", 17: "art", 18: "art", 19: "wiz",
+}
+
 
 def speed_per_tick(move_stat, initiative_stat, k=MOVING_FREELY_K):
     """World units a regiment covers in one 100 ms tick (game_rules.md, "Real time and movement"):
@@ -104,6 +116,7 @@ class Regiment:
     missile_code: int | None = None  # S_BalWeap, only ARCHER_MISSILE_CODES are modelled as shooters
     missile_range: float | None = None  # world units, from rules.MISSILE_RANGES
     psychology: frozenset = frozenset()  # psy_status flag names, e.g. {"CantBreak", "CantRally"}
+    hud_class: str | None = None  # "inf"/"arch"/"art"/"wiz"/"mon"; see HUD_CLASS_BY_RACE_TYPE
 
     # Combat/order state (whshr.combat, whshr.ai).
     attack_target: str | None = None  # identifier of an enemy regiment this regiment is charging
@@ -214,6 +227,8 @@ def _decode_combat_profile(unit):
     missile_range = MISSILE_RANGES.get(missile_code) if missile_code in ARCHER_MISSILE_CODES else None
     psy_status = unit.get("set", {}).get("psy_status")
     psychology = frozenset(f for f in str(psy_status or "").split("|") if f)
+    side = fields.get("s_side")
+    hud_class = HUD_CLASS_BY_RACE_TYPE.get(side & 0x3F) if side is not None else None
     return {
         "ws": int(profile.get("WS", DEFAULT_PROFILE["WS"])),
         "bs": int(profile.get("BS", DEFAULT_PROFILE["BS"])),
@@ -228,6 +243,7 @@ def _decode_combat_profile(unit):
         "missile_code": missile_code if missile_range else None,
         "missile_range": missile_range,
         "psychology": psychology,
+        "hud_class": hud_class,
     }
 
 

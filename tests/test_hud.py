@@ -1,10 +1,15 @@
-"""HUD geometry/input tests without requiring the optional pygame/zengl frontend stack."""
+"""HUD geometry/panel-state/input tests without requiring the optional pygame/zengl frontend stack.
+
+Layout source: notes/game_rules.md "Battle HUD layout". The HUD draws GPU quads directly (matching
+the rest of the engine's rendering), so these tests exercise the pure logic that decides *what*
+gets drawn (panel state, slot layout, hit testing, minimap marker selection) rather than pixel
+output.
+"""
 import sys
 import types
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
-
 
 try:
     import pygame
@@ -18,6 +23,15 @@ except ModuleNotFoundError:
     pygame.MOUSEBUTTONUP = 5
     pygame.K_HOME = 6
     pygame.K_ESCAPE = 7
+
+    class _Rect:
+        def __init__(self, x, y, w, h):
+            self.x, self.y, self.w, self.h = x, y, w, h
+
+        def collidepoint(self, pos):
+            x, y = pos
+            return self.x <= x < self.x + self.w and self.y <= y < self.y + self.h
+    pygame.Rect = _Rect
     sys.modules["pygame"] = pygame
 
 try:
@@ -26,174 +40,379 @@ except ModuleNotFoundError:
     sys.modules["zengl"] = types.ModuleType("zengl")
 
 from whshr.engine import Battle, Regiment
-from whshr.battlefield import SpriteFrame, SpriteSheet
-from whshr.frontend.battle_view import BANNER_MARKER_RAISE, BattleView, INSTANCE
-from whshr.frontend.hud import Hud, MINIMAP_SIZE
+from whshr.frontend.battle_view import BattleView
+from whshr.frontend.hud import FIXED_BUTTONS, MINIMAP_RECT, PANEL_RECT, Hud
 
 
-class HudTests(unittest.TestCase):
-    def setUp(self):
-        player = Regiment("player", "Player", 100, 100, 0, True, models=10, ranks=2)
-        enemy = Regiment("enemy", "Enemy", 700, 600, 0, False, models=10, ranks=2)
-        self.hud = Hud.__new__(Hud)
-        self.hud.field = SimpleNamespace(width=1000, height=800, palette=[(0, 0, 0), (12, 34, 56)], ui_sheets={})
-        self.hud.battle = Battle(1000, 800, [player, enemy])
-        self.hud.selected = "player"
-        self.hud._draw_size = (1280, 720)
-        self.hud.pressed_action = None
+def _hud(selected="player", regiments=None, **overrides):
+    if regiments is None:
+        regiments = [
+            Regiment("player", "Player", 100, 100, 0, True, models=10, ranks=2, hud_class="inf"),
+            Regiment("enemy", "Enemy", 700, 600, 128, False, models=10, ranks=2, hud_class="inf"),
+        ]
+    instance = Hud.__new__(Hud)
+    instance.field = SimpleNamespace(width=1000, height=800, palette=[(0, 0, 0)], ui_sheets={})
+    instance.battle = Battle(1000, 800, regiments)
+    instance.selected = selected
+    instance._draw_size = (640, 480)
+    instance.pressed = None
+    instance.panel_set = "idle"
+    instance.pending_order = None
+    instance.marker_mode = 0
+    instance._marker_order = []
+    for key, value in overrides.items():
+        setattr(instance, key, value)
+    return instance
 
-    def test_given_hud_chrome_when_hit_tested_then_all_drawn_regions_are_occupied(self):
-        self.assertTrue(self.hud.occupies((1030, 30)))  # minimap
-        self.assertTrue(self.hud.occupies((20, 600)))   # selected-unit panel
-        self.assertTrue(self.hud.occupies((1170, 550)))  # command panel
-        self.assertFalse(self.hud.occupies((500, 300)))
 
-    def test_given_a_minimap_pixel_when_converted_then_it_maps_to_the_battlefield_axes(self):
-        self.assertEqual(self.hud.minimap_position((1024, 16)), (0.0, 800.0))
-        self.assertEqual(self.hud.minimap_position((1263, 299)), (1000.0, 0.0))
-        self.assertIsNone(self.hud.minimap_position((500, 300)))
+class PanelStateTests(unittest.TestCase):
+    def test_given_nothing_selected_then_the_idle_no_selection_layout_is_used(self):
+        hud = _hud(selected=None)
 
-    def test_given_an_active_bannered_regiment_when_the_minimap_is_drawn_then_its_marker_is_bottom_centred(self):
-        marker = SpriteFrame(3, 2, 0, 2, bytes((0, 0, 0, 0, 1, 0)))
-        self.hud.field.ui_sheets["banner"] = SpriteSheet("BANNER", [marker, marker], [])
-        self.hud.battle.regiments["player"].banner = "banner"
-        self.hud._minimap_background = bytes((1, 2, 3, 255)) * (MINIMAP_SIZE[0] * MINIMAP_SIZE[1])
+        self.assertEqual(hud.panel_state(), ("idle", None))
+        self.assertEqual(hud.slots(), {"TL": "move", "TR": "attack", "BR": "independent"})
 
-        rgba = self.hud._minimap_rgba()
+    def test_given_an_idle_infantry_regiment_then_it_has_move_attack_independent(self):
+        hud = _hud()
 
-        x = round(100 / 1000 * (MINIMAP_SIZE[0] - 1))
-        y = round((1 - 100 / 800) * (MINIMAP_SIZE[1] - 1))
-        offset = (y * MINIMAP_SIZE[0] + x) * 4
-        self.assertEqual(rgba[offset:offset + 4], bytes((12, 34, 56, 255)))
-        self.assertEqual(self.hud.minimap_regiment_at((1024 + x, 16 + y)), "player")
-        selected_rim = rgba[(y * MINIMAP_SIZE[0] + x - 1) * 4:(y * MINIMAP_SIZE[0] + x) * 4]
-        self.hud.selected = None
-        deselected = self.hud._minimap_rgba()
-        self.assertNotEqual(selected_rim, deselected[(y * MINIMAP_SIZE[0] + x - 1) * 4:(y * MINIMAP_SIZE[0] + x) * 4])
+        self.assertEqual(hud.panel_state(), ("idle", "inf"))
+        self.assertEqual(hud.slots(), {"TL": "move", "TR": "attack", "BR": "independent"})
 
-    def test_given_a_selected_marker_with_art_at_its_frame_edge_when_drawn_then_selection_is_visually_distinguished(self):
-        marker = SpriteFrame(1, 1, 0, 1, bytes((1,)))
-        self.hud.field.ui_sheets["banner"] = SpriteSheet("BANNER", [marker, marker], [])
-        self.hud.battle.regiments["player"].banner = "banner"
-        self.hud._minimap_background = bytes((1, 2, 3, 255)) * (MINIMAP_SIZE[0] * MINIMAP_SIZE[1])
+    def test_given_an_idle_artillery_regiment_then_it_has_no_move_slot(self):
+        regiments = [Regiment("player", "Gun", 0, 0, 0, True, hud_class="art")]
+        hud = _hud(regiments=regiments)
 
-        rgba = self.hud._minimap_rgba()
+        self.assertEqual(hud.slots(), {"TR": "attack", "BR": "independent"})
 
-        x = round(100 / 1000 * (MINIMAP_SIZE[0] - 1))
-        y = round((1 - 100 / 800) * (MINIMAP_SIZE[1] - 1))
-        selected_rim = rgba[(y * MINIMAP_SIZE[0] + x - 1) * 4:(y * MINIMAP_SIZE[0] + x) * 4]
-        self.hud.selected = None
-        deselected = self.hud._minimap_rgba()
-        self.assertNotEqual(selected_rim, deselected[(y * MINIMAP_SIZE[0] + x - 1) * 4:(y * MINIMAP_SIZE[0] + x) * 4])
+    def test_given_an_idle_wizard_regiment_then_magic_and_back_are_present(self):
+        regiments = [Regiment("player", "Wiz", 0, 0, 0, True, hud_class="wiz")]
+        hud = _hud(regiments=regiments)
 
-    def test_given_overlapping_markers_when_one_is_selected_then_its_art_is_rendered_last(self):
-        player, enemy = self.hud.battle.regiments.values()
-        enemy.x, enemy.y = player.x, player.y
-        player_marker = SpriteFrame(3, 2, 0, 2, bytes((0, 0, 0, 0, 1, 0)))
-        enemy_marker = SpriteFrame(3, 2, 0, 2, bytes((0, 0, 0, 0, 2, 0)))
-        self.hud.field.palette.append((90, 80, 70))
-        self.hud.field.ui_sheets.update({
-            "player-banner": SpriteSheet("PLAYER", [player_marker, player_marker], []),
-            "enemy-banner": SpriteSheet("ENEMY", [enemy_marker, enemy_marker], []),
-        })
-        player.banner, enemy.banner = "player-banner", "enemy-banner"
-        self.hud._promote_marker("player")
-        self.hud._minimap_background = bytes((1, 2, 3, 255)) * (MINIMAP_SIZE[0] * MINIMAP_SIZE[1])
+        self.assertEqual(hud.slots(),
+                         {"TL": "move", "TR": "attack", "BR": "independent", "BL": "magic", "C": "back"})
 
-        rgba = self.hud._minimap_rgba()
+    def test_given_a_regiment_in_melee_then_the_melee_noncaster_set_is_used(self):
+        regiments = [Regiment("player", "P", 0, 0, 0, True, hud_class="inf", in_melee=True)]
+        hud = _hud(regiments=regiments)
 
-        x = round(player.x / self.hud.field.width * (MINIMAP_SIZE[0] - 1))
-        y = round((1 - player.y / self.hud.field.height) * (MINIMAP_SIZE[1] - 1))
-        offset = (y * MINIMAP_SIZE[0] + x) * 4
-        self.assertEqual(rgba[offset:offset + 4], bytes((12, 34, 56, 255)))
-        self.hud.selected = None
-        self.assertEqual(self.hud._minimap_rgba()[offset:offset + 4], bytes((12, 34, 56, 255)))
+        self.assertEqual(hud.panel_state(), ("melee_noncaster", "inf"))
+        self.assertEqual(hud.slots(), {"TR": "withdraw", "C": "fight_harder"})
 
-    def test_given_a_destroyed_bannered_regiment_when_the_minimap_is_drawn_then_its_marker_is_absent(self):
-        marker = SpriteFrame(3, 2, 0, 2, bytes((0, 0, 0, 0, 1, 0)))
-        self.hud.field.ui_sheets["banner"] = SpriteSheet("BANNER", [marker, marker], [])
-        player = self.hud.battle.regiments["player"]
-        player.banner, player.models = "banner", 0
-        self.hud._minimap_background = bytes((1, 2, 3, 255)) * (MINIMAP_SIZE[0] * MINIMAP_SIZE[1])
+    def test_given_a_routing_regiment_then_the_rally_set_is_used(self):
+        regiments = [Regiment("player", "P", 0, 0, 0, True, hud_class="inf", routing=True)]
+        hud = _hud(regiments=regiments)
 
-        rgba = self.hud._minimap_rgba()
+        self.assertEqual(hud.panel_state(), ("rally", "inf"))
+        self.assertEqual(hud.slots(), {"BR": "rally"})
 
-        x = round(100 / 1000 * (MINIMAP_SIZE[0] - 1))
-        y = round((1 - 100 / 800) * (MINIMAP_SIZE[1] - 1))
-        offset = (y * MINIMAP_SIZE[0] + x) * 4
-        self.assertEqual(rgba[offset:offset + 4], bytes((1, 2, 3, 255)))
+    def test_given_a_regiment_with_an_attack_target_not_yet_in_melee_then_charging_has_no_buttons(self):
+        regiments = [Regiment("player", "P", 0, 0, 0, True, hud_class="inf", attack_target="enemy")]
+        hud = _hud(regiments=regiments)
 
-    def test_given_a_selected_regiment_when_commands_are_checked_then_only_valid_orders_enable(self):
-        player = self.hud.battle.regiments["player"]
-        self.assertEqual(self.hud.hit_test((1161, 549)), "move")
-        self.assertTrue(self.hud._button_enabled("attack", player))
-        self.assertFalse(self.hud._button_enabled("halt", player))
-        self.assertFalse(self.hud._button_enabled("shoot", player))
+        self.assertEqual(hud.panel_state(), ("charging", "inf"))
+        self.assertEqual(hud.slots(), {})
+
+    def test_given_a_class_with_no_buttons_then_no_slots_are_shown(self):
+        regiments = [Regiment("player", "P", 0, 0, 0, True, hud_class=None)]
+        hud = _hud(regiments=regiments)
+
+        self.assertEqual(hud.panel_state(), (None, None))
+        self.assertEqual(hud.slots(), {})
+
+    def test_given_navigation_into_the_move_set_then_ranks_and_facing_subsets_are_offered(self):
+        hud = _hud()
+
+        hud.press("move")
+
+        self.assertEqual(hud.panel_state(), ("move", "inf"))
+        self.assertEqual(hud.slots(),
+                         {"TL": "ranks_subset", "TR": "facing_subset", "BR": "halt", "BL": "face_point", "C": "back"})
+
+    def test_given_the_attack_set_is_entered_then_the_noncaster_variant_is_used(self):
+        # whshr.engine.Regiment has no spells/items list, so the caster variant is never selected
+        # (a documented simplification, notes/glue_engine_integration... see Hud._caster).
+        hud = _hud()
+
+        hud.press("attack")
+
+        self.assertEqual(hud.panel_state(), ("attack_noncaster", "inf"))
+
+    def test_given_back_is_pressed_then_navigation_returns_to_idle(self):
+        hud = _hud()
+        hud.press("move")
+
+        hud.press("back")
+
+        self.assertEqual(hud.panel_state(), ("idle", "inf"))
+
+    def test_given_a_new_selection_then_panel_navigation_and_pending_order_reset(self):
+        hud = _hud()
+        hud.press("move")
+        self.assertEqual(hud.pending_order, "move")
+
+        hud.set_selected("enemy")
+
+        self.assertEqual(hud.panel_set, "idle")
+        self.assertIsNone(hud.pending_order)
+
+
+class PressAndOrderTests(unittest.TestCase):
+    def test_given_move_pressed_then_it_arms_a_pending_order_and_issues_no_order_itself(self):
+        hud = _hud()
+
+        order = hud.press("move")
+
+        self.assertIsNone(order)
+        self.assertEqual(hud.pending_order, "move")
+
+    def test_given_halt_pressed_then_it_is_returned_as_an_immediately_issuable_order(self):
+        hud = _hud()
+
+        order = hud.press("halt")
+
+        self.assertEqual(order, "halt")
+
+    def test_given_a_command_the_engine_does_not_support_then_pressing_it_issues_no_order(self):
+        hud = _hud()
+
+        self.assertIsNone(hud.press("charge"))
+        self.assertIsNone(hud.press("withdraw"))
+        self.assertIsNone(hud.press("rally"))
+
+    def test_given_order_completed_then_pending_order_clears_and_navigation_returns_to_idle(self):
+        hud = _hud()
+        hud.press("move")
+
+        hud.order_completed()
+
+        self.assertIsNone(hud.pending_order)
+        self.assertEqual(hud.panel_set, "idle")
+
+
+class ButtonEnabledTests(unittest.TestCase):
+    def test_given_an_unsupported_command_then_it_is_always_disabled(self):
+        hud = _hud()
+        player = hud.battle.regiments["player"]
+
+        self.assertFalse(hud._button_enabled("charge", player))
+
+    def test_given_back_then_it_is_always_enabled(self):
+        hud = _hud()
+
+        self.assertTrue(hud._button_enabled("back", None))
+
+    def test_given_halt_then_it_is_enabled_only_while_moving(self):
+        hud = _hud()
+        player = hud.battle.regiments["player"]
+
+        self.assertFalse(hud._button_enabled("halt", player))
         player.target_x, player.target_y = 500, 500
-        self.assertTrue(self.hud._button_enabled("halt", player))
-        player.routing = True
-        self.assertFalse(self.hud._button_enabled("move", player))
+        self.assertTrue(hud._button_enabled("halt", player))
 
-    def test_given_a_pressed_command_when_released_then_its_visual_state_is_cleared(self):
-        self.hud.set_pressed("move")
-        self.assertEqual(self.hud.pressed_action, "move")
-        self.hud.set_pressed(None)
-        self.assertIsNone(self.hud.pressed_action)
+    def test_given_an_inactive_or_enemy_regiment_then_orders_are_disabled(self):
+        hud = _hud()
+        enemy = hud.battle.regiments["enemy"]
+
+        self.assertFalse(hud._button_enabled("move", enemy))
+        self.assertFalse(hud._button_enabled("move", None))
+
+
+class HitTestAndOccupiesTests(unittest.TestCase):
+    def test_given_a_point_on_the_minimap_or_panel_then_it_is_occupied(self):
+        hud = _hud()
+
+        self.assertTrue(hud.occupies((MINIMAP_RECT[0] + 5, MINIMAP_RECT[1] + 5)))
+        self.assertTrue(hud.occupies((PANEL_RECT[0] + 5, PANEL_RECT[1] + 5)))
+        self.assertFalse(hud.occupies((320, 100)))
+
+    def test_given_a_fixed_button_position_then_hit_test_returns_its_name(self):
+        hud = _hud()
+        pos, _frames, _size = FIXED_BUTTONS["options"]
+
+        self.assertEqual(hud.hit_test((PANEL_RECT[0] + pos[0] + 1, PANEL_RECT[1] + pos[1] + 1)), "options")
+
+    def test_given_the_move_slot_position_then_hit_test_returns_move(self):
+        hud = _hud()
+        # TL slot: COMMAND_SUBWINDOW (492, 0) + (7, 11), inside the panel at PANEL_RECT's origin.
+        pos = (PANEL_RECT[0] + 492 + 7 + 1, PANEL_RECT[1] + 0 + 11 + 1)
+
+        self.assertEqual(hud.hit_test(pos), "move")
+
+    def test_given_a_disabled_slot_command_then_hit_test_does_not_return_it(self):
+        # Halt is only enabled while moving; the player regiment starts stationary.
+        hud = _hud()
+        hud.press("move")  # move set: BR = halt
+        from whshr.frontend.hud import COMMAND_SUBWINDOW, SLOT_POSITIONS, SLOT_SIZE
+        x, y = SLOT_POSITIONS["BR"]
+        pos = (PANEL_RECT[0] + COMMAND_SUBWINDOW[0] + x + SLOT_SIZE[0] // 2,
+              PANEL_RECT[1] + COMMAND_SUBWINDOW[1] + y + SLOT_SIZE[1] // 2)
+
+        self.assertIsNone(hud.hit_test(pos))
+
+
+class MinimapTests(unittest.TestCase):
+    def test_given_a_minimap_pixel_when_converted_then_it_maps_to_the_battlefield_axes(self):
+        hud = _hud()
+
+        left, top, width, height = hud._map_scale()
+        self.assertEqual(hud.minimap_position((left, top)), (0.0, 800.0))
+        self.assertEqual(hud.minimap_position((left + width - 1, top + height - 1)), (1000.0, 0.0))
+        self.assertIsNone(hud.minimap_position((0, 0)))
+
+    def test_given_a_regiment_position_then_world_to_map_pixel_round_trips_through_minimap_position(self):
+        hud = _hud()
+        player = hud.battle.regiments["player"]
+
+        pixel = hud._world_to_map_pixel(player.x, player.y)
+        world = hud.minimap_position(pixel)
+
+        self.assertAlmostEqual(world[0], player.x, delta=6.0)
+        self.assertAlmostEqual(world[1], player.y, delta=6.0)
+
+    def test_given_a_regiment_marker_then_minimap_regiment_at_finds_it_by_proximity(self):
+        hud = _hud()
+        player = hud.battle.regiments["player"]
+
+        pixel = hud._world_to_map_pixel(player.x, player.y)
+
+        self.assertEqual(hud.minimap_regiment_at(pixel), "player")
+        self.assertIsNone(hud.minimap_regiment_at((0, 0)))
+
+    def test_given_marker_mode_0_then_every_regiment_shows_its_banner(self):
+        hud = _hud()
+        player, enemy = hud.battle.regiments.values()
+
+        self.assertTrue(hud._shows_banner(player))
+        self.assertTrue(hud._shows_banner(enemy))
+
+    def test_given_marker_mode_1_then_only_the_selected_regiment_shows_its_banner(self):
+        hud = _hud()
+        hud.marker_mode = 1
+        player, enemy = hud.battle.regiments.values()
+
+        self.assertTrue(hud._shows_banner(player))
+        self.assertFalse(hud._shows_banner(enemy))
+
+    def test_given_marker_mode_2_then_only_friendly_regiments_show_their_banner(self):
+        hud = _hud()
+        hud.marker_mode = 2
+        player, enemy = hud.battle.regiments.values()
+
+        self.assertTrue(hud._shows_banner(player))
+        self.assertFalse(hud._shows_banner(enemy))
+
+    def test_given_a_fighting_player_regiment_then_its_dot_frame_is_the_fighting_friendly_base_plus_facing(self):
+        hud = _hud()
+        player = hud.battle.regiments["player"]
+        player.in_melee, player.direction = True, 0
+
+        self.assertEqual(hud._regiment_dot_frame(player), 119)
+
+    def test_given_a_routing_enemy_regiment_then_its_dot_frame_is_the_broken_enemy_base_plus_facing(self):
+        hud = _hud()
+        enemy = hud.battle.regiments["enemy"]
+        enemy.routing, enemy.direction = True, 128  # 128/64 = 2 eighths
+
+        self.assertEqual(hud._regiment_dot_frame(enemy), 143 + 2)
+
+    def test_given_a_clicked_unit_when_selected_then_it_is_promoted_to_the_top_paint_order(self):
+        hud = _hud()
+
+        hud._promote_marker("enemy")
+
+        self.assertEqual(list(hud._marker_order)[-1], "enemy")
+
+
+class HudClassTests(unittest.TestCase):
+    def test_given_a_unit_without_an_s_side_stat_then_hud_class_is_none(self):
+        from whshr.engine import _decode_combat_profile
+
+        decoded = _decode_combat_profile({})
+
+        self.assertIsNone(decoded["hud_class"])
+
+    def test_given_the_archer_race_type_then_hud_class_is_arch(self):
+        from whshr.engine import _decode_combat_profile
+
+        decoded = _decode_combat_profile({"stats": {"s_side": [3, 10, 10, 1]}})
+
+        self.assertEqual(decoded["hud_class"], "arch")
+
+    def test_given_the_wizard_race_type_then_hud_class_is_wiz(self):
+        from whshr.engine import _decode_combat_profile
+
+        decoded = _decode_combat_profile({"stats": {"s_side": [19, 1, 1, 1]}})
+
+        self.assertEqual(decoded["hud_class"], "wiz")
 
 
 class BattleViewHudInputTests(unittest.TestCase):
     def _view(self, hud, selected_id="player"):
         view = BattleView.__new__(BattleView)
         view.hud = hud
-        view.scene = SimpleNamespace(selected_id=selected_id)
+        view.scene = SimpleNamespace(selected_id=selected_id, battle=SimpleNamespace(
+            regiments={"player": SimpleNamespace(player=True)}))
         view.camera = SimpleNamespace()
         view.order_mode = None
         view._ground_click = Mock(return_value=(("ground",),))
         return view
 
+    def _hud_mock(self, **overrides):
+        base = dict(
+            click_minimap_tab=lambda pos: False, minimap_position=lambda pos: None,
+            minimap_regiment_at=lambda pos: None, hit_test=lambda pos: None,
+            occupies=lambda pos: True, set_pressed=Mock(), press=lambda name: None,
+            order_completed=Mock(),
+        )
+        base.update(overrides)
+        return SimpleNamespace(**base)
+
     def test_given_a_non_actionable_hud_click_when_handled_then_it_never_reaches_ground_picking(self):
-        hud = SimpleNamespace(minimap_regiment_at=lambda pos: None, minimap_position=lambda pos: None, hit_test=lambda pos: None,
-                              occupies=lambda pos: True, set_pressed=Mock())
-        view = self._view(hud)
+        view = self._view(self._hud_mock())
         event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
 
         self.assertEqual(view.events(event), ())
         view._ground_click.assert_not_called()
 
-    def test_given_a_selected_unit_when_the_minimap_is_clicked_then_it_emits_a_move_order(self):
-        hud = SimpleNamespace(minimap_regiment_at=lambda pos: None, minimap_position=lambda pos: (123.0, 456.0), hit_test=lambda pos: None,
-                              occupies=lambda pos: True, set_pressed=Mock())
+    def test_given_a_selected_unit_when_the_minimap_is_clicked_with_a_pending_move_then_it_moves(self):
+        hud = self._hud_mock(minimap_position=lambda pos: (123.0, 456.0))
         view = self._view(hud)
+        view.order_mode = "move"
+
         event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
 
         self.assertEqual(view.events(event), (("move_to", 123.0, 456.0),))
         view._ground_click.assert_not_called()
+        hud.order_completed.assert_called_once()
 
-    def test_given_no_selected_unit_when_the_minimap_is_clicked_then_it_does_not_issue_or_leak_an_order(self):
-        hud = SimpleNamespace(minimap_regiment_at=lambda pos: None, minimap_position=lambda pos: (123.0, 456.0), hit_test=lambda pos: None,
-                              occupies=lambda pos: True, set_pressed=Mock())
-        view = self._view(hud, selected_id=None)
+    def test_given_no_pending_order_then_an_empty_minimap_click_issues_nothing(self):
+        hud = self._hud_mock(minimap_position=lambda pos: (123.0, 456.0))
+        view = self._view(hud)
+
         event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
 
         self.assertEqual(view.events(event), ())
         view._ground_click.assert_not_called()
 
-    def test_given_a_move_button_when_held_then_its_pressed_art_stays_visible_until_mouse_up(self):
-        hud = SimpleNamespace(minimap_regiment_at=lambda pos: None, minimap_position=lambda pos: None, hit_test=lambda pos: "move",
-                              occupies=lambda pos: True, set_pressed=Mock())
+    def test_given_a_move_button_when_pressed_then_order_mode_is_armed_and_no_order_fires_yet(self):
+        hud = self._hud_mock(hit_test=lambda pos: "move", press=lambda name: None)
         view = self._view(hud)
         down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
-        up = SimpleNamespace(type=pygame.MOUSEBUTTONUP, button=1, pos=(100, 100))
 
         self.assertEqual(view.events(down), ())
         self.assertEqual(view.order_mode, "move")
         self.assertEqual(hud.set_pressed.call_args_list[-1].args, ("move",))
-        self.assertEqual(view.events(up), ())
-        self.assertEqual(hud.set_pressed.call_args_list[-1].args, (None,))
+
+    def test_given_a_halt_button_when_pressed_then_it_issues_the_halt_order_immediately(self):
+        hud = self._hud_mock(hit_test=lambda pos: "halt", press=lambda name: "halt")
+        view = self._view(hud)
+        down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+
+        self.assertEqual(view.events(down), (("halt",),))
+        hud.order_completed.assert_called_once()
 
     def test_given_a_right_click_that_ends_on_hud_chrome_then_it_does_not_issue_a_ground_order(self):
-        hud = SimpleNamespace(minimap_regiment_at=lambda pos: None, minimap_position=lambda pos: None, hit_test=lambda pos: None,
-                              occupies=lambda pos: pos == (20, 20), set_pressed=Mock())
+        hud = self._hud_mock(occupies=lambda pos: pos == (20, 20))
         view = self._view(hud)
         down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=3, pos=(10, 10))
         up = SimpleNamespace(type=pygame.MOUSEBUTTONUP, button=3, pos=(20, 20))
@@ -203,17 +422,25 @@ class BattleViewHudInputTests(unittest.TestCase):
         view._ground_click.assert_not_called()
 
     def test_given_a_unit_marker_when_clicked_on_the_minimap_then_that_unit_is_selected(self):
-        hud = SimpleNamespace(minimap_regiment_at=lambda pos: "player", minimap_position=lambda pos: (123.0, 456.0),
-                              hit_test=lambda pos: None, occupies=lambda pos: True, set_pressed=Mock())
+        hud = self._hud_mock(minimap_regiment_at=lambda pos: "player", minimap_position=lambda pos: (1.0, 2.0))
         view = self._view(hud)
         event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
 
         self.assertEqual(view.events(event), (("select", "player"),))
         view._ground_click.assert_not_called()
 
+    def test_given_a_minimap_tab_click_then_it_is_consumed_without_a_ground_or_move_order(self):
+        hud = self._hud_mock(click_minimap_tab=lambda pos: True)
+        view = self._view(hud)
+        event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+
+        self.assertEqual(view.events(event), ())
+        view._ground_click.assert_not_called()
+
 
 class BattleBannerVisibilityTests(unittest.TestCase):
     def _view_with_banner(self, active=True):
+        from whshr.battlefield import SpriteFrame, SpriteSheet
         regiment = Regiment("player", "Player", 100, 200, 0, True, models=1 if active else 0,
                             banner="banner")
         marker = SpriteFrame(32, 32, 0, 32, bytes(32 * 32))
@@ -230,6 +457,7 @@ class BattleBannerVisibilityTests(unittest.TestCase):
         return view
 
     def test_given_an_active_bannered_regiment_when_the_battle_view_draws_then_one_banner_marker_is_visible(self):
+        from whshr.frontend.battle_view import BANNER_MARKER_RAISE, INSTANCE
         instance = INSTANCE.unpack(self._view_with_banner()._instances())
 
         self.assertEqual(instance[:3], (12.5, 2.0 + BANNER_MARKER_RAISE, 25.0))
@@ -240,6 +468,8 @@ class BattleBannerVisibilityTests(unittest.TestCase):
         self.assertEqual(self._view_with_banner(active=False)._instances(), b"")
 
     def test_given_overlapping_regiment_banners_when_one_is_selected_then_its_marker_is_drawn_last(self):
+        from whshr.battlefield import SpriteFrame, SpriteSheet
+        from whshr.frontend.battle_view import INSTANCE
         player = Regiment("player", "Player", 100, 200, 0, True, banner="player-banner")
         enemy = Regiment("enemy", "Enemy", 100, 200, 0, False, banner="enemy-banner")
         marker = SpriteFrame(32, 32, 0, 32, bytes(32 * 32))

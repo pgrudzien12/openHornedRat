@@ -223,23 +223,25 @@ class BattleView(SceneView):
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             self.order_mode = None
             self.hud.set_pressed(None)
+            self.hud.order_completed()
             return (("deselect",),)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.hud.set_pressed(None)
-            minimap_regiment = self.hud.minimap_regiment_at(event.pos)
-            if minimap_regiment is not None:
-                self.order_mode = None
-                return (("select", minimap_regiment),)
-            minimap_position = self.hud.minimap_position(event.pos)
-            if minimap_position is not None:
-                self.order_mode = None
-                return (("move_to", *minimap_position),) if self.scene.selected_id is not None else ()
+            if self.hud.click_minimap_tab(event.pos):
+                return ()
+            if self.hud.minimap_position(event.pos) is not None:
+                return self._minimap_click(event.pos)
             action = self.hud.hit_test(event.pos)
-            self.hud.set_pressed(action)
-            if action == "halt":
-                return (("halt",),)
-            if action in {"move", "attack"}:
-                self.order_mode = action
+            if action is not None:
+                self.hud.set_pressed(action)
+                order = self.hud.press(action)
+                if action in {"move", "attack"}:
+                    self.order_mode = action
+                    return ()
+                if order is not None:
+                    self.order_mode = None
+                    self.hud.order_completed()
+                    return ((order,),)
                 return ()
             if self.hud.occupies(event.pos):
                 return ()
@@ -276,6 +278,7 @@ class BattleView(SceneView):
         if self.scene.selected_id is not None:
             enemy_id = self.scene.battle.regiment_at(x, y, player_only=False)
             mode, self.order_mode = self.order_mode, None
+            self.hud.order_completed()
             if mode == "attack":
                 return (("attack", enemy_id),) if enemy_id is not None else ()
             if mode == "move":
@@ -283,6 +286,26 @@ class BattleView(SceneView):
             if enemy_id is not None:
                 return (("attack", enemy_id),)
         return (("move_to", x, y),)
+
+    def _minimap_click(self, pixel):
+        """A minimap click behaves like a 3D-view ground click (notes/game_rules.md "Battle HUD
+        layout": "a left click on the minimap is handled exactly like a click in the 3D view"),
+        sourced from the HUD's own marker hit-testing instead of 3D picking - except an empty
+        click with no pending order never issues a direct move."""
+        regiment_id = self.hud.minimap_regiment_at(pixel)
+        if regiment_id is not None and self.order_mode is None:
+            regiment = self.scene.battle.regiments.get(regiment_id)
+            return (("select", regiment_id),) if regiment is not None and regiment.player else ()
+        world = self.hud.minimap_position(pixel)
+        if world is None or self.scene.selected_id is None:
+            return ()
+        mode, self.order_mode = self.order_mode, None
+        self.hud.order_completed()
+        if mode == "attack":
+            return (("attack", regiment_id),) if regiment_id is not None else ()
+        if mode == "move":
+            return (("move_to", *world),)
+        return ()
 
     def animate(self, seconds):
         keys = pygame.key.get_pressed()
@@ -378,7 +401,7 @@ class BattleView(SceneView):
         self.mesh.render()
         self.sprites.render()
         self.hud.set_selected(self.scene.selected_id)
-        self.hud.draw(width, height)
+        self.hud.draw(width, height, self.camera)
 
     def release(self):
         for resource in (self.mesh, self.sprites, self.vertex_buffer, self.instance_buffer, self.camera_buffer,
