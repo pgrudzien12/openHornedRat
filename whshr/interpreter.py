@@ -442,9 +442,19 @@ class ScriptInterpreter:
         return state.pc + 1
 
     def op_Loop(self, state, operand, script_words, unit_id, tick_count, rng):
-        """Loop: jump back to the PC pushed by PushPC."""
+        """Loop: jump back to the PC pushed by PushPC.
+
+        Peeks the return stack, it must NOT pop it -- PushPC runs once before the loop body and
+        Loop is meant to jump back every iteration (a "while true" idiom), exactly like its
+        siblings LoopIfTrue/LoopIfFalse already do correctly. A prior version popped, so the entry
+        was gone after the very first jump back: the second time the loop reached Loop, the stack
+        was empty and it just fell through to pc + 1 instead of looping again. Confirmed as the
+        real cause of NPC peasant regiments (BF003) scattering exactly twice via
+        PushPC/ScatterModelsToNode/SetWait/Wait/Loop, then freezing in place for the rest of the
+        battle: the second Loop silently exited the "patrol forever" cycle after one repetition.
+        """
         if state.return_stack and len(state.return_stack[-1]) == 1:
-            return state.return_stack.pop()[0]
+            return state.return_stack[-1][0]
         return state.pc + 1
 
     def op_Yield(self, state, operand, script_words, unit_id, tick_count, rng):

@@ -76,6 +76,19 @@ Landed against this document's "Proposed" section:
   17 MB, hard to read for anything else). Fixed to yield like `Wait`/`WaitUntilUnitFlags` do.
   Regression tests: `tests/test_interpreter_phase2_opcodes.py` (`WaitForBattleStartYieldTests`),
   `tests/test_interpreter_tracing.py` (`WaitForBattleStartIterationTests`).
+- **Real bug found (after peasants were reported still freezing mid-patrol despite the above) and
+  fixed**: `op_Loop` popped the return stack instead of peeking it, unlike its siblings
+  `LoopIfTrue`/`LoopIfFalse`, which already peeked correctly. `PushPC` runs once, before a loop
+  body; `Loop` is meant to jump back to it on every iteration (a "while true" idiom). Popping
+  destroyed that stack entry after the very first jump back, so the *second* time a script reached
+  `Loop`, the stack was already empty and it silently fell through to `pc + 1` instead of looping
+  again. Confirmed from a real trace as the exact cause of NPC peasant regiments (BF003) scattering
+  exactly twice via `PushPC`/`ScatterModelsToNode`/`SetWait`/`Wait`/`Loop`, then freezing in place
+  for the rest of the battle (regiment data showed `models` and `corpses` unchanged throughout --
+  they were never actually dying, just permanently stuck). Regression tests:
+  `tests/test_interpreter_phase2_opcodes.py` (`LoopPeeksNotPopsTests`),
+  `tests/test_interpreter_tracing.py` (`ScatterPatrolLoopEndToEndTests`, a full `Battle.tick()`
+  replay of the exact script shape that proves the loop now repeats more than twice).
 - **Real regression found and fixed after item 2 landed**: `SetBehaviour` called
   `LibraryBehaviors.track_threat()` immediately and unconditionally the moment it ran, setting
   `regiment.attack_target` on tick 0/1 regardless of any `SetWait`/`Wait`/`MoveToNode` gating later

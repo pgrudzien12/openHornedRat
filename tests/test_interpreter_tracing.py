@@ -85,6 +85,40 @@ class WaitForBattleStartIterationTests(unittest.TestCase):
         self.assertEqual(state.pc, 0)  # unchanged: still waiting
 
 
+class ScatterPatrolLoopEndToEndTests(unittest.TestCase):
+    """Regression test replicating the real NPC peasant script shape end to end through full
+    Battle.tick() calls: PushPC / ScatterModelsToNode / SetWait / Wait / Loop. Before the op_Loop
+    peek-not-pop fix, this pattern scattered exactly twice then froze forever -- the second Loop
+    fell through instead of jumping back, since the first Loop had already popped (destroyed) the
+    stack entry PushPC only pushes once."""
+
+    def setUp(self):
+        self.regiment = Regiment("peasants", "Peasants", 100, 100, 0, False, models=5, ranks=1)
+        words = [
+            _word(0x06),                    # 0: PushPC
+            _word(0x48), 2,                 # 1: ScatterModelsToNode 2
+            _word(0x1A), 3,                 # 3: SetWait 3 (short, so the test doesn't need many ticks)
+            _word(0x1C),                    # 5: Wait
+            _word(0x07),                    # 6: Loop
+            behaviour.END,                  # 7
+        ]
+        self.script_dll = _FakeScriptDll({0: words})
+        self.battle = Battle(2000, 2000, [self.regiment], seed=1995,
+                              script_dll=self.script_dll, script_ids={"peasants": 0},
+                              nodes={2: (700.0, 600.0)})
+
+    def test_scatter_loop_repeats_more_than_twice(self):
+        for _ in range(40):
+            self.battle.tick()
+
+        state = self.battle.event_bus.unit_states["peasants"]
+        # Loop's return-stack entry must still be there after several iterations, not consumed.
+        self.assertEqual(len(state.return_stack), 1)
+        # A regression would have the pc stuck past the loop body (pc >= 7, End) after ~2 cycles;
+        # a working loop keeps cycling pc back through 1 (ScatterModelsToNode) repeatedly.
+        self.assertLess(state.pc, 7)
+
+
 class BattleLoggerOpcodeRecordTests(unittest.TestCase):
     """write_opcode's record shape and its trace_scripts/enabled gating."""
 

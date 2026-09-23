@@ -114,6 +114,44 @@ class WaitForBattleStartYieldTests(unittest.TestCase):
         self.assertFalse(self.interp._should_yield)
 
 
+class LoopPeeksNotPopsTests(unittest.TestCase):
+    """Regression test: op_Loop popped the return stack (like a one-shot gosub return) instead of
+    peeking it (like its siblings LoopIfTrue/LoopIfFalse already do correctly). PushPC runs once
+    before a loop body; Loop is meant to jump back to it every iteration ("while true"), so popping
+    destroyed the loop anchor after exactly one repetition. Confirmed as the real cause of NPC
+    peasant regiments (BF003) scattering exactly twice, then freezing in place for the rest of the
+    battle: PushPC/ScatterModelsToNode/SetWait/Wait/Loop is precisely this idiom."""
+
+    def setUp(self):
+        self.interp = interpreter.ScriptInterpreter(None, None, None)
+
+    def test_loop_jumps_back_without_consuming_the_stack_entry(self):
+        state = interpreter.UnitScriptState()
+        state.pc = 10
+        self.interp.op_PushPC(state, None, [], "t", 0, None)  # pushes (11,)
+        self.assertEqual(len(state.return_stack), 1)
+
+        state.pc = 20
+        result = self.interp.op_Loop(state, None, [], "t", 0, None)
+        self.assertEqual(result, 11)
+        self.assertEqual(len(state.return_stack), 1)  # still there
+
+    def test_loop_can_jump_back_more_than_once(self):
+        """The actual bug: a second Loop call after the first must still jump back, not fall
+        through to pc + 1 because the stack entry was already consumed."""
+        state = interpreter.UnitScriptState()
+        state.pc = 10
+        self.interp.op_PushPC(state, None, [], "t", 0, None)  # pushes (11,)
+
+        state.pc = 20
+        first = self.interp.op_Loop(state, None, [], "t", 0, None)
+        state.pc = 20  # simulate the loop body running again and reaching Loop a second time
+        second = self.interp.op_Loop(state, None, [], "t", 0, None)
+
+        self.assertEqual(first, 11)
+        self.assertEqual(second, 11)  # previously: 21 (fell through, stack was already empty)
+
+
 class SwitchScriptPriorityTests(unittest.TestCase):
     def setUp(self):
         self.battle = Battle(500, 500, [Regiment("t", "T", 0, 0, 0, False, models=5, ranks=1)], seed=1995)
