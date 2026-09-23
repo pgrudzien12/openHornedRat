@@ -250,8 +250,81 @@ class FormationMovementTests(unittest.TestCase):
         self.assertFalse(self.regiment.walking)
         expected = formation_positions(self.regiment)
         for (x, y), (ex, ey) in zip(self.regiment.model_positions(), expected):
-            self.assertAlmostEqual(x, ex, places=2)
-            self.assertAlmostEqual(y, ey, places=2)
+            self.assertLessEqual(math.hypot(x - ex, y - ey), 3)
+
+
+class CatchUpWalkTests(unittest.TestCase):
+    """game_rules.md "Models chase the unit": each model walks from its stored world position."""
+
+    def test_given_four_ranks_when_the_anchor_moves_then_front_and_rear_models_take_rank_dependent_steps(self):
+        regiment = Regiment("block", "Block", 0, 0, 0, Side.PLAYER, models=20, ranks=4,
+                            speed_per_tick=speed_per_tick(4, 3))
+        battle = Battle(1000, 1000, [regiment])
+        before = list(regiment.model_positions())
+        regiment.y = 100
+
+        battle._advance_models(regiment, 1)
+
+        self.assertEqual(regiment.melee_models[0].current_speed, 1)
+        self.assertAlmostEqual(regiment.positions[0][1] - before[0][1], 36 * 2.4 / 256)
+        self.assertAlmostEqual(regiment.positions[16][1] - before[16][1], 12 * 2.4 / 256)
+
+    def test_given_a_model_already_walking_when_its_slot_changes_direction_then_it_keeps_its_heading_until_budget_runs_out(self):
+        regiment = Regiment("model", "Model", 0, 0, 0, Side.PLAYER,
+                            speed_per_tick=speed_per_tick(4, 3))
+        battle = Battle(1000, 1000, [regiment])
+        regiment.model_positions()
+        regiment.x = 100
+        battle._advance_models(regiment, 1)
+        first_x, first_y = regiment.positions[0]
+        regiment.y = 100
+
+        battle._advance_models(regiment, 1)
+
+        self.assertGreater(regiment.positions[0][0], first_x)
+        self.assertEqual(regiment.positions[0][1], first_y)
+        self.assertEqual(regiment.melee_models[0].current_speed, 2)
+
+    def test_given_a_slot_within_three_units_when_advanced_then_the_model_is_at_rest(self):
+        regiment = Regiment("model", "Model", 0, 0, 0, Side.PLAYER)
+        battle = Battle(1000, 1000, [regiment])
+        regiment.model_positions()
+        regiment.x = 2
+
+        moving = battle._advance_models(regiment, 1)
+
+        self.assertFalse(moving)
+        self.assertEqual(regiment.positions[0], (0, 0))
+        self.assertTrue(regiment.melee_models[0].at_rest)
+
+    def test_given_a_broken_regiment_when_models_catch_up_then_speed_is_not_capped_at_s_rlmv(self):
+        regiment = Regiment("model", "Model", 0, 0, 0, Side.PLAYER, routing=True,
+                            speed_per_tick=speed_per_tick(4, 3))
+        battle = Battle(1000, 1000, [regiment])
+        regiment.model_positions()
+        regiment.x = 100
+
+        for _ in range(20):
+            battle._advance_models(regiment, 1)
+
+        self.assertEqual(regiment.melee_models[0].current_speed, 20)
+
+    def test_given_a_wagon_when_models_catch_up_then_its_two_models_use_the_four_deep_rank_factors(self):
+        source = {"field": {"width": 1000, "height": 1000}, "merc": None,
+                  "armies": [{"units": [{
+                      "id": "wagon", "name": "Wagon", "set": {"x": 0, "y": 0},
+                      "stats": {"s_side": [0, 2, 2, 2], "s_race": [7 * 8]},
+                      "profile": {"M": 4, "I": 3},
+                  }]}]}
+        battle = Battle.from_script(source)
+        regiment = battle.regiments["wagon"]
+        before = list(regiment.model_positions())
+        regiment.y = 100
+
+        battle._advance_models(regiment, 1)
+
+        self.assertAlmostEqual(regiment.positions[0][1] - before[0][1], 36 * 2.4 / 256)
+        self.assertAlmostEqual(regiment.positions[1][1] - before[1][1], 28 * 2.4 / 256)
 
 
 def formation_positions(regiment):

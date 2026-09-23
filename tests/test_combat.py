@@ -539,7 +539,7 @@ class CloseCombatStrikeTests(unittest.TestCase):
         # fixed so the round's exact casualties are reproducible.
         self.attacker = _regiment("att", 0, 0, Side.PLAYER, ws=5, strength=5, attacks=2, leadership=8,
                                   initiative=10, speed_per_tick=0.0)
-        self.defender = _regiment("def", 10, 0, Side.ENEMY, ws=1, toughness=1, armour=0, leadership=2,
+        self.defender = _regiment("def", 14, 0, Side.ENEMY, ws=1, toughness=1, armour=0, leadership=2,
                                   initiative=10, speed_per_tick=1.5)
         self.battle = Battle(1000, 1000, [self.attacker, self.defender], seed=1)
         # No script/AI drives a scriptless battle any more (whshr.ai was removed): give "def" its

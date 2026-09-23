@@ -25,9 +25,9 @@ DEFAULT_SEED = 1995  # arbitrary but fixed: battles are deterministic unless a c
 # `set:map`, `whoami` and part of `setstats` open, but every BF001 combat unit does carry `s_move`):
 # trunc(4.8 x 4 + 3) / 2, the M4 I3 infantry example from game_rules.md.
 DEFAULT_S_RLMV = 11.0
-# World units a model may close on its formation slot in one tick before it counts as "settled" (not
-# walking); small compared to a tick's travel distance so it only masks floating-point residue.
-SETTLE_EPSILON = 0.05
+# game_rules.md, "Models chase the unit": a model rests within three world units of its slot.
+MODEL_ARRIVAL_DISTANCE = 3.0
+MODEL_STEP_SCALE = 2.4 / 256
 # Basic bow-type missile codes this engine models as shooters (game_rules.md 8.1/8.3): artillery and
 # special weapons (cannons, mortars, breath weapons, ...) are not modelled in this simplified engine.
 ARCHER_MISSILE_CODES = {1, 2, 9, 18, 19}
@@ -76,6 +76,12 @@ class ModelState:
     opponent: tuple | None = None  # (regiment identifier, model uid) this model is paired with
     arrived: bool = False  # has walked into its cell, so it may strike (model flag 0x10000)
     reserve: bool = False  # found no free cell this tick and waits for one (model flag 0x8000)
+    stagger: int = 0  # fixed 0-7 value for this model's rank-dependent pace and later charge delay
+    current_speed: float = 0.0  # speed counter, converted to world units by the rank step factor
+    distance_budget: float = 0.0  # travel remaining before recomputing the slot heading
+    heading_x: float = 0.0
+    heading_y: float = 0.0
+    at_rest: bool = True
 
 
 @dataclass
@@ -117,6 +123,7 @@ class Regiment:
     missile_range: float | None = None  # world units, from rules.MISSILE_RANGES
     psychology: frozenset = frozenset()  # psy_status flag names, e.g. {"CantBreak", "CantRally"}
     hud_class: str | None = None  # "inf"/"arch"/"art"/"wiz"/"mon"; see HUD_CLASS_BY_RACE_TYPE
+    unit_class: int | None = None  # s_race class; wagons use a four-deep movement layout
     points: int = 0  # s_pntval: experience gained by the killer, and the AI's per-model worth unit
     # (game_rules.md: unit worth = size x s_pntval x 12 artillery / 8 wizard / 4 monster / 1)
 
@@ -197,7 +204,8 @@ class Regiment:
             # Reseeding the formation renews every model's identity. Identities are drawn from a
             # counter that never restarts, so a pairing left over from before the reseed can never be
             # mistaken for one of the new models: it simply refers to a model that no longer exists.
-            self.melee_models = [ModelState(uid=self._next_uid + offset)
+            self.melee_models = [ModelState(uid=self._next_uid + offset,
+                                            stagger=(self._next_uid + offset) & 7)
                                  for offset in range(len(self.positions))]
             self._next_uid += len(self.positions)
         return self.positions
@@ -270,6 +278,7 @@ def _decode_combat_profile(unit):
         "missile_range": missile_range,
         "psychology": psychology,
         "hud_class": hud_class,
+        "unit_class": fields["s_race"] >> 3 if "s_race" in fields else None,
         "points": int(fields.get("s_pntval") or 0),
     }
 
@@ -524,7 +533,7 @@ class Battle:
             elif regiment.moving:
                 moved = self._advance_toward(regiment, (regiment.target_x, regiment.target_y),
                                              regiment.speed_per_tick * scale, arrive=True)
-            models_catching_up = self._advance_models(regiment, regiment.speed_per_tick * scale)
+            models_catching_up = self._advance_models(regiment, scale)
             regiment.walking = moved or models_catching_up
             regiment.animation_seconds = regiment.animation_seconds + seconds if regiment.walking else 0.0
 
@@ -592,8 +601,8 @@ class Battle:
         angle = regiment.direction * math.tau / formation.FULL_TURN
         return regiment.x + math.sin(angle) * 1e4, regiment.y + math.cos(angle) * 1e4
 
-    def _advance_models(self, regiment, step):
-        """Walk each model toward its target, never faster than the unit's speed.
+    def _advance_models(self, regiment, scale):
+        """Walk each model toward its target with its own ramping, rank-dependent pace.
 
         The target is normally the model's formation slot, but a model that holds a cell on a battle
         grid walks to that cell instead and is marked `arrived` once it is within
@@ -601,23 +610,46 @@ class Battle:
         """
         targets = formation.place(regiment.x, regiment.y, regiment.direction,
                                   formation.block_slots(regiment.models, regiment.ranks))
+        rank_sizes = formation.rank_sizes(regiment.models, regiment.ranks)
+        rank_indices = [rank for rank, width in enumerate(rank_sizes)
+                        for _ in range(width)]
+        ranks = max(1, len(rank_sizes))
+        if regiment.unit_class == 7 and regiment.models == 2:
+            # game_rules.md "Formations": a wagon's two models occupy ranks 0 and 1 of a
+            # four-deep movement layout, giving F=36/28 before their stagger terms.
+            ranks, rank_indices = 4, [0, 1]
+        s_rlmv = regiment.speed_per_tick * 16 / MOVING_FREELY_K
         updated, still_moving = [], False
         for index, ((px, py), slot) in enumerate(zip(regiment.positions, targets)):
-            model = regiment.melee_models[index] if index < len(regiment.melee_models) else None
-            cell = battle_grid.cell_target(self, regiment, index) if model is not None else None
+            model = regiment.melee_models[index]
+            cell = battle_grid.cell_target(self, regiment, index)
             tx, ty = cell if cell is not None else slot
             dx, dy = tx - px, ty - py
             distance = math.hypot(dx, dy)
-            if cell is not None and model is not None:
-                model.arrived = distance <= battle_grid.ARRIVAL_DISTANCE
-            if distance <= SETTLE_EPSILON:
-                updated.append((tx, ty))
-                continue
-            still_moving = True
-            if distance <= step:
-                updated.append((tx, ty))
+            if distance <= MODEL_ARRIVAL_DISTANCE:
+                model.current_speed = model.distance_budget = 0.0
+                model.at_rest = True
+                new_position = (px, py)
             else:
-                updated.append((px + dx / distance * step, py + dy / distance * step))
+                model.at_rest = False
+                target_speed = distance if regiment.routing else min(distance, s_rlmv)
+                model.current_speed = min(target_speed, model.current_speed + scale)
+                if model.distance_budget <= 0:
+                    model.heading_x, model.heading_y = dx / distance, dy / distance
+                    model.distance_budget = distance / 2
+                step_factor = ((ranks - rank_indices[index]) * 8 + (model.stagger & 6) + 4)
+                step = min(distance, model.current_speed * step_factor * MODEL_STEP_SCALE * scale)
+                new_position = (px + model.heading_x * step, py + model.heading_y * step)
+                model.distance_budget -= step
+                remaining = math.hypot(tx - new_position[0], ty - new_position[1])
+                if remaining <= MODEL_ARRIVAL_DISTANCE:
+                    model.current_speed = model.distance_budget = 0.0
+                    model.at_rest = True
+                else:
+                    still_moving = True
+            if cell is not None:
+                model.arrived = math.hypot(tx - new_position[0], ty - new_position[1]) <= battle_grid.ARRIVAL_DISTANCE
+            updated.append(new_position)
         regiment.positions = updated
         return still_moving
 
