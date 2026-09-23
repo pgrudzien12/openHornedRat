@@ -40,14 +40,34 @@ No `script_dll` is passed anywhere in this path. Consequently `self.interpreter`
 always `None` in every live battle, and `Battle.update` (the tick method — there is no
 `update_phase` method in this codebase) falls back to `ai.decide_orders(self)` instead.
 
-**Conclusion: the interpreter has never executed a single opcode in an actual battle.**
-It has only been exercised by the mission-specific unit tests added alongside it (BF001,
-BF003 test suites), which presumably construct `Battle` directly with a `script_dll`.
+**Conclusion: the interpreter has never executed a single opcode in an actual battle,
+and not even in a test.** Checked every `ScriptInterpreter(...)` construction and every
+`interpreter.run(...)` call across `tests/test_interpreter_bf001.py`,
+`tests/test_interpreter_bf003.py`, and `tests/test_interpreter_phase3.py` (28
+constructions total): every one passes `None` for `script_dll`, and `run()` is never
+called anywhere in the test suite. All existing tests call individual `op_*` handler
+methods directly (`interp.op_MoveToNode(state, ...)` etc.) against hand-built
+`UnitScriptState` objects — this is real and useful coverage of each handler's own logic,
+but the DLL-loading and opcode-dispatch loop in `ScriptInterpreter.run()` has not been
+exercised by anything in this repository, ever, against real or synthetic bytecode.
 
-### Opcode coverage: 88 of 232 catalogued opcodes have handlers
+### Opcode coverage: 87 of 232 catalogued opcodes have handlers
 
-Verified by `grep -c "def op_" whshr/interpreter.py` → 88, against the 232-opcode table
-in `whshr/behaviour.py`.
+`grep -c "def op_" whshr/interpreter.py` returns 88, but that count is wrong: it
+includes a docstring line ("Handlers follow the pattern: def op_<name>...") that matches
+the same grep pattern without being a real method. Counted the actual `def op_` lines
+that begin a method (`grep -oP "def op_\K\w+"`, then de-duplicated) → **87** distinct
+handler methods, against 232 opcode slots in `whshr/behaviour.py`'s `OPCODE_NAMES` table
+(232 keys, 230 unique name strings — two opcode numbers share a name).
+
+**Further check — are all 87 handlers actually reachable?** Cross-referencing the 87
+handler names against the 230 unique catalogued names found **4 that don't match any
+catalogued opcode**: `op_IfRouted`, `op_FindTargetNear`, `op_IfBreak`,
+`op_FindNewTargetNear`. `_dispatch()` builds the handler name from
+`behaviour.opcode_name(opcode)`, which does an exact dict lookup with no fuzzy matching —
+so these 4 methods can never be reached by any opcode value and are dead code. (This is
+an interpreter implementation detail, not something Phase 2/Issue #46 needs to fix, but
+it means only **83** of the 87 defined handlers are actually wired to dispatch.)
 
 **Implemented** (verified present as `op_*` methods): InitUnit, Restart, SetRestartPoint,
 GotoScript, SwitchScript, GosubScript, ReturnGosub, PushPC, Loop, Yield, ResetStack,
@@ -82,7 +102,7 @@ document incorrectly marked several of these as working:
 | `FleeFromTarget` | Yes | **No** |
 | `FearWhenCharged` | Yes | **No** |
 
-These are not a complete list of the 144 missing opcodes — they are the specific ones
+These are not a complete list of the 145 missing opcodes (232 − 87) — they are the specific ones
 that appear in the BF003/BF005/BF010 walkthroughs referenced below, checked because a
 previous version of this document claimed (falsely) that scripts using them were
 integration-verified.
