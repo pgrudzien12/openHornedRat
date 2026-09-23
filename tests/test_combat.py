@@ -204,6 +204,64 @@ class PursuitTests(unittest.TestCase):
         self.assertIsNone(archers.attack_target)
 
 
+class RoutPauseTests(unittest.TestCase):
+    def test_given_resting_models_when_the_unit_breaks_then_they_scatter_and_pause_by_stagger(self):
+        fleeing = _regiment("f", 100, 100, Side.ENEMY, models=2, ranks=1)
+        battle = Battle(1000, 1000, [fleeing], seed=0)
+        before = list(fleeing.model_positions())
+        fleeing.melee_models[0].stagger = 0
+        fleeing.melee_models[1].stagger = 7
+
+        combat._start_rout(fleeing, battle)
+
+        self.assertEqual([model.rout_pause_ticks for model in fleeing.melee_models], [6, 27])
+        self.assertEqual(fleeing.positions, [(before[0][0] - 1, before[0][1] - 1),
+                                             (before[1][0] + 1, before[1][1] + 1)])
+
+    def test_given_a_model_already_walking_when_the_unit_breaks_then_it_gets_no_pause(self):
+        fleeing = _regiment("f", 100, 100, Side.ENEMY, models=1)
+        battle = Battle(1000, 1000, [fleeing], seed=0)
+        before = fleeing.model_positions()[0]
+        fleeing.melee_models[0].at_rest = False
+
+        combat._start_rout(fleeing, battle)
+
+        self.assertEqual(fleeing.melee_models[0].rout_pause_ticks, 0)
+        self.assertEqual(fleeing.positions[0], before)
+
+    def test_given_a_paired_opponent_when_a_resting_model_breaks_then_both_pause(self):
+        fleeing = _regiment("f", 100, 100, Side.ENEMY, models=1)
+        winner = _regiment("w", 100, 112, Side.PLAYER, models=1)
+        battle = Battle(1000, 1000, [fleeing, winner], seed=0)
+        _join_fight(battle, "g", fleeing, winner)
+        fleeing.model_positions()
+        winner.model_positions()
+        fleeing.melee_models[0].stagger = 5
+        fleeing.melee_models[0].opponent = (winner.identifier, winner.melee_models[0].uid)
+        winner.melee_models[0].opponent = (fleeing.identifier, fleeing.melee_models[0].uid)
+
+        combat._start_rout(fleeing, battle)
+
+        self.assertEqual(fleeing.melee_models[0].rout_pause_ticks, 21)
+        self.assertEqual(winner.melee_models[0].rout_pause_ticks, 21)
+
+    def test_given_a_paused_router_when_the_pause_expires_then_its_model_can_walk(self):
+        fleeing = _regiment("f", 100, 100, Side.ENEMY, models=1, speed_per_tick=1.0)
+        battle = Battle(1000, 1000, [fleeing], seed=0)
+        fleeing.model_positions()
+        fleeing.melee_models[0].stagger = 0
+        combat._start_rout(fleeing, battle)
+        before = fleeing.positions[0]
+        fleeing.x += 30
+
+        for _ in range(6):
+            battle._advance_models(fleeing, 1)
+            self.assertEqual(fleeing.positions[0], before)
+        battle._advance_models(fleeing, 1)
+
+        self.assertNotEqual(fleeing.positions[0], before)
+
+
 class ContactAttackTests(unittest.TestCase):
     """game_rules.md 7.7: a pursuer cannot re-engage a fleeing unit, so contact attacks are the only
     damage a chase does -- automatic hits, to-wound and save only."""

@@ -561,6 +561,25 @@ def _start_rout(regiment, battle):
     opponents = [other for other in battle.regiments.values()
                  if other.active and other.side != regiment.side
                  and other.melee_group == group_id and group_id is not None]
+    regiment.model_positions()
+    for index, model in enumerate(regiment.melee_models):
+        if not model.at_rest:
+            continue
+        pause = (model.stagger & 7) * 3 + 6
+        model.rout_pause_ticks = pause
+        model.at_rest = False
+        model.current_speed = model.distance_budget = 0.0
+        # The public rule specifies a slight scatter, but not its exact distance or bearing.
+        px, py = regiment.positions[index]
+        regiment.positions[index] = (px + (1 if model.stagger & 1 else -1),
+                                     py + (1 if model.stagger & 2 else -1))
+        if group_id is not None and model.opponent is not None:
+            opponent_id, opponent_uid = model.opponent
+            opponent = battle.regiments.get(opponent_id)
+            opponent_index = opponent.index_of(opponent_uid) if opponent is not None else None
+            if opponent_index is not None:
+                opposing_model = opponent.melee_models[opponent_index]
+                opposing_model.rout_pause_ticks = max(opposing_model.rout_pause_ticks, pause)
     battle_grid.release(battle, regiment)
     regiment.routing = True
     regiment.in_melee = False
@@ -624,8 +643,8 @@ def resolve_contact_attacks(battle):
     to-hit roll (game_rules.md 5.2).
 
     Simplifications: the reach is the infantry 12 (the engine has no unit class for the cavalry 18 and
-    monster 24), and the original's timed "turning" state, in which a model still gets a to-hit roll, is
-    not modelled -- every target model here is taken to be running.
+    monster 24), and contact hits still ignore the rout pause's timed "turning" state, in which a model
+    would get a to-hit roll -- every target model here is taken to be running.
     """
     for attacker in sorted(battle.regiments.values(), key=lambda r: r.identifier):
         if not attacker.active or attacker.routing or attacker.in_melee:

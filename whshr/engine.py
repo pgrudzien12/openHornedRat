@@ -83,6 +83,7 @@ class ModelState:
     heading_y: float = 0.0
     at_rest: bool = True
     freeze_ticks: int = 0  # charge-start pause, (stagger & 7) + 1 ticks
+    rout_pause_ticks: int = 0  # break-and-turn pause, (stagger & 7) * 3 + 6 ticks
 
 
 @dataclass
@@ -742,6 +743,11 @@ class Battle:
         updated, still_moving = [], False
         for index, ((px, py), slot) in enumerate(zip(regiment.positions, targets)):
             model = regiment.melee_models[index]
+            if model.rout_pause_ticks > 0:
+                model.rout_pause_ticks -= 1
+                updated.append((px, py))
+                still_moving = True
+                continue
             if regiment.in_melee and model.at_rest:
                 updated.append((px, py))
                 continue
