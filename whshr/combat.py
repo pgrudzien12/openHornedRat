@@ -395,7 +395,7 @@ def resolve_contacts(battle):
                 # third regiment joining one already under way). The counter is spent one attacking
                 # model at a time, so only the first 1.5 x frontage models to strike get the bonus.
                 if regiment.attack_target in touching[identifier]:
-                    regiment.charge_counter = int(1.5 * regiment.front_rank_models())
+                    regiment.charge_counter = int(1.5 * regiment.frontage)
                 regiment.melee_group = group_id
                 regiment.target_x = regiment.target_y = None
             regiment.in_melee = True

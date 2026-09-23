@@ -639,6 +639,20 @@ class ShootingTests(unittest.TestCase):
 
 
 class ContactAndMeleeStateTests(unittest.TestCase):
+    def test_given_casualties_before_a_charge_when_contact_starts_then_the_grant_uses_formed_frontage(self):
+        charger = _regiment("charger", 0, 0, Side.PLAYER, models=10, ranks=2)
+        target = _regiment("target", 0, 0, Side.ENEMY)
+        battle = Battle(2000, 2000, [charger, target], seed=0)
+        charger.models = 6  # live front rank shrinks from five models to three
+        charger.attack_target = target.identifier
+
+        combat.resolve_contacts(battle)
+
+        self.assertTrue(charger.in_melee)
+        self.assertEqual(charger.frontage, 5)
+        self.assertEqual(charger.front_rank_models(), 3)
+        self.assertEqual(charger.charge_counter, 7)  # floor(1.5 * formed frontage)
+
     def test_given_a_routing_unit_when_an_enemy_touches_it_then_it_is_not_engaged_in_melee(self):
         routing = _regiment("r", 0, 0, Side.PLAYER, routing=True, speed_per_tick=0.0)
         pursuer = _regiment("p", 5, 0, Side.ENEMY, speed_per_tick=0.0)
