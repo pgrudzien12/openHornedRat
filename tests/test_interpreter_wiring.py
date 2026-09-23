@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import tempfile
 import unittest
 
-from whshr import behaviour
+from whshr import behaviour, interpreter
 from whshr.assets import AssetId, AssetLocator
 from whshr.battle_scene import BattleScene
 from whshr.cache import AssetCache
@@ -134,6 +134,39 @@ class BattleSceneScriptDllLoadingTests(unittest.TestCase):
             )}))
         self.assertIsNotNone(scene.battle)
         self.assertIsNone(scene.battle.interpreter)
+
+
+class InitUnitDoesNotClobberTheWiredScriptIdTests(unittest.TestCase):
+    """Regression test: InitUnit's operand is an init-size flag (128/64), not a script id.
+
+    A prior version of op_InitUnit wrote the operand into state.script_id and reset state.pc to 0,
+    which silently overwrote the script id Battle.from_script had just wired in from the unit's own
+    set:script= value (tests/test_interpreter_wiring.py's ScriptIdWiringTests) -- the moment a real
+    script's first instruction (InitUnit) ran, every unit jumped onto script 128 or 64 instead of
+    its actual mission script. Confirmed against a real BF003 playthrough log: every enemy regiment
+    sat frozen for 477+ ticks with attack_target always None, despite a player regiment walking
+    right up next to it.
+    """
+
+    def test_init_unit_leaves_the_wired_script_id_untouched(self):
+        battle = Battle.from_script({
+            "field": {"width": 1440, "height": 1680, "script": "BF003"},
+            "armies": [{"units": [_unit("Goblin_Stickers", 100, 100, script=0)]}],
+            "merc": {"armies": []},
+        })
+        state = battle.event_bus.unit_states["Goblin_Stickers"]
+        self.assertEqual(state.script_id, 0)  # wired correctly at construction
+
+        interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        interp.op_InitUnit(state, 128, [], "Goblin_Stickers", 0, battle.rng)
+
+        self.assertEqual(state.script_id, 0)  # still script 0 -- not clobbered to 128
+
+    def test_init_unit_advances_pc_by_one_not_reset_to_zero(self):
+        state = interpreter.UnitScriptState(script_id=0, pc=5)
+        interp = interpreter.ScriptInterpreter(None, None, None)
+        result = interp.op_InitUnit(state, 128, [], "t", 0, None)
+        self.assertEqual(result, 6)
 
 
 if __name__ == "__main__":

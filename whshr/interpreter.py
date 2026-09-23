@@ -285,10 +285,15 @@ class ScriptInterpreter:
     # ===== Core control-flow opcodes =====
 
     def op_InitUnit(self, state, operand, script_words, unit_id, tick_count, rng):
-        """InitUnit N: initialize the unit's script state. N is typically 64 or 128."""
-        state.script_id = operand if operand is not None else 100
-        state.pc = 0
-        state.restart_pc = 0
+        """InitUnit N: initialization-size flag, not a script id (128 = full/combat init, 64 =
+        minimal/non-combat init; notes/mission_scripts_research.md). Must NOT touch script_id or
+        pc: the unit's actual running script is set once at battle construction from its own
+        set:script= value (whshr.engine.Battle.from_script) and InitUnit is simply the first
+        instruction inside that script, not a request to jump elsewhere. A prior version of this
+        handler wrongly treated the operand as a script id and pc reset target, which silently
+        hijacked every unit onto script 128/64 (garbage or an unrelated library script) the moment
+        it ran -- the cause of a real regression where no scripted enemy ever moved.
+        """
         return state.pc + 1
 
     def op_Restart(self, state, operand, script_words, unit_id, tick_count, rng):
