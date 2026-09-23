@@ -155,6 +155,28 @@ Landed against this document's "Proposed" section:
   `SendEventToParent` remain unimplemented/no-op stubs -- not confirmed as actually called by any
   traced BF003 script, so left alone rather than guessed at). Tests:
   `tests/test_interpreter_phase3.py` (`UnitTaggingTests`, 3 new).
+- **`IfThreatOutweighsWorth`**: the only gap left in a real, *won* BF003 playthrough (a fresh trace
+  after all the fixes above), and it turned out to be genuinely well-documented -- it's the actual
+  decision gate behind library behaviour 15 (TrackThreat): game_rules.md describes TrackThreat as
+  "keep the best threat and attack it when its score exceeds the unit's worth", and separately
+  documents both formulas exactly: unit worth = `size x s_pntval x 12 artillery / 8 wizard / 4
+  monster / 1`, threat score = `worth x (range - d) / round(range / 4)` with octagonal distance,
+  zero for friends/routing/`CantMelee`/beyond range. Implemented both formulas
+  (`ScriptInterpreter._unit_worth`, `._threat_score`) and the opcode itself, plus a new
+  `Regiment.points` field (from each unit's own `s_pntval`, previously undecoded) to make worth
+  computable at all. Confirmed against the real trace: Goblin Wolfriders hits this exact opcode in
+  the documented `Query 1` / `IfThreatOutweighsWorth` / `SendEventSelfIfTrue` /
+  `AttackNearestFlag40Unit` sequence.
+
+  Simplification: game_rules.md documents a x4 score multiplier when "the enemy targets this unit"
+  and x32 when it is "also charging" -- these collapse into a single x4 here, since this engine's
+  `attack_target` field doesn't distinguish "targeting" from "charging" as separate states (setting
+  it always implies a charge order). Hidden units are not excluded from scoring either (no bit is
+  currently read for that anywhere in this engine) -- a known, documented gap, not a silent one.
+
+  Tests: `tests/test_interpreter_threat_score.py` (17 new: worth's class multipliers, the score
+  formula's exclusions and distance/charging behavior, the opcode's own decision threshold), plus
+  two in `tests/test_engine.py` confirming `s_pntval` actually reaches `Regiment.points`.
 
 ---
 

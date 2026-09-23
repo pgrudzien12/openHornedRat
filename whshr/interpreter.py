@@ -408,6 +408,36 @@ class ScriptInterpreter:
         enemies = sorted(candidates, key=lambda other: math.hypot(other.x - regiment.x, other.y - regiment.y))
         return enemies[n - 1].identifier if len(enemies) >= n else None
 
+    @staticmethod
+    def _unit_worth(regiment):
+        """game_rules.md: unit worth = size x s_pntval x 12 artillery / 8 wizard / 4 monster / 1,
+        read by AI target scoring (UnitScore)."""
+        multiplier = {"art": 12, "wiz": 8, "mon": 4}.get(regiment.hud_class, 1)
+        return regiment.models * regiment.points * multiplier
+
+    def _threat_score(self, regiment, other, threat_range):
+        """game_rules.md's UnitScore: worth x (range - d) / round(range / 4), octagonal distance
+        d = max(|dx|, |dy|) + min(|dx|, |dy|) / 2; 0 for friends, broken (routing), CantMelee, or
+        beyond range. The documented x4 ("enemy targets this unit") / x32 ("also charging") score
+        multipliers collapse into a single x4 here: this engine's attack_target field does not
+        distinguish "targeting" from "charging" as separate states (setting it always implies a
+        charge order, Battle._advance_regiments), so the two documented cases are not distinguishable.
+        Hidden units are not excluded (no bit is currently read for that here) -- a known gap.
+        """
+        if other.side == regiment.side or not other.active or other.routing or "CantMelee" in other.psychology:
+            return 0.0
+        dx, dy = other.x - regiment.x, other.y - regiment.y
+        d = max(abs(dx), abs(dy)) + min(abs(dx), abs(dy)) / 2.0
+        if d > threat_range:
+            return 0.0
+        divisor = round(threat_range / 4)
+        if divisor <= 0:
+            return 0.0
+        score = self._unit_worth(other) * (threat_range - d) / divisor
+        if other.attack_target == regiment.identifier:
+            score *= 4.0
+        return score
+
     # ===== Core control-flow opcodes =====
 
     def op_InitUnit(self, state, operand, script_words, unit_id, tick_count, rng):
@@ -825,6 +855,29 @@ class ScriptInterpreter:
 
     def op_KeepThreat(self, state, operand, script_words, unit_id, tick_count, rng):
         """KeepThreat: keep current threat (don't search for new one)."""
+        return state.pc + 1
+
+    def op_IfThreatOutweighsWorth(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfThreatOutweighsWorth: test whether the best-scoring enemy within threat_range outweighs
+        this unit's own worth -- the actual decision gate behind library behaviour 15, TrackThreat
+        (game_rules.md: "keep the best threat and attack it when its score exceeds the unit's
+        worth"). Confirmed used by a real BF003 playthrough's Goblin Wolfriders script, in the exact
+        Query 1/IfThreatOutweighsWorth/SendEventSelfIfTrue/AttackNearestFlag40Unit sequence
+        game_rules.md documents behaviour 15 as using.
+
+        Requires SetThreatRange to have set state.threat_range first; with no range set (0), or no
+        regiment found for this unit, conservatively sets cond_flags to 0 (no threat) rather than
+        guessing.
+        """
+        regiment = self.battle.regiments.get(unit_id)
+        if not regiment or state.threat_range <= 0:
+            state.cond_flags = 0
+            return state.pc + 1
+        best_score = max(
+            (self._threat_score(regiment, other, state.threat_range)
+             for other in self.battle.regiments.values() if other is not regiment),
+            default=0.0)
+        state.cond_flags = 1 if best_score > self._unit_worth(regiment) else 0
         return state.pc + 1
 
     def op_TargetGone(self, state, operand, script_words, unit_id, tick_count, rng):

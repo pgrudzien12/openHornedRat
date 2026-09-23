@@ -82,6 +82,34 @@ class BattleTests(unittest.TestCase):
         self.assertEqual((regiment.sprite, regiment.banner, regiment.portrait),
                          ("ClanRats", "BannerHiln", "Commander"))
 
+    def test_given_a_units_s_pntval_stat_when_built_then_it_becomes_the_regiments_points(self):
+        # game_rules.md: unit worth (AI threat scoring, whshr.interpreter's IfThreatOutweighsWorth)
+        # is size x s_pntval x a class multiplier -- points must reach Regiment for that to work.
+        source = {
+            "field": {"width": 100, "height": 100},
+            "armies": [{"units": [{
+                "id": "unit", "name": "Unit", "set": {"x": 10, "y": 10}, "stats": {"s_pntval": [7]},
+            }]}],
+            "merc": None,
+        }
+
+        regiment = Battle.from_script(source).regiments["unit"]
+
+        self.assertEqual(regiment.points, 7)
+
+    def test_given_no_s_pntval_stat_when_built_then_points_defaults_to_zero(self):
+        source = {
+            "field": {"width": 100, "height": 100},
+            "armies": [{"units": [{
+                "id": "unit", "name": "Unit", "set": {"x": 10, "y": 10}, "stats": {},
+            }]}],
+            "merc": None,
+        }
+
+        regiment = Battle.from_script(source).regiments["unit"]
+
+        self.assertEqual(regiment.points, 0)
+
 
 class FormationMovementTests(unittest.TestCase):
     """Models walk to their formation slots instead of teleporting with the block."""

@@ -117,6 +117,8 @@ class Regiment:
     missile_range: float | None = None  # world units, from rules.MISSILE_RANGES
     psychology: frozenset = frozenset()  # psy_status flag names, e.g. {"CantBreak", "CantRally"}
     hud_class: str | None = None  # "inf"/"arch"/"art"/"wiz"/"mon"; see HUD_CLASS_BY_RACE_TYPE
+    points: int = 0  # s_pntval: experience gained by the killer, and the AI's per-model worth unit
+    # (game_rules.md: unit worth = size x s_pntval x 12 artillery / 8 wizard / 4 monster / 1)
 
     # Combat/order state (whshr.combat, whshr.ai).
     attack_target: str | None = None  # identifier of an enemy regiment this regiment is charging
@@ -250,6 +252,7 @@ def _decode_combat_profile(unit):
         "missile_range": missile_range,
         "psychology": psychology,
         "hud_class": hud_class,
+        "points": int(fields.get("s_pntval") or 0),
     }
 
 
