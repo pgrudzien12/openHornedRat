@@ -5,6 +5,7 @@ segments make one turn (game_rules.md 5.1, 6.2, 7.4).
 """
 import math
 import unittest
+from unittest.mock import patch
 
 from whshr import combat, formation
 from whshr.engine import Battle, Regiment
@@ -260,6 +261,44 @@ class RoutPauseTests(unittest.TestCase):
         battle._advance_models(fleeing, 1)
 
         self.assertNotEqual(fleeing.positions[0], before)
+
+
+class MountedMeleeTests(unittest.TestCase):
+    def _strike(self, armour, mount, counter):
+        rider = _regiment("r", 100, 100, Side.PLAYER, models=1, ranks=1, ws=4,
+                          strength=2, attacks=1, armour=armour, mount=mount)
+        defender = _regiment("d", 100, 112, Side.ENEMY, models=1, ranks=1, ws=3,
+                             toughness=4, armour=0)
+        battle = Battle(1000, 1000, [rider, defender], seed=0)
+        _join_fight(battle, "g", rider, defender)
+        rider.model_positions()
+        defender.model_positions()
+        rider.charge_counter = counter
+        pair = (0, rider.melee_models[0], defender, 0)
+        with patch.object(combat.battle_grid, "fighting_models", return_value=[pair]):
+            combat._strike_with_models(rider, "g", battle.fights["g"], 0, 1, battle)
+        return battle.events[-1], rider, defender
+
+    def test_given_a_mounted_model_when_it_strikes_then_rider_and_mount_roll_separately(self):
+        event, rider, _defender = self._strike(8, 1, 2)
+
+        self.assertEqual([detail["source"] for detail in event.data["attacks"]],
+                         ["rider", "mount"])
+        self.assertEqual([detail["attacks"] for detail in event.data["attacks"]], [1, 1])
+        self.assertEqual([detail["wound_need"] for detail in event.data["attacks"]], [5, 3])
+        self.assertEqual(rider.charge_counter, 0)
+
+    def test_given_mount_code_without_mounted_armour_when_it_strikes_then_only_rider_rolls(self):
+        event, rider, _defender = self._strike(0, 1, 2)
+
+        self.assertEqual([detail["source"] for detail in event.data["attacks"]], ["rider"])
+        self.assertEqual(rider.charge_counter, 1)
+
+    def test_given_a_mount_with_two_attacks_when_it_strikes_then_it_uses_its_own_attack_count(self):
+        event, _rider, _defender = self._strike(8, 4, 0)
+
+        self.assertEqual([detail["attacks"] for detail in event.data["attacks"]], [1, 2])
+        self.assertEqual(event.data["attacks"][1]["wound_need"], 3)
 
 
 class ContactAttackTests(unittest.TestCase):

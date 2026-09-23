@@ -120,6 +120,7 @@ class Regiment:
     attacks: int = DEFAULT_PROFILE["A"]
     leadership: int = DEFAULT_PROFILE["Ld"]
     armour: int = 0  # s_armr code, indexes rules.EXPECTED_ARMOUR_SAVE
+    mount: int | None = None  # s_mount profile, active only for mounted armour codes 8-13
     strength_bonus: int = 0  # weapon class bonus, rules.EXPECTED_WEAPON_BONUS[s_weap]
     missile_code: int | None = None  # S_BalWeap, only ARCHER_MISSILE_CODES are modelled as shooters
     missile_range: float | None = None  # world units, from rules.MISSILE_RANGES
@@ -180,6 +181,10 @@ class Regiment:
     @property
     def moving(self):
         return self.target_x is not None
+
+    @property
+    def mount_profile(self):
+        return MOUNT_PROFILES.get(self.mount) if 8 <= self.armour <= 13 else None
 
     @property
     def destroyed(self):
@@ -282,6 +287,7 @@ def _decode_combat_profile(unit):
         "attacks": int(profile.get("A", DEFAULT_PROFILE["A"])),
         "leadership": int(profile.get("Ld", DEFAULT_PROFILE["Ld"])),
         "armour": armour,
+        "mount": fields.get("s_mount"),
         "strength_bonus": EXPECTED_WEAPON_BONUS.get(weapon_class, 0),
         "missile_code": missile_code if missile_range else None,
         "missile_range": missile_range,

@@ -10,7 +10,7 @@ has walked into it, and it strikes that one model, so there is no front-rank rul
 wraps around over several ticks.
 
 Simplifications common to this module (documented placeholders, not traced values):
-- No hatred re-rolls, magic items, mounts or monster return blows (game_rules.md 5.2, 5.4-5.6).
+- No hatred re-rolls, magic items or monster return blows (game_rules.md 5.2, 5.4-5.6).
 - Multi-wound models die on their first failed save (no per-model wound tracking).
 - Shooting hit chance is a documented BS-based placeholder (`SHOOT_TO_HIT`), not the original's
   geometric scatter/flight simulation (game_rules.md 8.1-8.3); only basic bow-type missile codes are
@@ -159,7 +159,8 @@ def _direction_bonus(attacker, defender):
     return DIRECTION_BONUS[sector]
 
 
-def _roll_model_attacks(attacker, defender, rng, charge_bonus=0, gang_bonus=0):
+def _roll_model_attacks(attacker, defender, rng, charge_bonus=0, gang_bonus=0,
+                        attacks=None, ws=None, strength=None):
     """One model's attacks against the one enemy model it is paired with (game_rules.md 5.2).
 
     Returns `(killed, detail)`: `killed` is True once any wound gets past the save, because this
@@ -170,9 +171,10 @@ def _roll_model_attacks(attacker, defender, rng, charge_bonus=0, gang_bonus=0):
     gets; `charge_bonus` is the +1 S spent one attacking model at a time from the unit's charge
     counter.
     """
-    attacks = max(1, attacker.attacks)
-    hit_need = wfb_to_hit(attacker.ws + gang_bonus, defender.ws)
-    strength = attacker.strength + attacker.strength_bonus + charge_bonus
+    attacks = max(1, attacker.attacks) if attacks is None else attacks
+    hit_need = wfb_to_hit((attacker.ws if ws is None else ws) + gang_bonus, defender.ws)
+    strength = (attacker.strength + attacker.strength_bonus + charge_bonus
+                if strength is None else strength)
     wound_need = wfb_to_wound(strength, defender.toughness)
     threshold = _armour_threshold(defender.armour, strength)
     detail = {"attacks": attacks, "hit_need": hit_need, "wound_need": wound_need,
@@ -464,8 +466,23 @@ def _strike_with_models(attacker, group_id, fight, turn, segment_number, battle)
         killed, detail = _roll_model_attacks(attacker, defender, battle.rng,
                                              charge_bonus=charge_bonus, gang_bonus=gang_bonus)
         detail.update({"model": model.uid, "target": defender.identifier,
-                       "target_model": defender_model.uid, "charge_bonus": charge_bonus})
+                       "target_model": defender_model.uid, "charge_bonus": charge_bonus,
+                       "source": "rider"})
         rolls.append(detail)
+        mount = attacker.mount_profile
+        if mount is not None:
+            mount_charge = attacker.charge_counter > 0
+            if mount_charge:
+                attacker.charge_counter -= 1
+            mount_strength = mount["charge_strength"] if mount_charge else mount["S"]
+            mount_killed, mount_detail = _roll_model_attacks(
+                attacker, defender, battle.rng, gang_bonus=gang_bonus,
+                attacks=mount["A"], ws=mount["WS"], strength=mount_strength)
+            mount_detail.update({"model": model.uid, "target": defender.identifier,
+                                 "target_model": defender_model.uid,
+                                 "charge_bonus": mount_charge, "source": "mount"})
+            rolls.append(mount_detail)
+            killed |= mount_killed
         if killed and defender_index not in victims.get(defender.identifier, ()):
             victims.setdefault(defender.identifier, set()).add(defender_index)
             kills += 1
