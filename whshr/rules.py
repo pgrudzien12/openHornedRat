@@ -284,6 +284,18 @@ def wfb_to_wound(strength, toughness):
 EXPECTED_ARMOUR_SAVE = [7, 6, 5, 4, 3, 7, 4, 7, 6, 5, 4, 3, 2, 2]   # code 5 gives no save (see notes)
 EXPECTED_WEAPON_BONUS = {0: 0, 3: 0, 4: 2, 10: 1}                    # the classes used by the scripts
 EXPECTED_MOUNTS = ['None', 'Warhorse', 'War Boar', 'Giant Wolf', 'Cave Squig']
+# Public mount profiles from game_rules.md, "Mounts". Movement uses M; the other combat values
+# are kept here for the mount's own attack resolution.
+MOUNT_PROFILES = {
+    1: {"M": 7, "WS": 3, "BS": 0, "S": 3, "T": 3, "W": 1, "I": 3, "A": 1, "Ld": 5,
+        "charge_strength": 5},
+    2: {"M": 6, "WS": 4, "BS": 0, "S": 3, "T": 4, "W": 1, "I": 3, "A": 1, "Ld": 3,
+        "charge_strength": 6},
+    3: {"M": 8, "WS": 4, "BS": 0, "S": 3, "T": 3, "W": 1, "I": 3, "A": 1, "Ld": 3,
+        "charge_strength": 3},
+    4: {"M": 5, "WS": 4, "BS": 0, "S": 5, "T": 3, "W": 1, "I": 5, "A": 2, "Ld": 2,
+        "charge_strength": 0},
+}
 
 
 def check_tables(tables):

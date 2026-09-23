@@ -1,6 +1,8 @@
 import math
+import random
 import unittest
 
+from whshr import combat
 from whshr.engine import Battle, Regiment, TICK_SECONDS, speed_per_tick
 from whshr.rules import Side
 
@@ -70,6 +72,75 @@ class BattleTests(unittest.TestCase):
     def test_given_the_worked_example_s_rlmv_when_charge_reach_is_computed_then_it_matches_the_documented_formula(self):
         # game_rules.md "Charge": reaches at most 12 * (s_rlmv + 1) units; M4 I3 -> s_rlmv = 11.
         self.assertAlmostEqual(self.player.charge_reach, 12 * (11 + 1))
+
+
+class MountedMovementTests(unittest.TestCase):
+    """game_rules.md "Mounts": a mounted rider uses the mount's M and the rider's I."""
+
+    def _regiment_from_script(self, mount, armour):
+        unit = {
+            "id": "rider", "name": "Rider", "set": {"x": 100, "y": 100},
+            "stats": {"s_side": [0, 10, 10, 2], "s_mount": [mount, armour]},
+            "profile": {"M": 4, "I": 3},
+        }
+        source = {"field": {"width": 1000, "height": 1000},
+                  "armies": [{"units": [unit]}], "merc": None}
+        return Battle.from_script(source).regiments["rider"]
+
+    def test_given_a_warhorse_rider_when_built_then_speed_and_charge_reach_use_the_mounts_movement(self):
+        mounted = self._regiment_from_script(1, 8)
+        unmounted = self._regiment_from_script(1, 0)
+
+        self.assertAlmostEqual(mounted.speed_per_tick, speed_per_tick(7, 3))
+        self.assertAlmostEqual(unmounted.speed_per_tick, speed_per_tick(4, 3))
+        self.assertAlmostEqual(mounted.charge_reach, 228)
+        self.assertAlmostEqual(unmounted.charge_reach, 144)
+
+    def test_given_other_mounts_when_built_then_each_uses_its_own_movement_with_the_riders_initiative(self):
+        for mount, movement in ((2, 6), (3, 8), (4, 5)):
+            with self.subTest(mount=mount):
+                regiment = self._regiment_from_script(mount, 13)
+                self.assertAlmostEqual(regiment.speed_per_tick, speed_per_tick(movement, 3))
+
+    def test_given_a_mount_without_mounted_armour_when_built_then_the_rider_keeps_foot_speed(self):
+        for armour in (0, 7):
+            with self.subTest(armour=armour):
+                regiment = self._regiment_from_script(3, armour)
+                self.assertAlmostEqual(regiment.speed_per_tick, speed_per_tick(4, 3))
+
+    def test_given_no_rider_initiative_when_mounted_then_speed_uses_the_regiments_default_initiative(self):
+        unit = {"stats": {"s_mount": [1, 8]}, "profile": {"M": 4}}
+
+        from whshr.engine import _decode_combat_profile
+        decoded = _decode_combat_profile(unit)
+
+        self.assertEqual(decoded["initiative"], 3)
+        self.assertAlmostEqual(decoded["speed_per_tick"], speed_per_tick(7, 3))
+
+    def test_given_equal_formations_when_one_has_a_mount_then_charge_grant_uses_the_same_frontage(self):
+        for armour in (0, 8):
+            with self.subTest(armour=armour):
+                rider = self._regiment_from_script(1, armour)
+                enemy = Regiment("enemy", "Enemy", rider.x, rider.y, 0, Side.ENEMY,
+                                 models=10, ranks=2)
+                battle = Battle(1000, 1000, [rider, enemy])
+                rider.attack_target = enemy.identifier
+
+                combat.resolve_contacts(battle)
+
+                self.assertEqual(rider.charge_counter, 7)
+
+    def test_given_mounted_and_unmounted_riders_when_contact_attacking_then_mount_speed_does_not_change_reach(self):
+        for armour in (0, 8):
+            rider = self._regiment_from_script(1, armour)
+            rider.models = 1
+            rider.positions = [(0, 0)]
+            target = Regiment("target", "Target", 0, 0, 0, Side.ENEMY)
+            for distance, in_reach in ((12, True), (13, False)):
+                with self.subTest(armour=armour, distance=distance):
+                    target.positions = [(distance, 0)]
+                    _victims, rolls = combat._contact_attack_rolls(rider, target, random.Random(0))
+                    self.assertEqual(bool(rolls), in_reach)
 
 
 class BracedOrderGatingTests(unittest.TestCase):

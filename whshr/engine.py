@@ -6,7 +6,7 @@ import random
 
 from . import battle_grid, behaviour, combat, formation, interpreter
 from .battle_events import BattleEvent
-from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, Side, can_fight, side_of_code, stat_fields
+from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, MOUNT_PROFILES, Side, can_fight, side_of_code, stat_fields
 from .script import load_battle, resource_name
 
 TICK_SECONDS = 0.1  # the battle clock ticks every 100 ms (game_rules.md, "Battle clock")
@@ -239,12 +239,14 @@ class Regiment:
 
 
 def _decode_combat_profile(unit):
-    """Decode a regiment's WS/BS/S/T/W/I/A/Ld, armour, weapon and missile stats from its raw script
+    """Decode a regiment's speed, WS/BS/S/T/W/I/A/Ld, armour, weapon and missile stats from its raw script
     setstats lines (game_rules.md section 3), stdlib-only (no GAMEF.DLL access needed at battle time:
     the tables it would supply are already verified constants in whshr.rules)."""
     fields, _conflicts = stat_fields(unit.get("stats") or {})
     profile = unit.get("profile") or {}
-    armour = fields.get("s_armr", 0)
+    armour = fields.get("s_armr") or 0
+    mount = MOUNT_PROFILES.get(fields.get("s_mount")) if 8 <= armour <= 13 else None
+    move_stat = mount["M"] if mount is not None else profile.get("M")
     weapon_class = fields.get("s_weap")
     missile_code = fields.get("S_BalWeap")
     missile_range = MISSILE_RANGES.get(missile_code) if missile_code in ARCHER_MISSILE_CODES else None
@@ -253,6 +255,7 @@ def _decode_combat_profile(unit):
     side = fields.get("s_side")
     hud_class = HUD_CLASS_BY_RACE_TYPE.get(side & 0x3F) if side is not None else None
     return {
+        "speed_per_tick": speed_per_tick(move_stat, profile.get("I", DEFAULT_PROFILE["I"])),
         "ws": int(profile.get("WS", DEFAULT_PROFILE["WS"])),
         "bs": int(profile.get("BS", DEFAULT_PROFILE["BS"])),
         "strength": int(profile.get("S", DEFAULT_PROFILE["S"])),
@@ -357,7 +360,6 @@ class Battle:
                     identifier, suffix = f"{unit['id']}#{suffix}", suffix + 1
                 used.add(identifier)
                 models, ranks = formation.unit_size(unit)
-                profile = unit.get("profile") or {}
                 if forced_side is not None:
                     side = forced_side
                 else:
@@ -369,7 +371,6 @@ class Battle:
                     sprite=resource_name(unit.get("sprites")),
                     banner=resource_name(unit.get("banner")),
                     portrait=resource_name((unit.get("leader") or {}).get("portrait")),
-                    speed_per_tick=speed_per_tick(profile.get("M"), profile.get("I")),
                     **_decode_combat_profile(unit),
                 ))
                 script_value = position.get("script")
