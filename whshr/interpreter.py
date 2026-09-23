@@ -21,6 +21,7 @@ from collections import deque
 
 from . import behaviour
 from .battle_events import BattleEvent
+from .rules import Side
 
 SCATTER_RADIUS = 40.0  # world units: ScatterModelsToNode's wander distance from a node's exact
 # point; a documented placeholder (see op_ScatterModelsToNode), not a confirmed game value.
@@ -112,15 +113,18 @@ class EventBus:
             if regiment:
                 for unit_id, unit_state in self.unit_states.items():
                     other = self.battle.regiments.get(unit_id)
-                    if other and other.player == regiment.player:
+                    if other and other.side == regiment.side:
                         unit_state.event_queue.append(event)
         elif route == "enemy":
-            # Broadcast to all units on the opposite side
+            # Broadcast to every unit of a different side (notes/neutral_units.md leaves the exact
+            # routing to/from a neutral side as an open research question -- "does event 0x13 route to
+            # NPC allies?" -- so this keeps the direct two-sided "not my side" generalisation rather
+            # than guessing a narrower rule).
             regiment = self.battle.regiments.get(recipient_id)
             if regiment:
                 for unit_id, unit_state in self.unit_states.items():
                     other = self.battle.regiments.get(unit_id)
-                    if other and other.player != regiment.player:
+                    if other and other.side != regiment.side:
                         unit_state.event_queue.append(event)
 
 
@@ -143,15 +147,17 @@ class LibraryBehaviors:
         """
         battle = self.interpreter.battle
         regiment = battle.regiments.get(unit_id)
-        if not regiment or regiment.player or not regiment.active:
+        if not regiment or regiment.side == Side.PLAYER or not regiment.active:
             return
 
-        # Find best threat (nearest active enemy)
+        # Find best threat (nearest active, different-side regiment): a script that assigns this
+        # library behaviour to a neutral unit has already made the targeting decision explicitly, so
+        # this is not gated by rules.hostile_sides the way whshr.ai's unscripted placeholder is.
         best_threat = None
         best_distance = float('inf')
 
         for other_id, other in battle.regiments.items():
-            if other.player == regiment.player or not other.active:
+            if other.side == regiment.side or not other.active:
                 continue
             dx = other.x - regiment.x
             dy = other.y - regiment.y
@@ -343,19 +349,27 @@ class ScriptInterpreter:
             return script_words[operand_pc]
         return None
 
-    def _nearest_enemy_id(self, regiment, n=1):
-        """The n-th nearest active enemy regiment identifier to `regiment` (1 = nearest), or None
-        if fewer than n active enemies remain. Euclidean distance; shared by the Target*/Attack*
-        opcode families (TargetNearestEnemy, AttackNearestEnemy, AttackNthNearestEnemy, ...).
+    def _nearest_enemy_id(self, regiment, n=1, side=None):
+        """The n-th nearest active regiment identifier to `regiment` (1 = nearest), or None if fewer
+        than n candidates remain. Euclidean distance; shared by the Target*/Attack* opcode families
+        (TargetNearestEnemy, AttackNearestEnemy, AttackNthNearestEnemy, ...).
+
+        `side`, when given, restricts candidates to that exact `rules.Side` (used by
+        AttackNearestFlag40Unit for the neutral side flag 0x40, notes/neutral_units.md); otherwise any
+        regiment of a different side than `regiment` is a candidate, matching this opcode family's
+        original two-sided "not my side" search generalised to three sides.
 
         This does not model "visible" (line-of-sight) any differently from a plain nearest-enemy
         search -- the engine has no visibility/fog system -- so the *Visible* opcode variants are
         implemented identically to their non-visible counterparts, a documented simplification.
         """
-        enemies = sorted(
-            (other for other in self.battle.regiments.values()
-             if other.active and other.player != regiment.player),
-            key=lambda other: math.hypot(other.x - regiment.x, other.y - regiment.y))
+        if side is not None:
+            candidates = (other for other in self.battle.regiments.values()
+                          if other.active and other.side == side)
+        else:
+            candidates = (other for other in self.battle.regiments.values()
+                          if other.active and other.side != regiment.side)
+        enemies = sorted(candidates, key=lambda other: math.hypot(other.x - regiment.x, other.y - regiment.y))
         return enemies[n - 1].identifier if len(enemies) >= n else None
 
     # ===== Core control-flow opcodes =====
@@ -748,23 +762,17 @@ class ScriptInterpreter:
         return self._attack_nearest(state, unit_id, n=1)
 
     def op_AttackNearestFlag40Unit(self, state, operand, script_words, unit_id, tick_count, rng):
-        """AttackNearestFlag40Unit: attack the nearest unit carrying side flag 0x40 (neutral).
-
-        The engine's Regiment model is currently two-sided only (player: bool); there is no third
-        "neutral" side to filter on (SetSide, which would populate it, is also not yet implemented --
-        see notes/interpreter_gameplay_integration.md). Falls back to AttackNearestEnemy so a script
-        using this as its "no enemy in sight" fallback branch still does something rather than
-        silently no-op; revisit once side tracking exists.
-        """
-        return self._attack_nearest(state, unit_id, n=1)
+        """AttackNearestFlag40Unit: attack the nearest unit carrying side flag 0x40 (neutral;
+        notes/neutral_units.md's 2-bit side code, `rules.Side.NEUTRAL`)."""
+        return self._attack_nearest(state, unit_id, n=1, side=Side.NEUTRAL)
 
     def op_AttackNthNearestEnemy(self, state, operand, script_words, unit_id, tick_count, rng):
         """AttackNthNearestEnemy N: find the N-th nearest enemy (1-based) and attack it."""
         return self._attack_nearest(state, unit_id, n=operand or 1)
 
-    def _attack_nearest(self, state, unit_id, n):
+    def _attack_nearest(self, state, unit_id, n, side=None):
         regiment = self.battle.regiments.get(unit_id)
-        target_id = self._nearest_enemy_id(regiment, n) if regiment else None
+        target_id = self._nearest_enemy_id(regiment, n, side=side) if regiment else None
         if target_id:
             state.current_target = (target_id, 0)
             regiment.attack_target = target_id
@@ -1224,7 +1232,7 @@ class ScriptInterpreter:
         regiment = battle.regiments.get(unit_id)
         if regiment:
             for other_id, other in battle.regiments.items():
-                if other.player != regiment.player and other.active and other.routing:
+                if other.side != regiment.side and other.active and other.routing:
                     state.cond_flags = 1
                     return state.pc + 1
         state.cond_flags = 0

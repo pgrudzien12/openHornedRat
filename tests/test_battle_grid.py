@@ -8,14 +8,15 @@ import unittest
 
 from whshr import battle_grid, combat
 from whshr.engine import Battle, Regiment
+from whshr.rules import Side
 
 
-def _regiment(identifier, x, y, player, **kwargs):
+def _regiment(identifier, x, y, side, **kwargs):
     models = kwargs.pop("models", 10)
     ranks = kwargs.pop("ranks", 2)
     direction = kwargs.pop("direction", 0)
     kwargs.setdefault("speed_per_tick", 1.5)
-    return Regiment(identifier, identifier, x, y, direction, player, models=models, ranks=ranks, **kwargs)
+    return Regiment(identifier, identifier, x, y, direction, side, models=models, ranks=ranks, **kwargs)
 
 
 def _grid(battle, regiment):
@@ -24,8 +25,8 @@ def _grid(battle, regiment):
 
 class GridSeedingTests(unittest.TestCase):
     def setUp(self):
-        self.defender = _regiment("aaa_def", 0, 0, False, initiative=5)
-        self.attacker = _regiment("bbb_att", 0, 14, True, initiative=5)
+        self.defender = _regiment("aaa_def", 0, 0, Side.ENEMY, initiative=5)
+        self.attacker = _regiment("bbb_att", 0, 14, Side.PLAYER, initiative=5)
         self.battle = Battle(1000, 1000, [self.defender, self.attacker], seed=0)
 
     def test_given_a_fresh_contact_when_the_grid_is_seeded_then_the_engaged_unit_holds_its_own_cells(self):
@@ -55,8 +56,8 @@ class GridSeedingTests(unittest.TestCase):
 
 class JoiningTests(unittest.TestCase):
     def setUp(self):
-        self.defender = _regiment("aaa_def", 0, 0, False, initiative=5)
-        self.attacker = _regiment("bbb_att", 0, 14, True, initiative=5, models=12, ranks=3)
+        self.defender = _regiment("aaa_def", 0, 0, Side.ENEMY, initiative=5)
+        self.attacker = _regiment("bbb_att", 0, 14, Side.PLAYER, initiative=5, models=12, ranks=3)
         self.battle = Battle(1000, 1000, [self.defender, self.attacker], seed=0)
 
     def test_given_a_joining_unit_when_one_tick_passes_then_at_most_its_frontage_is_placed(self):
@@ -87,9 +88,9 @@ class PileOnTests(unittest.TestCase):
     """game_rules.md 5.7: several units share one grid, one cell pool and one pair of tallies."""
 
     def setUp(self):
-        self.enemy = _regiment("enemy", 0, 0, False, initiative=5, models=20, ranks=4)
-        self.first = _regiment("first", 0, 16, True, initiative=5)
-        self.second = _regiment("second", 16, 0, True, initiative=5)
+        self.enemy = _regiment("enemy", 0, 0, Side.ENEMY, initiative=5, models=20, ranks=4)
+        self.first = _regiment("first", 0, 16, Side.PLAYER, initiative=5)
+        self.second = _regiment("second", 16, 0, Side.PLAYER, initiative=5)
         self.battle = Battle(1000, 1000, [self.enemy, self.first, self.second], seed=0)
         for _ in range(combat.SEGMENT_TICKS * 3):
             self.battle.tick()
@@ -122,8 +123,8 @@ class PileOnTests(unittest.TestCase):
 
 class CasualtyIdentityTests(unittest.TestCase):
     def setUp(self):
-        self.defender = _regiment("aaa_def", 0, 0, False, initiative=5)
-        self.attacker = _regiment("bbb_att", 0, 14, True, initiative=5)
+        self.defender = _regiment("aaa_def", 0, 0, Side.ENEMY, initiative=5)
+        self.attacker = _regiment("bbb_att", 0, 14, Side.PLAYER, initiative=5)
         self.battle = Battle(1000, 1000, [self.defender, self.attacker], seed=0)
         self.battle.tick()
 
@@ -191,10 +192,10 @@ class SeparateGridTests(unittest.TestCase):
     def test_given_two_fights_close_together_when_they_run_then_each_keeps_its_own_grid(self):
         # Far enough apart that the two fights never touch, but each pair engages on the spot.
         pairs = [
-            _regiment("a1", 0, 0, False, initiative=5, speed_per_tick=0.0),
-            _regiment("a2", 0, 14, True, initiative=5, speed_per_tick=0.0),
-            _regiment("b1", 400, 0, False, initiative=5, speed_per_tick=0.0),
-            _regiment("b2", 400, 14, True, initiative=5, speed_per_tick=0.0),
+            _regiment("a1", 0, 0, Side.ENEMY, initiative=5, speed_per_tick=0.0),
+            _regiment("a2", 0, 14, Side.PLAYER, initiative=5, speed_per_tick=0.0),
+            _regiment("b1", 400, 0, Side.ENEMY, initiative=5, speed_per_tick=0.0),
+            _regiment("b2", 400, 14, Side.PLAYER, initiative=5, speed_per_tick=0.0),
         ]
         battle = Battle(2000, 2000, pairs, seed=0)
         for _ in range(combat.SEGMENT_TICKS):

@@ -43,9 +43,28 @@ See `notes/neutral_units.md` for full data, type codes, and implementation guida
 
 ## Implementation notes
 
-- Until the `.BTS` survey above is done, don't guess a specific "neutral AI behaviour" — this is a
-  research task, not an implementation one, and should stay blocked on it.
-- Once the side model is known, `whshr.engine.Battle` likely needs a side enum richer than
-  `regiment.player: bool` (at minimum: player / enemy / neutral, with room for the allied-flag transition),
-  and `whshr/ai.py` needs a neutral-specific policy (e.g. no offensive orders unless provoked) instead of
-  reusing the generic enemy AI.
+**Implemented (Task #9):** `whshr.rules.Side` (player/neutral/enemy, decoded from the `s_side` bit
+pattern above via `rules.side_of_code`) replaced `Regiment.player: bool` throughout the engine
+(`engine.py`, `combat.py`, `ai.py`, `battle_grid.py`, `interpreter.py`, the HUD and log/debug
+modules). `Battle.from_script` now reads each `.BTS` army unit's own `s_side` byte instead of treating
+every non-`.MRC` unit as an enemy, so neutral units (peasants, dwarven allies, ...) load as
+`Side.NEUTRAL` rather than being folded into the enemy roster.
+
+- `whshr/ai.py`'s placeholder AI (only used for scriptless/synthetic battles; a real `.BTS` battle is
+  always script-driven) now gives orders to `Side.ENEMY` regiments only -- neutral regiments hold
+  position, per the "no offensive orders unless provoked" guidance below.
+- `rules.hostile_sides(side)` gates every other *autonomous, unscripted* targeting decision (the AI's
+  engage check, `combat.resolve_shooting`'s target search, `interpreter.LibraryBehaviors.track_threat`'s
+  player-guard) to the default player/enemy hostility; neutral is hostile to nobody by default.
+- Explicit script opcodes (`TargetNearestEnemy`, `AttackNearestEnemy`, `AttackNthNearestEnemy`, ...)
+  keep the plain "different side" search, since a script naming a target has already made the decision
+  -- not gated by `hostile_sides`. `AttackNearestFlag40Unit` (side flag 0x40) is now implemented for
+  real, filtering for `Side.NEUTRAL` specifically, instead of the previous silent fallback to
+  `AttackNearestEnemy`.
+- Close-combat contact (`combat.resolve_contacts`'s touching test, `battle_grid`'s pairing,
+  `Battle._resolve_collisions`'s push-apart) stays a plain "different side" rule: once two regiments of
+  any two different sides physically touch, they can fight, regardless of `hostile_sides`.
+- **Still open:** the runtime allied-flag transition (`0x100`, "Objective G") is not implemented --
+  `SetSide` (opcode 0xDF) has no handler yet, and its operand encoding is not a documented public fact.
+  Combat-result credit for neutral kills (who gets credit in the debrief) is also still open, per the
+  survey's own open questions above.

@@ -6,10 +6,48 @@ from the local installation at run time; no game data is stored in this module.
 
 import re
 import struct
+from enum import Enum
 from pathlib import Path
 
 from . import script
 from .paths import Installation
+
+
+class Side(str, Enum):
+    """A regiment's side (notes/neutral_units.md): the original's `s_side[0]` byte packs a 2-bit side
+    code into bits 7,6 -- 00 player, 01 neutral/NPC, 10 enemy, 11 unused -- plus a unit type code in
+    bits 0-5 (`script.side_info`). Subclasses `str` so it serialises as a plain string in battle logs
+    and dict keys (`whshr.battle_log`) without extra handling.
+    """
+    PLAYER = "player"
+    NEUTRAL = "neutral"
+    ENEMY = "enemy"
+
+
+_SIDE_BITS = {0: Side.PLAYER, 1: Side.NEUTRAL, 2: Side.ENEMY}
+# Default hostility, absent an explicit script order (notes/neutral_units.md, "Implementation
+# Requirements": behaviour is script-driven, not flag-driven). Player and enemy are each other's
+# default opponents; neutral has none -- "no offensive orders unless provoked".
+_HOSTILE = {Side.PLAYER: frozenset({Side.ENEMY}), Side.ENEMY: frozenset({Side.PLAYER}),
+            Side.NEUTRAL: frozenset()}
+
+
+def side_of_code(code):
+    """The `Side` of a raw `s_side[0]` byte, or `Side.ENEMY` if `code` is `None` or the bit pattern
+    11 (notes/neutral_units.md: unused, no units found with it in the 54-battle survey) -- matching
+    this engine's previous default for any `.BTS` army unit with no better information."""
+    if code is None:
+        return Side.ENEMY
+    return _SIDE_BITS.get((code >> 6) & 0x3, Side.ENEMY)
+
+
+def hostile_sides(side):
+    """The sides `side` is hostile to by default (see `Side`'s docstring): used by generic,
+    script-independent targeting (`whshr.ai`, `whshr.combat`'s shooting target search) so a neutral
+    regiment is never auto-targeted or auto-targeting. A script that explicitly names a target
+    (e.g. the `AttackNearestFlag40Unit` opcode) is not limited by this."""
+    return _HOSTILE[side]
+
 
 # Virtual addresses in GAMEF.DLL (image base 0x10000000, linker timestamp 1995-12-11).
 VA_STAT_TOKENS = 0x100E97C8   # {char *name; int token} pairs: psy_status=10, ..., s_side=13 ... s_Exp=43

@@ -32,7 +32,7 @@ def regiment_header_rows(battle, sprite_bases):
     for identifier in sorted(battle.regiments):
         regiment = battle.regiments[identifier]
         rows.append({
-            "id": identifier, "name": regiment.name, "side": "player" if regiment.player else "enemy",
+            "id": identifier, "name": regiment.name, "side": regiment.side.value,
             "sprite_resource": regiment.sprite,
             "sprite_base": sprite_bases.get((regiment.sprite or "").casefold()),
             "models": regiment.models, "ranks": regiment.ranks,

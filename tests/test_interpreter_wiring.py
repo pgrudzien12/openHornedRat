@@ -22,10 +22,12 @@ from whshr.battle_scene import BattleScene
 from whshr.cache import AssetCache
 from whshr.catalog import build
 from whshr.engine import Battle, Regiment
+from whshr.rules import Side
 from whshr.scenes import SceneAssets, SceneMachine
 
 
-def _unit(identifier, x, y, script=None, size=(1, 10, 10, 2)):
+def _unit(identifier, x, y, script=None, size=(0x81, 10, 10, 2)):
+    # size[0] is the s_side byte (notes/neutral_units.md): 0x81 = enemy (bit 7), type code 1.
     set_block = {"x": x, "y": y, "dir": 0}
     if script is not None:
         set_block["script"] = script
@@ -217,9 +219,9 @@ class SetBehaviourDoesNotPreemptScriptGatingTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.reinforcement = Regiment("Goblin_Wolfriders", "Wolfriders", 500, 500, 0, False,
+        self.reinforcement = Regiment("Goblin_Wolfriders", "Wolfriders", 500, 500, 0, Side.ENEMY,
                                        models=10, ranks=2, leadership=6)
-        self.player = Regiment("player_1", "Player", 100, 100, 0, True, models=10, ranks=2)
+        self.player = Regiment("player_1", "Player", 100, 100, 0, Side.PLAYER, models=10, ranks=2)
         self.battle = Battle(1000, 1000, [self.player, self.reinforcement], seed=1995)
         self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
 

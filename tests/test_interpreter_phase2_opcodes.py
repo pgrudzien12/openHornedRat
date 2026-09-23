@@ -10,15 +10,16 @@ Actually Disassembled" section for the real script excerpts these opcodes come f
 import unittest
 from whshr import interpreter
 from whshr.engine import Battle, Regiment
+from whshr.rules import Side
 
 
 class TargetSelectionTests(unittest.TestCase):
     """AttackNearestEnemy family and the TargetNearestEnemy fix (it was previously a stub)."""
 
     def setUp(self):
-        self.near = Regiment("player_near", "Near", 110, 100, 0, True, models=10, ranks=2)
-        self.far = Regiment("player_far", "Far", 500, 100, 0, True, models=10, ranks=2)
-        self.enemy = Regiment("enemy_1", "Enemy", 100, 100, 0, False, models=10, ranks=2)
+        self.near = Regiment("player_near", "Near", 110, 100, 0, Side.PLAYER, models=10, ranks=2)
+        self.far = Regiment("player_far", "Far", 500, 100, 0, Side.PLAYER, models=10, ranks=2)
+        self.enemy = Regiment("enemy_1", "Enemy", 100, 100, 0, Side.ENEMY, models=10, ranks=2)
         self.battle = Battle(1000, 1000, [self.near, self.far, self.enemy], seed=1995)
         self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
 
@@ -48,10 +49,24 @@ class TargetSelectionTests(unittest.TestCase):
         self.interp.op_AttackNearestVisibleEnemy(state, None, [], "enemy_1", 0, None)
         self.assertEqual(self.enemy.attack_target, "player_near")
 
-    def test_attack_nearest_flag40_unit_falls_back_to_nearest_enemy(self):
+    def test_attack_nearest_flag40_unit_targets_the_neutral_side_specifically(self):
+        # notes/neutral_units.md: side flag 0x40 is the neutral/NPC side, now a real third Side value
+        # rather than folded into "enemy" -- this opcode must find a neutral regiment, not just the
+        # nearest non-self side, and must not find one when there isn't one on the field.
+        peasant = Regiment("peasant_1", "Peasants", 105, 100, 0, Side.NEUTRAL, models=8, ranks=1)
+        battle = Battle(1000, 1000, [self.near, self.far, self.enemy, peasant], seed=1995)
+        interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        state = battle.event_bus.unit_states["enemy_1"]
+
+        interp.op_AttackNearestFlag40Unit(state, None, [], "enemy_1", 0, None)
+
+        self.assertEqual(self.enemy.attack_target, "peasant_1")
+
+    def test_attack_nearest_flag40_unit_fails_gracefully_with_no_neutral_units(self):
         state = self.battle.event_bus.unit_states["enemy_1"]
         self.interp.op_AttackNearestFlag40Unit(state, None, [], "enemy_1", 0, None)
-        self.assertEqual(self.enemy.attack_target, "player_near")
+        self.assertIsNone(self.enemy.attack_target)
+        self.assertEqual(state.cond_flags, 0)
 
     def test_attack_nth_nearest_enemy_picks_the_second_closest(self):
         state = self.battle.event_bus.unit_states["enemy_1"]
@@ -73,7 +88,7 @@ class TargetSelectionTests(unittest.TestCase):
 
 class WaitUntilUnitFlagsTests(unittest.TestCase):
     def setUp(self):
-        self.battle = Battle(500, 500, [Regiment("t", "T", 0, 0, 0, False, models=5, ranks=1)], seed=1995)
+        self.battle = Battle(500, 500, [Regiment("t", "T", 0, 0, 0, Side.ENEMY, models=5, ranks=1)], seed=1995)
         self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
         self.state = self.battle.event_bus.unit_states["t"]
 
@@ -97,7 +112,7 @@ class WaitForBattleStartYieldTests(unittest.TestCase):
     burned ~9993-9997 identical WaitForBattleStart dispatches on tick 0 alone."""
 
     def setUp(self):
-        self.battle = Battle(500, 500, [Regiment("t", "T", 0, 0, 0, False, models=5, ranks=1)], seed=1995)
+        self.battle = Battle(500, 500, [Regiment("t", "T", 0, 0, 0, Side.ENEMY, models=5, ranks=1)], seed=1995)
         self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
         self.state = self.battle.event_bus.unit_states["t"]
 
@@ -154,7 +169,7 @@ class LoopPeeksNotPopsTests(unittest.TestCase):
 
 class SwitchScriptPriorityTests(unittest.TestCase):
     def setUp(self):
-        self.battle = Battle(500, 500, [Regiment("t", "T", 0, 0, 0, False, models=5, ranks=1)], seed=1995)
+        self.battle = Battle(500, 500, [Regiment("t", "T", 0, 0, 0, Side.ENEMY, models=5, ranks=1)], seed=1995)
         self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
 
     def test_if_switch_script_only_fills_an_empty_pending_slot(self):
@@ -183,8 +198,8 @@ class SwitchScriptPriorityTests(unittest.TestCase):
 
 class MoraleReactionTests(unittest.TestCase):
     def setUp(self):
-        self.target = Regiment("target", "Target", 100, 100, 0, False, models=10, ranks=2, leadership=7)
-        self.charger = Regiment("charger", "Charger", 110, 100, 0, True, models=10, ranks=2)
+        self.target = Regiment("target", "Target", 100, 100, 0, Side.ENEMY, models=10, ranks=2, leadership=7)
+        self.charger = Regiment("charger", "Charger", 110, 100, 0, Side.PLAYER, models=10, ranks=2)
         self.battle = Battle(500, 500, [self.target, self.charger], seed=1995)
         self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
 
@@ -200,7 +215,7 @@ class MoraleReactionTests(unittest.TestCase):
         self.assertEqual(state.cond_flags, 0)
 
     def test_rout_allowed_false_for_cant_break(self):
-        stubborn = Regiment("stubborn", "S", 0, 0, 0, False, models=5, ranks=1,
+        stubborn = Regiment("stubborn", "S", 0, 0, 0, Side.ENEMY, models=5, ranks=1,
                              psychology=frozenset({"CantBreak"}))
         battle = Battle(500, 500, [stubborn], seed=1995)
         interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
@@ -256,8 +271,8 @@ class EventSourceIsARegimentIdentifierTests(unittest.TestCase):
     else 0, which was 0 for every real regiment identifier (e.g. "Goblin_Stickers")."""
 
     def setUp(self):
-        self.sender = Regiment("Goblin_Stickers", "Stickers", 0, 0, 0, False, models=5, ranks=1)
-        self.receiver = Regiment("Goblin_Wolfriders", "Wolfriders", 0, 0, 0, False, models=5, ranks=1)
+        self.sender = Regiment("Goblin_Stickers", "Stickers", 0, 0, 0, Side.ENEMY, models=5, ranks=1)
+        self.receiver = Regiment("Goblin_Wolfriders", "Wolfriders", 0, 0, 0, Side.ENEMY, models=5, ranks=1)
         self.battle = Battle(500, 500, [self.sender, self.receiver], seed=1995)
         self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
 

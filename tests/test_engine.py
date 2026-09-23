@@ -2,17 +2,18 @@ import math
 import unittest
 
 from whshr.engine import Battle, Regiment, TICK_SECONDS, speed_per_tick
+from whshr.rules import Side
 
 
 class BattleTests(unittest.TestCase):
     def setUp(self):
         # M4 I3, matching the game_rules.md worked example: s_rlmv = trunc(4.8*4+3)/2 = 11.
         self.speed = speed_per_tick(4, 3)
-        self.player = Regiment("player", "Player", 10, 10, 0, True, models=1, ranks=1,
+        self.player = Regiment("player", "Player", 10, 10, 0, Side.PLAYER, models=1, ranks=1,
                                speed_per_tick=self.speed)
         # Far enough apart that these plain movement-only scenarios never bring the two footprints into
         # close-combat contact (whshr.formation.penetrates); combat tests live in tests/test_combat.py.
-        self.enemy = Regiment("enemy", "Enemy", 90, 90, 0, False, models=1, ranks=1,
+        self.enemy = Regiment("enemy", "Enemy", 90, 90, 0, Side.ENEMY, models=1, ranks=1,
                               speed_per_tick=self.speed)
         self.battle = Battle(100, 100, [self.player, self.enemy])
 
@@ -87,7 +88,7 @@ class FormationMovementTests(unittest.TestCase):
 
     def setUp(self):
         self.speed = speed_per_tick(4, 3)
-        self.regiment = Regiment("player", "Player", 0, 0, 0, True, models=6, ranks=2,
+        self.regiment = Regiment("player", "Player", 0, 0, 0, Side.PLAYER, models=6, ranks=2,
                                  speed_per_tick=self.speed)
         self.battle = Battle(1000, 1000, [self.regiment])
 
@@ -129,8 +130,8 @@ def formation_positions(regiment):
 
 class SelectionTests(unittest.TestCase):
     def setUp(self):
-        self.player = Regiment("player", "Player", 100, 100, 0, True, models=18, ranks=4)
-        self.enemy = Regiment("enemy", "Enemy", 300, 300, 0, False, models=18, ranks=4)
+        self.player = Regiment("player", "Player", 100, 100, 0, Side.PLAYER, models=18, ranks=4)
+        self.enemy = Regiment("enemy", "Enemy", 300, 300, 0, Side.ENEMY, models=18, ranks=4)
         self.battle = Battle(1000, 1000, [self.player, self.enemy])
 
     def test_given_a_point_inside_a_player_regiment_when_picked_then_its_identifier_is_returned(self):
@@ -147,8 +148,8 @@ class CollisionTests(unittest.TestCase):
     """Simple, deterministic collisions: regiments do not end up walking through each other."""
 
     def test_given_two_regiments_ordered_into_each_other_when_ticked_then_their_footprints_stop_overlapping(self):
-        left = Regiment("left", "Left", 0, 0, 0, True, models=18, ranks=4, speed_per_tick=5.0)
-        right = Regiment("right", "Right", 200, 0, 0, True, models=18, ranks=4, speed_per_tick=5.0)
+        left = Regiment("left", "Left", 0, 0, 0, Side.PLAYER, models=18, ranks=4, speed_per_tick=5.0)
+        right = Regiment("right", "Right", 200, 0, 0, Side.PLAYER, models=18, ranks=4, speed_per_tick=5.0)
         battle = Battle(1000, 1000, [left, right])
         battle.order_move("left", 300, 0)
         battle.order_move("right", 0, 0)
@@ -161,8 +162,8 @@ class CollisionTests(unittest.TestCase):
 
     def test_given_regiments_deployed_overlapping_when_no_orders_are_given_then_neither_is_pushed(self):
         # BF001 deploys the Grudgebringer cavalry and infantry closer than their bounding circles.
-        cavalry = Regiment("cavalry", "Cavalry", 1090, 639, 0, True, models=12, ranks=3)
-        infantry = Regiment("infantry", "Infantry", 1112, 585, 0, True, models=16, ranks=4)
+        cavalry = Regiment("cavalry", "Cavalry", 1090, 639, 0, Side.PLAYER, models=12, ranks=3)
+        infantry = Regiment("infantry", "Infantry", 1112, 585, 0, Side.PLAYER, models=16, ranks=4)
         battle = Battle(1600, 1760, [cavalry, infantry])
 
         for _ in range(10):
@@ -172,8 +173,8 @@ class CollisionTests(unittest.TestCase):
         self.assertFalse(cavalry.walking or infantry.walking)
 
     def test_given_regiment_ordered_into_a_standing_one_when_ticked_then_only_the_moving_regiment_gives_way(self):
-        standing = Regiment("standing", "Standing", 200, 0, 0, True, models=18, ranks=4, speed_per_tick=5.0)
-        walker = Regiment("walker", "Walker", 0, 0, 0, True, models=18, ranks=4, speed_per_tick=5.0)
+        standing = Regiment("standing", "Standing", 200, 0, 0, Side.PLAYER, models=18, ranks=4, speed_per_tick=5.0)
+        walker = Regiment("walker", "Walker", 0, 0, 0, Side.PLAYER, models=18, ranks=4, speed_per_tick=5.0)
         battle = Battle(1000, 1000, [standing, walker])
         battle.order_move("walker", 400, 0)
 
@@ -187,8 +188,8 @@ class CollisionTests(unittest.TestCase):
 
 class AttackOrderTests(unittest.TestCase):
     def setUp(self):
-        self.player = Regiment("player", "Player", 0, 0, 0, True, models=10, ranks=2, speed_per_tick=5.0)
-        self.enemy = Regiment("enemy", "Enemy", 300, 0, 0, False, models=10, ranks=2, speed_per_tick=5.0)
+        self.player = Regiment("player", "Player", 0, 0, 0, Side.PLAYER, models=10, ranks=2, speed_per_tick=5.0)
+        self.enemy = Regiment("enemy", "Enemy", 300, 0, 0, Side.ENEMY, models=10, ranks=2, speed_per_tick=5.0)
         self.battle = Battle(1000, 1000, [self.player, self.enemy])
 
     def test_given_a_player_regiment_when_ordered_to_attack_an_enemy_then_it_charges_toward_it(self):
@@ -200,7 +201,7 @@ class AttackOrderTests(unittest.TestCase):
         self.assertIsNone(self.player.target_x)  # not an ordinary move order
 
     def test_given_an_attack_order_against_a_player_regiment_then_it_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "enemy regiment"):
+        with self.assertRaisesRegex(ValueError, "not.*a player regiment"):
             self.battle.order_attack("player", "player")
 
     def test_given_a_non_player_regiment_when_ordered_to_attack_then_it_is_rejected(self):
@@ -225,9 +226,9 @@ class BattleOutcomeTests(unittest.TestCase):
     """A full, deterministic battle resolves to a win or lose condition and stops simulating."""
 
     def test_given_an_overwhelming_player_force_when_battle_runs_then_it_ends_in_victory(self):
-        player = Regiment("player", "Player", 0, 0, 0, True, models=40, ranks=4, speed_per_tick=6.0,
+        player = Regiment("player", "Player", 0, 0, 0, Side.PLAYER, models=40, ranks=4, speed_per_tick=6.0,
                           ws=6, strength=6, attacks=3, leadership=9)
-        enemy = Regiment("enemy", "Enemy", 60, 0, 0, False, models=5, ranks=1, speed_per_tick=6.0,
+        enemy = Regiment("enemy", "Enemy", 60, 0, 0, Side.ENEMY, models=5, ranks=1, speed_per_tick=6.0,
                          ws=1, toughness=1, leadership=2)
         battle = Battle(1000, 1000, [player, enemy], seed=7)
         battle.order_attack("player", "enemy")
@@ -246,9 +247,9 @@ class BattleOutcomeTests(unittest.TestCase):
         self.assertEqual(battle.events, [])
 
     def test_given_an_overwhelming_enemy_force_when_battle_runs_then_it_ends_in_defeat(self):
-        player = Regiment("player", "Player", 0, 0, 0, True, models=5, ranks=1, speed_per_tick=6.0,
+        player = Regiment("player", "Player", 0, 0, 0, Side.PLAYER, models=5, ranks=1, speed_per_tick=6.0,
                           ws=1, toughness=1, leadership=2)
-        enemy = Regiment("enemy", "Enemy", 60, 0, 0, False, models=40, ranks=4, speed_per_tick=6.0,
+        enemy = Regiment("enemy", "Enemy", 60, 0, 0, Side.ENEMY, models=40, ranks=4, speed_per_tick=6.0,
                          ws=6, strength=6, attacks=3, leadership=9)
         battle = Battle(1000, 1000, [player, enemy], seed=11)
         enemy.attack_target = "player"

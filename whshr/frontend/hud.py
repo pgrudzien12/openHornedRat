@@ -19,6 +19,7 @@ import math
 import pygame
 
 from ..battlefield import WORLD_PER_MESH
+from ..rules import Side
 from .gpu import ScreenQuad
 
 # Documented for completeness; battle_view.py's 3D pipeline does not yet clip its viewport to this
@@ -336,7 +337,7 @@ class Hud:
             return False  # rendered per spec, but nothing in the engine can carry it out yet
         if name == "back":
             return True
-        if regiment is None or not regiment.player or not regiment.active:
+        if regiment is None or regiment.side != Side.PLAYER or not regiment.active:
             return False
         if name == "halt":
             return regiment.moving
@@ -489,7 +490,7 @@ class Hud:
         if top.identifier != self.selected:
             return top.identifier
         others = hits[:-1]
-        pool = [regiment for regiment in others if regiment.player] or others
+        pool = [regiment for regiment in others if regiment.side == Side.PLAYER] or others
         return pool[0].identifier if pool else top.identifier
 
     def minimap_target_at(self, pos):
@@ -524,7 +525,9 @@ class Hud:
         else:
             state = "normal"
         facing = round((regiment.direction % 512) / 64) % 8
-        return DOT_BASE[(state, regiment.player)] + facing
+        # No third minimap dot frame is documented for a neutral regiment (game_rules.md), so it
+        # falls back to the non-player set, same as an enemy.
+        return DOT_BASE[(state, regiment.side == Side.PLAYER)] + facing
 
     def _shows_banner(self, regiment):
         if self.marker_mode == 0:
@@ -532,7 +535,7 @@ class Hud:
         if self.marker_mode == 1:
             return regiment.identifier == self.selected
         if self.marker_mode == 2:
-            return regiment.player
+            return regiment.side == Side.PLAYER
         return False  # mode 3: banners only in deployment, which this engine does not model yet
 
     def _draw_minimap(self, regiment, camera=None):
@@ -595,7 +598,7 @@ class Hud:
             return None
         if regiment.hud_class in ("wiz", "mon"):
             base = 197
-        elif not regiment.player:
+        elif regiment.side != Side.PLAYER:
             base = 189
         else:
             base = 181

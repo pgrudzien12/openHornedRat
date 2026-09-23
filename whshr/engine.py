@@ -6,7 +6,7 @@ import random
 
 from . import ai, battle_grid, behaviour, combat, formation, interpreter
 from .battle_events import BattleEvent
-from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, stat_fields
+from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, Side, side_of_code, stat_fields
 from .script import load_battle, resource_name
 
 TICK_SECONDS = 0.1  # the battle clock ticks every 100 ms (game_rules.md, "Battle clock")
@@ -87,7 +87,7 @@ class Regiment:
     x: float
     y: float
     direction: int
-    player: bool
+    side: Side  # notes/neutral_units.md: player, neutral/NPC, or enemy
     target_x: float | None = None
     target_y: float | None = None
     models: int = 1
@@ -277,9 +277,11 @@ class Battle:
         self._fight_seq = 0  # counter for fresh whshr.combat fight group ids
         self.result = None  # None while the battle is ongoing, else "victory" or "defeat"
         # A battle only has a win/lose condition once it actually has both sides (movement-only tests
-        # and synthetic battles commonly field only one side, which must never auto-resolve).
-        self._has_enemy = any(not regiment.player for regiment in regiments)
-        self._has_player = any(regiment.player for regiment in regiments)
+        # and synthetic battles commonly field only one side, which must never auto-resolve). Neutral
+        # regiments never decide it either way (notes/neutral_units.md: their combat-credit rules are
+        # still an open research question, so this engine simply excludes them from victory/defeat).
+        self._has_enemy = any(regiment.side == Side.ENEMY for regiment in regiments)
+        self._has_player = any(regiment.side == Side.PLAYER for regiment in regiments)
 
         # Bytecode interpreter for mission scripts (issue #3/#46): `script_dll` is the mission's
         # loaded SCRIPT/BFxxx.DLL (whshr.behaviour.ScriptDll), or None for a mission-less/synthetic
@@ -321,9 +323,13 @@ class Battle:
                  for node in source.get("nodes") or ()
                  if node.get("id") is not None and node.get("x") is not None and node.get("y") is not None}
         regiments, script_ids, used = [], {}, set()
-        armies = [(army, False) for army in source["armies"]]
-        armies.extend((army, True) for army in (source["merc"] or {}).get("armies", []))
-        for army, player in armies:
+        # `source["armies"]` are the .BTS file's own [UNITS] sections (both the "Enemy Army" and "NPC
+        # units" ones, notes/neutral_units.md section 2): each unit's own s_side byte says whether it
+        # is enemy or neutral. `source["merc"]` is the player's own roster from the loaded .MRC, always
+        # Side.PLAYER regardless of any s_side value it happens to carry.
+        armies = [(army, None) for army in source["armies"]]
+        armies.extend((army, Side.PLAYER) for army in (source["merc"] or {}).get("armies", []))
+        for army, forced_side in armies:
             for unit in army["units"]:
                 position = unit["set"]
                 if "x" not in position or "y" not in position:
@@ -334,9 +340,14 @@ class Battle:
                 used.add(identifier)
                 models, ranks = formation.unit_size(unit)
                 profile = unit.get("profile") or {}
+                if forced_side is not None:
+                    side = forced_side
+                else:
+                    fields, _conflicts = stat_fields(unit.get("stats") or {})
+                    side = side_of_code(fields.get("s_side"))
                 regiments.append(Regiment(
                     identifier, unit["name"], float(position["x"]), float(position["y"]),
-                    int(position.get("dir") or 0) % 512, player, models=models, ranks=ranks,
+                    int(position.get("dir") or 0) % 512, side, models=models, ranks=ranks,
                     sprite=resource_name(unit.get("sprites")),
                     banner=resource_name(unit.get("banner")),
                     portrait=resource_name((unit.get("leader") or {}).get("portrait")),
@@ -353,7 +364,7 @@ class Battle:
 
     def order_move(self, identifier, x, y):
         regiment = self.regiments[identifier]
-        if not regiment.player:
+        if regiment.side != Side.PLAYER:
             raise ValueError(f"{identifier} is not player-controlled")
         if regiment.routing:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
@@ -363,15 +374,17 @@ class Battle:
         regiment.target_x, regiment.target_y = float(x), float(y)
 
     def order_attack(self, identifier, target_id):
-        """Order a player regiment to charge an enemy regiment into contact (game_rules.md, "Charge")."""
+        """Order a player regiment to charge a non-player regiment into contact (game_rules.md,
+        "Charge"): the target may be an enemy or a neutral regiment (notes/neutral_units.md documents
+        neutral units as ordinary battle units, not automatically off-limits to a deliberate order)."""
         regiment = self.regiments[identifier]
-        if not regiment.player:
+        if regiment.side != Side.PLAYER:
             raise ValueError(f"{identifier} is not player-controlled")
         if regiment.routing:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
         target = self.regiments.get(target_id)
-        if target is None or target.player:
-            raise ValueError("attack target must be an enemy regiment")
+        if target is None or target.side == Side.PLAYER:
+            raise ValueError("attack target must not be a player regiment")
         if not target.active:
             raise ValueError(f"{target_id} is no longer on the field")
         regiment.target_x = regiment.target_y = None
@@ -380,7 +393,7 @@ class Battle:
     def order_halt(self, identifier):
         """Cancel the selected regiment's current movement or charge order in place."""
         regiment = self.regiments[identifier]
-        if not regiment.player:
+        if regiment.side != Side.PLAYER:
             raise ValueError(f"{identifier} is not player-controlled")
         if regiment.routing:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
@@ -417,7 +430,7 @@ class Battle:
         for regiment in self.regiments.values():
             if not regiment.active:
                 continue
-            if player_only and not regiment.player:
+            if player_only and regiment.side != Side.PLAYER:
                 continue
             if not regiment.contains(x, y):
                 continue
@@ -530,7 +543,11 @@ class Battle:
         return True
 
     def _nearest_enemy(self, regiment):
-        enemies = [r for r in self.regiments.values() if r.player != regiment.player and r.active]
+        """The nearest active regiment of a *different* side, whatever it is (used for a rout's flee
+        bearing and rally's "enemy nearby" check): the opponent to flee from is whoever `regiment` is
+        actually engaged with, not restricted to `rules.hostile_sides`' default hostility, which only
+        gates unprompted/autonomous targeting (`whshr.ai`, `whshr.combat._shooting_target`)."""
+        enemies = [r for r in self.regiments.values() if r.side != regiment.side and r.active]
         if not enemies:
             return None
         return min(enemies, key=lambda e: math.hypot(e.x - regiment.x, e.y - regiment.y))
@@ -580,9 +597,9 @@ class Battle:
         """Per-side active/routing/fled/destroyed regiment counts (whshr.battle_log snapshots, and the
         diagnosis for "defeat never triggered": every result check's inputs are visible here)."""
         counts = {}
-        for side, label in ((True, "player"), (False, "enemy")):
-            regiments = [r for r in self.regiments.values() if r.player == side]
-            counts[label] = {
+        for side in Side:
+            regiments = [r for r in self.regiments.values() if r.side == side]
+            counts[side.value] = {
                 "active": sum(1 for r in regiments if r.active),
                 "routing": sum(1 for r in regiments if r.routing and r.active),
                 "fled": sum(1 for r in regiments if r.fled),
@@ -594,8 +611,8 @@ class Battle:
     def _update_result(self):
         if not (self._has_enemy and self._has_player):
             return
-        alive_enemy = any(r.active for r in self.regiments.values() if not r.player)
-        alive_player = any(r.active for r in self.regiments.values() if r.player)
+        alive_enemy = any(r.active for r in self.regiments.values() if r.side == Side.ENEMY)
+        alive_player = any(r.active for r in self.regiments.values() if r.side == Side.PLAYER)
         if not alive_enemy and alive_player:
             self.result = "victory"
             self.events.append(BattleEvent(
@@ -619,8 +636,8 @@ class Battle:
             for second in regiments[i + 1:]:
                 if first.in_melee or second.in_melee:
                     continue
-                if first.player != second.player:
-                    # Opposite sides never push apart: a charging regiment must be free to close all
+                if first.side != second.side:
+                    # Different sides never push apart: a charging regiment must be free to close all
                     # the way to footprint contact (combat.resolve_contacts), not stop at circle
                     # distance (see combat.resolve_contacts: contact needs real overlap).
                     continue

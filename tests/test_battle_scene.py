@@ -11,10 +11,14 @@ from whshr.glue_content import GlueContent
 from whshr.glue_runtime import EndGame
 from whshr.glue_scene import GlueScene
 from whshr.result_scene import ResultScene
+from whshr.rules import Side
 from whshr.scenes import SceneAssets, SceneMachine, Scene, Transition
 
 
-def _unit(identifier, x, y, size=(1, 10, 10, 2)):
+def _unit(identifier, x, y, size=(0x81, 10, 10, 2)):
+    # size[0] is the s_side byte (notes/neutral_units.md): 0x81 = enemy (bit 7), type code 1. The
+    # merc-army unit below forces Side.PLAYER regardless of its own s_side value, so only the enemy-
+    # army default needs a realistic side bit here.
     return {"id": identifier, "name": identifier.replace("_", " "), "sprites": "ClanRats,0",
             "set": {"x": x, "y": y, "dir": 0}, "stats": {"s_side": list(size)}}
 
@@ -61,7 +65,7 @@ class BattleSceneTests(unittest.TestCase):
         self.assertEqual(self.loaded, [self.root / "FILE/SCRIPT/BF001.BTS"])
         self.assertEqual(sorted(regiments), ["Clanrat_Warriors", "Clanrat_Warriors#2", "Grudgebringer_Infantry"])
         infantry = regiments["Grudgebringer_Infantry"]
-        self.assertEqual((infantry.models, infantry.ranks, infantry.player), (16, 4, True))
+        self.assertEqual((infantry.models, infantry.ranks, infantry.side), (16, 4, Side.PLAYER))
         self.assertEqual(len(infantry.model_positions()), 16)
 
     def test_given_a_glue_battle_when_it_resolves_then_its_same_runtime_resumes(self):
@@ -188,7 +192,7 @@ class BattleSceneTests(unittest.TestCase):
         scene = BattleScene()
         machine = SceneMachine(scene, self.context)
         for regiment in scene.battle.regiments.values():
-            if not regiment.player:
+            if regiment.side != Side.PLAYER:
                 regiment.models = 0  # every enemy destroyed: the next tick must resolve to victory
 
         machine.update(BATTLE_TICK_SECONDS)

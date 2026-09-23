@@ -8,13 +8,14 @@ import unittest
 
 from whshr import combat, formation
 from whshr.engine import Battle, Regiment
+from whshr.rules import Side
 
 
-def _regiment(identifier, x, y, player, **kwargs):
+def _regiment(identifier, x, y, side, **kwargs):
     models = kwargs.pop("models", 10)
     ranks = kwargs.pop("ranks", 2)
     direction = kwargs.pop("direction", 0)
-    return Regiment(identifier, identifier, x, y, direction, player, models=models, ranks=ranks, **kwargs)
+    return Regiment(identifier, identifier, x, y, direction, side, models=models, ranks=ranks, **kwargs)
 
 
 def _run(battle, ticks):
@@ -37,15 +38,15 @@ def _join_fight(battle, group_id, *regiments, turn=0):
         regiment.in_melee = True
         regiment.melee_group = group_id
         regiment.melee_touching = frozenset(
-            r.identifier for r in regiments if r.player != regiment.player)
+            r.identifier for r in regiments if r.side != regiment.side)
 
 
 class InitiativeTimingTests(unittest.TestCase):
     """game_rules.md 5.1: a unit attacks once per turn, in the segment equal to its Initiative."""
 
     def test_given_two_engaged_regiments_with_different_initiative_when_ticked_one_full_turn_then_each_strikes_exactly_once(self):
-        high_i = _regiment("hi", 0, 0, True, initiative=10, speed_per_tick=0.0)
-        low_i = _regiment("lo", 10, 0, False, initiative=1, speed_per_tick=0.0)
+        high_i = _regiment("hi", 0, 0, Side.PLAYER, initiative=10, speed_per_tick=0.0)
+        low_i = _regiment("lo", 10, 0, Side.ENEMY, initiative=1, speed_per_tick=0.0)
         battle = Battle(1000, 1000, [high_i, low_i], seed=1)
         _join_fight(battle, "g", high_i, low_i, turn=100)  # next_test_turn far ahead: never due here
 
@@ -65,9 +66,9 @@ class BreakTestTimingTests(unittest.TestCase):
         # A clear winner (more attacks, better WS/S) against a weaker but not instantly wiped-out
         # defender, both with matching Initiative so both strike every turn; seed 3 makes the winner
         # (the attacker) eventually fail its own Leadership test in this particular matchup.
-        self.attacker = _regiment("att", 0, 0, True, ws=4, strength=4, attacks=1, leadership=8,
+        self.attacker = _regiment("att", 0, 0, Side.PLAYER, ws=4, strength=4, attacks=1, leadership=8,
                                   initiative=10, models=20, ranks=4, speed_per_tick=0.0)
-        self.defender = _regiment("def", 10, 0, False, ws=3, toughness=3, armour=0, leadership=7,
+        self.defender = _regiment("def", 10, 0, Side.ENEMY, ws=3, toughness=3, armour=0, leadership=7,
                                   initiative=10, models=20, ranks=4, speed_per_tick=0.0)
         self.battle = Battle(1000, 1000, [self.attacker, self.defender], seed=3)
 
@@ -87,9 +88,9 @@ class BreakTestTimingTests(unittest.TestCase):
     def test_given_a_clanrats_style_charge_when_ticked_through_the_first_turn_then_the_defender_does_not_rout(self):
         # game_rules.md's BF001 diagnosis: a 3-0 first round used to trigger an immediate failed break
         # test and instant rout. With traced timing, no break test at all can happen in the first turn.
-        clanrats = _regiment("clanrats", 0, 0, True, ws=3, strength=3, attacks=1, leadership=7,
+        clanrats = _regiment("clanrats", 0, 0, Side.PLAYER, ws=3, strength=3, attacks=1, leadership=7,
                               initiative=4, models=13, ranks=3, speed_per_tick=0.0)
-        infantry = _regiment("infantry", 10, 0, False, ws=3, strength=3, toughness=3, attacks=1,
+        infantry = _regiment("infantry", 10, 0, Side.ENEMY, ws=3, strength=3, toughness=3, attacks=1,
                              leadership=7, initiative=4, models=16, ranks=4, speed_per_tick=0.0)
         battle = Battle(1000, 1000, [clanrats, infantry], seed=1)
 
@@ -107,10 +108,10 @@ class DisengagementTests(unittest.TestCase):
     def test_given_an_ally_still_fighting_when_one_enemy_routs_then_the_others_stay_engaged(self):
         # Two player regiments and two enemies share one fight; one enemy routs. Nobody may leave:
         # the other enemy is still standing in the same fight.
-        left = _regiment("left", 0, 0, True, initiative=5, speed_per_tick=0.0)
-        right = _regiment("right", 30, 0, True, initiative=5, speed_per_tick=0.0)
-        first = _regiment("e_first", 0, 12, False, initiative=5, speed_per_tick=0.0)
-        second = _regiment("e_second", 30, 12, False, initiative=5, speed_per_tick=0.0)
+        left = _regiment("left", 0, 0, Side.PLAYER, initiative=5, speed_per_tick=0.0)
+        right = _regiment("right", 30, 0, Side.PLAYER, initiative=5, speed_per_tick=0.0)
+        first = _regiment("e_first", 0, 12, Side.ENEMY, initiative=5, speed_per_tick=0.0)
+        second = _regiment("e_second", 30, 12, Side.ENEMY, initiative=5, speed_per_tick=0.0)
         battle = Battle(1000, 1000, [left, right, first, second], seed=0)
         _join_fight(battle, "g", left, right, first, second)
         first.routing = True  # one enemy has broken; the other has not
@@ -122,8 +123,8 @@ class DisengagementTests(unittest.TestCase):
         self.assertEqual(left.melee_group, "g")
 
     def test_given_no_enemy_left_in_the_fight_when_refreshed_then_the_unit_disengages(self):
-        player = _regiment("p", 0, 0, True, initiative=5, speed_per_tick=0.0)
-        enemy = _regiment("e", 0, 12, False, initiative=5, speed_per_tick=0.0)
+        player = _regiment("p", 0, 0, Side.PLAYER, initiative=5, speed_per_tick=0.0)
+        enemy = _regiment("e", 0, 12, Side.ENEMY, initiative=5, speed_per_tick=0.0)
         battle = Battle(1000, 1000, [player, enemy], seed=0)
         _join_fight(battle, "g", player, enemy)
         enemy.routing = True
@@ -135,8 +136,8 @@ class DisengagementTests(unittest.TestCase):
 
     def test_given_a_shrinking_formation_when_its_footprint_pulls_apart_then_it_stays_engaged(self):
         # Casualties shrink a block's footprint, which must never by itself end a close combat.
-        player = _regiment("p", 0, 0, True, models=20, ranks=4, initiative=5, speed_per_tick=0.0)
-        enemy = _regiment("e", 0, 300, False, models=20, ranks=4, initiative=5, speed_per_tick=0.0)
+        player = _regiment("p", 0, 0, Side.PLAYER, models=20, ranks=4, initiative=5, speed_per_tick=0.0)
+        enemy = _regiment("e", 0, 300, Side.ENEMY, models=20, ranks=4, initiative=5, speed_per_tick=0.0)
         battle = Battle(1000, 1000, [player, enemy], seed=0)
         _join_fight(battle, "g", player, enemy)  # engaged, but far apart: geometry must not matter
 
@@ -154,8 +155,8 @@ class PursuitTests(unittest.TestCase):
     there is one, and otherwise pursue."""
 
     def test_given_a_lone_opponent_when_it_routs_then_the_winner_pursues_it(self):
-        winner = _regiment("w", 0, 0, True, initiative=5, leadership=9, speed_per_tick=1.0)
-        loser = _regiment("l", 0, 12, False, initiative=5, leadership=2, speed_per_tick=1.0)
+        winner = _regiment("w", 0, 0, Side.PLAYER, initiative=5, leadership=9, speed_per_tick=1.0)
+        loser = _regiment("l", 0, 12, Side.ENEMY, initiative=5, leadership=2, speed_per_tick=1.0)
         battle = Battle(1000, 1000, [winner, loser], seed=0)
         _join_fight(battle, "g", winner, loser)
 
@@ -165,9 +166,9 @@ class PursuitTests(unittest.TestCase):
         self.assertIn("pursuit_start", [e.kind for e in battle.events])
 
     def test_given_another_enemy_in_the_fight_when_one_routs_then_the_winner_does_not_pursue(self):
-        winner = _regiment("w", 0, 0, True, initiative=5, speed_per_tick=1.0)
-        loser = _regiment("l", 0, 12, False, initiative=5, speed_per_tick=1.0)
-        other = _regiment("o", 12, 0, False, initiative=5, speed_per_tick=1.0)
+        winner = _regiment("w", 0, 0, Side.PLAYER, initiative=5, speed_per_tick=1.0)
+        loser = _regiment("l", 0, 12, Side.ENEMY, initiative=5, speed_per_tick=1.0)
+        other = _regiment("o", 12, 0, Side.ENEMY, initiative=5, speed_per_tick=1.0)
         battle = Battle(1000, 1000, [winner, loser, other], seed=0)
         _join_fight(battle, "g", winner, loser, other)
 
@@ -179,8 +180,8 @@ class PursuitTests(unittest.TestCase):
     def test_given_a_pursuit_order_when_the_winner_leaves_the_fight_then_the_order_survives(self):
         # Leaving a fight must not cancel the unit's order: the pursuit is granted on the tick the
         # last enemy breaks, and `refresh_melee_state` releases the winner on the very next one.
-        winner = _regiment("w", 0, 0, True, initiative=5, speed_per_tick=1.0)
-        loser = _regiment("l", 0, 12, False, initiative=5, speed_per_tick=1.0)
+        winner = _regiment("w", 0, 0, Side.PLAYER, initiative=5, speed_per_tick=1.0)
+        loser = _regiment("l", 0, 12, Side.ENEMY, initiative=5, speed_per_tick=1.0)
         battle = Battle(1000, 1000, [winner, loser], seed=0)
         _join_fight(battle, "g", winner, loser)
         combat._start_rout(loser, battle)
@@ -192,9 +193,9 @@ class PursuitTests(unittest.TestCase):
         self.assertEqual(winner.attack_target, "l")
 
     def test_given_player_missile_troops_when_their_opponent_routs_then_they_hold(self):
-        archers = _regiment("a", 0, 0, True, initiative=5, speed_per_tick=1.0,
+        archers = _regiment("a", 0, 0, Side.PLAYER, initiative=5, speed_per_tick=1.0,
                             missile_code=2, missile_range=720.0)
-        loser = _regiment("l", 0, 12, False, initiative=5, speed_per_tick=1.0)
+        loser = _regiment("l", 0, 12, Side.ENEMY, initiative=5, speed_per_tick=1.0)
         battle = Battle(1000, 1000, [archers, loser], seed=0)
         _join_fight(battle, "g", archers, loser)
 
@@ -208,8 +209,8 @@ class ContactAttackTests(unittest.TestCase):
     damage a chase does -- automatic hits, to-wound and save only."""
 
     def test_given_a_pursuer_in_reach_when_a_segment_passes_then_it_cuts_down_fugitives(self):
-        chaser = _regiment("c", 0, 0, True, strength=6, attacks=2, speed_per_tick=0.0)
-        fleeing = _regiment("f", 0, 6, False, toughness=2, armour=0, speed_per_tick=0.0)
+        chaser = _regiment("c", 0, 0, Side.PLAYER, strength=6, attacks=2, speed_per_tick=0.0)
+        fleeing = _regiment("f", 0, 6, Side.ENEMY, toughness=2, armour=0, speed_per_tick=0.0)
         fleeing.routing = True
         battle = Battle(1000, 1000, [chaser, fleeing], seed=1)
         chaser.attack_target = "f"
@@ -225,8 +226,8 @@ class ContactAttackTests(unittest.TestCase):
             self.assertNotIn("hit", roll)
 
     def test_given_a_target_out_of_reach_when_a_segment_passes_then_nothing_happens(self):
-        chaser = _regiment("c", 0, 0, True, speed_per_tick=0.0)
-        fleeing = _regiment("f", 0, 600, False, speed_per_tick=0.0)
+        chaser = _regiment("c", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        fleeing = _regiment("f", 0, 600, Side.ENEMY, speed_per_tick=0.0)
         fleeing.routing = True
         battle = Battle(1000, 1000, [chaser, fleeing], seed=1)
         chaser.attack_target = "f"
@@ -237,8 +238,8 @@ class ContactAttackTests(unittest.TestCase):
 
     def test_given_a_standing_enemy_when_a_segment_passes_then_no_contact_attacks_are_made(self):
         # Contact attacks are for fugitives; a standing enemy is fought in close combat instead.
-        chaser = _regiment("c", 0, 0, True, speed_per_tick=0.0)
-        standing = _regiment("s", 0, 6, False, speed_per_tick=0.0)
+        chaser = _regiment("c", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        standing = _regiment("s", 0, 6, Side.ENEMY, speed_per_tick=0.0)
         battle = Battle(1000, 1000, [chaser, standing], seed=1)
         chaser.attack_target = "s"
 
@@ -251,22 +252,22 @@ class EngagementGeometryTests(unittest.TestCase):
     """game_rules.md, "What triggers engagement": real footprint overlap, not proximity."""
 
     def test_given_footprints_that_only_come_close_when_checked_then_they_do_not_engage(self):
-        first = _regiment("a", 0, 0, True, speed_per_tick=0.0)
-        second = _regiment("b", 0, 30, False, speed_per_tick=0.0)
+        first = _regiment("a", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        second = _regiment("b", 0, 30, Side.ENEMY, speed_per_tick=0.0)
 
         self.assertFalse(formation.penetrates(first.block(), second.block()))
 
     def test_given_overlapping_footprints_when_checked_then_they_engage(self):
-        first = _regiment("a", 0, 0, True, speed_per_tick=0.0)
-        second = _regiment("b", 0, 14, False, speed_per_tick=0.0)
+        first = _regiment("a", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        second = _regiment("b", 0, 14, Side.ENEMY, speed_per_tick=0.0)
 
         self.assertTrue(formation.penetrates(first.block(), second.block()))
 
     def test_given_a_regiment_in_contact_when_it_turns_then_the_contact_survives_the_turn(self):
         # The footprint is built around the block centre, and the original moves the unit position on
         # every turn so that centre stays put; turning the anchor in place would swing it away.
-        first = _regiment("a", 0, 0, True, models=20, ranks=4, speed_per_tick=0.0)
-        second = _regiment("b", 0, 40, False, models=20, ranks=4, speed_per_tick=0.0)
+        first = _regiment("a", 0, 0, Side.PLAYER, models=20, ranks=4, speed_per_tick=0.0)
+        second = _regiment("b", 0, 40, Side.ENEMY, models=20, ranks=4, speed_per_tick=0.0)
         self.assertTrue(formation.penetrates(first.block(), second.block()))
 
         Battle._turn_to(second, 256)
@@ -278,35 +279,35 @@ class RankAndDirectionBonusTests(unittest.TestCase):
     """game_rules.md 6.1: rank bonus (deep formations) and direction bonus (flank/rear attacks)."""
 
     def test_given_a_shallow_formation_when_the_rank_bonus_is_computed_then_it_is_zero(self):
-        shallow = _regiment("s", 0, 0, True, models=6, ranks=2)  # frontage 3, not > 3
+        shallow = _regiment("s", 0, 0, Side.PLAYER, models=6, ranks=2)  # frontage 3, not > 3
         self.assertEqual(combat._rank_bonus(shallow), 0)
 
     def test_given_a_deep_formation_when_the_rank_bonus_is_computed_then_it_counts_the_ranks_behind_the_first(self):
-        deep = _regiment("d", 0, 0, True, models=16, ranks=4)  # frontage 4, size/width - 1 = 3
+        deep = _regiment("d", 0, 0, Side.PLAYER, models=16, ranks=4)  # frontage 4, size/width - 1 = 3
         self.assertEqual(combat._rank_bonus(deep), 3)
 
     def test_given_an_attack_from_the_front_when_the_direction_bonus_is_computed_then_it_is_zero(self):
-        defender = _regiment("def", 0, 0, False, direction=0)  # direction 0 faces +Y (formation.place)
-        attacker = _regiment("att", 0, 10, True)  # in front of the defender's facing
+        defender = _regiment("def", 0, 0, Side.ENEMY, direction=0)  # direction 0 faces +Y (formation.place)
+        attacker = _regiment("att", 0, 10, Side.PLAYER)  # in front of the defender's facing
         self.assertEqual(combat._direction_bonus(attacker, defender), 0)
 
     def test_given_an_attack_from_the_rear_when_the_direction_bonus_is_computed_then_it_is_two(self):
-        defender = _regiment("def", 0, 0, False, direction=0)
-        attacker = _regiment("att", 0, -10, True)  # behind the defender's facing
+        defender = _regiment("def", 0, 0, Side.ENEMY, direction=0)
+        attacker = _regiment("att", 0, -10, Side.PLAYER)  # behind the defender's facing
         self.assertEqual(combat._direction_bonus(attacker, defender), 2)
 
     def test_given_an_attack_from_the_flank_when_the_direction_bonus_is_computed_then_it_is_one(self):
-        defender = _regiment("def", 0, 0, False, direction=0)
-        attacker = _regiment("att", 10, 0, True)  # to the defender's side
+        defender = _regiment("def", 0, 0, Side.ENEMY, direction=0)
+        attacker = _regiment("att", 10, 0, Side.PLAYER)  # to the defender's side
         self.assertEqual(combat._direction_bonus(attacker, defender), 1)
 
     def test_given_a_kill_deficit_smaller_than_the_rank_bonus_when_the_break_test_is_due_then_the_deep_unit_does_not_lose_the_result(self):
-        deep = _regiment("deep", 0, 0, True, leadership=7)
-        shallow = _regiment("shallow", 10, 0, False, leadership=7)
+        deep = _regiment("deep", 0, 0, Side.PLAYER, leadership=7)
+        shallow = _regiment("shallow", 10, 0, Side.ENEMY, leadership=7)
         battle = Battle(1000, 1000, [deep, shallow], seed=0)
         _join_fight(battle, "g", deep, shallow, turn=0)
         # 1 kill behind, +3 rank bonus already folded in: the deep unit is not on the losing side.
-        battle.fights["g"]["tally"] = {True: 3.0, False: 2.0}
+        battle.fights["g"]["tally"] = {Side.PLAYER: 3.0, Side.ENEMY: 2.0}
 
         combat._resolve_group_break_test("g", [deep, shallow], 2, battle)
 
@@ -314,11 +315,11 @@ class RankAndDirectionBonusTests(unittest.TestCase):
         self.assertEqual(deep_tests, [])
 
     def test_given_a_kill_deficit_without_a_rank_bonus_when_the_break_test_is_due_then_the_loser_is_tested(self):
-        loser = _regiment("loser", 0, 0, True, leadership=7)
-        winner = _regiment("winner", 10, 0, False, leadership=7)
+        loser = _regiment("loser", 0, 0, Side.PLAYER, leadership=7)
+        winner = _regiment("winner", 10, 0, Side.ENEMY, leadership=7)
         battle = Battle(1000, 1000, [loser, winner], seed=0)
         _join_fight(battle, "g", loser, winner, turn=0)
-        battle.fights["g"]["tally"] = {True: 0.0, False: 2.0}
+        battle.fights["g"]["tally"] = {Side.PLAYER: 0.0, Side.ENEMY: 2.0}
 
         combat._resolve_group_break_test("g", [loser, winner], 2, battle)
 
@@ -337,8 +338,8 @@ class FleeBearingTests(unittest.TestCase):
     second friendly regiment was also chasing it."""
 
     def test_given_a_routing_unit_then_the_flee_bearing_is_computed_once_not_every_tick(self):
-        fleeing = _regiment("f", 500, 500, False, speed_per_tick=4.0)
-        enemy = _regiment("e", 500, 470, True, speed_per_tick=0.0)
+        fleeing = _regiment("f", 500, 500, Side.ENEMY, speed_per_tick=4.0)
+        enemy = _regiment("e", 500, 470, Side.PLAYER, speed_per_tick=0.0)
         battle = Battle(1000, 1000, [fleeing, enemy], seed=0)
         combat._start_rout(fleeing, battle)
         calls = []
@@ -351,10 +352,10 @@ class FleeBearingTests(unittest.TestCase):
         self.assertEqual(calls, [])  # never recomputed once the rout has started
 
     def test_given_two_pursuers_converging_from_different_sides_then_the_fugitive_still_escapes(self):
-        fleeing = _regiment("f", 500, 500, False, speed_per_tick=4.0, initiative=5)
-        cavalry = _regiment("cav", 500, 470, True, speed_per_tick=10.0, initiative=5,
+        fleeing = _regiment("f", 500, 500, Side.ENEMY, speed_per_tick=4.0, initiative=5)
+        cavalry = _regiment("cav", 500, 470, Side.PLAYER, speed_per_tick=10.0, initiative=5,
                             attack_target="f")
-        infantry = _regiment("inf", 470, 500, True, speed_per_tick=4.0, initiative=5,
+        infantry = _regiment("inf", 470, 500, Side.PLAYER, speed_per_tick=4.0, initiative=5,
                              attack_target="f")
         battle = Battle(1000, 1000, [fleeing, cavalry, infantry], seed=0)
         fleeing.routing = True
@@ -372,8 +373,8 @@ class RallyTimingTests(unittest.TestCase):
     """game_rules.md 7.4: the first rally attempt is one full turn after the rout, then every 3 segments."""
 
     def test_given_a_regiment_that_just_routed_when_checked_before_its_scheduled_segment_then_no_attempt_is_made(self):
-        routing = _regiment("r", 0, 0, True, leadership=9, routing=True, rally_next_segment=5)
-        enemy = _regiment("e", 1000, 1000, False)
+        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_next_segment=5)
+        enemy = _regiment("e", 1000, 1000, Side.ENEMY)
         battle = Battle(2000, 2000, [routing, enemy], seed=0)
         battle.tick_count = 4 * combat.SEGMENT_TICKS  # absolute_segment 4, still before segment 5
 
@@ -383,8 +384,8 @@ class RallyTimingTests(unittest.TestCase):
         self.assertTrue(routing.routing)
 
     def test_given_a_regiment_whose_scheduled_segment_has_come_when_checked_then_an_attempt_is_made(self):
-        routing = _regiment("r", 0, 0, True, leadership=9, routing=True, rally_next_segment=5)
-        enemy = _regiment("e", 1000, 1000, False)
+        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_next_segment=5)
+        enemy = _regiment("e", 1000, 1000, Side.ENEMY)
         battle = Battle(2000, 2000, [routing, enemy], seed=0)
         battle.tick_count = 5 * combat.SEGMENT_TICKS
 
@@ -393,9 +394,9 @@ class RallyTimingTests(unittest.TestCase):
         self.assertEqual([e.kind for e in battle.events], ["rally_test"])
 
     def test_given_a_regiment_starting_to_rout_when_the_rout_begins_then_its_first_rally_attempt_is_scheduled_one_turn_later(self):
-        attacker = _regiment("att", 0, 0, True, ws=4, strength=4, attacks=1, leadership=8, initiative=10,
+        attacker = _regiment("att", 0, 0, Side.PLAYER, ws=4, strength=4, attacks=1, leadership=8, initiative=10,
                              models=20, ranks=4, speed_per_tick=0.0)
-        defender = _regiment("def", 10, 0, False, ws=3, toughness=3, armour=0, leadership=7,
+        defender = _regiment("def", 10, 0, Side.ENEMY, ws=3, toughness=3, armour=0, leadership=7,
                              initiative=10, models=20, ranks=4, speed_per_tick=0.0)
         battle = Battle(1000, 1000, [attacker, defender], seed=3)  # eventually the attacker breaks first
         rout_event, segment_at_rout = None, None
@@ -415,8 +416,8 @@ class RallyTimingTests(unittest.TestCase):
 
 class CasualtiesAndCantRallyTests(unittest.TestCase):
     def test_given_no_enemy_nearby_when_the_leadership_test_passes_then_the_unit_rallies(self):
-        routing = _regiment("r", 0, 0, True, leadership=9, routing=True, rally_next_segment=0)
-        enemy = _regiment("e", 1000, 1000, False)
+        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_next_segment=0)
+        enemy = _regiment("e", 1000, 1000, Side.ENEMY)
         battle = Battle(2000, 2000, [routing, enemy], seed=0)  # seed 0: the roll passes Ld 9
 
         combat.resolve_rally(battle)
@@ -427,8 +428,8 @@ class CasualtiesAndCantRallyTests(unittest.TestCase):
         self.assertTrue(rally.data["passed"])
 
     def test_given_an_enemy_within_the_safe_distance_when_checked_then_no_rally_is_attempted(self):
-        routing = _regiment("r", 0, 0, True, leadership=9, routing=True, rally_next_segment=0)
-        enemy = _regiment("e", 50, 0, False)  # well within FLEE_SAFE_DISTANCE
+        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_next_segment=0)
+        enemy = _regiment("e", 50, 0, Side.ENEMY)  # well within FLEE_SAFE_DISTANCE
         battle = Battle(2000, 2000, [routing, enemy], seed=0)
 
         combat.resolve_rally(battle)
@@ -437,9 +438,9 @@ class CasualtiesAndCantRallyTests(unittest.TestCase):
         self.assertTrue(battle.events[-1].data["blocked_by_enemy"])
 
     def test_given_cant_rally_psychology_when_checked_then_the_unit_never_rallies(self):
-        routing = _regiment("r", 0, 0, True, leadership=9, routing=True, rally_next_segment=0,
+        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_next_segment=0,
                             psychology=frozenset({"CantRally"}))
-        enemy = _regiment("e", 1000, 1000, False)
+        enemy = _regiment("e", 1000, 1000, Side.ENEMY)
         battle = Battle(2000, 2000, [routing, enemy], seed=0)
 
         combat.resolve_rally(battle)
@@ -447,9 +448,9 @@ class CasualtiesAndCantRallyTests(unittest.TestCase):
         self.assertTrue(routing.routing)
 
     def test_given_casualties_at_or_below_a_quarter_of_strength_when_checked_then_the_unit_cannot_rally(self):
-        routing = _regiment("r", 0, 0, True, leadership=9, routing=True, rally_next_segment=0,
+        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_next_segment=0,
                             models=2, original_models=10)  # 8 casualties >= 3 x 2 models left
-        enemy = _regiment("e", 1000, 1000, False)
+        enemy = _regiment("e", 1000, 1000, Side.ENEMY)
         battle = Battle(2000, 2000, [routing, enemy], seed=0)
 
         combat.resolve_rally(battle)
@@ -460,8 +461,8 @@ class CasualtiesAndCantRallyTests(unittest.TestCase):
     def test_given_a_regiment_that_has_fled_the_field_when_checked_then_it_is_never_offered_a_rally_attempt(self):
         # Bug: fled regiments (routing off the map edge) kept passing rally tests and returning, because
         # resolve_rally only checked `routing`, never `active` (which `fled` makes permanently False).
-        fled = _regiment("r", 0, 0, True, leadership=9, routing=True, fled=True, rally_next_segment=0)
-        enemy = _regiment("e", 1000, 1000, False)
+        fled = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, fled=True, rally_next_segment=0)
+        enemy = _regiment("e", 1000, 1000, Side.ENEMY)
         battle = Battle(2000, 2000, [fled, enemy], seed=0)
 
         combat.resolve_rally(battle)
@@ -480,9 +481,9 @@ class CloseCombatStrikeTests(unittest.TestCase):
         # A hard-hitting attacker (WS5, S5, A2) against a weak, low-Leadership defender (WS1, T1, no
         # armour, Ld2), both Initiative 10 so they clash and strike on the very same tick; seed 1 is
         # fixed so the round's exact casualties are reproducible.
-        self.attacker = _regiment("att", 0, 0, True, ws=5, strength=5, attacks=2, leadership=8,
+        self.attacker = _regiment("att", 0, 0, Side.PLAYER, ws=5, strength=5, attacks=2, leadership=8,
                                   initiative=10, speed_per_tick=0.0)
-        self.defender = _regiment("def", 10, 0, False, ws=1, toughness=1, armour=0, leadership=2,
+        self.defender = _regiment("def", 10, 0, Side.ENEMY, ws=1, toughness=1, armour=0, leadership=2,
                                   initiative=10, speed_per_tick=1.5)
         self.battle = Battle(1000, 1000, [self.attacker, self.defender], seed=1)
 
@@ -529,7 +530,7 @@ class CloseCombatStrikeTests(unittest.TestCase):
 
     def test_given_a_cant_die_defender_when_casualties_are_applied_then_no_models_are_removed(self):
         # game_rules.md 7.6: CantDie models are never removed by wounds.
-        immortal = _regiment("i", 0, 0, False, psychology=frozenset({"CantDie"}))
+        immortal = _regiment("i", 0, 0, Side.ENEMY, psychology=frozenset({"CantDie"}))
 
         removed = combat.apply_casualties(immortal, 5, self.battle.rng, self.battle)
 
@@ -541,9 +542,9 @@ class CloseCombatStrikeTests(unittest.TestCase):
 class ShootingTests(unittest.TestCase):
     def setUp(self):
         # Crossbows (missile code 2), BS5, facing north at a target directly north and in arc.
-        self.shooter = _regiment("s", 0, 0, True, bs=5, missile_code=2, missile_range=720.0,
+        self.shooter = _regiment("s", 0, 0, Side.PLAYER, bs=5, missile_code=2, missile_range=720.0,
                                  speed_per_tick=0.0)
-        self.target = _regiment("t", 0, 300, False, toughness=3, armour=0, speed_per_tick=0.0)
+        self.target = _regiment("t", 0, 300, Side.ENEMY, toughness=3, armour=0, speed_per_tick=0.0)
         self.battle = Battle(2000, 2000, [self.shooter, self.target], seed=0)
 
     def test_given_a_target_in_range_and_arc_when_ticked_then_it_fires_and_reloads(self):
@@ -579,8 +580,8 @@ class ShootingTests(unittest.TestCase):
 
 class ContactAndMeleeStateTests(unittest.TestCase):
     def test_given_a_routing_unit_when_an_enemy_touches_it_then_it_is_not_engaged_in_melee(self):
-        routing = _regiment("r", 0, 0, True, routing=True, speed_per_tick=0.0)
-        pursuer = _regiment("p", 5, 0, False, speed_per_tick=0.0)
+        routing = _regiment("r", 0, 0, Side.PLAYER, routing=True, speed_per_tick=0.0)
+        pursuer = _regiment("p", 5, 0, Side.ENEMY, speed_per_tick=0.0)
         battle = Battle(2000, 2000, [routing, pursuer], seed=0)
 
         battle.tick()
@@ -593,8 +594,8 @@ class ContactAndMeleeStateTests(unittest.TestCase):
         # footprints (half_forward 12 each) are exactly two model spacings (24 units) apart, but their
         # bounding circles (radius ~32) still overlap at that 48-unit centre distance. Must not clash on
         # circle touch, only on the footprints actually meeting (game_rules.md, "Engagement").
-        left = _regiment("left", 0, 0, True, speed_per_tick=0.0)
-        right = _regiment("right", 0, 48, False, speed_per_tick=0.0)
+        left = _regiment("left", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        right = _regiment("right", 0, 48, Side.ENEMY, speed_per_tick=0.0)
         battle = Battle(2000, 2000, [left, right], seed=0)
         gap = formation.footprint_gap(left.footprint_corners(), right.footprint_corners())
         self.assertAlmostEqual(gap, 2 * formation.MODEL_SPACING, places=6)
@@ -607,8 +608,8 @@ class ContactAndMeleeStateTests(unittest.TestCase):
         self.assertFalse(right.in_melee)
 
     def test_given_a_charging_regiment_when_it_closes_then_it_keeps_moving_until_footprints_touch_then_clashes(self):
-        charger = _regiment("charger", 0, 0, True, models=10, ranks=2, speed_per_tick=6.0)
-        target = _regiment("target", 120, 0, False, models=10, ranks=2, speed_per_tick=0.0)
+        charger = _regiment("charger", 0, 0, Side.PLAYER, models=10, ranks=2, speed_per_tick=6.0)
+        target = _regiment("target", 120, 0, Side.ENEMY, models=10, ranks=2, speed_per_tick=0.0)
         battle = Battle(2000, 2000, [charger, target], seed=0)
         battle.order_attack("charger", "target")
 
@@ -625,9 +626,9 @@ class ContactAndMeleeStateTests(unittest.TestCase):
     def test_given_two_regiments_touching_one_enemy_when_they_clash_then_they_share_one_fight_and_both_strike(self):
         # No 2 vs 1: two player regiments touching the same lone enemy regiment must share a single
         # fight (game_rules.md 5.7's battle grid), and both get to strike it in their own segment.
-        left = _regiment("left", 0, 0, True, initiative=10, speed_per_tick=1.5)
-        right = _regiment("right", 10, 12, True, initiative=10, speed_per_tick=1.5)
-        enemy = _regiment("enemy", 10, -10, False, initiative=10, models=40, ranks=8, speed_per_tick=1.5)
+        left = _regiment("left", 0, 0, Side.PLAYER, initiative=10, speed_per_tick=1.5)
+        right = _regiment("right", 10, 12, Side.PLAYER, initiative=10, speed_per_tick=1.5)
+        enemy = _regiment("enemy", 10, -10, Side.ENEMY, initiative=10, models=40, ranks=8, speed_per_tick=1.5)
         battle = Battle(2000, 2000, [left, right, enemy], seed=0)
 
         strikers = set()
@@ -644,7 +645,7 @@ class ContactAndMeleeStateTests(unittest.TestCase):
                          {"left", "right", "enemy"})
         self.assertEqual(strikers, {"left", "right", "enemy"})
         fight = battle.fights[left.melee_group]
-        self.assertGreater(fight["tally"][True], 0)  # left and right's kills/bonuses share one tally
+        self.assertGreater(fight["tally"][Side.PLAYER], 0)  # left and right's kills/bonuses share one tally
 
 
 if __name__ == "__main__":

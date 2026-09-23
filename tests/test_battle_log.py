@@ -15,6 +15,7 @@ from whshr.battle_scene import BATTLE_TICK_SECONDS, BattleScene
 from whshr.cache import AssetCache
 from whshr.catalog import build
 from whshr.engine import Battle, Regiment
+from whshr.rules import Side
 from whshr.scenes import SceneAssets, SceneMachine
 
 
@@ -148,9 +149,9 @@ class CombatEventLoggingTests(unittest.TestCase):
         # after; a moderate advantage (WS4 S4 vs WS3 T3, both 20 models/4 ranks) whittles the loser down
         # without destroying it outright, so its scheduled break test (two turns after contact,
         # game_rules.md 6.2) is reached and fails with this fixed seed.
-        attacker = Regiment("att", "Attacker", 0, 0, 0, True, models=20, ranks=4, initiative=10,
+        attacker = Regiment("att", "Attacker", 0, 0, 0, Side.PLAYER, models=20, ranks=4, initiative=10,
                             ws=4, strength=4, attacks=1, leadership=8, speed_per_tick=0.0)
-        defender = Regiment("def", "Defender", 10, 0, 0, False, models=20, ranks=4, initiative=10,
+        defender = Regiment("def", "Defender", 10, 0, 0, Side.ENEMY, models=20, ranks=4, initiative=10,
                             ws=3, toughness=3, armour=0, leadership=7, speed_per_tick=0.0)
         battle = Battle(1000, 1000, [attacker, defender], seed=3)
         logger = BattleLogger(Path(tempfile.mkdtemp()) / "combat.jsonl")
@@ -196,7 +197,7 @@ class FleeingRemovalLoggingTests(unittest.TestCase):
     """Given a regiment fleeing across the field edge, removal is logged with its position."""
 
     def test_given_a_routing_regiment_when_it_crosses_the_field_edge_then_removal_is_logged_with_position(self):
-        fleeing = Regiment("r", "Fleeing", 1595, 500, 128, True, models=5, speed_per_tick=1000.0, routing=True)
+        fleeing = Regiment("r", "Fleeing", 1595, 500, 128, Side.PLAYER, models=5, speed_per_tick=1000.0, routing=True)
         battle = Battle(1600, 1760, [fleeing], seed=1)
 
         battle.tick()

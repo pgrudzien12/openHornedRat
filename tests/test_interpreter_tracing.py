@@ -26,6 +26,7 @@ from whshr.battle_scene import BattleScene
 from whshr.cache import AssetCache
 from whshr.catalog import build
 from whshr.engine import Battle, Regiment
+from whshr.rules import Side
 from whshr.scenes import SceneAssets, SceneMachine
 
 
@@ -61,7 +62,7 @@ class WaitForBattleStartIterationTests(unittest.TestCase):
     WaitForBattleStart ~9993-9997 times on tick 0 alone."""
 
     def setUp(self):
-        self.regiment = Regiment("t", "T", 0, 0, 0, False, models=5, ranks=1)
+        self.regiment = Regiment("t", "T", 0, 0, 0, Side.ENEMY, models=5, ranks=1)
         self.battle = Battle(500, 500, [self.regiment], seed=1995)
         words = [_word(0x01), _word(0x17), behaviour.END]  # WaitForBattleStart, Yield, End
         self.script_dll = _FakeScriptDll({0: words})
@@ -93,7 +94,7 @@ class ScatterPatrolLoopEndToEndTests(unittest.TestCase):
     stack entry PushPC only pushes once."""
 
     def setUp(self):
-        self.regiment = Regiment("peasants", "Peasants", 100, 100, 0, False, models=5, ranks=1)
+        self.regiment = Regiment("peasants", "Peasants", 100, 100, 0, Side.ENEMY, models=5, ranks=1)
         words = [
             _word(0x06),                    # 0: PushPC
             _word(0x48), 2,                 # 1: ScatterModelsToNode 2
@@ -156,7 +157,7 @@ class TraceScriptsIntegrationTests(unittest.TestCase):
     """ScriptInterpreter.run() actually writes trace records when the logger asks for them."""
 
     def setUp(self):
-        self.regiment = Regiment("enemy_1", "Enemy", 100, 100, 0, False, models=10, ranks=2)
+        self.regiment = Regiment("enemy_1", "Enemy", 100, 100, 0, Side.ENEMY, models=10, ranks=2)
         self.battle = Battle(500, 500, [self.regiment], seed=1995)
         self.opcode, self.opcode_name = _find_unimplemented_opcode()
         length = behaviour.LENGTHS[self.opcode]
@@ -200,7 +201,7 @@ class GapReportingTests(unittest.TestCase):
     """_report_gap: always-on, deduplicated BattleEvents for missing/broken opcodes."""
 
     def setUp(self):
-        self.regiment = Regiment("enemy_1", "Enemy", 100, 100, 0, False, models=10, ranks=2)
+        self.regiment = Regiment("enemy_1", "Enemy", 100, 100, 0, Side.ENEMY, models=10, ranks=2)
         self.battle = Battle(500, 500, [self.regiment], seed=1995)
         self.opcode, self.opcode_name = _find_unimplemented_opcode()
         length = behaviour.LENGTHS[self.opcode]

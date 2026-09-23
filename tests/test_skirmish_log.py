@@ -6,22 +6,23 @@ from pathlib import Path
 
 from whshr import battle_grid, combat, skirmish_log
 from whshr.engine import Battle, Regiment
+from whshr.rules import Side
 
 
-def _regiment(identifier, x, y, player, **kwargs):
+def _regiment(identifier, x, y, side, **kwargs):
     models = kwargs.pop("models", 10)
     ranks = kwargs.pop("ranks", 2)
     direction = kwargs.pop("direction", 0)
     kwargs.setdefault("speed_per_tick", 1.5)
     kwargs.setdefault("initiative", 5)
-    return Regiment(identifier, identifier, x, y, direction, player, models=models, ranks=ranks, **kwargs)
+    return Regiment(identifier, identifier, x, y, direction, side, models=models, ranks=ranks, **kwargs)
 
 
 class _Fixture(unittest.TestCase):
     def setUp(self):
         self.directory = Path(tempfile.mkdtemp())
-        self.defender = _regiment("aaa_def", 0, 0, False)
-        self.attacker = _regiment("bbb_att", 0, 14, True)
+        self.defender = _regiment("aaa_def", 0, 0, Side.ENEMY)
+        self.attacker = _regiment("bbb_att", 0, 14, Side.PLAYER)
         self.battle = Battle(1000, 1000, [self.defender, self.attacker], seed=0)
         self.logger = skirmish_log.SkirmishLogger(self.directory, "BF001")
 
@@ -143,9 +144,9 @@ class GridCheckTests(_Fixture):
 
 class LetterStabilityTests(unittest.TestCase):
     def test_given_a_unit_joining_later_when_letters_are_assigned_then_the_existing_ones_do_not_move(self):
-        first = _regiment("aaa", 0, 0, False)
-        second = _regiment("bbb", 0, 14, True)
-        third = _regiment("ccc", 14, 0, True)
+        first = _regiment("aaa", 0, 0, Side.ENEMY)
+        second = _regiment("bbb", 0, 14, Side.PLAYER)
+        third = _regiment("ccc", 14, 0, Side.PLAYER)
 
         letters = skirmish_log.assign_letters([first, second])
         grown = skirmish_log.assign_letters([first, second, third], letters)

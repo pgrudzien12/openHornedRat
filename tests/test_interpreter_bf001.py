@@ -14,6 +14,7 @@ Tests are based on `notes/mission_walkthroughs_BF001.md` choreography.
 import unittest
 from whshr import engine, interpreter
 from whshr.engine import Regiment, Battle
+from whshr.rules import Side
 
 
 class BF001InterpreterTests(unittest.TestCase):
@@ -22,22 +23,22 @@ class BF001InterpreterTests(unittest.TestCase):
     def setUp(self):
         """Set up a simple battle with player vs. enemy units (no script DLL for now)."""
         self.player_unit = Regiment(
-            "player_1", "Player Infantry", 100, 100, 0, True,
+            "player_1", "Player Infantry", 100, 100, 0, Side.PLAYER,
             models=10, ranks=2, ws=3, bs=3, strength=3, toughness=3,
             wounds=1, initiative=3, attacks=1, leadership=7
         )
         self.enemy_1 = Regiment(
-            "enemy_0", "Enemy Unit 0", 200, 100, 0, False,
+            "enemy_0", "Enemy Unit 0", 200, 100, 0, Side.ENEMY,
             models=10, ranks=2, ws=3, bs=3, strength=3, toughness=3,
             wounds=1, initiative=3, attacks=1, leadership=7
         )
         self.enemy_2 = Regiment(
-            "enemy_1", "Enemy Unit 1 (Dormant)", 200, 150, 0, False,
+            "enemy_1", "Enemy Unit 1 (Dormant)", 200, 150, 0, Side.ENEMY,
             models=10, ranks=2, ws=3, bs=3, strength=3, toughness=3,
             wounds=1, initiative=3, attacks=1, leadership=7
         )
         self.enemy_3 = Regiment(
-            "enemy_2", "Enemy Unit 2 (Reinforcement)", 250, 100, 0, False,
+            "enemy_2", "Enemy Unit 2 (Reinforcement)", 250, 100, 0, Side.ENEMY,
             models=10, ranks=2, ws=3, bs=3, strength=3, toughness=3,
             wounds=1, initiative=3, attacks=1, leadership=7
         )
@@ -245,11 +246,11 @@ class BF001ScenarioTests(unittest.TestCase):
         3. Send event to own side when attacking
         """
         player = Regiment(
-            "player_1", "Player", 100, 100, 0, True,
+            "player_1", "Player", 100, 100, 0, Side.PLAYER,
             models=10, ranks=2, leadership=7
         )
         enemy0 = Regiment(
-            "enemy_0", "Unit 0", 200, 100, 0, False,
+            "enemy_0", "Unit 0", 200, 100, 0, Side.ENEMY,
             models=10, ranks=2, leadership=7
         )
 
@@ -276,7 +277,7 @@ class BF001ScenarioTests(unittest.TestCase):
         3. Check flag 512 to potentially kill all models
         """
         enemy = Regiment(
-            "enemy_1", "Unit 1", 200, 150, 0, False,
+            "enemy_1", "Unit 1", 200, 150, 0, Side.ENEMY,
             models=10, ranks=2, leadership=7
         )
 
@@ -305,7 +306,7 @@ class BF001ScenarioTests(unittest.TestCase):
         4. Then activate and hunt tagged unit
         """
         enemy = Regiment(
-            "enemy_2", "Unit 2", 250, 100, 0, False,
+            "enemy_2", "Unit 2", 250, 100, 0, Side.ENEMY,
             models=10, ranks=2, leadership=7
         )
 

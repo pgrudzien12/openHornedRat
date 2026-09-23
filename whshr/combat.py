@@ -29,7 +29,7 @@ import math
 
 from . import battle_grid, formation
 from .battle_events import BattleEvent
-from .rules import EXPECTED_ARMOUR_SAVE, wfb_to_hit, wfb_to_wound
+from .rules import EXPECTED_ARMOUR_SAVE, Side, hostile_sides, wfb_to_hit, wfb_to_wound
 
 SEGMENT_TICKS = 19  # game_rules.md, "Battle clock": 19 ticks per segment
 SEGMENTS_PER_TURN = 10  # game_rules.md 5.1: segments count down from 10 to 1 within a turn
@@ -228,7 +228,7 @@ def _fight_has_enemy(battle, regiment):
     if regiment.melee_group is None:
         return False
     return any(other.active and not other.routing
-               and other.player != regiment.player
+               and other.side != regiment.side
                and other.melee_group == regiment.melee_group
                for other in battle.regiments.values())
 
@@ -241,6 +241,10 @@ def _segment_state(tick_count):
     return absolute_segment, turn, SEGMENTS_PER_TURN - segment_in_turn
 
 
+def _empty_breakdown():
+    return {side: {"kills": 0, "rank": 0, "direction": 0} for side in Side}
+
+
 def _new_fight(turn, segment):
     return {
         "grid": None,  # whshr.battle_grid.BattleGrid, seeded on the first tick of the fight
@@ -249,9 +253,11 @@ def _new_fight(turn, segment):
         "segment": segment,
         "next_test_turn": turn + 2,
         "rounds": {},  # regiment id -> result segments it has seen on this grid (6.2's +0x33C)
-        "tally": {True: 0.0, False: 0.0},
-        "breakdown": {True: {"kills": 0, "rank": 0, "direction": 0},
-                      False: {"kills": 0, "rank": 0, "direction": 0}},
+        # Keyed by Side rather than the two-sided bool this engine used before three sides existed
+        # (notes/neutral_units.md): a fight normally still has only two sides in it, but nothing stops
+        # a neutral regiment from being dragged into one (see _resolve_group_break_test).
+        "tally": {side: 0.0 for side in Side},
+        "breakdown": _empty_breakdown(),
     }
 
 
@@ -269,7 +275,7 @@ def _merge_fights(battle, keep_id, other_ids):
         other = battle.fights.pop(other_id, None)
         if other is None:
             continue
-        for side in (True, False):
+        for side in Side:
             keep["tally"][side] += other["tally"][side]
             for field_name in ("kills", "rank", "direction"):
                 keep["breakdown"][side][field_name] += other["breakdown"][side][field_name]
@@ -290,7 +296,7 @@ def resolve_contacts(battle):
     old_touching = {r.identifier: r.melee_touching for r in active}
     for i, first in enumerate(active):
         for second in active[i + 1:]:
-            if second.player == first.player:
+            if second.side == first.side:
                 continue
             if formation.penetrates(first.block(), second.block()):
                 touching[first.identifier].add(second.identifier)
@@ -444,15 +450,15 @@ def _strike_with_models(attacker, group_id, fight, turn, segment_number, battle)
     defender = battle.regiments[max(victims, key=lambda key: len(victims[key]))] if victims else pairs[0][2]
     rank_bonus = _rank_bonus(attacker)
     direction_bonus = _direction_bonus(attacker, defender)
-    fight["tally"][attacker.player] += kills + rank_bonus + direction_bonus
-    breakdown = fight["breakdown"][attacker.player]
+    fight["tally"][attacker.side] += kills + rank_bonus + direction_bonus
+    breakdown = fight["breakdown"][attacker.side]
     breakdown["kills"] += kills
     breakdown["rank"] += rank_bonus
     breakdown["direction"] += direction_bonus
     battle.events.append(BattleEvent(
         f"{attacker.name} strikes {defender.name} in segment {segment_number} (turn {turn}): "
         f"{len(pairs)} models fighting, {kills} casualties, side tally "
-        f"{fight['tally'][attacker.player]:.0f} (+{rank_bonus} rank, +{direction_bonus} dir).",
+        f"{fight['tally'][attacker.side]:.0f} (+{rank_bonus} rank, +{direction_bonus} dir).",
         "melee_strike",
         attacker=attacker.identifier, defender=defender.identifier, fight=group_id, turn=turn,
         segment=segment_number, kills=kills, fighting=len(pairs), rank_bonus=rank_bonus,
@@ -465,6 +471,13 @@ def _resolve_group_break_test(group_id, members, turn, battle):
     accumulated tally) is tested, every active regiment on that side; the tally and its breakdown reset
     and the next test is due next turn.
 
+    A fight normally has exactly two sides in it (the original binary player/enemy case this was
+    traced from); the loser is then simply whichever of the two has the lower tally, by the same
+    margin as before. With three possible sides (notes/neutral_units.md) a fight that happens to draw
+    in all three at once has no traced original behaviour to match, so this picks the single lowest-
+    tally side as the loser against the single highest, a direct, undocumented generalisation of the
+    two-sided rule rather than a researched three-way one.
+
     Each regiment also counts the result segments it has seen on this grid, and is exempt from the
     first of them (the traced `+0x33C >= 2` rule), so a regiment that joins a fight late cannot be
     broken by a result it was not present for.
@@ -475,17 +488,19 @@ def _resolve_group_break_test(group_id, members, turn, battle):
         seen[regiment.identifier] = seen.get(regiment.identifier, 0) + 1
     if turn < fight["next_test_turn"]:
         return
-    difference = fight["tally"][True] - fight["tally"][False]
-    if difference != 0:
-        losing_side = difference < 0
-        modifier = abs(difference)
-        breakdown = {True: dict(fight["breakdown"][True]), False: dict(fight["breakdown"][False])}
-        for regiment in members:
-            if regiment.player == losing_side and seen.get(regiment.identifier, 0) >= 2:
-                _break_test(regiment, modifier, group_id, breakdown, battle)
-    fight["tally"] = {True: 0.0, False: 0.0}
-    fight["breakdown"] = {True: {"kills": 0, "rank": 0, "direction": 0},
-                           False: {"kills": 0, "rank": 0, "direction": 0}}
+    present = {regiment.side for regiment in members}
+    if len(present) >= 2:
+        tallies = {side: fight["tally"][side] for side in present}
+        winning_tally = max(tallies.values())
+        losing_side, losing_tally = min(tallies.items(), key=lambda item: item[1])
+        modifier = winning_tally - losing_tally
+        if modifier != 0:
+            breakdown = {side: dict(fight["breakdown"][side]) for side in Side}
+            for regiment in members:
+                if regiment.side == losing_side and seen.get(regiment.identifier, 0) >= 2:
+                    _break_test(regiment, modifier, group_id, breakdown, battle)
+    fight["tally"] = {side: 0.0 for side in Side}
+    fight["breakdown"] = _empty_breakdown()
     fight["next_test_turn"] = turn + 1
 
 
@@ -520,7 +535,7 @@ def _start_rout(regiment, battle):
     regiment.flee_x, regiment.flee_y = flee_x, flee_y
     group_id = regiment.melee_group
     opponents = [other for other in battle.regiments.values()
-                 if other.active and other.player != regiment.player
+                 if other.active and other.side != regiment.side
                  and other.melee_group == group_id and group_id is not None]
     battle_grid.release(battle, regiment)
     regiment.routing = True
@@ -556,7 +571,7 @@ def _react_to_rout(routed, opponents, group_id, battle):
         if opponent.routing or not opponent.active:
             continue
         still_fighting = any(
-            other.active and not other.routing and other.player != opponent.player
+            other.active and not other.routing and other.side != opponent.side
             and other.melee_group == group_id
             for other in battle.regiments.values())
         if still_fighting:
@@ -751,10 +766,13 @@ def resolve_shooting(battle):
 
 
 def _shooting_target(battle, regiment):
-    """The nearest active enemy regiment in range and front arc (game_rules.md 8.1)."""
+    """The nearest active hostile regiment in range and front arc (game_rules.md 8.1). Restricted to
+    `rules.hostile_sides` rather than simply "a different side" so a neutral regiment with a missile
+    weapon (notes/neutral_units.md's NPC artillery) never opens fire on its own, and is never
+    auto-targeted either -- shooting here is autonomous engine behaviour, not a scripted order."""
     best, best_distance = None, None
     for enemy in battle.regiments.values():
-        if enemy.player == regiment.player or not enemy.active or enemy.routing:
+        if enemy.side not in hostile_sides(regiment.side) or not enemy.active or enemy.routing:
             continue
         dx, dy = enemy.x - regiment.x, enemy.y - regiment.y
         distance = math.hypot(dx, dy)

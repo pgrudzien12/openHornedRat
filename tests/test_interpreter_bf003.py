@@ -12,6 +12,7 @@ Victory condition: Keep all peasants alive and defeat enemies.
 import unittest
 from whshr import engine, interpreter
 from whshr.engine import Regiment, Battle
+from whshr.rules import Side
 
 
 class BF003SetupTests(unittest.TestCase):
@@ -21,20 +22,20 @@ class BF003SetupTests(unittest.TestCase):
         """Set up BF003 scenario with player, enemies, and peasants."""
         # Player forces (not specified in walkthrough, use reasonable defaults)
         self.player = Regiment(
-            "player_1", "Player Army", 400, 400, 0, True,
+            "player_1", "Player Army", 400, 400, 0, Side.PLAYER,
             models=20, ranks=3, leadership=8
         )
 
         # Enemy forces
         self.stickers = Regiment(
-            "enemy_0", "Goblin Stickers", 200, 200, 0, False,
+            "enemy_0", "Goblin Stickers", 200, 200, 0, Side.ENEMY,
             models=15, ranks=2, ws=4, bs=2, strength=4, toughness=3,
             wounds=1, initiative=4, attacks=1, leadership=6,
             missile_code=None, missile_range=None
         )
 
         self.wolfriders = Regiment(
-            "enemy_1", "Goblin Wolfriders", 100, 100, 0, False,
+            "enemy_1", "Goblin Wolfriders", 100, 100, 0, Side.ENEMY,
             models=10, ranks=2, ws=4, bs=2, strength=3, toughness=3,
             wounds=1, initiative=5, attacks=1, leadership=6,
             missile_code=None, missile_range=None
@@ -43,21 +44,21 @@ class BF003SetupTests(unittest.TestCase):
 
         # Peasant groups (non-combatants)
         self.peasant1 = Regiment(
-            "peasant_0", "Peasants at Node 2", 300, 300, 0, False,
+            "peasant_0", "Peasants at Node 2", 300, 300, 0, Side.ENEMY,
             models=8, ranks=1, ws=2, bs=1, strength=2, toughness=2,
             wounds=1, initiative=2, attacks=0, leadership=5,  # No attacks
             missile_code=None, missile_range=None
         )
 
         self.peasant2 = Regiment(
-            "peasant_1", "Peasants at Node 4", 500, 200, 0, False,
+            "peasant_1", "Peasants at Node 4", 500, 200, 0, Side.ENEMY,
             models=8, ranks=1, ws=2, bs=1, strength=2, toughness=2,
             wounds=1, initiative=2, attacks=0, leadership=5,
             missile_code=None, missile_range=None
         )
 
         self.peasant3 = Regiment(
-            "peasant_2", "Peasants at Node 3", 350, 450, 0, False,
+            "peasant_2", "Peasants at Node 3", 350, 450, 0, Side.ENEMY,
             models=8, ranks=1, ws=2, bs=1, strength=2, toughness=2,
             wounds=1, initiative=2, attacks=0, leadership=5,
             missile_code=None, missile_range=None
@@ -90,18 +91,18 @@ class BF003ReinforcementTests(unittest.TestCase):
     def setUp(self):
         """Set up BF003 with hidden Wolfriders."""
         self.stickers = Regiment(
-            "enemy_0", "Stickers", 200, 200, 0, False,
+            "enemy_0", "Stickers", 200, 200, 0, Side.ENEMY,
             models=15, ranks=2, leadership=6
         )
 
         self.wolfriders = Regiment(
-            "enemy_1", "Wolfriders", 100, 100, 0, False,
+            "enemy_1", "Wolfriders", 100, 100, 0, Side.ENEMY,
             models=10, ranks=2, leadership=6
         )
         self.wolfriders.fled = True  # Hidden initially
 
         self.player = Regiment(
-            "player_1", "Player", 400, 400, 0, True,
+            "player_1", "Player", 400, 400, 0, Side.PLAYER,
             models=20, ranks=3, leadership=8
         )
 
@@ -139,17 +140,17 @@ class BF003AIBehaviorTests(unittest.TestCase):
     def setUp(self):
         """Set up BF003 with player and enemies."""
         self.player = Regiment(
-            "player_1", "Player", 400, 400, 0, True,
+            "player_1", "Player", 400, 400, 0, Side.PLAYER,
             models=20, ranks=3, leadership=8
         )
 
         self.stickers = Regiment(
-            "enemy_0", "Stickers", 200, 200, 0, False,
+            "enemy_0", "Stickers", 200, 200, 0, Side.ENEMY,
             models=15, ranks=2, leadership=6
         )
 
         self.wolfriders = Regiment(
-            "enemy_1", "Wolfriders", 100, 100, 0, False,
+            "enemy_1", "Wolfriders", 100, 100, 0, Side.ENEMY,
             models=10, ranks=2, leadership=6
         )
 
@@ -190,18 +191,18 @@ class BF003PeasantProtectionTests(unittest.TestCase):
     def setUp(self):
         """Set up peasants that need protection."""
         self.peasant = Regiment(
-            "peasant_0", "Peasants", 300, 300, 0, False,
+            "peasant_0", "Peasants", 300, 300, 0, Side.ENEMY,
             models=8, ranks=1, ws=2, bs=1, strength=2, toughness=2,
             wounds=1, initiative=2, attacks=0, leadership=5
         )
 
         self.enemy = Regiment(
-            "enemy_0", "Enemy", 200, 200, 0, False,
+            "enemy_0", "Enemy", 200, 200, 0, Side.ENEMY,
             models=10, ranks=1, leadership=6
         )
 
         self.player = Regiment(
-            "player_1", "Player", 400, 400, 0, True,
+            "player_1", "Player", 400, 400, 0, Side.PLAYER,
             models=20, ranks=3, leadership=8
         )
 

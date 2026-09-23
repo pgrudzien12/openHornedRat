@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import battle_grid, combat
+from .rules import Side
 
 MAX_ATTACKERS_PER_MODEL = 4  # four orthogonal cells (game_rules.md 5.2)
 DRIFT_LIMIT = battle_grid.CELL  # a model further than this from its own cell has drifted off it
@@ -99,7 +100,7 @@ def check_grid(battle, grid, members):
                     f"{regiment.identifier}#{model.uid}: paired with {target_id}#{target_uid}, "
                     f"which is dead ({target.models} models left)")
                 continue
-            if target.player == regiment.player:
+            if target.side == regiment.side:
                 problems.append(f"{regiment.identifier}#{model.uid}: paired with friendly {target_id}")
                 continue
             attackers_per_target.setdefault((target_id, target_uid), []).append(
@@ -148,7 +149,8 @@ def render_grid(battle, grid, members, letters=None):
             identifier, uid = occupant
             regiment = battle.regiments.get(identifier)
             base = letters.get(identifier, "?")
-            letter = base if (regiment is not None and regiment.player) else base.lower()
+            is_player = regiment is not None and regiment.side == Side.PLAYER
+            letter = base if is_player else base.lower()
             index = regiment.index_of(uid) if regiment is not None else None
             if index is None:
                 line.append("?")  # a cell still held by a model that no longer exists
@@ -156,11 +158,11 @@ def render_grid(battle, grid, members, letters=None):
             model = regiment.melee_models[index]
             fighting = model.arrived and model.opponent is not None
             # A fighting model shows in its side's own case; one still walking in shows in the other.
-            line.append(letter if fighting else (letter.lower() if regiment.player else letter.upper()))
+            line.append(letter if fighting else (letter.lower() if is_player else letter.upper()))
         rows.append(f"{row:3d} " + "".join(line))
     legend = ", ".join(
-        f"{letters[r.identifier] if r.player else letters[r.identifier].lower()}={r.identifier}"
-        f"{'' if r.player else ' (enemy)'}"
+        f"{letters[r.identifier] if r.side == Side.PLAYER else letters[r.identifier].lower()}={r.identifier}"
+        f"{'' if r.side == Side.PLAYER else f' ({r.side.value})'}"
         for r in sorted(members, key=lambda r: r.identifier) if r.identifier in letters)
     rows.append(f"    legend: {legend}  "
                 f"(a model still walking into its cell shows in the opposite case)")
@@ -235,7 +237,7 @@ class SkirmishLogger:
                               f"(frame x={grid.x:.1f} y={grid.y:.1f} dir={grid.direction})")
         self._write(group_id, "participants:")
         for regiment in members:
-            side = "player" if regiment.player else "enemy"
+            side = regiment.side.value
             self._write(group_id,
                         f"  {regiment.identifier:<16} {side:<6} {regiment.models:3d} models "
                         f"ranks {regiment.ranks} frontage {regiment.front_rank_models()}  "

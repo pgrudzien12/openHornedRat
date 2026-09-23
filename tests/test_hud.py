@@ -44,13 +44,14 @@ from whshr.battlefield import WORLD_PER_MESH
 from whshr.engine import Battle, Regiment
 from whshr.frontend.battle_view import BattleView
 from whshr.frontend.hud import FIXED_BUTTONS, MINIMAP_RECT, PANEL_RECT, Hud
+from whshr.rules import Side
 
 
 def _hud(selected="player", regiments=None, **overrides):
     if regiments is None:
         regiments = [
-            Regiment("player", "Player", 100, 100, 0, True, models=10, ranks=2, hud_class="inf"),
-            Regiment("enemy", "Enemy", 700, 600, 128, False, models=10, ranks=2, hud_class="inf"),
+            Regiment("player", "Player", 100, 100, 0, Side.PLAYER, models=10, ranks=2, hud_class="inf"),
+            Regiment("enemy", "Enemy", 700, 600, 128, Side.ENEMY, models=10, ranks=2, hud_class="inf"),
         ]
     instance = Hud.__new__(Hud)
     instance.field = SimpleNamespace(width=1000, height=800, palette=[(0, 0, 0)], ui_sheets={})
@@ -81,41 +82,41 @@ class PanelStateTests(unittest.TestCase):
         self.assertEqual(hud.slots(), {"TL": "move", "TR": "attack", "BR": "independent"})
 
     def test_given_an_idle_artillery_regiment_then_it_has_no_move_slot(self):
-        regiments = [Regiment("player", "Gun", 0, 0, 0, True, hud_class="art")]
+        regiments = [Regiment("player", "Gun", 0, 0, 0, Side.PLAYER, hud_class="art")]
         hud = _hud(regiments=regiments)
 
         self.assertEqual(hud.slots(), {"TR": "attack", "BR": "independent"})
 
     def test_given_an_idle_wizard_regiment_then_magic_and_back_are_present(self):
-        regiments = [Regiment("player", "Wiz", 0, 0, 0, True, hud_class="wiz")]
+        regiments = [Regiment("player", "Wiz", 0, 0, 0, Side.PLAYER, hud_class="wiz")]
         hud = _hud(regiments=regiments)
 
         self.assertEqual(hud.slots(),
                          {"TL": "move", "TR": "attack", "BR": "independent", "BL": "magic", "C": "back"})
 
     def test_given_a_regiment_in_melee_then_the_melee_noncaster_set_is_used(self):
-        regiments = [Regiment("player", "P", 0, 0, 0, True, hud_class="inf", in_melee=True)]
+        regiments = [Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf", in_melee=True)]
         hud = _hud(regiments=regiments)
 
         self.assertEqual(hud.panel_state(), ("melee_noncaster", "inf"))
         self.assertEqual(hud.slots(), {"TR": "withdraw", "C": "fight_harder"})
 
     def test_given_a_routing_regiment_then_the_rally_set_is_used(self):
-        regiments = [Regiment("player", "P", 0, 0, 0, True, hud_class="inf", routing=True)]
+        regiments = [Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf", routing=True)]
         hud = _hud(regiments=regiments)
 
         self.assertEqual(hud.panel_state(), ("rally", "inf"))
         self.assertEqual(hud.slots(), {"BR": "rally"})
 
     def test_given_a_regiment_with_an_attack_target_not_yet_in_melee_then_charging_has_no_buttons(self):
-        regiments = [Regiment("player", "P", 0, 0, 0, True, hud_class="inf", attack_target="enemy")]
+        regiments = [Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf", attack_target="enemy")]
         hud = _hud(regiments=regiments)
 
         self.assertEqual(hud.panel_state(), ("charging", "inf"))
         self.assertEqual(hud.slots(), {})
 
     def test_given_a_class_with_no_buttons_then_no_slots_are_shown(self):
-        regiments = [Regiment("player", "P", 0, 0, 0, True, hud_class=None)]
+        regiments = [Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class=None)]
         hud = _hud(regiments=regiments)
 
         self.assertEqual(hud.panel_state(), (None, None))
@@ -348,18 +349,18 @@ class MinimapTests(unittest.TestCase):
         return _hud(regiments=regiments)
 
     def test_given_a_stack_of_markers_then_the_topmost_one_not_yet_selected_wins(self):
-        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, False, models=10, hud_class="inf"),
-                    Regiment("friendly_b", "FriendlyB", 500, 500, 0, True, models=10, hud_class="inf"),
-                    Regiment("friendly_c", "FriendlyC", 500, 500, 0, True, models=10, hud_class="inf")]
+        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, Side.ENEMY, models=10, hud_class="inf"),
+                    Regiment("friendly_b", "FriendlyB", 500, 500, 0, Side.PLAYER, models=10, hud_class="inf"),
+                    Regiment("friendly_c", "FriendlyC", 500, 500, 0, Side.PLAYER, models=10, hud_class="inf")]
         hud = self._stacked_hud(regiments)
         pixel = hud._world_to_map_pixel(500, 500)
 
         self.assertEqual(hud.minimap_regiment_at(_map_pos(hud, *pixel)), "friendly_c")
 
     def test_given_the_topmost_is_already_selected_then_the_bottom_most_friendly_is_picked_next(self):
-        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, False, models=10, hud_class="inf"),
-                    Regiment("friendly_b", "FriendlyB", 500, 500, 0, True, models=10, hud_class="inf"),
-                    Regiment("friendly_c", "FriendlyC", 500, 500, 0, True, models=10, hud_class="inf")]
+        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, Side.ENEMY, models=10, hud_class="inf"),
+                    Regiment("friendly_b", "FriendlyB", 500, 500, 0, Side.PLAYER, models=10, hud_class="inf"),
+                    Regiment("friendly_c", "FriendlyC", 500, 500, 0, Side.PLAYER, models=10, hud_class="inf")]
         hud = self._stacked_hud(regiments)
         hud.selected = "friendly_c"  # already on top
         pixel = hud._world_to_map_pixel(500, 500)
@@ -367,9 +368,9 @@ class MinimapTests(unittest.TestCase):
         self.assertEqual(hud.minimap_regiment_at(_map_pos(hud, *pixel)), "friendly_b")
 
     def test_given_repeated_clicks_on_the_same_stack_then_selection_cycles_through_every_friendly(self):
-        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, False, models=10, hud_class="inf"),
-                    Regiment("friendly_b", "FriendlyB", 500, 500, 0, True, models=10, hud_class="inf"),
-                    Regiment("friendly_c", "FriendlyC", 500, 500, 0, True, models=10, hud_class="inf")]
+        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, Side.ENEMY, models=10, hud_class="inf"),
+                    Regiment("friendly_b", "FriendlyB", 500, 500, 0, Side.PLAYER, models=10, hud_class="inf"),
+                    Regiment("friendly_c", "FriendlyC", 500, 500, 0, Side.PLAYER, models=10, hud_class="inf")]
         hud = self._stacked_hud(regiments)
         pixel = hud._world_to_map_pixel(500, 500)
         seen = []
@@ -381,8 +382,8 @@ class MinimapTests(unittest.TestCase):
         self.assertEqual(seen, ["friendly_c", "friendly_b", "friendly_c", "friendly_b"])
 
     def test_given_no_friendly_unit_in_the_stack_then_it_cycles_through_any_side(self):
-        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, False, models=10, hud_class="inf"),
-                    Regiment("enemy_b", "EnemyB", 500, 500, 0, False, models=10, hud_class="inf")]
+        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, Side.ENEMY, models=10, hud_class="inf"),
+                    Regiment("enemy_b", "EnemyB", 500, 500, 0, Side.ENEMY, models=10, hud_class="inf")]
         hud = self._stacked_hud(regiments)
         hud.selected = "enemy_b"  # already on top
         pixel = hud._world_to_map_pixel(500, 500)
@@ -390,7 +391,7 @@ class MinimapTests(unittest.TestCase):
         self.assertEqual(hud.minimap_regiment_at(_map_pos(hud, *pixel)), "enemy_a")
 
     def test_given_a_single_unit_stack_already_selected_then_it_is_reselected(self):
-        regiments = [Regiment("player", "Player", 500, 500, 0, True, models=10, hud_class="inf")]
+        regiments = [Regiment("player", "Player", 500, 500, 0, Side.PLAYER, models=10, hud_class="inf")]
         hud = self._stacked_hud(regiments)
         hud.selected = "player"
         pixel = hud._world_to_map_pixel(500, 500)
@@ -401,9 +402,9 @@ class MinimapTests(unittest.TestCase):
         # Not one of the two rules the user described; treated the same as "not in the stack at
         # all" rather than a third special case - topmost wins whenever the exact previously
         # picked regiment isn't being re-clicked.
-        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, False, models=10, hud_class="inf"),
-                    Regiment("friendly_b", "FriendlyB", 500, 500, 0, True, models=10, hud_class="inf"),
-                    Regiment("friendly_c", "FriendlyC", 500, 500, 0, True, models=10, hud_class="inf")]
+        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, Side.ENEMY, models=10, hud_class="inf"),
+                    Regiment("friendly_b", "FriendlyB", 500, 500, 0, Side.PLAYER, models=10, hud_class="inf"),
+                    Regiment("friendly_c", "FriendlyC", 500, 500, 0, Side.PLAYER, models=10, hud_class="inf")]
         hud = self._stacked_hud(regiments)
         hud.selected = "friendly_b"  # in the stack, but not on top
         pixel = hud._world_to_map_pixel(500, 500)
@@ -413,8 +414,8 @@ class MinimapTests(unittest.TestCase):
     def test_given_an_order_target_lookup_then_the_topmost_wins_even_if_it_is_already_selected(self):
         # minimap_target_at() (order targeting, e.g. Attack) never cycles like minimap_regiment_at()
         # (plain-click selection) does: an order always hits whatever is visually on top.
-        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, False, models=10, hud_class="inf"),
-                    Regiment("enemy_b", "EnemyB", 500, 500, 0, False, models=10, hud_class="inf")]
+        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, Side.ENEMY, models=10, hud_class="inf"),
+                    Regiment("enemy_b", "EnemyB", 500, 500, 0, Side.ENEMY, models=10, hud_class="inf")]
         hud = self._stacked_hud(regiments)
         hud.selected = "enemy_b"  # already selected/on top - must not trigger any cycling here
         pixel = hud._world_to_map_pixel(500, 500)
@@ -754,8 +755,8 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
             return view._ground_click((0, 0))
 
     def test_given_no_player_selection_then_clicking_an_enemy_selects_it_for_inspection(self):
-        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10),
-                    Regiment("enemy", "Enemy", 200, 200, 0, False, models=10)]
+        regiments = [Regiment("player", "Player", 100, 100, 0, Side.PLAYER, models=10),
+                    Regiment("enemy", "Enemy", 200, 200, 0, Side.ENEMY, models=10)]
         view = self._view(regiments, selected_id=None)
 
         events = self._click_at(view, 200, 200)
@@ -765,8 +766,8 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
     def test_given_a_player_selection_but_no_pending_order_then_clicking_an_enemy_still_selects_it(self):
         # notes/game_rules.md "Player orders and the command panel": there is no "just click an
         # enemy to charge" shortcut - Attack must be armed first, via the HUD button.
-        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10),
-                    Regiment("enemy", "Enemy", 200, 200, 0, False, models=10)]
+        regiments = [Regiment("player", "Player", 100, 100, 0, Side.PLAYER, models=10),
+                    Regiment("enemy", "Enemy", 200, 200, 0, Side.ENEMY, models=10)]
         view = self._view(regiments, selected_id="player")
 
         events = self._click_at(view, 200, 200)
@@ -774,8 +775,8 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
         self.assertEqual(events, (("select", "enemy"),))
 
     def test_given_an_armed_attack_order_then_clicking_an_enemy_charges_it(self):
-        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10),
-                    Regiment("enemy", "Enemy", 200, 200, 0, False, models=10)]
+        regiments = [Regiment("player", "Player", 100, 100, 0, Side.PLAYER, models=10),
+                    Regiment("enemy", "Enemy", 200, 200, 0, Side.ENEMY, models=10)]
         view = self._view(regiments, selected_id="player", order_mode="attack")
 
         events = self._click_at(view, 200, 200)
@@ -783,7 +784,7 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
         self.assertEqual(events, (("attack", "enemy"),))
 
     def test_given_an_armed_attack_order_and_empty_ground_then_it_cancels_and_logs_cannot(self):
-        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10)]
+        regiments = [Regiment("player", "Player", 100, 100, 0, Side.PLAYER, models=10)]
         view = self._view(regiments, selected_id="player", order_mode="attack")
         view._sprite_pick = lambda pixel, projection: None  # the stubbed projection isn't real
 
@@ -794,8 +795,8 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
         self.assertEqual(view.event_log[-1], "Cannot attack!")
 
     def test_given_an_armed_attack_order_and_a_target_then_nothing_is_logged(self):
-        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10),
-                    Regiment("enemy", "Enemy", 200, 200, 0, False, models=10)]
+        regiments = [Regiment("player", "Player", 100, 100, 0, Side.PLAYER, models=10),
+                    Regiment("enemy", "Enemy", 200, 200, 0, Side.ENEMY, models=10)]
         view = self._view(regiments, selected_id="player", order_mode="attack")
 
         self._click_at(view, 200, 200)
@@ -805,8 +806,8 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
     def test_given_a_right_click_direct_order_then_clicking_an_enemy_charges_it_without_arming_attack(self):
         # The right-click shortcut (direct=True) bypasses the Move/Attack HUD buttons entirely -
         # a pre-existing engine convenience, distinct from the documented button-driven flow.
-        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10),
-                    Regiment("enemy", "Enemy", 200, 200, 0, False, models=10)]
+        regiments = [Regiment("player", "Player", 100, 100, 0, Side.PLAYER, models=10),
+                    Regiment("enemy", "Enemy", 200, 200, 0, Side.ENEMY, models=10)]
         view = self._view(regiments, selected_id="player")
 
         with patch("whshr.frontend.battle_view.picking.pick_ground",
@@ -816,8 +817,8 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
         self.assertEqual(events, (("attack", "enemy"),))
 
     def test_given_an_enemy_already_selected_for_inspection_then_it_cannot_be_ordered(self):
-        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10),
-                    Regiment("enemy", "Enemy", 200, 200, 0, False, models=10)]
+        regiments = [Regiment("player", "Player", 100, 100, 0, Side.PLAYER, models=10),
+                    Regiment("enemy", "Enemy", 200, 200, 0, Side.ENEMY, models=10)]
         scene = BattleScene()
         scene.battle = Battle(1000, 800, regiments)
         scene.selected_id = None
@@ -855,7 +856,7 @@ class SpritePickTests(unittest.TestCase):
 
     def test_given_a_pixel_on_the_rendered_sprite_body_then_the_regiment_is_picked(self):
         from whshr.frontend.battle_view import SPRITE_MID_HEIGHT
-        regiments = [Regiment("player", "Player", 500, 400, 0, True, models=10)]
+        regiments = [Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=10)]
         view = self._view(regiments)
         projection = view.camera.projection(640, 480, 1000, 800, 0.0)
         mesh_x, mesh_z = 500 / WORLD_PER_MESH, 400 / WORLD_PER_MESH
@@ -864,7 +865,7 @@ class SpritePickTests(unittest.TestCase):
         self.assertEqual(view._sprite_pick(pixel, projection), "player")
 
     def test_given_a_pixel_far_from_any_regiment_then_nothing_is_picked(self):
-        regiments = [Regiment("player", "Player", 500, 400, 0, True, models=10)]
+        regiments = [Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=10)]
         view = self._view(regiments)
         projection = view.camera.projection(640, 480, 1000, 800, 0.0)
 
@@ -872,7 +873,7 @@ class SpritePickTests(unittest.TestCase):
 
     def test_given_an_inactive_regiment_then_its_sprite_is_never_picked(self):
         from whshr.frontend.battle_view import SPRITE_MID_HEIGHT
-        regiments = [Regiment("player", "Player", 500, 400, 0, True, models=0)]  # destroyed
+        regiments = [Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=0)]  # destroyed
         view = self._view(regiments)
         projection = view.camera.projection(640, 480, 1000, 800, 0.0)
         mesh_x, mesh_z = 500 / WORLD_PER_MESH, 400 / WORLD_PER_MESH
@@ -882,8 +883,8 @@ class SpritePickTests(unittest.TestCase):
 
     def test_given_two_overlapping_regiments_then_the_nearer_to_the_camera_wins(self):
         from whshr.frontend.battle_view import SPRITE_MID_HEIGHT
-        near = Regiment("near", "Near", 500, 400, 0, True, models=10)
-        far = Regiment("far", "Far", 500, 460, 0, False, models=10)  # further from the camera, same spot-ish
+        near = Regiment("near", "Near", 500, 400, 0, Side.PLAYER, models=10)
+        far = Regiment("far", "Far", 500, 460, 0, Side.ENEMY, models=10)  # further from the camera, same spot-ish
         view = self._view([near, far])
         projection = view.camera.projection(640, 480, 1000, 800, 0.0)
         mesh_x, mesh_z = 500 / WORLD_PER_MESH, 400 / WORLD_PER_MESH
@@ -895,7 +896,7 @@ class SpritePickTests(unittest.TestCase):
 class BattleBannerVisibilityTests(unittest.TestCase):
     def _view_with_banner(self, active=True):
         from whshr.battlefield import SpriteFrame, SpriteSheet
-        regiment = Regiment("player", "Player", 100, 200, 0, True, models=1 if active else 0,
+        regiment = Regiment("player", "Player", 100, 200, 0, Side.PLAYER, models=1 if active else 0,
                             banner="banner")
         marker = SpriteFrame(32, 32, 0, 32, bytes(32 * 32))
         banner = SpriteSheet("BANNER", [marker, marker, marker], [],
@@ -925,7 +926,7 @@ class BattleBannerVisibilityTests(unittest.TestCase):
         # troops' actual current positions, not the anchor, or it visibly floats ahead of the block.
         from whshr.battlefield import SpriteFrame, SpriteSheet
         from whshr.frontend.battle_view import BANNER_MARKER_RAISE, INSTANCE
-        regiment = Regiment("player", "Player", 100, 200, 0, True, models=2, banner="banner")
+        regiment = Regiment("player", "Player", 100, 200, 0, Side.PLAYER, models=2, banner="banner")
         regiment.positions = [(80.0, 180.0), (90.0, 190.0)]  # lagging behind the (100, 200) anchor
         marker = SpriteFrame(32, 32, 0, 32, bytes(32 * 32))
         banner = SpriteSheet("BANNER", [marker, marker, marker], [], rects=[(0, 0, 32, 32)] * 3)
@@ -948,8 +949,8 @@ class BattleBannerVisibilityTests(unittest.TestCase):
     def test_given_overlapping_regiment_banners_when_one_is_selected_then_its_marker_is_drawn_last(self):
         from whshr.battlefield import SpriteFrame, SpriteSheet
         from whshr.frontend.battle_view import INSTANCE
-        player = Regiment("player", "Player", 100, 200, 0, True, banner="player-banner")
-        enemy = Regiment("enemy", "Enemy", 100, 200, 0, False, banner="enemy-banner")
+        player = Regiment("player", "Player", 100, 200, 0, Side.PLAYER, banner="player-banner")
+        enemy = Regiment("enemy", "Enemy", 100, 200, 0, Side.ENEMY, banner="enemy-banner")
         marker = SpriteFrame(32, 32, 0, 32, bytes(32 * 32))
         player_sheet = SpriteSheet("PLAYER", [marker, marker, marker], [], rects=[(10, 0, 32, 32)] * 3)
         enemy_sheet = SpriteSheet("ENEMY", [marker, marker, marker], [], rects=[(50, 0, 32, 32)] * 3)
@@ -990,7 +991,7 @@ class CameraTargetTests(unittest.TestCase):
     def test_given_a_battle_draw_then_the_target_mark_is_drawn_before_regiment_markers(self):
         # It must sit at the lowest z-order above the plan map: every other minimap element
         # (waypoints, regiments, tabs) should paint over it.
-        regiments = [Regiment("player", "Player", 100, 100, 0, True, models=10, ranks=2, hud_class="inf")]
+        regiments = [Regiment("player", "Player", 100, 100, 0, Side.PLAYER, models=10, ranks=2, hud_class="inf")]
         hud = _hud(regiments=regiments)
         hud._draw_size = (640, 480)
         hud.minimap_layers = {}

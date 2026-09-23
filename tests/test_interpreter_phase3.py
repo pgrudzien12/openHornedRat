@@ -11,6 +11,7 @@ Tests verify that the interpreter can:
 import unittest
 from whshr import engine, interpreter
 from whshr.engine import Regiment, Battle
+from whshr.rules import Side
 
 
 class CombatIntegrationTests(unittest.TestCase):
@@ -19,13 +20,13 @@ class CombatIntegrationTests(unittest.TestCase):
     def setUp(self):
         """Set up a simple 1v1 battle."""
         self.player = Regiment(
-            "player_1", "Player Unit", 100, 100, 0, True,
+            "player_1", "Player Unit", 100, 100, 0, Side.PLAYER,
             models=10, ranks=2, ws=3, bs=3, strength=3, toughness=3,
             wounds=1, initiative=3, attacks=1, leadership=7,
             missile_code=None, missile_range=None
         )
         self.enemy = Regiment(
-            "enemy_1", "Enemy Unit", 200, 100, 0, False,
+            "enemy_1", "Enemy Unit", 200, 100, 0, Side.ENEMY,
             models=10, ranks=2, ws=3, bs=3, strength=3, toughness=3,
             wounds=1, initiative=3, attacks=1, leadership=7,
             missile_code=None, missile_range=None
@@ -59,7 +60,7 @@ class CombatIntegrationTests(unittest.TestCase):
     def test_fire_at_target_with_missile_range(self):
         """Test that FireAtTarget works for archer units."""
         archer = Regiment(
-            "archer_1", "Archer", 200, 100, 0, False,
+            "archer_1", "Archer", 200, 100, 0, Side.ENEMY,
             models=10, ranks=2, ws=2, bs=4, strength=3, toughness=3,
             wounds=1, initiative=3, attacks=1, leadership=7,
             missile_code=1, missile_range=120.0  # archers have range
@@ -95,7 +96,7 @@ class UnitEffectsTests(unittest.TestCase):
     def setUp(self):
         """Set up test battle."""
         self.unit = Regiment(
-            "test_1", "Test Unit", 100, 100, 0, False,
+            "test_1", "Test Unit", 100, 100, 0, Side.ENEMY,
             models=10, ranks=2, leadership=7
         )
         self.battle = Battle(500, 500, [self.unit], seed=1995)
@@ -143,11 +144,11 @@ class UnitTaggingTests(unittest.TestCase):
     def setUp(self):
         """Set up test battle with tagged units."""
         self.cargo = Regiment(
-            "cargo_1", "Cargo", 100, 100, 0, False,
+            "cargo_1", "Cargo", 100, 100, 0, Side.ENEMY,
             models=5, ranks=1, leadership=7
         )
         self.hunter = Regiment(
-            "hunter_1", "Hunter", 200, 100, 0, False,
+            "hunter_1", "Hunter", 200, 100, 0, Side.ENEMY,
             models=10, ranks=2, leadership=7
         )
         self.battle = Battle(500, 500, [self.cargo, self.hunter], seed=1995)
@@ -200,11 +201,11 @@ class MoraleRoutingTests(unittest.TestCase):
     def setUp(self):
         """Set up test battle."""
         self.unit = Regiment(
-            "test_1", "Test Unit", 100, 100, 0, False,
+            "test_1", "Test Unit", 100, 100, 0, Side.ENEMY,
             models=10, ranks=2, leadership=7
         )
         self.player = Regiment(
-            "player_1", "Player", 100, 100, 0, True,
+            "player_1", "Player", 100, 100, 0, Side.PLAYER,
             models=10, ranks=2, leadership=7
         )
         self.battle = Battle(500, 500, [self.unit, self.player], seed=1995)
@@ -256,7 +257,7 @@ class MoraleRoutingTests(unittest.TestCase):
     def test_run_away_respects_cant_break(self):
         """Test that RunAway does not rout a unit with the CantBreak psychology flag."""
         stubborn = Regiment(
-            "stubborn_1", "Stubborn Unit", 100, 100, 0, False,
+            "stubborn_1", "Stubborn Unit", 100, 100, 0, Side.ENEMY,
             models=10, ranks=2, leadership=7, psychology=frozenset({"CantBreak"})
         )
         battle = Battle(500, 500, [stubborn, self.player], seed=1995)
@@ -269,7 +270,7 @@ class MoraleRoutingTests(unittest.TestCase):
     def test_ready_to_fire_checks_reload_state(self):
         """Test that ReadyToFire checks if unit can shoot."""
         archer = Regiment(
-            "archer_1", "Archer", 100, 100, 0, False,
+            "archer_1", "Archer", 100, 100, 0, Side.ENEMY,
             models=10, ranks=2, missile_code=1, missile_range=120.0
         )
         battle = Battle(500, 500, [archer], seed=1995)
@@ -293,7 +294,7 @@ class MovementOpcodeTests(unittest.TestCase):
     def setUp(self):
         """Set up test battle."""
         self.unit = Regiment(
-            "test_1", "Test Unit", 100, 100, 0, False,
+            "test_1", "Test Unit", 100, 100, 0, Side.ENEMY,
             models=10, ranks=2, leadership=7
         )
         self.battle = Battle(500, 500, [self.unit], seed=1995)
@@ -343,7 +344,7 @@ class MovementOpcodeWithRealNodesTests(unittest.TestCase):
 
     def setUp(self):
         self.unit = Regiment(
-            "test_1", "Test Unit", 100, 100, 0, False,
+            "test_1", "Test Unit", 100, 100, 0, Side.ENEMY,
             models=10, ranks=2, leadership=7
         )
         self.battle = Battle(500, 500, [self.unit], seed=1995, nodes={5: (300.0, 200.0), 9: (100.0, 100.0)})
