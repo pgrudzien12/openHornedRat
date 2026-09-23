@@ -1,6 +1,6 @@
 """Battle scene: owns one loaded battlefield and advances its deterministic simulation."""
 
-from . import battle_log, combat, skirmish_log
+from . import battle_log, behaviour, combat, skirmish_log
 from .assets import AssetId
 from .battlefield import sprite_files
 from .clock import FixedStepClock
@@ -39,7 +39,8 @@ class BattleScene(Scene):
 
     def enter(self, context):
         self.field = context.load(self.battle_id)
-        self.battle = Battle.from_script(self.field.script, seed=self.seed)
+        script_dll = self._load_script_dll(context)
+        self.battle = Battle.from_script(self.field.script, seed=self.seed, script_dll=script_dll)
         self.initial_models = {identifier: regiment.models for identifier, regiment in self.battle.regiments.items()}
         path = battle_log.default_log_path(self.log_dir, self.battle_id.name) if self.log_dir is not None else None
         self.logger = battle_log.BattleLogger(path)
@@ -54,6 +55,20 @@ class BattleScene(Scene):
                 battle_asset=str(self.battle_id), bts_path=self.field.script.get("file"), seed=self.seed,
                 width=self.battle.width, height=self.battle.height,
                 regiments=battle_log.regiment_header_rows(self.battle, sprite_bases))
+
+    def _load_script_dll(self, context):
+        """Load this battle's SCRIPT/BFxxx.DLL (its `loadScript` name) for the bytecode interpreter
+        (issue #3/#46); None if the field has no loadScript name or the DLL can't be found or loaded,
+        in which case `Battle` falls back to `whshr.ai`'s placeholder AI. A missing/broken script DLL
+        must never block the battle from starting (same defensive stance as sprite_bases above)."""
+        name = self.field.script.get("field", {}).get("script")
+        if not name:
+            return None
+        try:
+            path = context.locator.installation.find("FILE", "SCRIPT", f"{name}.DLL")
+            return behaviour.ScriptDll(path) if path is not None else None
+        except Exception:
+            return None
 
     def exit(self, context):
         # Terrain, scenery and sprites are battle-scoped: leaving the battle releases them.

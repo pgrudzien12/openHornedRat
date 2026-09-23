@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import math
 import random
 
-from . import ai, battle_grid, combat, formation, interpreter
+from . import ai, battle_grid, behaviour, combat, formation, interpreter
 from .battle_events import BattleEvent
 from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, stat_fields
 from .script import load_battle, resource_name
@@ -257,7 +257,7 @@ class Battle:
     """Authoritative fixed-tick state: movement, and (whshr.combat/whshr.ai) close combat, shooting,
     morale and a simple enemy AI."""
 
-    def __init__(self, width, height, regiments, seed=DEFAULT_SEED, script_dll=None):
+    def __init__(self, width, height, regiments, seed=DEFAULT_SEED, script_dll=None, script_ids=None):
         if width <= 0 or height <= 0:
             raise ValueError("battle dimensions must be positive")
         self.width = width
@@ -276,22 +276,37 @@ class Battle:
         self._has_enemy = any(not regiment.player for regiment in regiments)
         self._has_player = any(regiment.player for regiment in regiments)
 
-        # Initialize bytecode interpreter for mission scripts (issue #3)
+        # Bytecode interpreter for mission scripts (issue #3/#46): `script_dll` is the mission's
+        # loaded SCRIPT/BFxxx.DLL (whshr.behaviour.ScriptDll), or None for a mission-less/synthetic
+        # battle, in which case whshr.ai's placeholder AI drives every regiment instead (Battle.tick).
+        # `script_ids` is {regiment identifier: initial script id}, from each unit's own
+        # set:script= value; a regiment absent from it starts on the shared library script
+        # (behaviour.PLAYER_SCRIPT), matching the original's own default for units with no explicit
+        # set:script= line.
         self.script_dll = script_dll
         self.event_bus = interpreter.EventBus(self)
+        script_ids = script_ids or {}
         for regiment_id in self.regiments:
-            self.event_bus.unit_states[regiment_id] = interpreter.UnitScriptState()
+            initial_script = script_ids.get(regiment_id, behaviour.PLAYER_SCRIPT)
+            self.event_bus.unit_states[regiment_id] = interpreter.UnitScriptState(script_id=initial_script)
         self.interpreter = interpreter.ScriptInterpreter(self, self.event_bus, script_dll) if script_dll else None
 
     @classmethod
-    def from_battle_file(cls, path, seed=DEFAULT_SEED):
-        return cls.from_script(load_battle(path), seed=seed)
+    def from_battle_file(cls, path, seed=DEFAULT_SEED, script_dll=None):
+        return cls.from_script(load_battle(path), seed=seed, script_dll=script_dll)
 
     @classmethod
-    def from_script(cls, source, seed=DEFAULT_SEED):
-        """Build the battle from a loaded BTS/MRC script; repeated unit ids get ``#2``, ``#3``... suffixes."""
+    def from_script(cls, source, seed=DEFAULT_SEED, script_dll=None):
+        """Build the battle from a loaded BTS/MRC script; repeated unit ids get ``#2``, ``#3``... suffixes.
+
+        ``script_dll``, when given, is threaded through to `Battle.__init__` (issue #3/#46) so its
+        interpreter drives every regiment instead of `whshr.ai`'s placeholder rule. Each unit's own
+        ``set:script=`` value (a number, or the literal ``PLAYER_SCRIPT``) becomes that regiment's
+        initial script id, matching the original's `set:script=PLAYER_SCRIPT` convention
+        (`whshr.behaviour.PLAYER_SCRIPT` = library script 100).
+        """
         field_data = source["field"]
-        regiments, used = [], set()
+        regiments, script_ids, used = [], {}, set()
         armies = [(army, False) for army in source["armies"]]
         armies.extend((army, True) for army in (source["merc"] or {}).get("armies", []))
         for army, player in armies:
@@ -314,7 +329,13 @@ class Battle:
                     speed_per_tick=speed_per_tick(profile.get("M"), profile.get("I")),
                     **_decode_combat_profile(unit),
                 ))
-        return cls(field_data["width"], field_data["height"], regiments, seed=seed)
+                script_value = position.get("script")
+                if isinstance(script_value, str) and script_value.upper() == "PLAYER_SCRIPT":
+                    script_ids[identifier] = behaviour.PLAYER_SCRIPT
+                elif isinstance(script_value, (int, float)):
+                    script_ids[identifier] = int(script_value)
+        return cls(field_data["width"], field_data["height"], regiments, seed=seed,
+                   script_dll=script_dll, script_ids=script_ids)
 
     def order_move(self, identifier, x, y):
         regiment = self.regiments[identifier]
