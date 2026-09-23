@@ -265,6 +265,36 @@ class MoraleReactionTests(unittest.TestCase):
         self.interp.op_FearWhenCharged(state, None, [], "target", 0, self.battle.rng)
         self.assertIn(state.cond_flags, (0, 1))
 
+    def test_fear_when_charged_pass_braces_the_unit_against_the_charger(self):
+        # game_rules.md "Braced": no fear/terror rule applies here, so the test passes outright and
+        # the target halts, dropping any order in flight, and records the charger.
+        self.target.target_x, self.target.target_y = 400.0, 400.0
+        state = self.battle.event_bus.unit_states["target"]
+        state.current_event = interpreter.Event(code=0x07, source="charger")
+        self.interp.op_FearWhenCharged(state, None, [], "target", 0, None)
+        self.assertEqual(state.cond_flags, 0)
+        self.assertTrue(self.target.braced)
+        self.assertEqual(self.target.braced_target, "charger")
+        self.assertIsNone(self.target.target_x)
+        self.assertIsNone(self.target.target_y)
+        self.assertIsNone(self.target.attack_target)
+
+    def test_fear_when_charged_pass_turns_to_face_the_charger(self):
+        state = self.battle.event_bus.unit_states["target"]
+        state.current_event = interpreter.Event(code=0x07, source="charger")
+        self.interp.op_FearWhenCharged(state, None, [], "target", 0, None)
+        # charger sits due east (+x) of target -- 0 = north/+Y, clockwise, so east is 128.
+        self.assertEqual(self.target.direction, 128)
+
+    def test_fear_when_charged_fail_does_not_brace(self):
+        self.charger.psychology = frozenset({"CauseTerror"})
+        state = self.battle.event_bus.unit_states["target"]
+        state.current_event = interpreter.Event(code=0x07, source="charger")
+        self.interp.op_FearWhenCharged(state, None, [], "target", 0, None)
+        self.assertEqual(state.cond_flags, 1)
+        self.assertFalse(self.target.braced)
+        self.assertIsNone(self.target.braced_target)
+
 
 class EventSourceIsARegimentIdentifierTests(unittest.TestCase):
     """Regression test for the Event.source bug: it used to be int(unit_id) if unit_id.isdigit()

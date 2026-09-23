@@ -46,7 +46,9 @@ This is a behavioural specification for the original game. Findings are based on
 11. **Time and movement** ✅ One tick per 100 ms timer message (≤ 10 ticks/s, no catch-up); 19 ticks per segment,
     10 segments per turn = 19 s. M only feeds a speed stat `s_rlmv = trunc(4.8 × M + I) / 2`; units move
     `s_rlmv × k / 16` units per tick (k 1.8 free, 1.0 closing, 2.5 charging, 1.5 fleeing); terrain does not slow
-    them; units wheel on a front corner. Routes use a reactive steer-around controller (no path graph); units push
+    them; units wheel on a front corner. That speed moves only the unit's own reference point — the models chase
+    it separately at a rank-dependent rate with no charge multiplier, so a charging block visibly stretches and
+    its rear rank cannot keep station. Routes use a reactive steer-around controller (no path graph); units push
     apart on overlap; visibility is a 100° cone blocked by scenery and `SightEdge` lines, never by terrain height.
 12. **Magic** ✅ Each side has one shared power pool of 0–8, re-rolled by a random walk every 50 s of real time;
     spells cost 1–3 and always work when the target is in range and within ±50° of the wizard's facing (no
@@ -193,14 +195,25 @@ never use `AlwaysPursue`.
   segment (19 ticks) lasts 1.9 s and a turn (10 segments) 19 s. Pause is bit `0x80` of the game state; there is
   no game speed option.
 - **Speed stat**: Movement is used only to derive `s_rlmv` at unit set-up (the game):
-  `trunc(4.8 × M' + I) / 2`, or `trunc(2.4 × M') + 4` for neutral units, with `M'` = the mount's M when mounted.
-  (So the mount's M does count here, contrary to the close combat mount record, which only uses WS, S, A and the
-  charge S.)
-- **Unit speed**: `s_rlmv × k / 16` world units per tick, recomputed every tick, with k = 1.8 moving freely,
-  1.0 closing on a target, 2.5 charging or in melee, 1.5 fleeing (and pursuing: step `min(24 × s_rlmv,
-  10 × distance)` per segment, k at the relevant data = 1.5). An M4 I3 infantry unit covers about 9.8" per turn moving
-  freely and 5.4" closing in. Pursuers and fugitives use the same factor, so only a higher `s_rlmv` closes the gap.
-  **Terrain has no effect on speed.**
+  `trunc(4.8 × M' + I) / 2`, or `trunc(2.4 × M') + 4` for neutral units. `M'` is the **mount's** M when the
+  armour code marks the model as mounted, otherwise the model's own M; the Initiative term is always the
+  rider's. After set-up nothing reads M again — `s_rlmv` is the only movement input (see "Mounts").
+- **Unit speed** ✅: recomputed **every tick**, before the unit's behaviour script and its movement update run,
+  as a single stored value `speed = s_rlmv × 16 × k`. The factor `k` is chosen by the first matching case:
+
+  | Condition | `k` |
+  |---|---|
+  | charging **or** in melee | **2.5** |
+  | broken / fleeing | 1.5 |
+  | pursuing | — (the pursuit step replaces the whole `s_rlmv × 16` term) |
+  | no target, **or** distance to the target exceeds the target's radius | 1.8 |
+  | otherwise (closing on a target) | 1.0 |
+
+  The stored value is a speed in 1/16 world units per tick, so the unit's own reference point advances
+  **`s_rlmv × k / 16` world units per tick**. An M4 I3 infantry unit covers about 9.8" per turn moving freely
+  and 5.4" closing in. Pursuers and fugitives use the same factor, so only a higher `s_rlmv` closes the gap.
+  **Terrain has no effect on speed.** Note that "in melee" shares the charge factor, but an engaged unit does
+  not translate at all (see below), so the value is inert there.
 - **Turning** ✅ (the game, reached only through the game): facing is a **16.16 accumulator** at
   `+0xCC` whose high word `+0xCE` is the integer facing in 1/512 turn. Per tick it advances by
   `s_rlmv × (144 − s²) × 2^(scale − 9)` facing units, with `s = frontage + ranks − min(frontage, ranks) / 2`
@@ -219,9 +232,11 @@ never use `AlwaysPursue`.
   get wrong. In-place turns pivot about the **block centre**: the about-face displaces the anchor by
   `(ranks − 1) × 12` backwards along the old facing (exactly twice the map-object offset, which holds the
   block centre fixed under 180°), and the 90° turn moves it to the new front-rank centre while swapping
-  ranks and frontage (`+0x7D := +0x7E`). Wheels pivot about the **inner front corner**: the game
-  shifts the anchor by the rotation applied to the half-frontage vector `6 × (frontage − 1)`, halves the
-  translation speed `+0xD8` while wheeling and zeroes it while halted-turning. In both cases every model's
+  ranks and frontage (`+0x7D := +0x7E`). **Gradual** turns instead pivot about the **inner front corner** —
+  uniformly, for every kind of gradual turn and not only for wheels — by shifting the anchor by the rotation
+  applied to the half-frontage vector `6 × (frontage − 1)`; a wheel then keeps half its translation speed and
+  every other gradual turn drops to zero. Details and the formation differences are in
+  "Turning, wheeling and reversing" below. In both cases every model's
   stored offset is counter-shifted (the game, the game) so the soldiers do not teleport, and a
   re-form is queued (`+0xBC |= 1`). **The unit position is never held fixed while the facing changes**, so a
   turn cannot open a gap between two touching units.
@@ -288,7 +303,8 @@ and at most 32 models, usually in 4 ranks (3–5).
   position, together with its slot, rank and file. **The unit position is the front-rank centre**, and that
   slot is reserved for the leader model (unless it is fleeing). Every other slot takes the nearest free model
   (octagonal distance), so re-forming moves each soldier to the closest position. `MoveModels`
-  (the game) then walks each model towards its slot, never faster than the unit's `s_rlmv`.
+  (the game) then walks each model towards its slot every tick — at a **rank-dependent** rate, described in
+  "Models chase the unit, they are not carried by it" below.
 - **Ranks** (the game, orders 0x0F/0x10 and the deployment buttons the game): refused while fleeing,
   held (Tangling Thorn) or charging; the request is clamped to `[min, models / min]` with
   `min = max(1, trunc(0.75 × √models))` (constants 1.5 × 0.5 at the relevant data/the relevant data). Examples: 8 models
@@ -310,6 +326,216 @@ and at most 32 models, usually in 4 ranks (3–5).
   the two rear ranks offset by half a spacing; 12 crossbows as 4 × 3). In both units the model spacing is about
   1.43 times the on-screen sprite width, so one troop sprite pixel covers about **0.45 world units** (measured,
   not traced; R68). `whshr/formation.py` implements the block layout for both battle viewers.
+
+### Models chase the unit, they are not carried by it ✅
+
+Traced September 2026. This is the rule that decides what a moving unit actually **looks like**, and it is the
+one an engine is most likely to get wrong by assuming the soldiers are rigidly attached to the formation.
+
+**There are two positions, and only one of them is driven by the speed stat.**
+
+1. The **unit position** (the "anchor", the front-rank centre) is a bookkeeping point. It is what the footprint,
+   the collision tests, engagement, charge distance and the charge counter are all keyed off. It advances at
+   `s_rlmv × k / 16` world units per tick, with the `k` of the table in "Real time and movement" above — so
+   **`k = 2.5` while charging**.
+2. Every **model** keeps its own position, stored **relative to the anchor**. The moment the anchor translates,
+   every model's stored position is decremented by exactly the same delta. The net effect is that a model's
+   **absolute world position is completely unchanged** by the unit's own movement.
+
+So the anchor never drags the soldiers along. All it does is move the models' target slots out from under them,
+opening a gap of exactly one anchor-step every tick. The figures are then pulled forward only by a separate,
+independent catch-up walk — and that walk runs at its own speed, which has **no charge multiplier in it at all**.
+
+**The catch-up walk**, per model, per tick:
+
+```
+if the model has a pending start delay          -> it does not move this tick (see below)
+dist          = straight-line distance to its slot
+target_speed  = min(dist, s_rlmv)                 (no cap at all while the unit is broken)
+current_speed = current_speed + 1, up to target_speed   (drops to target_speed immediately if lower)
+position     += current_speed × step_vector
+```
+
+`current_speed` is a **counter, not a distance**. It is converted to world units by the step vector, whose
+magnitude carries a per-model factor `F`:
+
+```
+step length per unit of current_speed = F × 2.4 / 256  world units
+F = (ranks − rank_index) × 8 + (per-model stagger value & 6) + 4      rank_index 0 = front rank
+```
+
+The per-model stagger value is a small fixed per-model number (its low three bits are also what stagger the
+charge start and the rout scatter), so models within one rank differ slightly, giving the block its ragged,
+non-rigid look. Its contribution to `F` is 0, 2, 4 or 6.
+
+**Top speed of a model, and whether it can keep station:**
+
+```
+v_model = s_rlmv × F × 2.4 / 256
+v_anchor = s_rlmv × k / 16
+v_model / v_anchor = 0.15 × F / k     ->   a model holds its place only while  F ≥ 6.67 × k
+```
+
+`F` drops by 8 for every rank further back, so **the rearmost rank always has `F` = 12…18, however deep the unit
+is**. The thresholds that matters:
+
+| Unit state | `k` | `F` needed to hold station | Rearmost rank (`F` = 12…18) |
+|---|---|---|---|
+| closing on a target | 1.0 | 6.7 | holds easily |
+| moving freely | 1.8 | 12 | **exactly marginal** |
+| fleeing | 1.5 | 10 | holds |
+| **charging** | **2.5** | **16.7** | **falls behind** |
+
+The tuning is deliberate: at the ordinary marching factor the rearmost rank's minimum step is
+`12 × 2.4 / 256 = 0.1125` and the anchor's is `1.8 / 16 = 0.1125` — **identical**. The back rank is calibrated to
+exactly keep pace with a normal march, and is therefore structurally incapable of keeping pace with a charge.
+
+**Worked example** — Empire infantry (`s_rlmv` 11) in 4 ranks, world units per tick:
+
+| | `F` | speed | vs. the charging anchor (1.72) |
+|---|---|---|---|
+| anchor, charging (`k` 2.5) | — | **1.72** | — |
+| anchor, marching (`k` 1.8) | — | 1.24 | — |
+| front rank | 36–42 | 3.71–4.33 | tracks tightly |
+| second rank | 28–34 | 2.89–3.51 | tracks |
+| third rank | 20–26 | 2.06–2.68 | tracks |
+| **rear rank** | **12–18** | **1.24–1.86** | **three of the four stagger values trail** |
+
+**What this produces on screen:**
+
+- **A charging block visibly stretches.** The rear rank moves at about 72 % of the anchor's charge speed and
+  loses roughly 0.48 world units per tick. Across a full infantry charge (about 84 ticks and 144 world units,
+  see "Charge" below) the back rank ends up on the order of **40 world units — about 1.7", over three model
+  spacings — behind where the formation says it should be**. Cavalry in two ranks string out the same way.
+- **The stretch is recovered afterwards, not during.** Nothing caps the accumulated gap, and nothing accelerates
+  the stragglers. Once the unit stops or engages, the anchor stops moving and the trailing models close the gap
+  at their own rate, so the block visibly concertinas back together over roughly three seconds.
+- **Nobody moves at all for the first moment of a charge.** Issuing the charge gives every model a freeze
+  countdown of `(stagger value & 7) + 1` = **1 to 8 ticks** during which it does not move, while the anchor is
+  already running at `k = 2.5`. That alone opens up to about 14 world units — more than a model spacing — before
+  a model takes its first step, and it staggers the start model by model.
+- **Models walk toward where the slot used to be.** The step vector is recomputed only when a per-model distance
+  budget (reset to half the remaining distance at each recomputation) runs out, and a model is only considered
+  arrived once it is within 3 world units of its slot. Between recomputations a model marches in a straight line
+  on a stale heading, which is why a turning or charging block looks like it is sliding rather than tracking.
+- **Broken units are the exception**: while broken, the `s_rlmv` cap on the catch-up walk is removed entirely, so
+  fleeing models are not held to formation speed.
+
+**Formation is what decides all of this** ✅. Note first that `s_rlmv` appears on both sides of
+`v_model / v_anchor = 0.15 × F / k` and cancels out: **whether a model can hold station never depends on its
+speed stat**, only on its rank index, its unit's rank count, its stagger value and the movement state. A Dwarf
+and a wolf rider in the same formation stretch by the same proportion; they just do it at different absolute
+speeds.
+
+- **Rank count sets the whole speed gradient; frontage does not enter it at all.** `F` is built from
+  `ranks − rank_index`, so each rank further back is `8 × 2.4 / 256 = 0.075 × s_rlmv` world units per tick
+  slower than the one in front of it (0.83 for `s_rlmv` 11). Frontage affects the turn rate, the wheel pivot and
+  the footprint, but never a model's step length.
+- **The rearmost rank is always `F` = 12…18, whatever the depth.** Depth therefore does not make the back of a
+  unit lag *worse* — it makes the front of it faster (`F` = `8 × ranks + 4 + stagger`), so the deeper the unit,
+  the wider the spread of speeds inside it. A block re-formed from 4 ranks to 2 keeps the same rear-rank
+  behaviour but loses much of its front-rank speed (`F` 36 → 20).
+- **A one-rank formation is uniformly slow.** With `ranks` = 1 every model is rank 0 and so `F` = 12…18 — the
+  whole unit trails a charge, not just its back. Rank clamping (`min = max(1, trunc(0.75 × √models))`) means
+  this only arises for single-model units.
+- **Monsters inherit it through their pseudo-formation.** The single model is placed at rank index 1 of the
+  footprint-shaped layout, so the **2 × 2 monsters (`ranks` = 2) get `F` = 12…18 and trail their own charge**,
+  while the 3 × 3 ones (`ranks` = 3) get `F` = 20…26 and keep up. The Mole Machine's 5 × 8 layout puts its model
+  at rank 2 of 8, `F` = 52…58, so it tracks its reference point almost exactly. (Which monster has which
+  footprint: see "Monsters" under Formations.)
+- **War machine crew are deliberately the slow ones.** The machine takes rank 0 of the 3- or 4-deep layout
+  (`F` = 28…34) and the crew are assigned rank indices at the back of it (`ranks − 1` and its neighbours), so the
+  crew always re-settle around the machine rather than the other way round.
+- **Wagons never stretch**: the two models sit at rank 0 and rank 1 of a 4-deep layout (`F` = 36…42 and 28…34),
+  both far above the charge threshold.
+- **Turning hides the effect, and finishes it.** A wheel halves the unit's translation while leaving the models'
+  step length untouched, which halves the keep-up requirement to `F ≥ 3.33 × k` — enough for the rear rank even
+  at charge speed. A halted turn stops translation altogether, so the block fully re-compresses while it pivots.
+  This is why a charge that has to wheel onto its target arrives much tidier than one that runs straight in.
+
+**For an engine**: the unit's logical position must be advanced by the full charge speed regardless of where the
+sprites are, because every gameplay consequence (contact, engagement, charge bonus, footprint) reads the anchor.
+The sprites must be a *separate* per-model pursuit of an anchor-relative slot, at a rank-dependent rate with no
+charge multiplier. Treating the models as rigidly attached to the formation removes the stretch, the ragged
+start and the concertina — the most recognisable visual features of movement in this game.
+
+### Turning, wheeling and reversing ✅
+
+Traced September 2026. Turning is where the formation system is most visible, and where the differences between
+formations are largest. There are two entirely separate mechanisms: **gradual turns**, which every unit performs
+continuously, and **instant snaps**, applied once when a move order is issued (described in "Real time and
+movement" above). Everything below is the gradual path.
+
+**The per-tick turn step.** Facing is a fixed-point accumulator whose integer part is the facing in 1/512 of a
+turn, wrapped to 0…511. Each tick the unit turns by
+
+```
+step    = s_rlmv × (144 − s²) / 2^(16 − shift)      units of 1/512 turn
+s       = frontage + ranks − min(frontage, ranks) / 2
+shift   = 9 charge re-aim · 8 halted turn and turn order · 7 wheel · 6 closing redirect
+```
+
+so a halted turn advances `s_rlmv × (144 − s²) / 256` per tick. The direction is always **the shorter way
+round** (the turn setup compares the required difference against a half turn and folds it, recording the side in
+a flag that the step then reads). The angle still owed is reduced by the amount actually turned, and the turn
+**ends once 10 or fewer of the 512 units remain** (about 7°).
+
+**Wide units turn dramatically slower** — this is the `(144 − s²)` term, and it is the single most important
+tactical consequence of choosing a formation:
+
+| 20 models, `s_rlmv` 11 | frontage × ranks | `s` | `144 − s²` | 90° turn | 180° reverse |
+|---|---|---|---|---|---|
+| deep column | 5 × 4 | 7 | 95 | ≈ 31 ticks (3.1 s) | ≈ 6.2 s |
+| wide line | 10 × 2 | 11 | 23 | ≈ 130 ticks (13 s) | **≈ 26 s** |
+| 10 cavalry, `s_rlmv` 18 | 5 × 2 | 6 | 108 | ≈ 17 ticks (1.7 s) | ≈ 3.4 s |
+
+A wide line reversing takes well over a full game turn, while the same models in a deep column manage it in six
+seconds. 🟡 For `s ≥ 12` the term reaches zero or goes negative and the turn would never finish; the widest
+formation in the campaign data reaches `s` = 10, so it is not reachable in practice.
+
+**What the formation does.** On every tick of a turn that actually rotates the block:
+
+- the unit's reference point is **displaced by the rotation applied to the half-frontage vector
+  `6 × (frontage − 1)`**, which holds the **inner front corner** still — a true wheel rather than a spin about
+  the anchor. The side is taken from the same turn-direction flag, and a **frontage of 1 inverts it**.
+- **translation speed is changed for that tick**: a wheel keeps moving at **half speed**; every other kind of
+  turn — halted turn, turn order, charge re-aim, closing redirect — **sets the speed to zero**. Only a wheel
+  turns and travels at once; everything else stops the unit dead while it comes round.
+- **every model's slot is recomputed from the new facing**, as
+  `rotate(12 × column − 6 × (frontage − 1), −12 × rank)`. Ranks that are one model short are offset by a further
+  half spacing (6 world units), which is the staggered look of the rear ranks.
+- a re-form is queued, and a turn order ends by halting and re-forming to the script's rank count.
+
+**What the individual figures do.** They are never rotated into place. The slot lattice rotates under them, and
+at the same moment every model's stored position is **counter-shifted by exactly the reference point's
+displacement**, so no figure teleports — each keeps its world position and simply finds its slot has moved. It
+then walks to it under the ordinary rank-dependent catch-up walk of "Models chase the unit, they are not
+carried by it": front ranks fastest, rear rank slowest, each ramping up by one speed unit per tick.
+
+This is what makes a turning block read as a body of men rather than a rotating sprite sheet: the *shape* turns
+at the formation's rate, and the *figures* stream after it individually, the outside of the turn hurrying and the
+rear rank trailing, converging again once the facing settles.
+
+**Differences by formation** ✅:
+
+- **Blocks** (infantry, cavalry, archers, wizards, special) get all of the above; their turn rate and pivot both
+  scale with frontage and depth.
+- **Single-model units (monsters)** skip the entire pivot-and-slot block, which is guarded on the unit having
+  **more than one model**. A monster therefore turns **on the spot with no reference-point displacement, no slot
+  recomputation, and no speed penalty at all** — it keeps translating at full speed while it comes round. Its
+  pseudo-formation is small (`s` = 3 for a 2 × 2, 5 for a 3 × 3), so it also turns very fast. Monsters are
+  by far the most agile things on the field, and deliberately so.
+- **Units currently re-forming** are also skipped by the same guard, so a unit that is still settling its models
+  does not additionally drag its reference point around.
+- **Wagons** carry a further restriction from their layout: their facing is **snapped to 45° steps**, so they
+  turn in visible increments rather than smoothly.
+- **War machines** use a 2–3 wide, 3–4 deep layout (`s` ≈ 4–5, so a quick turn), but are usually anchored in
+  place by a separate flag and rarely turn at all in practice.
+
+**When a unit breaks and turns to run**, every model that is currently at rest is given a pause of
+`(per-model stagger value & 7) × 3 + 6` — **6 to 27 ticks** — with its timed-pause flag set, and is scattered
+slightly from its position. If the unit is in melee, **each model's opponent is given the same pause**, so both
+sides visibly hesitate together at the moment of the break before the routers turn about.
 
 ### Routes, collisions and visibility ✅
 
@@ -365,6 +591,17 @@ script each tick (`RunUnitScript`, the game, called from the battle tick the gam
   several rule functions looked orphaned (the game is opcode 0x5B, the game opcode 0xC8).
 - **Per-unit state**: current script `+0x242`, PC `+0x244`, return stack `+0x24E`/`+0x250`, interrupt
   script `+0x214`, pending switch `+0x246`, current event `+0x238`, event queue head `+0x216`, count `+0x20E`.
+- **Event dispatch is pre-emptive, not polled** ✅ (traced September 2026): every tick, before a unit's
+  script executes any of its own instructions for that tick, the interpreter itself checks whether the
+  unit has any queued, unconsumed events. If it does, the interpreter forces entry into the unit's
+  registered interrupt script right there — regardless of what instruction the main script's program
+  counter currently sits on (even, for example, in the middle of an indefinite idle `Wait` loop) — and
+  arranges to resume the interrupted script afterward. Only then does it run the unit's (now possibly
+  switched) script for the rest of the tick. The "enter interrupt script" opcode has no callers from
+  any library or mission script anywhere in the corpus; it exists purely as this internal, once-per-tick
+  scheduler mechanism, not something a script is expected to invoke itself. A unit idling in a
+  `Wait`-only loop for most of a battle (the common case) is therefore still reactive to events like
+  "you are being charged" every tick, without its own code ever polling for them.
 - **Script source**: `the original game(id)` calls `DLLGetScriptPointer` of the mission DLL named by
   `loadScript`. In every `SCRIPT/BFxxx.DLL` that export is a table lookup: ids from 0 → the mission's unit
   scripts (3–37 per DLL; `set:script=N` values are always below the DLL's count), ids **100–170 → a shared
@@ -975,9 +1212,32 @@ the charge counter is non-zero.
 | 3 | Giant Wolf | 3 | 8 4 0 3 3 1 3 1 3 |
 | 4 | Cave Squig | 0 | 5 4 0 5 3 1 5 2 2 |
 
-Only charge strength, WS, S and A of the mount record are ever read; its M, T, W, I, Ld and the byte `+4` (255 on
-the War Boar) are unused. A mounted model has a single wound counter: **the mount cannot be wounded or killed
-separately** and does not change movement.
+**Exactly five fields of the mount record are ever read** ✅: **M**, **WS**, **S**, **A** and the **charge
+strength**. Its BS, T, W, I, Ld and the byte `+4` (255 on the War Boar) are never touched by anything.
+
+**What a mount changes, and what it does not** ✅ (traced September 2026):
+
+- **Movement — this is the mount's largest effect by far.** The speed stat is derived once at unit set-up, and
+  when the armour code marks the model as mounted it takes the **mount's M in place of the rider's**; the
+  rider's own Initiative is still used. Everything else about movement follows from that one substitution,
+  because the speed stat is the master movement variable: the unit's per-tick advance in every state
+  (free, closing, charging, fleeing), the **charge reach `12 × (s_rlmv + 1)`** and how long a charge lasts, the
+  turn and wheel rate, flight and pursuit speed, and each model's formation catch-up speed all scale with it.
+  A rider on a Warhorse (M7) with I3 gets a speed stat of 18 against 11 on foot (M4 I3) — about 64 % more of
+  everything above, and a charge reach of 228 world units (9.5") instead of 144 (6").
+- **An extra attack sequence in close combat.** The mount attacks in its own right with its own A, WS and S —
+  substituting its **charge strength** for its S while the unit's charge counter is non-zero. Because the
+  rider and the mount each run the attack resolution, a mounted model also **spends the charge counter faster**
+  than a foot model does (see "Charge").
+- **It does not add toughness, wounds or survivability.** A mounted model has a single wound counter and uses
+  the **rider's** T and W; **the mount cannot be wounded or killed separately**, and it is never removed while
+  the rider lives. A mount is pure offence and pure speed.
+- **It does not change the charge counter's size** (that is `1.5 × frontage`, a formation property), the model
+  spacing (12 world units for every class, cavalry included), or the formation layout.
+- **It is not what sets the contact reach.** The reach used for the automatic contact attacks of a charging or
+  pursuing unit (12 world units, **18**, or 24) is selected from the **unit's class** — Cavalry and Monster get
+  the wider values — and is read without reference to the mount record or to whether any model is mounted.
+  A unit's class and its models' mounts are independent facts, and only the class decides reach.
 
 ### Charge ✅
 
@@ -988,11 +1248,33 @@ the current opponent) stores 0. The contact handler the game treats the moving u
 counter to whichever unit is not yet on a grid, so a unit that runs into an ongoing combat also gets
 one. The defender's counter is untouched and nothing resets it when the combat ends.
 
-While non-zero: +1 S and the mount's charge strength. It is decremented once per attacking model
-(after the rider's and the mount's attacks) and per return blow, so **the first `1.5 × frontage`
-models to fight** get the bonus (16 models in 4 ranks: 6; 10 knights in 2 ranks: 7). 🟡 A charging
-monster keeps +1 S on its own attacks, because `MeleeRoundMonster` never decrements the counter
-(probable bug). The lance (`s_weponame` 17) has no special rule; the Reiksguard use weapon class 3.
+**The charge bonus is not carried by the charging flag, and it is not a duration** ✅. The charging flag is a
+movement/order state meaning "this unit is executing a charge move", and engagement clears it immediately because
+the move is over. The bonus lives entirely in the separate **charge counter** above, which is set at the instant
+of engagement and is a **budget of attacks, not a timer**: nothing decrements it with time, and it survives until
+it is spent. An engine must therefore keep the two concepts apart — clearing the "charging" state on contact must
+not clear the pending bonus.
+
+While non-zero it gives **+1 Strength**, and a mount uses its **charge strength** stat in place of its normal S.
+It is consumed as it is used, at two points: the attack resolution that grants the +1 S decrements it, and the
+per-model melee round decrements it again after that model's rider and mount attacks have been resolved. A
+mounted model therefore drains it faster than a foot model (its rider and its mount each run the attack
+resolution), and an attack against a war machine takes a different resolution path that does not decrement it.
+The practical effect is that the bonus covers the **opening exchange of the fight only** — of the order of the
+first half-frontage to frontage of models to actually land attacks, rather than a fixed count of models
+(`1.5 × frontage` is the budget, not the number of beneficiaries). 🟡 The exact number of beneficiaries per
+formation has not been measured against a live fight.
+
+Consequences worth implementing deliberately:
+- **Re-engaging an opponent you are already fighting sets the counter to 0** — no bonus for re-contacting.
+- **A unit that runs into an ongoing combat also receives a counter**, because the counter goes to whichever unit
+  is joining a grid it is not already on.
+- **Nothing clears the counter when a combat ends.** A unit whose fight finishes before the budget is spent keeps
+  the remainder, and would still be spending it in a later engagement.
+- 🟡 A charging monster keeps +1 S on its own attacks, because the monster melee round never decrements the
+  counter (probable bug).
+
+The lance (`s_weponame` 17) has no special rule; the Reiksguard use weapon class 3.
 
 ### Magic item effects ✅
 
@@ -1072,6 +1354,30 @@ always one shared record. The **attack direction** (`+0x22E`, the game) is compu
 engagement, from the attacker's unit position to the defender's object centre against the defender's
 box diagonal `+0x322`, and is never recomputed while the fight lasts.
 
+**Two units both charging each other at once** ✅ (traced September 2026): the engagement decision
+is made **independently by each unit's own per-tick contact check**, not by a single comparison
+between the two sides. Whenever a unit's own order flags say it is charging or pursuing (`0x8080`)
+and it has already confirmed the other unit as its recorded opponent (from the prior handshake
+tick), that unit unconditionally calls `EngageCharging` **with itself as the charging party** —
+there is no read of the other unit's own order flags at that point. So if both units carry a charge
+order and each has the other recorded as its opponent by the time their own handshake tick fires,
+**each one's own contact check makes itself the charger**, independently: both would compute and
+store their own `floor(1.5 × frontage)` charge bonus for the fight, rather than the engine picking
+a single "winner" charger between the two.
+
+The "refuses a second grid" guard only stops a unit from being handed a second charge counter when
+*it itself* is asked to be the charger again while it already has one — it does not compare against
+the other side. Grid creation/joining ("whichever side doesn't have a grid yet joins the other's")
+is likewise decided per call, from the perspective of whichever unit initiated that particular
+`EngageCharging` call, not as a global "is this pair already fighting" check. 🟡 Whether this can
+produce two independent battle-grid records for what should be one shared fight in a truly
+simultaneous mutual charge (as opposed to reliably converging on one shared record because the two
+units' contact checks run on different ticks or in a fixed order within the same tick) is not
+confirmed by a live trace — the per-tick unit processing order that would settle this was not
+determined. Practically, this only matters for the exact edge case of two units charging each
+other head-on and reaching contact together; the common case (one moving unit reaching a
+stationary or already-engaged one) is unambiguous, as already described above.
+
 **Pairing** runs every tick (`EngageTroops`, the game):
 - The joining unit places at most **frontage** free models per tick, each in a free cell orthogonally
   next to the nearest enemy model (only the front and one flank cell are offered while the model is
@@ -1085,9 +1391,66 @@ box diagonal `+0x322`, and is never recomputed while the fight lasts.
   and `0x10000`). Opponents retarget to a unit with a higher `s_pntval` or away from a war machine.
 
 There is no front-rank, supporting-rank or spear rule: contact on the square grid decides who fights.
-🟡 In practice models in combat walk `s_rlmv / 8` units per tick, so the wrap-around completes within 2–4
-segments, well inside the first combat turn; the limit is the number of free cells next to enemy models (about
-`2 × (width + depth)`), so most models of both units fight by the first result.
+🟡 The wrap-around completes within roughly 2–4 segments, well inside the first combat turn; the limit is the
+number of free cells next to enemy models (about `2 × (width + depth)`), so most models of both units fight by
+the first result.
+
+#### Why the charger disperses and the charged unit stands still ✅
+
+Traced September 2026. The two sides of a new engagement are **not** treated symmetrically, and the asymmetry is
+decided entirely by **who the grid is built around**. This is the single most visible consequence of the whole
+engagement system.
+
+**The grid is created from the defender's own formation.** When a charge connects, the grid is fetched or created
+**for the target**, and creating it does this:
+
+- the grid record is anchored at the **defender's** position and takes the **defender's facing**;
+- the defender's block is centred on the 17 × 17 cell map by offsetting it to the middle:
+  `grid_column = model's formation column + (8 − frontage / 2)`, `grid_row = model's formation rank + (8 − ranks / 2)`;
+- each defender model's stored column and rank are **overwritten with those grid coordinates**, its cell is
+  stamped as occupied by its side, it is flagged "on the grid", and its heading is snapped to the unit's facing.
+
+So the cell map is just the defender's existing block transcribed onto the grid. **Every defender model is already
+standing exactly in the cell it has been assigned** — its target position does not change by a single world unit,
+so it has nothing to walk to. This is why the charged unit appears to freeze in place on contact: not because it
+was ordered to stand, but because the grid was drawn around where its models already were.
+
+**The charger is entered as the joining unit.** The same engagement gives the charger "has a grid" and "in melee",
+clears its charging flag and its charge movement state — so **its reference point stops translating immediately** —
+and pointedly does **not** give it the owner-pairing bit. The two per-tick routines then diverge:
+
+| | **Owner** (the charged unit) | **Joiner** (the charger) |
+|---|---|---|
+| Models already next to an enemy | pair **in place**, no movement at all | — |
+| Models with no adjacent enemy | queued to shuffle up beside a comrade who is already fighting, nearest first | placed into a **free cell orthogonally next to an enemy model** |
+| Cells used | the ones its own formation already occupies | cells belonging to the **defender's** block outline |
+| Overflow | — | become **reserves**, placed next to an already-placed comrade on later ticks |
+
+The joiner's candidate cells come from a small per-direction offset table selected by the attack direction, so
+where it wraps depends on which side it came in from. Only the first **two** candidate cells are offered while the
+model is more than **18** world units away, and all **four** once it is closer — so a distant model takes the
+obvious cell and a close one can slot into any gap.
+
+**How a relocated model actually moves.** Committing a placement writes a new target derived from the enemy
+model's position plus the chosen adjacency offset (converted between the two units' reference frames, since model
+targets are stored relative to their own unit), clears the model's "at rest" flag and zeroes its step budget, which
+forces an immediate re-aim. It then walks there under the ordinary rank-dependent catch-up walk of
+"Models chase the unit, they are not carried by it" — ramping up from a standstill, with the deeper ranks slower.
+Conversely, **a model that is at rest is skipped outright while its unit is in melee**, which is what holds the
+defender's models motionless: they are never given a new target, so they are never taken out of "at rest".
+A defender model that does get paired is momentarily taken out of "at rest", finds itself already within the
+3-world-unit arrival threshold of its target, and settles again the same tick without visibly moving.
+
+**Net effect on screen**: at the moment of contact the charger's block stops dead, loses its formation cohesion,
+and its models stream outward to fan around the defender's edge — arriving raggedly, front ranks first, with the
+overflow trickling in over later ticks as reserves. The defender does nothing at all except turn to face and start
+fighting. The charging unit's earlier charge stretch (see the movement section) is resolved during this same
+dispersal, since its reference point has stopped.
+
+**This is not the Braced flag.** Bracing is a separate mechanism: being charged raises an event, and a passed fear
+test sets a flag that makes the engine ignore movement, turn, rank and charge **orders** for that unit. It governs
+what the unit may be *told* to do. The stillness described here is mechanical and happens regardless — the
+defender's models have nowhere to go because the grid was built on top of them.
 
 **Leaving** (`LeaveBattleGrid`, the game): models are unpaired, ownership passes to another unit
 on the grid or the record is freed; a lone remaining unit with `s_side & 0xE0 == 0x20` leaves as well.

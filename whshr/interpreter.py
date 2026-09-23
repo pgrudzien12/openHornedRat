@@ -160,7 +160,7 @@ class LibraryBehaviors:
 
         # Find best threat (nearest active, different-side regiment): a script that assigns this
         # library behaviour to a neutral unit has already made the targeting decision explicitly, so
-        # this is not gated by rules.hostile_sides the way whshr.ai's unscripted placeholder is.
+        # this is not gated by rules.hostile_sides.
         best_threat = None
         best_distance = float('inf')
 
@@ -232,15 +232,24 @@ class ScriptInterpreter:
             state.pending_arrival = False
 
     def raise_charge_events(self):
-        """Queue event 0x07 ("you are being charged") to any regiment whose attacker just set a
-        fresh attack_target on it this tick (game_rules.md event table: 0x07 = charge start).
+        """Queue event 0x07 ("you are being charged") to any regiment an attacker has closed to
+        within actual charge reach of (game_rules.md event table: 0x07 = charge start; "Charge":
+        a real charge reaches at most `12 * (s_rlmv + 1)` units -- a short final rush, not the whole
+        approach). NOT the moment `attack_target` is merely set: this engine (a documented
+        simplification, `engine.py`'s `CLOSING_K` note) drives the entire approach through
+        `attack_target` at charging speed from wherever the AI first picks a target, which can be
+        the length of the battlefield -- so gating on `attack_target` alone braced the target for
+        the whole approach (tens of real seconds) instead of only the real charge's short final
+        rush, making every targeted player regiment uncommandable for most of the battle.
 
         Called once per tick from Battle.tick(), after every unit's script has run -- centralized
         here rather than duplicated in every opcode that can set attack_target (ChargeTarget,
         AttackNearestEnemy and its many variants, AttackTagged, LibraryBehaviors.track_threat, ...)
-        so they all raise it consistently. Fires once per fresh charge (None/other -> this target),
-        not every tick the same charge continues, and fires again if the same target is charged a
-        second time after an intervening gap (target lost, then re-acquired).
+        so they all raise it consistently. Fires once per fresh charge that has reached this range
+        (None/other -> this target), not every tick the same charge continues, and fires again if
+        the same target is charged a second time after an intervening gap (target lost, then
+        re-acquired) -- `last_attack_target` is left untouched while still out of reach, so entering
+        reach is what marks the notification as sent, not merely acquiring the target.
 
         This is what a charged unit's own event-handling frame (GetEvent; CaseEvent 7; ...) reacts
         to -- typically a fear/terror test (op 0x42, FearWhenCharged) then bracing in place, per
@@ -255,9 +264,43 @@ class ScriptInterpreter:
             if state is None:
                 continue
             target_id = attacker.attack_target
-            if target_id is not None and target_id != state.last_attack_target:
+            if target_id is None:
+                state.last_attack_target = None
+                continue
+            target = self.battle.regiments.get(target_id)
+            if target is None:
+                continue
+            distance = math.hypot(target.x - attacker.x, target.y - attacker.y)
+            if distance > attacker.charge_reach:
+                continue  # still closing, not yet within an actual charge's reach
+            if target_id != state.last_attack_target:
                 self.event_bus.queue_event(target_id, Event(code=0x07, source=attacker_id), route="self")
             state.last_attack_target = target_id
+
+    @staticmethod
+    def _preempt_for_pending_event(state: UnitScriptState):
+        """game_rules.md "Event dispatch is pre-emptive, not polled": before a unit's script runs any
+        of its own instructions this tick, force entry into its registered interrupt script if it has
+        a queued, unconsumed event -- regardless of what instruction the main script's PC currently
+        sits on (even inside an indefinite idle `Wait` loop, which never itself calls GetEvent). This
+        is what makes an idling unit still react to events like 0x07 "you are being charged" every
+        tick, without its own code polling for them, matching real play (a charged unit braces
+        immediately, not only once its current Wait happens to finish).
+
+        Mirrors `op_CallInterruptScript`'s own mechanics (one-level gosub via `interrupt_return`), but
+        triggered by the interpreter itself rather than requiring the main script to execute opcode
+        0x12 -- no library or mission script anywhere in the corpus ever does, so relying on an
+        explicit call left this dormant. A no-op once already inside an interrupt (`interrupt_return`
+        set): the interrupt script itself is expected to `ConsumeEvent`/`ReturnInterrupt`, not to be
+        re-entered on top of itself for the same or a further event within one tick.
+        """
+        if state.interrupt_script is None or state.interrupt_return is not None:
+            return
+        if not state.event_queue and not state.current_event.code:
+            return
+        state.interrupt_return = (state.script_id, state.pc)
+        state.script_id = state.interrupt_script
+        state.pc = 0
 
     def run(self, unit_id: str, state: UnitScriptState, tick_count: int, rng):
         """Execute one unit's script for one tick.
@@ -268,6 +311,8 @@ class ScriptInterpreter:
 
         if state.script_dll is None:
             state.script_dll = self.script_dll
+
+        self._preempt_for_pending_event(state)
 
         # Fetch the script words from the DLL
         try:
@@ -284,12 +329,6 @@ class ScriptInterpreter:
         while iterations < max_iterations:
             iterations += 1
 
-            # Check for event: if there is one, enter event handling
-            if not state.current_event.code and state.event_queue:
-                state.current_event = state.event_queue.popleft()
-
-            # Check if this is an event handling frame (GetEvent called)
-            # For now, simplified: just run the script, real implementation branches on CaseEvent
             if state.pc >= len(script_words):
                 break
 
@@ -327,6 +366,18 @@ class ScriptInterpreter:
                     tick_count, unit_id=unit_id, script_id=script_before, pc=pc_before,
                     opcode=opcode, opcode_name=behaviour.opcode_name(opcode), operand=operand_before,
                     outcome=outcome, state=self._state_snapshot(unit_id, state))
+
+            # A script-switching opcode (GosubScript/GotoScript/ReturnGosub/ReturnInterrupt/...) just
+            # changed state.script_id mid-tick: `script_words` still holds the *previous* script's
+            # words, so the next iteration must not keep dispatching against it -- that would
+            # interpret the new script's PC against the wrong bytecode entirely (latent until
+            # ScriptInterpreter._preempt_for_pending_event started actually entering interrupt
+            # scripts; game_rules.md "Event dispatch is pre-emptive, not polled").
+            if state.script_id != script_before:
+                try:
+                    script_words = state.script_dll.scripts([state.script_id])[state.script_id]
+                except (KeyError, Exception):
+                    break
 
             # Yield/event handling: return control to the battle
             if self._should_yield:
@@ -598,7 +649,14 @@ class ScriptInterpreter:
     # ===== Event handling opcodes =====
 
     def op_GetEvent(self, state, operand, script_words, unit_id, tick_count, rng):
-        """GetEvent: fetch the next event from the queue."""
+        """GetEvent: fetch the next event from the queue.
+
+        `run()`'s dispatch loop must not pre-pop the queue into `current_event` on its own: this
+        handler's own "queue empty" branch would then blank out an event a caller (in practice,
+        `_preempt_for_pending_event`) had already correctly placed there, since by the time GetEvent
+        ran the queue looked empty even though current_event was already valid. An earlier version
+        of the loop did exactly that and silently discarded every event dispatched via preemption.
+        """
         if state.event_queue:
             state.current_event = state.event_queue.popleft()
         else:
@@ -1010,8 +1068,14 @@ class ScriptInterpreter:
         return state.pc + 1
 
     def op_ChargeTarget(self, state, operand, script_words, unit_id, tick_count, rng):
-        """ChargeTarget: issue charge order to the current target."""
+        """ChargeTarget: issue charge order to the current target.
+
+        Refused while braced (game_rules.md "Braced": charge orders are ignored for a scripted unit
+        exactly as for a player's own click), matching Battle.order_attack's player-side guard.
+        """
         regiment = self.battle.regiments.get(unit_id)
+        if regiment and regiment.braced:
+            return state.pc + 1
         if regiment and state.current_target:
             target_id = state.current_target[0]
             if target_id in self.battle.regiments:
@@ -1277,6 +1341,19 @@ class ScriptInterpreter:
             state.cond_flags = 0 if combat.leadership_test(regiment.leadership, rng) else 1
         else:
             state.cond_flags = 0
+        if state.cond_flags == 0:
+            # game_rules.md "Braced" (flag 0x100000): a passed fear/terror test halts the unit
+            # facing its charger and suppresses move/attack/turn/rank/charge/fire orders -- for
+            # the player exactly like for a script -- until combat.refresh_braced_state or
+            # Battle.order_halt clears it.
+            regiment.target_x = regiment.target_y = None
+            regiment.attack_target = None
+            regiment.braced = True
+            regiment.braced_target = source_id
+            if (charger.x != regiment.x or charger.y != regiment.y):
+                dx, dy = charger.x - regiment.x, charger.y - regiment.y
+                direction = round(math.atan2(dx, dy) * 512 / math.tau) % 512
+                self.battle._turn_to(regiment, direction)
         return state.pc + 1
 
     def op_ResetStack(self, state, operand, script_words, unit_id, tick_count, rng):

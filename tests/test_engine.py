@@ -67,6 +67,39 @@ class BattleTests(unittest.TestCase):
     def test_given_a_regiment_without_a_decoded_profile_when_built_then_it_gets_the_documented_placeholder(self):
         self.assertEqual(speed_per_tick(None, None), speed_per_tick(4, 3))
 
+    def test_given_the_worked_example_s_rlmv_when_charge_reach_is_computed_then_it_matches_the_documented_formula(self):
+        # game_rules.md "Charge": reaches at most 12 * (s_rlmv + 1) units; M4 I3 -> s_rlmv = 11.
+        self.assertAlmostEqual(self.player.charge_reach, 12 * (11 + 1))
+
+
+class BracedOrderGatingTests(unittest.TestCase):
+    """game_rules.md "Braced": move/attack orders are ignored while braced -- for a player's own
+    click exactly as for a script's own order (whshr.interpreter.op_FearWhenCharged, op_ChargeTarget);
+    Halt is the one order still accepted, and it clears the status."""
+
+    def setUp(self):
+        self.speed = speed_per_tick(4, 3)
+        self.player = Regiment("player", "Player", 10, 10, 0, Side.PLAYER, models=1, ranks=1,
+                               speed_per_tick=self.speed)
+        self.enemy = Regiment("enemy", "Enemy", 90, 90, 0, Side.ENEMY, models=1, ranks=1,
+                              speed_per_tick=self.speed)
+        self.battle = Battle(100, 100, [self.player, self.enemy])
+        self.player.braced = True
+        self.player.braced_target = "enemy"
+
+    def test_given_a_braced_regiment_when_moved_then_the_order_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "braced"):
+            self.battle.order_move("player", 70, 10)
+
+    def test_given_a_braced_regiment_when_attacked_then_the_order_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "braced"):
+            self.battle.order_attack("player", "enemy")
+
+    def test_given_a_braced_regiment_when_halted_then_the_order_is_accepted_and_clears_braced(self):
+        self.battle.order_halt("player")
+        self.assertFalse(self.player.braced)
+        self.assertIsNone(self.player.braced_target)
+
     def test_given_script_resources_with_variant_suffixes_when_built_then_their_resource_names_are_normalized(self):
         source = {
             "field": {"width": 100, "height": 100},

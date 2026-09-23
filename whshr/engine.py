@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import math
 import random
 
-from . import ai, battle_grid, behaviour, combat, formation, interpreter
+from . import battle_grid, behaviour, combat, formation, interpreter
 from .battle_events import BattleEvent
 from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, Side, can_fight, side_of_code, stat_fields
 from .script import load_battle, resource_name
@@ -120,8 +120,14 @@ class Regiment:
     points: int = 0  # s_pntval: experience gained by the killer, and the AI's per-model worth unit
     # (game_rules.md: unit worth = size x s_pntval x 12 artillery / 8 wizard / 4 monster / 1)
 
-    # Combat/order state (whshr.combat, whshr.ai).
+    # Combat/order state (whshr.combat).
     attack_target: str | None = None  # identifier of an enemy regiment this regiment is charging
+    # game_rules.md "Braced" (flag 0x100000): set when this regiment passes its fear/terror test on
+    # being charged (interpreter.op_FearWhenCharged, event 0x07). While set, move/attack/turn/rank/
+    # charge/fire orders are ignored -- for the player exactly like for a script -- until the charger
+    # named by `braced_target` is gone (combat.refresh_braced_state) or it enters melee.
+    braced: bool = False
+    braced_target: str | None = None  # identifier of the regiment this one is braced against
     in_melee: bool = False
     melee_group: str | None = None  # id of the shared multi-regiment fight (Battle.fights), if any
     melee_touching: frozenset = field(default_factory=frozenset)  # enemy ids this footprint touches now
@@ -172,6 +178,15 @@ class Regiment:
         """Per-tick speed at movement factor ``k`` (game_rules.md k factors), scaled from the regiment's
         own free-movement speed rather than carrying a second raw ``s_rlmv`` field."""
         return self.speed_per_tick * k / MOVING_FREELY_K
+
+    @property
+    def charge_reach(self):
+        """game_rules.md "Charge": a real charge reaches at most ``12 * (s_rlmv + 1)`` world units
+        (about 6" for infantry, 9.5" for cavalry) -- a short final rush, not the whole approach.
+        Recovers ``s_rlmv`` from the stored free-movement `speed_per_tick` (``s_rlmv * 1.8 / 16``)
+        rather than carrying a second raw field, same approach as `speed_for_mode`."""
+        s_rlmv = self.speed_per_tick * 16 / MOVING_FREELY_K
+        return 12 * (s_rlmv + 1)
 
     def model_positions(self, spacing=formation.MODEL_SPACING):
         """Current per-model positions (BTS world units): seeded in formation, then advanced by `Battle.tick`."""
@@ -257,8 +272,7 @@ def _decode_combat_profile(unit):
 
 
 class Battle:
-    """Authoritative fixed-tick state: movement, and (whshr.combat/whshr.ai) close combat, shooting,
-    morale and a simple enemy AI."""
+    """Authoritative fixed-tick state: movement, and (whshr.combat) close combat, shooting, morale."""
 
     def __init__(self, width, height, regiments, seed=DEFAULT_SEED, script_dll=None, script_ids=None,
                  script_logger=None, nodes=None):
@@ -288,7 +302,8 @@ class Battle:
 
         # Bytecode interpreter for mission scripts (issue #3/#46): `script_dll` is the mission's
         # loaded SCRIPT/BFxxx.DLL (whshr.behaviour.ScriptDll), or None for a mission-less/synthetic
-        # battle, in which case whshr.ai's placeholder AI drives every regiment instead (Battle.tick).
+        # battle, in which case no script-driven regiment gets automatic orders (Battle.tick) --
+        # only explicit Battle.order_* calls move it.
         # `script_ids` is {regiment identifier: initial script id}, from each unit's own
         # set:script= value; a regiment absent from it starts on the shared library script
         # (behaviour.PLAYER_SCRIPT), matching the original's own default for units with no explicit
@@ -313,7 +328,7 @@ class Battle:
         """Build the battle from a loaded BTS/MRC script; repeated unit ids get ``#2``, ``#3``... suffixes.
 
         ``script_dll``, when given, is threaded through to `Battle.__init__` (issue #3/#46) so its
-        interpreter drives every regiment instead of `whshr.ai`'s placeholder rule. Each unit's own
+        interpreter drives every regiment; without it, no regiment gets automatic orders. Each unit's own
         ``set:script=`` value (a number, or the literal ``PLAYER_SCRIPT``) becomes that regiment's
         initial script id, matching the original's `set:script=PLAYER_SCRIPT` convention
         (`whshr.behaviour.PLAYER_SCRIPT` = library script 100). The script's own ``[NODES]`` table
@@ -371,6 +386,8 @@ class Battle:
             raise ValueError(f"{identifier} is not player-controlled")
         if regiment.routing:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
+        if regiment.braced:
+            raise ValueError(f"{identifier} is braced against a charge and cannot be ordered")
         if not 0 <= x <= self.width or not 0 <= y <= self.height:
             raise ValueError("destination is outside the battlefield")
         regiment.attack_target = None
@@ -385,6 +402,8 @@ class Battle:
             raise ValueError(f"{identifier} is not player-controlled")
         if regiment.routing:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
+        if regiment.braced:
+            raise ValueError(f"{identifier} is braced against a charge and cannot be ordered")
         target = self.regiments.get(target_id)
         if target is None or target.side == Side.PLAYER:
             raise ValueError("attack target must not be a player regiment")
@@ -404,6 +423,9 @@ class Battle:
             raise ValueError(f"{identifier} is in melee and cannot be ordered")
         regiment.target_x = regiment.target_y = None
         regiment.attack_target = None
+        # game_rules.md "Braced": Halt is the one order still accepted while braced, and clears it.
+        regiment.braced = False
+        regiment.braced_target = None
 
     def snapshot(self):
         """Per-regiment state for `whshr.battle_log` (a segment snapshot or the final battle state):
@@ -417,6 +439,7 @@ class Battle:
                 "in_melee": regiment.in_melee, "melee_group": regiment.melee_group,
                 "melee_touching": sorted(regiment.melee_touching),
                 "attack_target": regiment.attack_target, "reload_ticks": regiment.reload_ticks,
+                "braced": regiment.braced, "braced_target": regiment.braced_target,
                 # Battle-grid occupancy (game_rules.md 5.7): how many models hold a cell, how many
                 # have walked into it and are paired, and how many are waiting for a cell to free up.
                 "placed": sum(1 for m in regiment.melee_models if m.cell is not None),
@@ -450,17 +473,17 @@ class Battle:
             self.tick_count += 1
             return
         scale = seconds / TICK_SECONDS
-        # Run behaviour scripts via the bytecode interpreter (issue #3), or fall back to simple AI
+        # Run behaviour scripts via the bytecode interpreter (issue #3); a mission-less/synthetic
+        # battle has no interpreter and so no automatic orders (only explicit Battle.order_* calls).
         if self.interpreter:
             for unit_id, state in self.event_bus.unit_states.items():
                 self.interpreter.run(unit_id, state, self.tick_count, self.rng)
             self.interpreter.raise_charge_events()
-        else:
-            ai.decide_orders(self)
         combat.refresh_melee_state(self)
         self._advance_regiments(scale, seconds)
         self._resolve_collisions()
         combat.resolve_contacts(self)
+        combat.refresh_braced_state(self)
         if self.tick_count % combat.SEGMENT_TICKS == 0:
             combat.resolve_melee(self)
             combat.resolve_contact_attacks(self)  # game_rules.md 7.7, once per segment
@@ -550,7 +573,7 @@ class Battle:
         """The nearest active regiment of a *different* side, whatever it is (used for a rout's flee
         bearing and rally's "enemy nearby" check): the opponent to flee from is whoever `regiment` is
         actually engaged with, not restricted to `rules.hostile_sides`' default hostility, which only
-        gates unprompted/autonomous targeting (`whshr.ai`, `whshr.combat._shooting_target`)."""
+        gates unprompted/autonomous targeting (`whshr.combat._shooting_target`)."""
         enemies = [r for r in self.regiments.values() if r.side != regiment.side and r.active]
         if not enemies:
             return None

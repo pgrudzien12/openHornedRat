@@ -66,8 +66,8 @@ class BattleScene(Scene):
     def _load_script_dll(self, context):
         """Load this battle's SCRIPT/BFxxx.DLL (its `loadScript` name) for the bytecode interpreter
         (issue #3/#46); None if the field has no loadScript name or the DLL can't be found or loaded,
-        in which case `Battle` falls back to `whshr.ai`'s placeholder AI. A missing/broken script DLL
-        must never block the battle from starting (same defensive stance as sprite_bases above)."""
+        in which case `Battle` drives no regiment automatically. A missing/broken script DLL must
+        never block the battle from starting (same defensive stance as sprite_bases above)."""
         name = self.field.script.get("field", {}).get("script")
         if not name:
             return None

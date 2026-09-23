@@ -542,6 +542,10 @@ class CloseCombatStrikeTests(unittest.TestCase):
         self.defender = _regiment("def", 10, 0, Side.ENEMY, ws=1, toughness=1, armour=0, leadership=2,
                                   initiative=10, speed_per_tick=1.5)
         self.battle = Battle(1000, 1000, [self.attacker, self.defender], seed=1)
+        # No script/AI drives a scriptless battle any more (whshr.ai was removed): give "def" its
+        # charge order explicitly so it is still the joining unit whose models must walk into cells,
+        # matching this class's scenario ("attacker" stands still and is already placed).
+        self.defender.attack_target = "att"
 
     def test_given_two_touching_regiments_when_ticked_then_they_clash_and_the_engaged_unit_strikes(self):
         # The grid is seeded around the unit that was engaged, so its models already stand in their
@@ -702,6 +706,56 @@ class ContactAndMeleeStateTests(unittest.TestCase):
         self.assertEqual(strikers, {"left", "right", "enemy"})
         fight = battle.fights[left.melee_group]
         self.assertGreater(fight["tally"][Side.PLAYER], 0)  # left and right's kills/bonuses share one tally
+
+
+class BracedStateTests(unittest.TestCase):
+    """game_rules.md "Braced": cleared once the charger it names is gone, or once the braced
+    regiment itself joins melee (in_melee already suppresses orders more completely there)."""
+
+    def test_given_a_braced_regiment_when_the_charger_is_no_longer_active_then_it_is_unbraced(self):
+        target = _regiment("target", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        charger = _regiment("charger", 500, 500, Side.ENEMY, speed_per_tick=0.0)
+        battle = Battle(2000, 2000, [target, charger], seed=0)
+        target.braced, target.braced_target = True, "charger"
+        charger.models = 0
+
+        combat.refresh_braced_state(battle)
+
+        self.assertFalse(target.braced)
+        self.assertIsNone(target.braced_target)
+
+    def test_given_a_braced_regiment_when_the_charger_routs_then_it_is_unbraced(self):
+        target = _regiment("target", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        charger = _regiment("charger", 500, 500, Side.ENEMY, speed_per_tick=0.0, routing=True)
+        battle = Battle(2000, 2000, [target, charger], seed=0)
+        target.braced, target.braced_target = True, "charger"
+
+        combat.refresh_braced_state(battle)
+
+        self.assertFalse(target.braced)
+        self.assertIsNone(target.braced_target)
+
+    def test_given_a_braced_regiment_still_facing_an_active_charger_then_it_stays_braced(self):
+        target = _regiment("target", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        charger = _regiment("charger", 500, 500, Side.ENEMY, speed_per_tick=0.0)
+        battle = Battle(2000, 2000, [target, charger], seed=0)
+        target.braced, target.braced_target = True, "charger"
+
+        combat.refresh_braced_state(battle)
+
+        self.assertTrue(target.braced)
+        self.assertEqual(target.braced_target, "charger")
+
+    def test_given_a_braced_regiment_that_has_joined_melee_then_it_is_unbraced(self):
+        target = _regiment("target", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        charger = _regiment("charger", 500, 500, Side.ENEMY, speed_per_tick=0.0)
+        battle = Battle(2000, 2000, [target, charger], seed=0)
+        target.braced, target.braced_target, target.in_melee = True, "charger", True
+
+        combat.refresh_braced_state(battle)
+
+        self.assertFalse(target.braced)
+        self.assertIsNone(target.braced_target)
 
 
 if __name__ == "__main__":

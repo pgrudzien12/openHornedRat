@@ -43,7 +43,7 @@ def side_of_code(code):
 
 def hostile_sides(side):
     """The sides `side` is hostile to by default (see `Side`'s docstring): used by generic,
-    script-independent targeting (`whshr.ai`, `whshr.combat`'s shooting target search) so a neutral
+    script-independent targeting (`whshr.combat`'s shooting target search) so a neutral
     regiment is never auto-targeted or auto-targeting. A script that explicitly names a target
     (e.g. the `AttackNearestFlag40Unit` opcode) is not limited by this."""
     return _HOSTILE[side]

@@ -1,5 +1,4 @@
-"""Structured battle event records shared by `whshr.engine`, `whshr.combat`, `whshr.ai` and
-`whshr.battle_log`.
+"""Structured battle event records shared by `whshr.engine`, `whshr.combat` and `whshr.battle_log`.
 
 `whshr.engine.Battle.events` has always been "a list the view can still print" (docs/testing.md,
 existing BDD scenarios in `tests/test_combat.py` compare it against plain strings). `BattleEvent` is a

@@ -135,11 +135,11 @@ class RaiseChargeEventsTests(unittest.TestCase):
         self.assertEqual(len(target_state.event_queue), 2)
 
     def test_wired_into_battle_tick_end_to_end(self):
-        """Full path: an opcode sets attack_target, Battle.tick() raises the charge event without
-        any extra wiring at the call site."""
+        """Full path: an opcode sets attack_target within charge reach, Battle.tick() raises the
+        charge event without any extra wiring at the call site."""
         battle = Battle(500, 500, [
             Regiment("attacker", "Attacker", 0, 0, 0, Side.ENEMY, models=10, ranks=2),
-            Regiment("target", "Target", 5000, 5000, 0, Side.PLAYER, models=10, ranks=2),
+            Regiment("target", "Target", 50, 0, 0, Side.PLAYER, models=10, ranks=2),
         ], seed=1995, script_dll=object())  # truthy script_dll: constructs a real interpreter
         battle.regiments["attacker"].attack_target = "target"
 
@@ -148,6 +148,27 @@ class RaiseChargeEventsTests(unittest.TestCase):
         target_state = battle.event_bus.unit_states["target"]
         self.assertEqual(len(target_state.event_queue), 1)
         self.assertEqual(target_state.event_queue[0].code, 0x07)
+
+    def test_far_away_attack_target_does_not_yet_raise_the_event(self):
+        # game_rules.md "Charge": a real charge only reaches `12 * (s_rlmv + 1)` units -- picking a
+        # target from across the battlefield must not brace it for the whole approach.
+        self.attacker.attack_target = "target"
+        self.target.x = self.attacker.x + self.attacker.charge_reach + 1
+        self.interp.raise_charge_events()
+
+        target_state = self.battle.event_bus.unit_states["target"]
+        self.assertEqual(len(target_state.event_queue), 0)
+
+    def test_closing_into_charge_reach_raises_the_event_once(self):
+        self.attacker.attack_target = "target"
+        self.target.x = self.attacker.x + self.attacker.charge_reach + 50
+        self.interp.raise_charge_events()  # still out of reach: no event yet
+        self.target.x = self.attacker.x + self.attacker.charge_reach - 1
+        self.interp.raise_charge_events()  # now in reach: fires
+        self.interp.raise_charge_events()  # still the same target, in reach: does not refire
+
+        target_state = self.battle.event_bus.unit_states["target"]
+        self.assertEqual(len(target_state.event_queue), 1)
 
 
 if __name__ == "__main__":

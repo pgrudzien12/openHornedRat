@@ -223,6 +223,26 @@ def refresh_melee_state(battle):
         # is dropped by `Battle._advance_regiments` instead.
 
 
+def refresh_braced_state(battle):
+    """Clear a regiment's Braced status (game_rules.md "Braced") once the charger it braced against
+    is gone -- inactive, fled, or routing (routing units are never engaged in melee, so they are no
+    longer a threat this unit needs to brace against) -- or once it has itself joined melee, where
+    `in_melee` already suppresses orders more completely. `interpreter.op_FearWhenCharged` sets
+    Braced; `Battle.order_halt` also clears it as the one order still accepted while braced.
+    """
+    for regiment in battle.regiments.values():
+        if not regiment.braced:
+            continue
+        if regiment.in_melee:
+            regiment.braced = False
+            regiment.braced_target = None
+            continue
+        charger = battle.regiments.get(regiment.braced_target)
+        if charger is None or not charger.active or charger.routing:
+            regiment.braced = False
+            regiment.braced_target = None
+
+
 def _fight_has_enemy(battle, regiment):
     """True while some active, standing enemy is still in `regiment`'s fight."""
     if regiment.melee_group is None:
