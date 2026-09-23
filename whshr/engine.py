@@ -6,7 +6,7 @@ import random
 
 from . import ai, battle_grid, behaviour, combat, formation, interpreter
 from .battle_events import BattleEvent
-from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, Side, side_of_code, stat_fields
+from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, Side, can_fight, side_of_code, stat_fields
 from .script import load_battle, resource_name
 
 TICK_SECONDS = 0.1  # the battle clock ticks every 100 ms (game_rules.md, "Battle clock")
@@ -636,10 +636,13 @@ class Battle:
             for second in regiments[i + 1:]:
                 if first.in_melee or second.in_melee:
                     continue
-                if first.side != second.side:
-                    # Different sides never push apart: a charging regiment must be free to close all
-                    # the way to footprint contact (combat.resolve_contacts), not stop at circle
-                    # distance (see combat.resolve_contacts: contact needs real overlap).
+                if can_fight(first.side, second.side):
+                    # A pair that can actually fight never pushes apart: a charging regiment must be
+                    # free to close all the way to footprint contact (combat.resolve_contacts), not
+                    # stop at circle distance (see combat.resolve_contacts: contact needs real
+                    # overlap). A pair that can never fight (same side, or the Player-Neutral
+                    # exception rules.can_fight documents) still pushes apart like same-side
+                    # regiments always did, so e.g. peasants don't sit interpenetrating the player.
                     continue
                 first_yields = first.moving or first.routing or first.attack_target is not None
                 second_yields = second.moving or second.routing or second.attack_target is not None

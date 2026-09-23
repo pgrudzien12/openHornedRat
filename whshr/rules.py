@@ -49,6 +49,24 @@ def hostile_sides(side):
     return _HOSTILE[side]
 
 
+_NEVER_FIGHT = frozenset({frozenset({Side.PLAYER, Side.NEUTRAL})})
+
+
+def can_fight(side_a, side_b):
+    """Whether two regiments of different sides may engage in close combat *on physical contact*
+    (`whshr.combat.resolve_contacts`) or must instead push apart like same-side regiments do
+    (`whshr.engine.Battle._resolve_collisions`).
+
+    Player and Neutral never fight each other, even just from bumping into one another: user-
+    corrected from a real playthrough where NPC peasant regiments ended up in melee with the
+    player's own infantry purely from footprint contact. In this game NPCs are either genuinely
+    neutral or effectively on the player's side -- never hostile to the player -- so Enemy and
+    Neutral can still fight (that is how a mission's own scripted threat against neutrals, e.g.
+    `AttackNearestFlag40Unit`, actually plays out physically), but Player and Neutral cannot.
+    """
+    return side_a != side_b and frozenset({side_a, side_b}) not in _NEVER_FIGHT
+
+
 # Virtual addresses in GAMEF.DLL (image base 0x10000000, linker timestamp 1995-12-11).
 VA_STAT_TOKENS = 0x100E97C8   # {char *name; int token} pairs: psy_status=10, ..., s_side=13 ... s_Exp=43
 VA_PSY_TOKENS = 0x100E9AA8    # CantBreak=19 ... CantDie=32; psy_status bit = token - 19

@@ -275,6 +275,62 @@ class EngagementGeometryTests(unittest.TestCase):
         self.assertTrue(formation.penetrates(first.block(), second.block()))
 
 
+class PlayerNeutralNeverFightTests(unittest.TestCase):
+    """rules.can_fight: Player and Neutral never engage in close combat, even from pure footprint
+    contact -- user-corrected from a real playthrough where NPC peasant regiments ended up fighting
+    the player's own infantry just from bumping into them. Enemy and Neutral can still fight (that
+    is how a mission's own scripted threat against neutrals, e.g. AttackNearestFlag40Unit, actually
+    plays out physically); only the Player-Neutral pair is excluded."""
+
+    def test_overlapping_player_and_neutral_footprints_do_not_engage(self):
+        player = _regiment("player", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        peasant = _regiment("peasant", 0, 14, Side.NEUTRAL, speed_per_tick=0.0)
+        battle = Battle(500, 500, [player, peasant], seed=1995)
+
+        battle.tick()
+
+        self.assertFalse(player.in_melee)
+        self.assertFalse(peasant.in_melee)
+        self.assertEqual(battle.events, [])
+
+    def test_overlapping_enemy_and_neutral_footprints_still_engage(self):
+        enemy = _regiment("enemy", 0, 0, Side.ENEMY, speed_per_tick=0.0)
+        peasant = _regiment("peasant", 0, 14, Side.NEUTRAL, speed_per_tick=0.0)
+        battle = Battle(500, 500, [enemy, peasant], seed=1995)
+
+        battle.tick()
+
+        self.assertTrue(enemy.in_melee)
+        self.assertTrue(peasant.in_melee)
+
+    def test_overlapping_player_and_enemy_footprints_still_engage(self):
+        player = _regiment("player", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        enemy = _regiment("enemy", 0, 14, Side.ENEMY, speed_per_tick=0.0)
+        battle = Battle(500, 500, [player, enemy], seed=1995)
+
+        battle.tick()
+
+        self.assertTrue(player.in_melee)
+        self.assertTrue(enemy.in_melee)
+
+    def test_player_walking_into_a_stationary_neutral_does_not_fight_over_many_ticks(self):
+        # A player regiment ordered to move straight through a stationary peasant regiment must
+        # never end up fighting it (the collision push-apart deflects the moving party; a standing
+        # regiment never gives way, matching _resolve_collisions' existing "standing regiments never
+        # give way" rule for same-side pairs -- see test_engine.py's CollisionTests).
+        player = _regiment("player", 0, 0, Side.PLAYER, models=10, ranks=2)
+        peasant = _regiment("peasant", 0, 5, Side.NEUTRAL, models=10, ranks=2, speed_per_tick=0.0)
+        battle = Battle(500, 500, [player, peasant], seed=1995)
+        battle.order_move("player", 0, 100)
+
+        for _ in range(20):
+            battle.tick()
+
+        self.assertFalse(player.in_melee)
+        self.assertFalse(peasant.in_melee)
+        self.assertEqual(peasant.models, 10)  # never took casualties
+
+
 class RankAndDirectionBonusTests(unittest.TestCase):
     """game_rules.md 6.1: rank bonus (deep formations) and direction bonus (flank/rear attacks)."""
 

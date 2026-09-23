@@ -61,9 +61,14 @@ every non-`.MRC` unit as an enemy, so neutral units (peasants, dwarven allies, .
   -- not gated by `hostile_sides`. `AttackNearestFlag40Unit` (side flag 0x40) is now implemented for
   real, filtering for `Side.NEUTRAL` specifically, instead of the previous silent fallback to
   `AttackNearestEnemy`.
-- Close-combat contact (`combat.resolve_contacts`'s touching test, `battle_grid`'s pairing,
-  `Battle._resolve_collisions`'s push-apart) stays a plain "different side" rule: once two regiments of
-  any two different sides physically touch, they can fight, regardless of `hostile_sides`.
+- Close-combat contact (`combat.resolve_contacts`'s touching test, `Battle._resolve_collisions`'s
+  push-apart) uses `rules.can_fight`, **not** a plain "different side" rule: Player and Neutral never
+  fight each other, even from pure footprint contact (user-corrected from a real playthrough where
+  NPC peasants ended up in melee with the player's own infantry just from bumping into them -- NPCs
+  in this game are either genuinely neutral or effectively on the player's side, never hostile to the
+  player). Enemy and Neutral still can fight on contact, which is how a mission's own scripted threat
+  against neutrals (e.g. `AttackNearestFlag40Unit`) actually plays out physically. A Player-Neutral
+  pair that would otherwise overlap pushes apart instead, like a same-side pair.
 - **Still open:** the runtime allied-flag transition (`0x100`, "Objective G") is not implemented --
   `SetSide` (opcode 0xDF) has no handler yet, and its operand encoding is not a documented public fact.
   Combat-result credit for neutral kills (who gets credit in the debrief) is also still open, per the

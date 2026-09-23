@@ -29,7 +29,7 @@ import math
 
 from . import battle_grid, formation
 from .battle_events import BattleEvent
-from .rules import EXPECTED_ARMOUR_SAVE, Side, hostile_sides, wfb_to_hit, wfb_to_wound
+from .rules import EXPECTED_ARMOUR_SAVE, Side, can_fight, hostile_sides, wfb_to_hit, wfb_to_wound
 
 SEGMENT_TICKS = 19  # game_rules.md, "Battle clock": 19 ticks per segment
 SEGMENTS_PER_TURN = 10  # game_rules.md 5.1: segments count down from 10 to 1 within a turn
@@ -288,7 +288,11 @@ def resolve_contacts(battle):
     a routing regiment is never engaged in close combat (game_rules.md 7.7: "pursuers never engage
     fleeing units in close combat"). Recomputed every tick so a regiment that dies or a footprint that
     shrinks below contact range releases its neighbours, and a third regiment closing in joins the fight
-    already in progress instead of starting a separate 1v1."""
+    already in progress instead of starting a separate 1v1.
+
+    Two different sides may still not fight on contact: `rules.can_fight` excludes Player-Neutral
+    specifically (NPCs never fight the player, even by bumping into them), while still allowing
+    Enemy-Neutral so a mission's own scripted threat against neutrals plays out physically."""
     _, turn, segment = _segment_state(battle.tick_count)
     active = [r for r in battle.regiments.values() if r.active and not r.routing]
     by_id = {r.identifier: r for r in active}
@@ -296,7 +300,7 @@ def resolve_contacts(battle):
     old_touching = {r.identifier: r.melee_touching for r in active}
     for i, first in enumerate(active):
         for second in active[i + 1:]:
-            if second.side == first.side:
+            if not can_fight(first.side, second.side):
                 continue
             if formation.penetrates(first.block(), second.block()):
                 touching[first.identifier].add(second.identifier)
