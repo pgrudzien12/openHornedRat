@@ -51,12 +51,20 @@ def regiment_header_rows(battle, sprite_bases):
 
 class BattleLogger:
     """Appends JSON Lines records to `path`, flushing after every write so a crash or a closed window
-    still leaves a usable log. Pass `path=None` for a disabled (no-op) recorder."""
+    still leaves a usable log. Pass `path=None` for a disabled (no-op) recorder.
 
-    def __init__(self, path=None):
+    `trace_scripts=True` additionally writes an `"opcode"` record for every bytecode instruction the
+    interpreter (`whshr.interpreter.ScriptInterpreter`) dispatches -- off by default, since it is far
+    higher volume than the rest of the log and only useful when actually debugging mission scripts
+    (issue #3/#46). `whshr.battle_scene.BattleScene` turns it on via the `WHSHR_TRACE_SCRIPTS`
+    environment variable.
+    """
+
+    def __init__(self, path=None, trace_scripts=False):
         self.path = Path(path) if path is not None else None
         self._file = None
         self.enabled = False
+        self.trace_scripts = trace_scripts
         if self.path is not None:
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,6 +99,21 @@ class BattleLogger:
 
     def write_event(self, tick, battle_event):
         self._write(battle_event.as_record(tick))
+
+    def write_opcode(self, tick, *, unit_id, script_id, pc, opcode, opcode_name, operand, outcome, state):
+        """One dispatched bytecode instruction (only when `trace_scripts` is on).
+
+        `outcome` is "ok", "unimplemented" (no handler -- PC advanced past it anyway) or "error" (the
+        handler raised; PC also advanced past it, matching `ScriptInterpreter.run`'s recovery). `state`
+        is a small snapshot of the fields opcodes actually change, taken *after* the instruction ran, so
+        a trace read top-to-bottom shows exactly when e.g. `script_id`, `attack_target` or `cond_flags`
+        changed -- this is what caught both the InitUnit and SetBehaviour regressions (issue #3/#46).
+        """
+        self._write({
+            "type": "opcode", "tick": tick, "unit_id": unit_id, "script_id": script_id, "pc": pc,
+            "opcode": opcode, "opcode_name": opcode_name, "operand": operand, "outcome": outcome,
+            "state": state,
+        })
 
     def write_snapshot(self, tick, battle):
         self._write({

@@ -257,7 +257,8 @@ class Battle:
     """Authoritative fixed-tick state: movement, and (whshr.combat/whshr.ai) close combat, shooting,
     morale and a simple enemy AI."""
 
-    def __init__(self, width, height, regiments, seed=DEFAULT_SEED, script_dll=None, script_ids=None):
+    def __init__(self, width, height, regiments, seed=DEFAULT_SEED, script_dll=None, script_ids=None,
+                 script_logger=None):
         if width <= 0 or height <= 0:
             raise ValueError("battle dimensions must be positive")
         self.width = width
@@ -289,14 +290,17 @@ class Battle:
         for regiment_id in self.regiments:
             initial_script = script_ids.get(regiment_id, behaviour.PLAYER_SCRIPT)
             self.event_bus.unit_states[regiment_id] = interpreter.UnitScriptState(script_id=initial_script)
-        self.interpreter = interpreter.ScriptInterpreter(self, self.event_bus, script_dll) if script_dll else None
+        # `script_logger` (whshr.battle_log.BattleLogger) optionally records every dispatched opcode
+        # when its own trace_scripts flag is on -- see ScriptInterpreter.run/write_opcode.
+        self.interpreter = (interpreter.ScriptInterpreter(self, self.event_bus, script_dll, logger=script_logger)
+                             if script_dll else None)
 
     @classmethod
-    def from_battle_file(cls, path, seed=DEFAULT_SEED, script_dll=None):
-        return cls.from_script(load_battle(path), seed=seed, script_dll=script_dll)
+    def from_battle_file(cls, path, seed=DEFAULT_SEED, script_dll=None, script_logger=None):
+        return cls.from_script(load_battle(path), seed=seed, script_dll=script_dll, script_logger=script_logger)
 
     @classmethod
-    def from_script(cls, source, seed=DEFAULT_SEED, script_dll=None):
+    def from_script(cls, source, seed=DEFAULT_SEED, script_dll=None, script_logger=None):
         """Build the battle from a loaded BTS/MRC script; repeated unit ids get ``#2``, ``#3``... suffixes.
 
         ``script_dll``, when given, is threaded through to `Battle.__init__` (issue #3/#46) so its
@@ -335,7 +339,7 @@ class Battle:
                 elif isinstance(script_value, (int, float)):
                     script_ids[identifier] = int(script_value)
         return cls(field_data["width"], field_data["height"], regiments, seed=seed,
-                   script_dll=script_dll, script_ids=script_ids)
+                   script_dll=script_dll, script_ids=script_ids, script_logger=script_logger)
 
     def order_move(self, identifier, x, y):
         regiment = self.regiments[identifier]

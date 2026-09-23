@@ -58,6 +58,21 @@ Landed against this document's "Proposed" section:
   reimplementation — a unit's own `AttackNearestEnemy`/`AttackNearestVisibleEnemy`/`FindTarget*`
   calls (item 2, now implemented) are what actually drive targeting. Regression tests:
   `tests/test_interpreter_wiring.py`.
+- **Opcode-level tracing and gap reporting**, added because both regressions above were only found
+  by manually cross-referencing regiment positions across dozens of battle-log snapshots. Two
+  mechanisms (`tests/test_interpreter_tracing.py`):
+  - `WHSHR_TRACE_SCRIPTS=1` environment variable: `BattleScene.enter()` turns on
+    `BattleLogger.trace_scripts`, which makes `ScriptInterpreter.run()` write an `"opcode"` record
+    (tick, unit, script id, pc, opcode name, operand, outcome, a small state snapshot) for every
+    instruction it dispatches, into the same JSON Lines file as the rest of the battle log. Off by
+    default -- much higher volume than the rest of the log. Usage:
+    `WHSHR_TRACE_SCRIPTS=1 .venv/bin/python -m whshr engine "$WARFB" --battle BF003`, then
+    `grep '"type": "opcode"' logs/battle-*.jsonl` or filter by `unit_id`.
+  - Always on, independent of tracing: the first time any unit's script hits an opcode with no
+    handler, or one whose handler raises, it's recorded once as a normal `"event"` record
+    (`kind: "script_gap"`) -- deduplicated per (unit, script, opcode) so a tight retry loop doesn't
+    spam the same complaint every tick for the rest of the battle. Visible in every battle log
+    without needing `WHSHR_TRACE_SCRIPTS` at all.
 
 ---
 

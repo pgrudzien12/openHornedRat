@@ -20,6 +20,7 @@ import struct
 from collections import deque
 
 from . import behaviour
+from .battle_events import BattleEvent
 
 
 @dataclass
@@ -163,11 +164,26 @@ class ScriptInterpreter:
     For opcodes that fall through, handlers return pc + instruction_length.
     """
 
-    def __init__(self, battle, event_bus, script_dll):
+    def __init__(self, battle, event_bus, script_dll, logger=None):
         self.battle = battle
         self.event_bus = event_bus
         self.script_dll = script_dll
         self.behaviors = LibraryBehaviors(self)
+        self.logger = logger  # whshr.battle_log.BattleLogger, or None; see write_opcode
+        self._reported_gaps = set()  # (unit_id, script_id, opcode): a missing/broken opcode already
+        # surfaced as a BattleEvent once, so a tight retry loop doesn't spam the same complaint
+        # every tick for the rest of the battle.
+
+    def _state_snapshot(self, unit_id, state):
+        """A small, JSON-safe snapshot of the fields opcodes actually change, for write_opcode."""
+        regiment = self.battle.regiments.get(unit_id) if self.battle else None
+        return {
+            "pc": state.pc, "script_id": state.script_id, "cond_flags": state.cond_flags,
+            "unit_flags": state.unit_flags, "pending_switch": state.pending_switch,
+            "current_target": list(state.current_target) if state.current_target else None,
+            "wait_remaining": state.wait_remaining,
+            "attack_target": regiment.attack_target if regiment else None,
+        }
 
     def run(self, unit_id: str, state: UnitScriptState, tick_count: int, rng):
         """Execute one unit's script for one tick.
@@ -213,17 +229,28 @@ class ScriptInterpreter:
                 continue
 
             # Dispatch opcode to handler
+            pc_before, script_before = state.pc, state.script_id
+            operand_before = (script_words[pc_before + 1]
+                               if behaviour.LENGTHS[opcode] > 1 and pc_before + 1 < len(script_words)
+                               else None)
+            outcome = "ok"
             try:
                 new_pc = self._dispatch(state, opcode, script_words, unit_id, tick_count, rng)
                 state.pc = new_pc if new_pc is not None else state.pc + behaviour.LENGTHS[opcode]
-            except NotImplementedError as e:
-                # Log missing opcodes but continue (safe for partial implementation)
-                # print(f"Unit {unit_id}: unimplemented opcode {opcode:02X} ({behaviour.opcode_name(opcode)})")
+            except NotImplementedError:
+                outcome = "unimplemented"
                 state.pc += behaviour.LENGTHS[opcode]
-            except Exception as e:
-                # Catastrophic handler error: log and continue
-                # print(f"Unit {unit_id}: error in opcode {opcode:02X}: {e}")
+                self._report_gap(unit_id, script_before, opcode, "has no handler")
+            except Exception as error:
+                outcome = "error"
                 state.pc += behaviour.LENGTHS[opcode]
+                self._report_gap(unit_id, script_before, opcode, f"raised {error!r}")
+
+            if self.logger is not None and self.logger.trace_scripts:
+                self.logger.write_opcode(
+                    tick_count, unit_id=unit_id, script_id=script_before, pc=pc_before,
+                    opcode=opcode, opcode_name=behaviour.opcode_name(opcode), operand=operand_before,
+                    outcome=outcome, state=self._state_snapshot(unit_id, state))
 
             # Yield/event handling: return control to the battle
             if self._should_yield:
@@ -240,6 +267,17 @@ class ScriptInterpreter:
         state.current_event = Event()
 
         return state
+
+    def _report_gap(self, unit_id, script_id, opcode, reason):
+        """Surface a missing/broken opcode as a battle event, once per (unit, script, opcode)."""
+        key = (unit_id, script_id, opcode)
+        if key in self._reported_gaps or self.battle is None:
+            return
+        self._reported_gaps.add(key)
+        name = behaviour.opcode_name(opcode)
+        self.battle.events.append(BattleEvent(
+            f"{unit_id}: script {script_id} opcode {name} ({opcode:#04x}) {reason}; skipped.",
+            "script_gap", unit=unit_id, script_id=script_id, opcode=opcode, opcode_name=name))
 
     def _dispatch(self, state, opcode, script_words, unit_id, tick_count, rng):
         """Dispatch an opcode to its handler method.

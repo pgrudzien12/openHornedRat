@@ -1,5 +1,7 @@
 """Battle scene: owns one loaded battlefield and advances its deterministic simulation."""
 
+import os
+
 from . import battle_log, behaviour, combat, skirmish_log
 from .assets import AssetId
 from .battlefield import sprite_files
@@ -40,10 +42,15 @@ class BattleScene(Scene):
     def enter(self, context):
         self.field = context.load(self.battle_id)
         script_dll = self._load_script_dll(context)
-        self.battle = Battle.from_script(self.field.script, seed=self.seed, script_dll=script_dll)
-        self.initial_models = {identifier: regiment.models for identifier, regiment in self.battle.regiments.items()}
+        # The logger must exist before Battle.from_script so ScriptInterpreter can be handed it
+        # directly (script_logger=); WHSHR_TRACE_SCRIPTS=1 turns on its per-opcode trace records
+        # (issue #3/#46, "proper logging" for debugging mission scripts -- off by default, since
+        # it is far higher volume than the rest of the battle log).
         path = battle_log.default_log_path(self.log_dir, self.battle_id.name) if self.log_dir is not None else None
-        self.logger = battle_log.BattleLogger(path)
+        self.logger = battle_log.BattleLogger(path, trace_scripts=bool(os.environ.get("WHSHR_TRACE_SCRIPTS")))
+        self.battle = Battle.from_script(self.field.script, seed=self.seed, script_dll=script_dll,
+                                         script_logger=self.logger)
+        self.initial_models = {identifier: regiment.models for identifier, regiment in self.battle.regiments.items()}
         self.skirmishes = skirmish_log.SkirmishLogger(self.log_dir, self.battle_id.name)
         self._log_closed = False
         if self.logger.enabled:
