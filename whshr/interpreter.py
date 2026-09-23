@@ -22,6 +22,15 @@ from collections import deque
 from . import behaviour
 from .battle_events import BattleEvent
 
+SCATTER_RADIUS = 40.0  # world units: ScatterModelsToNode's wander distance from a node's exact
+# point; a documented placeholder (see op_ScatterModelsToNode), not a confirmed game value.
+
+# Hypothesis, not a confirmed public fact (see op_MoveToNode/_update_arrival_flag): unit_flags bit
+# 0x10 signals "the unit's last ordinary move order has arrived", matching the MoveToNode N;
+# WaitUntilUnitFlags 16 idiom seen throughout real mission scripts. No other candidate meaning for
+# that specific bit, immediately after a MoveToNode call, was found in the public notes.
+ARRIVED_FLAG = 0x10
+
 
 @dataclass
 class Event:
@@ -67,6 +76,9 @@ class UnitScriptState:
     # Current order and target (set by FindTarget*, AttackTarget, etc.)
     current_target: tuple | None = None  # (regiment_id, unit_id) for attack/movement orders
     current_node: int | None = None  # waypoint node for movement orders
+    pending_arrival: bool = False  # a MoveToNode/ScatterModelsToNode order is in flight; see
+    # ScriptInterpreter._update_arrival_flag, which sets ARRIVED_FLAG on unit_flags once the
+    # regiment stops moving, so a WaitUntilUnitFlags(ARRIVED_FLAG) loop can unblock
     behaviour_id: int | None = None  # declared by SetBehaviour; recorded only, not auto-run
     # (see op_SetBehaviour -- there is no confirmed public evidence for when/how often a declared
     # library behaviour like 15/TrackThreat actually gets invoked versus a unit's own script opcodes
@@ -185,11 +197,33 @@ class ScriptInterpreter:
             "attack_target": regiment.attack_target if regiment else None,
         }
 
+    def _update_arrival_flag(self, unit_id, state):
+        """If a MoveToNode/ScatterModelsToNode order is in flight (state.pending_arrival) and the
+        regiment is no longer moving, set ARRIVED_FLAG so a WaitUntilUnitFlags(ARRIVED_FLAG) loop
+        can unblock (see the module docstring note on ARRIVED_FLAG -- a well-evidenced hypothesis,
+        not a confirmed public fact).
+
+        Known imprecision: "no longer moving" (Regiment.moving, i.e. target_x is None) also becomes
+        true if something else halts the regiment before it reaches the target (e.g. HaltAndReform,
+        or a later opcode overriding movement) -- this would report "arrived" a little early in that
+        case. Not observed in any real script traced so far; accepted as a documented limitation
+        rather than adding a separate "was this halted, not arrived" distinction for a case that
+        hasn't actually come up yet.
+        """
+        if not state.pending_arrival or self.battle is None:
+            return
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment is not None and not regiment.moving:
+            state.unit_flags |= ARRIVED_FLAG
+            state.pending_arrival = False
+
     def run(self, unit_id: str, state: UnitScriptState, tick_count: int, rng):
         """Execute one unit's script for one tick.
 
         Returns the state after execution. Modifies state in-place.
         """
+        self._update_arrival_flag(unit_id, state)
+
         if state.script_dll is None:
             state.script_dll = self.script_dll
 
@@ -611,8 +645,17 @@ class ScriptInterpreter:
     # ===== Timing and wait opcodes =====
 
     def op_WaitForBattleStart(self, state, operand, script_words, unit_id, tick_count, rng):
-        """WaitForBattleStart: hold until battle has started (tick_count > 0)."""
+        """WaitForBattleStart: hold until battle has started (tick_count > 0).
+
+        Must yield like Wait/WaitUntilUnitFlags while blocked -- a prior version returned the same
+        pc without setting _should_yield, so the dispatch loop just re-executed this instruction
+        until max_iterations (10000) was hit instead of properly ending the tick. Confirmed from a
+        real trace: every unit burned ~9993-9997 identical WaitForBattleStart dispatches on tick 0
+        alone. Not fatal (state.pc still ends up in the right place once tick_count > 0), but wildly
+        wasteful and made the opcode trace nearly unusable for actually debugging anything else.
+        """
         if tick_count == 0:
+            self._should_yield = True
             return state.pc  # wait (don't advance)
         return state.pc + 1  # resume
 
@@ -769,6 +812,9 @@ class ScriptInterpreter:
         id the script never defines). Does not touch attack_target -- a later AttackNearestEnemy
         etc. still takes priority every tick (Battle._advance_regiments checks attack_target first),
         matching how the rest of this interpreter leaves targeting decisions to their own opcodes.
+
+        Clears ARRIVED_FLAG and arms pending_arrival, so _update_arrival_flag can set it again once
+        the regiment actually reaches this new target (see ScriptInterpreter.run).
         """
         if operand is not None:
             state.current_node = operand
@@ -776,6 +822,8 @@ class ScriptInterpreter:
             coords = self.battle.nodes.get(operand)
             if regiment and coords:
                 regiment.target_x, regiment.target_y = coords
+                state.unit_flags &= ~ARRIVED_FLAG
+                state.pending_arrival = True
         return state.pc + 1
 
     def op_FaceNode(self, state, operand, script_words, unit_id, tick_count, rng):
@@ -794,22 +842,9 @@ class ScriptInterpreter:
         return state.pc + 1
 
     def op_TeleportToNode(self, state, operand, script_words, unit_id, tick_count, rng):
-        """TeleportToNode N: instantly move to waypoint node N (no travel time)."""
-        if operand is not None:
-            state.current_node = operand
-            regiment = self.battle.regiments.get(unit_id)
-            coords = self.battle.nodes.get(operand)
-            if regiment and coords:
-                regiment.x, regiment.y = coords
-                regiment.target_x = regiment.target_y = None
-        return state.pc + 1
+        """TeleportToNode N: instantly move to waypoint node N (no travel time).
 
-    def op_PlaceAtNode(self, state, operand, script_words, unit_id, tick_count, rng):
-        """PlaceAtNode N: place unit at node N in formation.
-
-        Same positional effect as TeleportToNode -- "in formation" (re-forming ranks in place) is
-        not separately modeled; the regiment's own formation slots are always recomputed from its
-        current models/ranks/direction (Regiment.model_positions), so there is nothing extra to do.
+        Completes immediately, so ARRIVED_FLAG is set right away (no pending_arrival needed).
         """
         if operand is not None:
             state.current_node = operand
@@ -818,6 +853,53 @@ class ScriptInterpreter:
             if regiment and coords:
                 regiment.x, regiment.y = coords
                 regiment.target_x = regiment.target_y = None
+                state.unit_flags |= ARRIVED_FLAG
+                state.pending_arrival = False
+        return state.pc + 1
+
+    def op_PlaceAtNode(self, state, operand, script_words, unit_id, tick_count, rng):
+        """PlaceAtNode N: place unit at node N in formation.
+
+        Same positional effect as TeleportToNode -- "in formation" (re-forming ranks in place) is
+        not separately modeled; the regiment's own formation slots are always recomputed from its
+        current models/ranks/direction (Regiment.model_positions), so there is nothing extra to do.
+        Completes immediately, so ARRIVED_FLAG is set right away.
+        """
+        if operand is not None:
+            state.current_node = operand
+            regiment = self.battle.regiments.get(unit_id)
+            coords = self.battle.nodes.get(operand)
+            if regiment and coords:
+                regiment.x, regiment.y = coords
+                state.unit_flags |= ARRIVED_FLAG
+                state.pending_arrival = False
+                regiment.target_x = regiment.target_y = None
+        return state.pc + 1
+
+    def op_ScatterModelsToNode(self, state, operand, script_words, unit_id, tick_count, rng):
+        """ScatterModelsToNode N: wander to a randomized point near waypoint node N.
+
+        This is the actual opcode NPC "patrol" scripts use (confirmed from a real BF003 trace: the
+        peasant regiments loop SetWait 20/Wait/ScatterModelsToNode every ~20 ticks) -- not
+        MoveToNode, which their scripts never call at all.
+
+        Real per-model scatter (spreading individual models out around the node, rather than moving
+        the whole regiment) is not modeled; this reuses the regiment's ordinary move order with a
+        small random jitter around the node's point instead, which is what produces the wandering
+        appearance when called repeatedly. SCATTER_RADIUS is a documented placeholder (nodes do
+        carry their own `radius` field in the parsed .BTS data, but Battle.nodes only keeps x/y
+        today, and whether that radius is even the right value for this opcode isn't confirmed).
+        Deterministic: draws from Battle.rng like every other random decision in the engine.
+        """
+        if operand is not None:
+            state.current_node = operand
+            regiment = self.battle.regiments.get(unit_id)
+            coords = self.battle.nodes.get(operand)
+            if regiment and coords:
+                regiment.target_x = coords[0] + self.battle.rng.uniform(-SCATTER_RADIUS, SCATTER_RADIUS)
+                regiment.target_y = coords[1] + self.battle.rng.uniform(-SCATTER_RADIUS, SCATTER_RADIUS)
+                state.unit_flags &= ~ARRIVED_FLAG
+                state.pending_arrival = True
         return state.pc + 1
 
     def op_ChargeTarget(self, state, operand, script_words, unit_id, tick_count, rng):

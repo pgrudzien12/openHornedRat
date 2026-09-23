@@ -383,5 +383,101 @@ class MovementOpcodeWithRealNodesTests(unittest.TestCase):
         self.assertEqual((self.unit.x, self.unit.y), (300.0, 200.0))
 
 
+class ScatterModelsToNodeTests(unittest.TestCase):
+    """The actual opcode NPC 'patrol' scripts call (confirmed from a real BF003 trace), not
+    MoveToNode -- peasant regiments never call MoveToNode at all."""
+
+    def setUp(self):
+        self.unit = Regiment("peasants", "Peasants", 100, 100, 0, False, models=5, ranks=1)
+        self.battle = Battle(2000, 2000, [self.unit], seed=1995, nodes={2: (700.0, 600.0)})
+        self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
+        self.state = self.battle.event_bus.unit_states["peasants"]
+
+    def test_orders_a_move_to_a_jittered_point_near_the_node(self):
+        self.interp.op_ScatterModelsToNode(self.state, 2, [], "peasants", 0, self.battle.rng)
+        self.assertTrue(self.unit.moving)
+        dx = self.unit.target_x - 700.0
+        dy = self.unit.target_y - 600.0
+        self.assertLessEqual(abs(dx), interpreter.SCATTER_RADIUS)
+        self.assertLessEqual(abs(dy), interpreter.SCATTER_RADIUS)
+
+    def test_is_deterministic_for_a_given_seed(self):
+        battle_a = Battle(2000, 2000, [Regiment("p", "P", 100, 100, 0, False, models=5, ranks=1)],
+                           seed=42, nodes={2: (700.0, 600.0)})
+        battle_b = Battle(2000, 2000, [Regiment("p", "P", 100, 100, 0, False, models=5, ranks=1)],
+                           seed=42, nodes={2: (700.0, 600.0)})
+        for battle in (battle_a, battle_b):
+            interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+            state = battle.event_bus.unit_states["p"]
+            interp.op_ScatterModelsToNode(state, 2, [], "p", 0, battle.rng)
+        self.assertEqual(
+            (battle_a.regiments["p"].target_x, battle_a.regiments["p"].target_y),
+            (battle_b.regiments["p"].target_x, battle_b.regiments["p"].target_y))
+
+    def test_unknown_node_is_a_safe_noop(self):
+        self.interp.op_ScatterModelsToNode(self.state, 999, [], "peasants", 0, self.battle.rng)
+        self.assertIsNone(self.unit.target_x)
+
+
+class ArrivalFlagTests(unittest.TestCase):
+    """ARRIVED_FLAG lets a WaitUntilUnitFlags(ARRIVED_FLAG) loop unblock once a script-issued
+    MoveToNode/ScatterModelsToNode order completes -- confirmed as the real cause of Goblin
+    Wolfriders freezing permanently mid-mission in a real BF003 playthrough: nothing previously
+    ever set any bit checked by WaitUntilUnitFlags, so that wait never ended."""
+
+    def setUp(self):
+        self.unit = Regiment("wolfriders", "Wolfriders", 100, 100, 0, False, models=10, ranks=2)
+        self.battle = Battle(2000, 2000, [self.unit], seed=1995, nodes={2: (110.0, 100.0)})
+        self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
+        self.state = self.battle.event_bus.unit_states["wolfriders"]
+
+    def test_move_to_node_arms_pending_arrival_and_clears_the_flag(self):
+        self.state.unit_flags = interpreter.ARRIVED_FLAG  # stale flag from an earlier order
+        self.interp.op_MoveToNode(self.state, 2, [], "wolfriders", 0, None)
+        self.assertTrue(self.state.pending_arrival)
+        self.assertEqual(self.state.unit_flags & interpreter.ARRIVED_FLAG, 0)
+
+    def test_flag_is_not_set_while_still_moving(self):
+        self.interp.op_MoveToNode(self.state, 2, [], "wolfriders", 0, None)
+        self.interp._update_arrival_flag("wolfriders", self.state)
+        self.assertEqual(self.state.unit_flags & interpreter.ARRIVED_FLAG, 0)
+        self.assertTrue(self.state.pending_arrival)
+
+    def test_flag_is_set_once_the_regiment_stops_moving(self):
+        self.interp.op_MoveToNode(self.state, 2, [], "wolfriders", 0, None)
+        self.unit.target_x = self.unit.target_y = None  # simulate Battle._advance_toward arriving
+        self.interp._update_arrival_flag("wolfriders", self.state)
+        self.assertEqual(self.state.unit_flags & interpreter.ARRIVED_FLAG, interpreter.ARRIVED_FLAG)
+        self.assertFalse(self.state.pending_arrival)
+
+    def test_waituntilunitflags_unblocks_once_arrived(self):
+        self.interp.op_MoveToNode(self.state, 2, [], "wolfriders", 0, None)
+        result = self.interp.op_WaitUntilUnitFlags(self.state, 16, [], "wolfriders", 0, None)
+        self.assertEqual(result, self.state.pc)  # still blocked: not arrived yet
+
+        self.unit.target_x = self.unit.target_y = None
+        self.interp._update_arrival_flag("wolfriders", self.state)
+        result = self.interp.op_WaitUntilUnitFlags(self.state, 16, [], "wolfriders", 0, None)
+        self.assertEqual(result, self.state.pc + 1)  # unblocked
+
+    def test_teleport_to_node_sets_the_flag_immediately_no_pending_arrival(self):
+        self.interp.op_TeleportToNode(self.state, 2, [], "wolfriders", 0, None)
+        self.assertEqual(self.state.unit_flags & interpreter.ARRIVED_FLAG, interpreter.ARRIVED_FLAG)
+        self.assertFalse(self.state.pending_arrival)
+
+    def test_full_run_cycle_via_run_sets_the_flag_after_arrival(self):
+        """End-to-end through ScriptInterpreter.run(), not calling _update_arrival_flag directly."""
+        self.interp.op_MoveToNode(self.state, 2, [], "wolfriders", 0, None)
+        self.assertTrue(self.state.pending_arrival)
+
+        # The regiment "arrives" between ticks (Battle._advance_regiments' job, simulated here).
+        self.unit.target_x = self.unit.target_y = None
+
+        # A bare UnitScriptState with no script_dll makes run() return immediately after the
+        # arrival check -- exactly what's being tested here.
+        self.interp.run("wolfriders", self.state, 1, self.battle.rng)
+        self.assertEqual(self.state.unit_flags & interpreter.ARRIVED_FLAG, interpreter.ARRIVED_FLAG)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -90,6 +90,30 @@ class WaitUntilUnitFlagsTests(unittest.TestCase):
         self.assertFalse(self.interp._should_yield)
 
 
+class WaitForBattleStartYieldTests(unittest.TestCase):
+    """Regression test: op_WaitForBattleStart used to block without setting _should_yield, so
+    ScriptInterpreter.run's dispatch loop re-executed it up to max_iterations (10000) times in a
+    single tick instead of properly ending the tick. Confirmed from a real BF003 trace: every unit
+    burned ~9993-9997 identical WaitForBattleStart dispatches on tick 0 alone."""
+
+    def setUp(self):
+        self.battle = Battle(500, 500, [Regiment("t", "T", 0, 0, 0, False, models=5, ranks=1)], seed=1995)
+        self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
+        self.state = self.battle.event_bus.unit_states["t"]
+
+    def test_blocking_at_tick_zero_sets_should_yield(self):
+        self.interp._should_yield = False
+        result = self.interp.op_WaitForBattleStart(self.state, None, [], "t", 0, None)
+        self.assertEqual(result, self.state.pc)  # same pc: still blocked
+        self.assertTrue(self.interp._should_yield)
+
+    def test_resuming_at_a_later_tick_does_not_yield(self):
+        self.interp._should_yield = False
+        result = self.interp.op_WaitForBattleStart(self.state, None, [], "t", 1, None)
+        self.assertEqual(result, self.state.pc + 1)
+        self.assertFalse(self.interp._should_yield)
+
+
 class SwitchScriptPriorityTests(unittest.TestCase):
     def setUp(self):
         self.battle = Battle(500, 500, [Regiment("t", "T", 0, 0, 0, False, models=5, ranks=1)], seed=1995)

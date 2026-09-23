@@ -54,6 +54,37 @@ def _word(opcode):
     return behaviour.OPCODE_FLAG | opcode
 
 
+class WaitForBattleStartIterationTests(unittest.TestCase):
+    """Regression test at the run() level: op_WaitForBattleStart must yield after exactly one
+    dispatch when blocked (tick 0), not spin toward max_iterations (10000). This is exactly the
+    bug a real opcode trace caught: every regiment in a BF003 playthrough dispatched
+    WaitForBattleStart ~9993-9997 times on tick 0 alone."""
+
+    def setUp(self):
+        self.regiment = Regiment("t", "T", 0, 0, 0, False, models=5, ranks=1)
+        self.battle = Battle(500, 500, [self.regiment], seed=1995)
+        words = [_word(0x01), _word(0x17), behaviour.END]  # WaitForBattleStart, Yield, End
+        self.script_dll = _FakeScriptDll({0: words})
+
+    def test_blocked_at_tick_zero_dispatches_exactly_once(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.jsonl"
+            logger = battle_log.BattleLogger(path, trace_scripts=True)
+            interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, self.script_dll, logger=logger)
+            state = self.battle.event_bus.unit_states["t"]
+            state.script_id = 0
+            interp.run("t", state, 0, self.battle.rng)
+            logger.close()
+            opcode_records = [json.loads(line) for line in path.read_text().splitlines()]
+
+        self.assertEqual(len(opcode_records), 1)
+        self.assertEqual(opcode_records[0]["opcode_name"], "WaitForBattleStart")
+        self.assertEqual(state.pc, 0)  # unchanged: still waiting
+
+
 class BattleLoggerOpcodeRecordTests(unittest.TestCase):
     """write_opcode's record shape and its trace_scripts/enabled gating."""
 

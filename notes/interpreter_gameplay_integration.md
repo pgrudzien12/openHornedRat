@@ -47,11 +47,35 @@ Landed against this document's "Proposed" section:
   through. `MoveToNode` issues an ordinary move order toward the node's coordinates,
   `TeleportToNode`/`PlaceAtNode` reposition instantly, and `FaceNode` turns toward it using the same
   pivot-preserving `Battle._turn_to` every other turn in the engine uses. All four fail-safe (no-op,
-  never raise) for an id the battle has no node for. Still open: "arrival feedback" (a script
-  polling e.g. `TestUnitFlags`/`WaitUntilUnitFlags` to learn a `MoveToNode` order has completed) is
-  a separate mechanism this doesn't build -- see the "Generate events from engine conditions" item
-  below. Tests: `tests/test_interpreter_wiring.py` (`NodeWiringTests`),
-  `tests/test_interpreter_phase3.py` (`MovementOpcodeWithRealNodesTests`).
+  never raise) for an id the battle has no node for.
+
+  Arrival feedback is now also built: `MoveToNode`/`ScatterModelsToNode` arm `pending_arrival` and
+  clear a new `ARRIVED_FLAG` (unit_flags bit `0x10`) on the order's regiment; once the regiment
+  stops moving (checked at the start of every `ScriptInterpreter.run()` call), the flag is set, so a
+  `WaitUntilUnitFlags(16)` loop can unblock. `TeleportToNode`/`PlaceAtNode` set it immediately
+  (instant completion). **This is a well-evidenced hypothesis, not a confirmed public fact**: no
+  document confirms bit `0x10` means "arrived", but the `MoveToNode N; WaitUntilUnitFlags 16` idiom
+  appears throughout real scripts immediately after a move order, nothing else in the engine ever
+  set any bit `WaitUntilUnitFlags` checks, and this was confirmed as the actual cause of Goblin
+  Wolfriders freezing permanently (forever blocked on this exact wait) in a real BF003 playthrough.
+
+  Also implemented: `ScatterModelsToNode`, the opcode NPC "patrol" scripts actually use -- a real
+  trace showed peasant regiments never call `MoveToNode` at all, only this (in a
+  `SetWait 20`/`Wait`/`Loop` cycle). Reuses the ordinary move order with a small random jitter
+  around the node (`SCATTER_RADIUS`, a documented placeholder -- issue #47 tracks confirming the
+  real value, possibly the node's own unread `radius` field).
+
+  Tests: `tests/test_interpreter_wiring.py` (`NodeWiringTests`),
+  `tests/test_interpreter_phase3.py` (`MovementOpcodeWithRealNodesTests`, `ScatterModelsToNodeTests`,
+  `ArrivalFlagTests`).
+- **Real bug found via the new opcode trace (see below) and fixed**: `WaitForBattleStart` blocked
+  (tick 0) without setting `_should_yield`, so `ScriptInterpreter.run()`'s dispatch loop
+  re-dispatched the exact same instruction until hitting `max_iterations` (10000) instead of
+  properly ending the tick -- confirmed from a real trace: every regiment burned ~9993-9997
+  identical `WaitForBattleStart` dispatches on tick 0 alone (and made the trace file itself, at
+  17 MB, hard to read for anything else). Fixed to yield like `Wait`/`WaitUntilUnitFlags` do.
+  Regression tests: `tests/test_interpreter_phase2_opcodes.py` (`WaitForBattleStartYieldTests`),
+  `tests/test_interpreter_tracing.py` (`WaitForBattleStartIterationTests`).
 - **Real regression found and fixed after item 2 landed**: `SetBehaviour` called
   `LibraryBehaviors.track_threat()` immediately and unconditionally the moment it ran, setting
   `regiment.attack_target` on tick 0/1 regardless of any `SetWait`/`Wait`/`MoveToNode` gating later
