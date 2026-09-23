@@ -2,7 +2,47 @@
 
 **Research Date:** 2026-09-23
 **Task:** Issue #46 — Wire the bytecode interpreter into live battle gameplay
-**Status:** Research phase
+**Status:** Research phase (see "Implementation Status" below for what has since been built)
+
+---
+
+## Implementation Status (2026-09-23, added by the implementer, not part of the research above)
+
+Landed against this document's "Proposed" section:
+
+- **Item 1, "Wire `script_dll` through to `BattleScene`"**: done. `Battle.from_script`/`from_battle_file`
+  take `script_dll`; `BattleScene._load_script_dll()` loads the mission's own `SCRIPT/BFxxx.DLL` from
+  its `loadScript` name and fails closed (returns None, falls back to `whshr.ai`) on a missing or
+  unparseable DLL. Each regiment's initial script id now comes from its own `set:script=` value
+  instead of a hardcoded default. Tests: `tests/test_interpreter_wiring.py`.
+- **Item 2, "Implement the missing opcodes scripts actually use"**: the opcodes this document listed
+  as verified-missing are now implemented: `AttackNearestEnemy`, `AttackNearestVisibleEnemy`,
+  `AttackNearestFlag40Unit` (falls back to plain nearest-enemy — no neutral-side/flag-0x40 tracking
+  exists yet, see item 3 below), `AttackNthNearestEnemy`, `WaitUntilUnitFlags`, `IfSwitchScript`,
+  `IfSwitchScriptHigh`, `IfNotSwitchScript`, `RoutAllowed`, `FleeFromTarget`, `FearWhenCharged`. The
+  `SwitchScript` priority family's exact semantics beyond "0x0F is higher priority than 0x0D/0x0E"
+  are a best-effort reading of this document's own bytecode findings, not independently confirmed —
+  flagged as such in each handler's docstring. `TargetNearestEnemy` was also fixed: it was an
+  existing stub that always set `cond_flags = 1` without finding anything. Tests:
+  `tests/test_interpreter_phase2_opcodes.py`.
+- **Bug found and fixed along the way**: `Event.source` was typed `int` but every emitting opcode
+  computed it as `int(unit_id) if unit_id.isdigit() else 0` — always `0` for real regiment
+  identifiers (e.g. `"Goblin_Stickers"`), silently breaking `TakeEventTarget` and `IfEventSource`
+  for any real mission. Now `source` holds the sender's regiment identifier directly.
+  `RunAway` also had `combat._start_rout(battle, regiment)` (swapped argument order against the
+  real `_start_rout(regiment, battle)` signature) — would have raised `AttributeError` the moment
+  it ran against real event data. Both fixed with regression tests.
+- **Item 3, "Connect script outputs to engine state"**: partially done — `AttackNearestEnemy` and
+  friends set `regiment.attack_target` directly now (same approach `ChargeTarget`/`FireAtTarget`
+  already used). Neutral-side/flag-0x40 tracking (needed for a real `AttackNearestFlag40Unit`) is
+  still open.
+- **Item 4, "Generate events from engine conditions"**: still not built. `WaitUntilUnitFlags` and
+  `FearWhenCharged` are implemented against the interpreter's own state (`unit_flags`, event
+  `source`), but nothing in `whshr/combat.py` yet raises engine conditions (attacked, routed,
+  charged) as events or flags — a script that waits on one will block indefinitely, which is
+  documented in the opcode's own docstring rather than papered over.
+- **Item 5, "Movement feedback"**: still not built, unchanged from this document's original Proposed
+  section.
 
 ---
 

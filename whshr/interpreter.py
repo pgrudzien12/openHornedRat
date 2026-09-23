@@ -15,6 +15,7 @@ Missing opcodes raise NotImplementedError, which fails gracefully if a mission d
 """
 
 from dataclasses import dataclass, field
+import math
 import struct
 from collections import deque
 
@@ -26,7 +27,7 @@ class Event:
     """A 14-byte behaviour event record (game_rules.md, "Unit behaviour scripts and events")."""
     recipient: int = 0  # unit identifier (ignored by the queue: events are posted to units directly)
     code: int = 0  # event code 0x00..0x23 (36 codes enumerated in game_rules.md event table)
-    source: int = 0  # sender's unit identifier
+    source: str | None = None  # sender's regiment identifier (Battle.regiments key), or None
     parameter: int = 0  # opcode-specific payload (e.g. node id for movement event)
     x: int = 0  # world coordinate (or -1 for "not set")
     y: int = 0  # world coordinate (or -1 for "not set")
@@ -266,6 +267,21 @@ class ScriptInterpreter:
             return script_words[operand_pc]
         return None
 
+    def _nearest_enemy_id(self, regiment, n=1):
+        """The n-th nearest active enemy regiment identifier to `regiment` (1 = nearest), or None
+        if fewer than n active enemies remain. Euclidean distance; shared by the Target*/Attack*
+        opcode families (TargetNearestEnemy, AttackNearestEnemy, AttackNthNearestEnemy, ...).
+
+        This does not model "visible" (line-of-sight) any differently from a plain nearest-enemy
+        search -- the engine has no visibility/fog system -- so the *Visible* opcode variants are
+        implemented identically to their non-visible counterparts, a documented simplification.
+        """
+        enemies = sorted(
+            (other for other in self.battle.regiments.values()
+             if other.active and other.player != regiment.player),
+            key=lambda other: math.hypot(other.x - regiment.x, other.y - regiment.y))
+        return enemies[n - 1].identifier if len(enemies) >= n else None
+
     # ===== Core control-flow opcodes =====
 
     def op_InitUnit(self, state, operand, script_words, unit_id, tick_count, rng):
@@ -295,6 +311,33 @@ class ScriptInterpreter:
     def op_SwitchScript(self, state, operand, script_words, unit_id, tick_count, rng):
         """SwitchScript N: switch to script N after this tick completes."""
         if operand is not None:
+            state.pending_switch = operand
+        return state.pc + 1
+
+    def op_IfSwitchScript(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfSwitchScript N: request switching to script N at end of tick, but only if nothing
+        else has already requested a switch this tick (normal priority; game_rules.md documents
+        opcodes 0x0D-0x10 together as "switch script at end of tick", 0x0F called out as
+        "high priority" -- the priority ordering among 0x0D/0x0E is inferred from that framing,
+        not independently confirmed)."""
+        if operand is not None and state.pending_switch is None:
+            state.pending_switch = operand
+        return state.pc + 1
+
+    def op_IfSwitchScriptHigh(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfSwitchScriptHigh N: request switching to script N at end of tick, overriding any
+        other pending switch this tick (the "high priority" variant per game_rules.md)."""
+        if operand is not None:
+            state.pending_switch = operand
+        return state.pc + 1
+
+    def op_IfNotSwitchScript(self, state, operand, script_words, unit_id, tick_count, rng):
+        """IfNotSwitchScript N: request switching to script N at end of tick, unless the unit is
+        already running script N. Treated as normal priority (does not override an existing
+        pending switch), matching IfSwitchScript -- the exact precedence versus IfSwitchScript is
+        not independently confirmed in the public notes, only that all four opcodes (0x0D-0x10)
+        share the same "switch at end of tick" mechanism."""
+        if operand is not None and operand != state.script_id and state.pending_switch is None:
             state.pending_switch = operand
         return state.pc + 1
 
@@ -347,6 +390,21 @@ class ScriptInterpreter:
         if operand is not None:
             state.cond_flags = state.unit_flags & operand
         return state.pc + 1
+
+    def op_WaitUntilUnitFlags(self, state, operand, script_words, unit_id, tick_count, rng):
+        """WaitUntilUnitFlags N: yield (same PC) until (unit_flags & N) is set, then fall through.
+
+        Known limitation: unit_flags is only ever set by SetUnitFlags/ClearUnitFlags in this
+        interpreter today; the engine does not yet raise flags for its own conditions (e.g. a
+        "routed" bit set when combat.py starts a rout). A script that waits on a flag nothing
+        currently sets (see notes/interpreter_gameplay_integration.md item 4, "generate events from
+        engine conditions", still Proposed) will block here indefinitely rather than silently
+        proceeding -- faithful to what is and is not wired up yet, not a bug in this opcode.
+        """
+        if operand is not None and (state.unit_flags & operand):
+            return state.pc + 1
+        self._should_yield = True
+        return state.pc
 
     def op_SetCondFlags(self, state, operand, script_words, unit_id, tick_count, rng):
         """SetCondFlags N: set bits in cond_flags (for If/IfNot)."""
@@ -403,42 +461,42 @@ class ScriptInterpreter:
     def op_SendEventSelf(self, state, operand, script_words, unit_id, tick_count, rng):
         """SendEventSelf CODE: queue an event to self."""
         if operand is not None:
-            event = Event(code=operand, source=int(unit_id) if unit_id.isdigit() else 0)
+            event = Event(code=operand, source=unit_id)
             self.event_bus.queue_event(unit_id, event, route="self")
         return state.pc + 1
 
     def op_SendEventSelfIfTrue(self, state, operand, script_words, unit_id, tick_count, rng):
         """SendEventSelfIfTrue CODE: queue event to self if cond_flags is true."""
         if state.cond_flags and operand is not None:
-            event = Event(code=operand, source=int(unit_id) if unit_id.isdigit() else 0)
+            event = Event(code=operand, source=unit_id)
             self.event_bus.queue_event(unit_id, event, route="self")
         return state.pc + 1
 
     def op_SendEventSelfIfFalse(self, state, operand, script_words, unit_id, tick_count, rng):
         """SendEventSelfIfFalse CODE: queue event to self if cond_flags is false."""
         if not state.cond_flags and operand is not None:
-            event = Event(code=operand, source=int(unit_id) if unit_id.isdigit() else 0)
+            event = Event(code=operand, source=unit_id)
             self.event_bus.queue_event(unit_id, event, route="self")
         return state.pc + 1
 
     def op_SendEventToOwnSide(self, state, operand, script_words, unit_id, tick_count, rng):
         """SendEventToOwnSide CODE: broadcast event to own-side units."""
         if operand is not None:
-            event = Event(code=operand, source=int(unit_id) if unit_id.isdigit() else 0)
+            event = Event(code=operand, source=unit_id)
             self.event_bus.queue_event(unit_id, event, route="side")
         return state.pc + 1
 
     def op_SendEventToOwnSideIfTrue(self, state, operand, script_words, unit_id, tick_count, rng):
         """SendEventToOwnSideIfTrue CODE: broadcast event to own-side if cond_flags is true."""
         if state.cond_flags and operand is not None:
-            event = Event(code=operand, source=int(unit_id) if unit_id.isdigit() else 0)
+            event = Event(code=operand, source=unit_id)
             self.event_bus.queue_event(unit_id, event, route="side")
         return state.pc + 1
 
     def op_SendEventToEnemySide(self, state, operand, script_words, unit_id, tick_count, rng):
         """SendEventToEnemySide CODE: broadcast event to enemy-side units."""
         if operand is not None:
-            event = Event(code=operand, source=int(unit_id) if unit_id.isdigit() else 0)
+            event = Event(code=operand, source=unit_id)
             self.event_bus.queue_event(unit_id, event, route="enemy")
         return state.pc + 1
 
@@ -571,7 +629,48 @@ class ScriptInterpreter:
 
     def op_TargetNearestEnemy(self, state, operand, script_words, unit_id, tick_count, rng):
         """TargetNearestEnemy: set current target to nearest enemy."""
-        state.cond_flags = 1
+        regiment = self.battle.regiments.get(unit_id)
+        target_id = self._nearest_enemy_id(regiment) if regiment else None
+        if target_id:
+            state.current_target = (target_id, 0)
+            state.cond_flags = 1
+        else:
+            state.cond_flags = 0
+        return state.pc + 1
+
+    def op_AttackNearestEnemy(self, state, operand, script_words, unit_id, tick_count, rng):
+        """AttackNearestEnemy: find the nearest enemy and attack it (game_rules.md opcode 0xB0)."""
+        return self._attack_nearest(state, unit_id, n=1)
+
+    def op_AttackNearestVisibleEnemy(self, state, operand, script_words, unit_id, tick_count, rng):
+        """AttackNearestVisibleEnemy: as AttackNearestEnemy (no visibility model, see
+        _nearest_enemy_id)."""
+        return self._attack_nearest(state, unit_id, n=1)
+
+    def op_AttackNearestFlag40Unit(self, state, operand, script_words, unit_id, tick_count, rng):
+        """AttackNearestFlag40Unit: attack the nearest unit carrying side flag 0x40 (neutral).
+
+        The engine's Regiment model is currently two-sided only (player: bool); there is no third
+        "neutral" side to filter on (SetSide, which would populate it, is also not yet implemented --
+        see notes/interpreter_gameplay_integration.md). Falls back to AttackNearestEnemy so a script
+        using this as its "no enemy in sight" fallback branch still does something rather than
+        silently no-op; revisit once side tracking exists.
+        """
+        return self._attack_nearest(state, unit_id, n=1)
+
+    def op_AttackNthNearestEnemy(self, state, operand, script_words, unit_id, tick_count, rng):
+        """AttackNthNearestEnemy N: find the N-th nearest enemy (1-based) and attack it."""
+        return self._attack_nearest(state, unit_id, n=operand or 1)
+
+    def _attack_nearest(self, state, unit_id, n):
+        regiment = self.battle.regiments.get(unit_id)
+        target_id = self._nearest_enemy_id(regiment, n) if regiment else None
+        if target_id:
+            state.current_target = (target_id, 0)
+            regiment.attack_target = target_id
+            state.cond_flags = 1
+        else:
+            state.cond_flags = 0
         return state.pc + 1
 
     def op_TargetValid(self, state, operand, script_words, unit_id, tick_count, rng):
@@ -782,10 +881,65 @@ class ScriptInterpreter:
         Similar to rout/panic, unit tries to leave the field.
         """
         regiment = self.battle.regiments.get(unit_id)
-        if regiment and not regiment.routing:
-            # Trigger routing via combat module
+        if regiment and not regiment.routing and "CantBreak" not in regiment.psychology:
+            # Trigger routing via combat module (_start_rout takes (regiment, battle), not the reverse)
             from . import combat
-            combat._start_rout(self.battle, regiment)
+            combat._start_rout(regiment, self.battle)
+        return state.pc + 1
+
+    def op_RoutAllowed(self, state, operand, script_words, unit_id, tick_count, rng):
+        """RoutAllowed: test whether this unit may currently rout (game_rules.md opcode 0xC8).
+
+        A read-only check: true unless the regiment already routed/fled or carries CantBreak
+        (the same guard whshr.combat._break_test applies before calling _start_rout).
+        """
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment and regiment.active and not regiment.routing and "CantBreak" not in regiment.psychology:
+            state.cond_flags = 1
+        else:
+            state.cond_flags = 0
+        return state.pc + 1
+
+    def op_FleeFromTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+        """FleeFromTarget: flee from the current target/threat.
+
+        Starts a rout via the same combat._start_rout path as RunAway/RoutAllowed if the unit
+        isn't already routing and is allowed to; once routing, Battle._advance_regiments already
+        drives the per-tick flee movement generically for any routing regiment, so this becomes a
+        no-op on later ticks rather than needing its own movement logic here.
+        """
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment and not regiment.routing and "CantBreak" not in regiment.psychology:
+            from . import combat
+            combat._start_rout(regiment, self.battle)
+        return state.pc + 1
+
+    def op_FearWhenCharged(self, state, operand, script_words, unit_id, tick_count, rng):
+        """FearWhenCharged: fear/terror test on being charged (game_rules.md opcode 0x42, run on
+        event 0x07 "you are being charged"). Sets cond_flags to 1 when the test fails (the unit
+        should flee) -- matching event 0x07's documented handling ("fear/terror test op 0x42, then
+        brace"), i.e. a script normally reacts to cond_flags=1 here by routing (e.g. via RunAway).
+
+        Simplified relative to game_rules.md's full rule (no Dread Banner, no "already resisted
+        this enemy" caching of psy bit 14 -- that state doesn't exist in this engine yet): terror
+        applies whenever the charger has CauseTerror and this unit lacks Frenzy/PsyImmune; fear
+        applies whenever the charger has CauseFear and this unit lacks CantBreak/Frenzy/PsyImmune,
+        with a Leadership test (whshr.combat.leadership_test) deciding the outcome.
+        """
+        regiment = self.battle.regiments.get(unit_id)
+        source_id = state.current_event.source
+        charger = self.battle.regiments.get(source_id) if source_id else None
+        if not regiment or not charger:
+            state.cond_flags = 0
+            return state.pc + 1
+        immune = regiment.psychology & {"Frenzy", "PsyImmune"}
+        if "CauseTerror" in charger.psychology and not immune:
+            state.cond_flags = 1
+        elif "CauseFear" in charger.psychology and not immune and "CantBreak" not in regiment.psychology:
+            from . import combat
+            state.cond_flags = 0 if combat.leadership_test(regiment.leadership, rng) else 1
+        else:
+            state.cond_flags = 0
         return state.pc + 1
 
     def op_ResetStack(self, state, operand, script_words, unit_id, tick_count, rng):
@@ -845,7 +999,13 @@ class ScriptInterpreter:
         return state.pc + 1
 
     def op_IfEventSource(self, state, operand, script_words, unit_id, tick_count, rng):
-        """IfEventSource: test if current event came from a specific source."""
+        """IfEventSource: test if current event came from a specific source.
+
+        Known limitation: the operand is a numeric source id from the bytecode, but
+        Event.source in this engine holds a regiment identifier string (see the fix in
+        SendEventSelf/etc.) -- there is no numeric-id-to-regiment mapping in this engine, so this
+        comparison never matches today. Left as a documented gap rather than a guessed mapping.
+        """
         if operand is not None and state.current_event.source == operand:
             state.cond_flags = 1
         else:

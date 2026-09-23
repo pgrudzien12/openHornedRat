@@ -237,6 +237,35 @@ class MoraleRoutingTests(unittest.TestCase):
         interp.op_EnemyRouted(state, None, [], "test_1", 0, None)
         self.assertEqual(state.cond_flags, 1)
 
+    def test_run_away_actually_starts_routing(self):
+        """Test that RunAway calls combat._start_rout with the correct argument order.
+
+        Regression test: an earlier draft called combat._start_rout(battle, regiment) instead of
+        combat._start_rout(regiment, battle), which would raise AttributeError the moment
+        _start_rout touched regiment.player on what was actually the Battle object.
+        """
+        interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
+        state = self.battle.event_bus.unit_states["test_1"]
+
+        self.assertFalse(self.unit.routing)
+        interp.op_RunAway(state, None, [], "test_1", 0, None)
+        self.assertTrue(self.unit.routing)
+        self.assertIsNotNone(self.unit.flee_x)
+        self.assertIsNotNone(self.unit.flee_y)
+
+    def test_run_away_respects_cant_break(self):
+        """Test that RunAway does not rout a unit with the CantBreak psychology flag."""
+        stubborn = Regiment(
+            "stubborn_1", "Stubborn Unit", 100, 100, 0, False,
+            models=10, ranks=2, leadership=7, psychology=frozenset({"CantBreak"})
+        )
+        battle = Battle(500, 500, [stubborn, self.player], seed=1995)
+        interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        state = battle.event_bus.unit_states["stubborn_1"]
+
+        interp.op_RunAway(state, None, [], "stubborn_1", 0, None)
+        self.assertFalse(stubborn.routing)
+
     def test_ready_to_fire_checks_reload_state(self):
         """Test that ReadyToFire checks if unit can shoot."""
         archer = Regiment(
