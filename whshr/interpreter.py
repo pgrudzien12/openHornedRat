@@ -762,32 +762,62 @@ class ScriptInterpreter:
     # Each logs a placeholder message and continues, allowing partial mission execution.
 
     def op_MoveToNode(self, state, operand, script_words, unit_id, tick_count, rng):
-        """MoveToNode N: move to waypoint node N from the battle map."""
+        """MoveToNode N: order an ordinary move to waypoint node N's coordinates.
+
+        Uses Battle.nodes (the battle's own [NODES] table, whshr.script.load_battle) to resolve N
+        to a real (x, y); a no-op if the battle has no such node (synthetic/nodeless battles, or an
+        id the script never defines). Does not touch attack_target -- a later AttackNearestEnemy
+        etc. still takes priority every tick (Battle._advance_regiments checks attack_target first),
+        matching how the rest of this interpreter leaves targeting decisions to their own opcodes.
+        """
         if operand is not None:
             state.current_node = operand
-            # TODO: get node coordinates from battle.battlefield.nodes[N] or battle script
-            # For now, just set the node id
+            regiment = self.battle.regiments.get(unit_id)
+            coords = self.battle.nodes.get(operand)
+            if regiment and coords:
+                regiment.target_x, regiment.target_y = coords
         return state.pc + 1
 
     def op_FaceNode(self, state, operand, script_words, unit_id, tick_count, rng):
-        """FaceNode N: turn to face waypoint node N (formation turn, not movement)."""
+        """FaceNode N: turn to face waypoint node N (instant turn, not a movement order).
+
+        Reuses Battle._turn_to so facing changes pivot the same way every other turn in the engine
+        does (game_rules.md: "a turn always moves the unit position to keep the pivot still").
+        """
         if operand is not None:
-            # TODO: calculate direction to node and set regiment.direction
-            pass
+            regiment = self.battle.regiments.get(unit_id)
+            coords = self.battle.nodes.get(operand)
+            if regiment and coords and (coords[0] != regiment.x or coords[1] != regiment.y):
+                dx, dy = coords[0] - regiment.x, coords[1] - regiment.y
+                direction = round(math.atan2(dx, dy) * 512 / math.tau) % 512
+                self.battle._turn_to(regiment, direction)
         return state.pc + 1
 
     def op_TeleportToNode(self, state, operand, script_words, unit_id, tick_count, rng):
-        """TeleportToNode N: instantly move to waypoint node N."""
+        """TeleportToNode N: instantly move to waypoint node N (no travel time)."""
         if operand is not None:
             state.current_node = operand
-            # TODO: instantly reposition regiment to node coordinates
+            regiment = self.battle.regiments.get(unit_id)
+            coords = self.battle.nodes.get(operand)
+            if regiment and coords:
+                regiment.x, regiment.y = coords
+                regiment.target_x = regiment.target_y = None
         return state.pc + 1
 
     def op_PlaceAtNode(self, state, operand, script_words, unit_id, tick_count, rng):
-        """PlaceAtNode N: place unit at node N in formation."""
+        """PlaceAtNode N: place unit at node N in formation.
+
+        Same positional effect as TeleportToNode -- "in formation" (re-forming ranks in place) is
+        not separately modeled; the regiment's own formation slots are always recomputed from its
+        current models/ranks/direction (Regiment.model_positions), so there is nothing extra to do.
+        """
         if operand is not None:
             state.current_node = operand
-            # TODO: reposition regiment and reform in place at node
+            regiment = self.battle.regiments.get(unit_id)
+            coords = self.battle.nodes.get(operand)
+            if regiment and coords:
+                regiment.x, regiment.y = coords
+                regiment.target_x = regiment.target_y = None
         return state.pc + 1
 
     def op_ChargeTarget(self, state, operand, script_words, unit_id, tick_count, rng):

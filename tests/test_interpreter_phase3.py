@@ -287,7 +287,8 @@ class MoraleRoutingTests(unittest.TestCase):
 
 
 class MovementOpcodeTests(unittest.TestCase):
-    """Test movement-related opcodes."""
+    """Test movement-related opcodes against a battle with no [NODES] table (empty Battle.nodes):
+    the opcodes must still record current_node and otherwise no-op gracefully, never raise."""
 
     def setUp(self):
         """Set up test battle."""
@@ -306,31 +307,80 @@ class MovementOpcodeTests(unittest.TestCase):
         interp.op_MoveToNode(state, node_id, [], "test_1", 0, None)
 
         self.assertEqual(state.current_node, node_id)
+        self.assertIsNone(self.unit.target_x)  # unknown node: no movement order issued
 
     def test_face_node_executes(self):
-        """Test that FaceNode opcode executes (placeholder)."""
+        """Test that FaceNode opcode executes without a known node (no-op, no error)."""
         interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
         state = self.battle.event_bus.unit_states["test_1"]
 
         # Should execute without error
         result = interp.op_FaceNode(state, 3, [], "test_1", 0, None)
         self.assertEqual(result, 1)
+        self.assertEqual(self.unit.direction, 0)  # unchanged
 
-    def test_teleport_to_node_sets_position(self):
-        """Test that TeleportToNode sets current node (placeholder)."""
+    def test_teleport_to_node_sets_current_node(self):
+        """Test that TeleportToNode sets current node even when the node is unknown."""
         interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
         state = self.battle.event_bus.unit_states["test_1"]
 
         interp.op_TeleportToNode(state, 7, [], "test_1", 0, None)
         self.assertEqual(state.current_node, 7)
+        self.assertEqual(self.unit.x, 100)  # unknown node: position unchanged
 
     def test_place_at_node_sets_node(self):
-        """Test that PlaceAtNode sets the node (placeholder)."""
+        """Test that PlaceAtNode sets the node even when the node is unknown."""
         interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
         state = self.battle.event_bus.unit_states["test_1"]
 
         interp.op_PlaceAtNode(state, 9, [], "test_1", 0, None)
         self.assertEqual(state.current_node, 9)
+
+
+class MovementOpcodeWithRealNodesTests(unittest.TestCase):
+    """Test movement-related opcodes against a battle whose Battle.nodes is populated (the normal
+    case: [NODES] data comes from whshr.script.load_battle via Battle.from_script)."""
+
+    def setUp(self):
+        self.unit = Regiment(
+            "test_1", "Test Unit", 100, 100, 0, False,
+            models=10, ranks=2, leadership=7
+        )
+        self.battle = Battle(500, 500, [self.unit], seed=1995, nodes={5: (300.0, 200.0), 9: (100.0, 100.0)})
+        self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
+        self.state = self.battle.event_bus.unit_states["test_1"]
+
+    def test_move_to_node_orders_an_ordinary_move_toward_the_nodes_coordinates(self):
+        self.interp.op_MoveToNode(self.state, 5, [], "test_1", 0, None)
+        self.assertEqual((self.unit.target_x, self.unit.target_y), (300.0, 200.0))
+        self.assertTrue(self.unit.moving)
+
+    def test_move_to_node_does_not_touch_an_existing_attack_target(self):
+        self.unit.attack_target = "someone"
+        self.interp.op_MoveToNode(self.state, 5, [], "test_1", 0, None)
+        self.assertEqual(self.unit.attack_target, "someone")
+
+    def test_face_node_turns_toward_the_node_without_moving(self):
+        # Node 5 is at (300, 200): due east-ish of (100, 100) -- just confirm a turn happened and
+        # no movement order was issued, without asserting the exact direction encoding here.
+        self.interp.op_FaceNode(self.state, 5, [], "test_1", 0, None)
+        self.assertNotEqual(self.unit.direction, 0)
+        self.assertIsNone(self.unit.target_x)
+
+    def test_face_node_is_a_noop_when_already_at_the_nodes_position(self):
+        self.interp.op_FaceNode(self.state, 9, [], "test_1", 0, None)  # node 9 == unit's own (x, y)
+        self.assertEqual(self.unit.direction, 0)
+
+    def test_teleport_to_node_instantly_repositions_and_clears_any_move_order(self):
+        self.unit.target_x, self.unit.target_y = 999.0, 999.0
+        self.interp.op_TeleportToNode(self.state, 5, [], "test_1", 0, None)
+        self.assertEqual((self.unit.x, self.unit.y), (300.0, 200.0))
+        self.assertIsNone(self.unit.target_x)
+        self.assertIsNone(self.unit.target_y)
+
+    def test_place_at_node_instantly_repositions(self):
+        self.interp.op_PlaceAtNode(self.state, 5, [], "test_1", 0, None)
+        self.assertEqual((self.unit.x, self.unit.y), (300.0, 200.0))
 
 
 if __name__ == '__main__':

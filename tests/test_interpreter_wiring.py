@@ -78,6 +78,46 @@ class ScriptIdWiringTests(unittest.TestCase):
         self.assertIs(battle.interpreter.script_dll, sentinel_dll)
 
 
+class NodeWiringTests(unittest.TestCase):
+    """Battle.from_script reads the battle's own [NODES] table (whshr.script.load_battle) into
+    Battle.nodes -- previously parsed and available but silently discarded (issue #3/#46)."""
+
+    def _source(self, nodes):
+        return {
+            "field": {"width": 1600, "height": 1760, "script": "BF003"},
+            "armies": [{"units": [_unit("Goblin_Stickers", 100, 100, script=0)]}],
+            "merc": {"armies": []},
+            "nodes": nodes,
+        }
+
+    def test_nodes_with_id_and_coordinates_become_battle_nodes(self):
+        battle = Battle.from_script(self._source([
+            {"id": 0, "x": 300, "y": 400, "radius": 10, "dir": 0, "status": []},
+            {"id": 2, "x": 500.5, "y": 600.5, "radius": None, "dir": None, "status": ["ns_startpos"]},
+        ]))
+        self.assertEqual(battle.nodes, {0: (300.0, 400.0), 2: (500.5, 600.5)})
+
+    def test_a_node_with_no_id_is_excluded(self):
+        battle = Battle.from_script(self._source([{"id": None, "x": 1, "y": 2, "radius": None,
+                                                     "dir": None, "status": []}]))
+        self.assertEqual(battle.nodes, {})
+
+    def test_a_node_with_missing_coordinates_is_excluded(self):
+        battle = Battle.from_script(self._source([{"id": 5, "x": None, "y": None, "radius": None,
+                                                     "dir": None, "status": []}]))
+        self.assertEqual(battle.nodes, {})
+
+    def test_a_source_with_no_nodes_key_at_all_defaults_to_empty(self):
+        source = self._source([])
+        del source["nodes"]
+        battle = Battle.from_script(source)
+        self.assertEqual(battle.nodes, {})
+
+    def test_a_battle_built_directly_without_nodes_defaults_to_empty(self):
+        battle = Battle(500, 500, [])
+        self.assertEqual(battle.nodes, {})
+
+
 class BattleSceneScriptDllLoadingTests(unittest.TestCase):
     """BattleScene._load_script_dll locates the mission's own SCRIPT/BFxxx.DLL, or fails gracefully."""
 

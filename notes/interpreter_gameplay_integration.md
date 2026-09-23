@@ -41,11 +41,17 @@ Landed against this document's "Proposed" section:
   `source`), but nothing in `whshr/combat.py` yet raises engine conditions (attacked, routed,
   charged) as events or flags — a script that waits on one will block indefinitely, which is
   documented in the opcode's own docstring rather than papered over.
-- **Item 5, "Movement feedback"**: still not built, unchanged from this document's original Proposed
-  section. Confirmed via a real playthrough log: NPC peasant regiments that should patrol between
-  waypoints stand completely still, because `MoveToNode`/`FaceNode`/etc. only record a node id on
-  `UnitScriptState` and never set `regiment.target_x`/`target_y`, which is what `Battle._advance_regiments`
-  actually reads to move a regiment.
+- **Item 5, "Movement feedback"**: the node-coordinate half is done. The battle's own `[NODES]`
+  table was already fully parsed by `whshr.script.load_battle` (each node has real `x`/`y`) but
+  `Battle.from_script` silently discarded it -- `Battle.nodes` (`{id: (x, y)}`) now carries it
+  through. `MoveToNode` issues an ordinary move order toward the node's coordinates,
+  `TeleportToNode`/`PlaceAtNode` reposition instantly, and `FaceNode` turns toward it using the same
+  pivot-preserving `Battle._turn_to` every other turn in the engine uses. All four fail-safe (no-op,
+  never raise) for an id the battle has no node for. Still open: "arrival feedback" (a script
+  polling e.g. `TestUnitFlags`/`WaitUntilUnitFlags` to learn a `MoveToNode` order has completed) is
+  a separate mechanism this doesn't build -- see the "Generate events from engine conditions" item
+  below. Tests: `tests/test_interpreter_wiring.py` (`NodeWiringTests`),
+  `tests/test_interpreter_phase3.py` (`MovementOpcodeWithRealNodesTests`).
 - **Real regression found and fixed after item 2 landed**: `SetBehaviour` called
   `LibraryBehaviors.track_threat()` immediately and unconditionally the moment it ran, setting
   `regiment.attack_target` on tick 0/1 regardless of any `SetWait`/`Wait`/`MoveToNode` gating later

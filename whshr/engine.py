@@ -258,7 +258,7 @@ class Battle:
     morale and a simple enemy AI."""
 
     def __init__(self, width, height, regiments, seed=DEFAULT_SEED, script_dll=None, script_ids=None,
-                 script_logger=None):
+                 script_logger=None, nodes=None):
         if width <= 0 or height <= 0:
             raise ValueError("battle dimensions must be positive")
         self.width = width
@@ -269,6 +269,10 @@ class Battle:
         self.tick_count = 0
         self.rng = random.Random(seed)
         self.events = []  # battle events emitted by the most recent tick (plain strings)
+        # {node id: (x, y)} from the battle's own [NODES] section (whshr.script.load_battle),
+        # BTS world coordinates; read by the interpreter's MoveToNode/FaceNode/TeleportToNode/
+        # PlaceAtNode opcodes (issue #3/#46). Empty for a synthetic/nodeless battle.
+        self.nodes = nodes or {}
         self.fights = {}  # group id -> {"next_test_turn", "tally": {True/False}, "breakdown": {...}}
         self._fight_seq = 0  # counter for fresh whshr.combat fight group ids
         self.result = None  # None while the battle is ongoing, else "victory" or "defeat"
@@ -307,9 +311,15 @@ class Battle:
         interpreter drives every regiment instead of `whshr.ai`'s placeholder rule. Each unit's own
         ``set:script=`` value (a number, or the literal ``PLAYER_SCRIPT``) becomes that regiment's
         initial script id, matching the original's `set:script=PLAYER_SCRIPT` convention
-        (`whshr.behaviour.PLAYER_SCRIPT` = library script 100).
+        (`whshr.behaviour.PLAYER_SCRIPT` = library script 100). The script's own ``[NODES]`` table
+        (already parsed by `whshr.script.load_battle`, just not previously read here) becomes
+        `Battle.nodes`, so movement opcodes (MoveToNode and friends) can resolve a node id to a
+        real world coordinate instead of only recording the id.
         """
         field_data = source["field"]
+        nodes = {node["id"]: (float(node["x"]), float(node["y"]))
+                 for node in source.get("nodes") or ()
+                 if node.get("id") is not None and node.get("x") is not None and node.get("y") is not None}
         regiments, script_ids, used = [], {}, set()
         armies = [(army, False) for army in source["armies"]]
         armies.extend((army, True) for army in (source["merc"] or {}).get("armies", []))
@@ -339,7 +349,7 @@ class Battle:
                 elif isinstance(script_value, (int, float)):
                     script_ids[identifier] = int(script_value)
         return cls(field_data["width"], field_data["height"], regiments, seed=seed,
-                   script_dll=script_dll, script_ids=script_ids, script_logger=script_logger)
+                   script_dll=script_dll, script_ids=script_ids, script_logger=script_logger, nodes=nodes)
 
     def order_move(self, identifier, x, y):
         regiment = self.regiments[identifier]
