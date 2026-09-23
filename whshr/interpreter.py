@@ -66,6 +66,10 @@ class UnitScriptState:
     # Current order and target (set by FindTarget*, AttackTarget, etc.)
     current_target: tuple | None = None  # (regiment_id, unit_id) for attack/movement orders
     current_node: int | None = None  # waypoint node for movement orders
+    behaviour_id: int | None = None  # declared by SetBehaviour; recorded only, not auto-run
+    # (see op_SetBehaviour -- there is no confirmed public evidence for when/how often a declared
+    # library behaviour like 15/TrackThreat actually gets invoked versus a unit's own script opcodes
+    # driving targeting directly, so nothing currently acts on this field automatically)
 
     # Script metadata (loaded once at init)
     script_dll = None  # behaviour.ScriptDll instance for script lookup
@@ -813,13 +817,25 @@ class ScriptInterpreter:
         return state.pc + 1
 
     def op_SetBehaviour(self, state, operand, script_words, unit_id, tick_count, rng):
-        """SetBehaviour N: set explicit behavior (e.g., 15=TrackThreat).
+        """SetBehaviour N: record which library AI behavior (e.g. 15 = TrackThreat) governs this
+        unit. Does NOT invoke it.
 
-        Instead of gosub to library script, applies the behavior inline.
-        Behavior 15 (TrackThreat) is the most common.
+        A prior version of this handler called LibraryBehaviors.track_threat() immediately and
+        unconditionally the moment this opcode ran -- which, since SetBehaviour appears near the
+        very start of a unit's script (before any SetWait/Wait/MoveToNode that should gate its
+        first action), set regiment.attack_target on tick 0 regardless of what the rest of the
+        script does. Battle._advance_regiments checks attack_target before an ordinary move order,
+        so this silently overrode every later movement/wait instruction. Confirmed against a real
+        BF003 playthrough: the reinforcement Goblin Wolfriders regiment attacked from the first
+        tick instead of respecting its own SetWait 60 gate.
+
+        There is no confirmed public documentation of exactly when/how often a declared library
+        behavior is meant to run relative to a unit's own script instructions, so this is
+        deliberately left as a no-op recording rather than a guessed re-implementation. A script's
+        own AttackNearestEnemy/AttackNearestVisibleEnemy/FindTarget* calls (now implemented) are
+        what actually drive targeting; see notes/interpreter_gameplay_integration.md.
         """
-        if operand == 15:  # TrackThreat
-            self.behaviors.track_threat(unit_id, state, tick_count, self.battle.rng)
+        state.behaviour_id = operand
         return state.pc + 1
 
     def op_React(self, state, operand, script_words, unit_id, tick_count, rng):

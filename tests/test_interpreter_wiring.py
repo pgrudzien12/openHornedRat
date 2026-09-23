@@ -21,7 +21,7 @@ from whshr.assets import AssetId, AssetLocator
 from whshr.battle_scene import BattleScene
 from whshr.cache import AssetCache
 from whshr.catalog import build
-from whshr.engine import Battle
+from whshr.engine import Battle, Regiment
 from whshr.scenes import SceneAssets, SceneMachine
 
 
@@ -167,6 +167,40 @@ class InitUnitDoesNotClobberTheWiredScriptIdTests(unittest.TestCase):
         interp = interpreter.ScriptInterpreter(None, None, None)
         result = interp.op_InitUnit(state, 128, [], "t", 0, None)
         self.assertEqual(result, 6)
+
+
+class SetBehaviourDoesNotPreemptScriptGatingTests(unittest.TestCase):
+    """Regression test: SetBehaviour used to call track_threat() immediately, setting
+    attack_target on tick 0 regardless of any SetWait/Wait/MoveToNode gating later in the same
+    script. Confirmed against a real BF003 playthrough where the reinforcement Goblin Wolfriders
+    attacked from the first tick instead of respecting its own SetWait 60 gate.
+    """
+
+    def setUp(self):
+        self.reinforcement = Regiment("Goblin_Wolfriders", "Wolfriders", 500, 500, 0, False,
+                                       models=10, ranks=2, leadership=6)
+        self.player = Regiment("player_1", "Player", 100, 100, 0, True, models=10, ranks=2)
+        self.battle = Battle(1000, 1000, [self.player, self.reinforcement], seed=1995)
+        self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
+
+    def test_set_behaviour_only_records_the_id_and_does_not_attack(self):
+        state = self.battle.event_bus.unit_states["Goblin_Wolfriders"]
+        self.interp.op_SetBehaviour(state, 15, [], "Goblin_Wolfriders", 0, self.battle.rng)
+
+        self.assertEqual(state.behaviour_id, 15)
+        self.assertIsNone(self.reinforcement.attack_target)  # not attacking yet
+
+    def test_a_setwait_60_gate_after_setbehaviour_is_no_longer_bypassed(self):
+        """Simulates the real BF003 Wolfriders shape: SetBehaviour 15, then WaitForBattleStart,
+        SetWait 60, Wait -- the unit must still be idle at tick 1, not already attacking."""
+        state = self.battle.event_bus.unit_states["Goblin_Wolfriders"]
+        self.interp.op_SetBehaviour(state, 15, [], "Goblin_Wolfriders", 0, self.battle.rng)
+        self.interp.op_WaitForBattleStart(state, None, [], "Goblin_Wolfriders", 1, self.battle.rng)
+        self.interp.op_SetWait(state, 60, [], "Goblin_Wolfriders", 1, self.battle.rng)
+        self.interp.op_Wait(state, None, [], "Goblin_Wolfriders", 1, self.battle.rng)
+
+        self.assertIsNone(self.reinforcement.attack_target)
+        self.assertGreater(state.wait_remaining, 0)
 
 
 if __name__ == "__main__":

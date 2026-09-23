@@ -42,7 +42,22 @@ Landed against this document's "Proposed" section:
   charged) as events or flags — a script that waits on one will block indefinitely, which is
   documented in the opcode's own docstring rather than papered over.
 - **Item 5, "Movement feedback"**: still not built, unchanged from this document's original Proposed
-  section.
+  section. Confirmed via a real playthrough log: NPC peasant regiments that should patrol between
+  waypoints stand completely still, because `MoveToNode`/`FaceNode`/etc. only record a node id on
+  `UnitScriptState` and never set `regiment.target_x`/`target_y`, which is what `Battle._advance_regiments`
+  actually reads to move a regiment.
+- **Real regression found and fixed after item 2 landed**: `SetBehaviour` called
+  `LibraryBehaviors.track_threat()` immediately and unconditionally the moment it ran, setting
+  `regiment.attack_target` on tick 0/1 regardless of any `SetWait`/`Wait`/`MoveToNode` gating later
+  in the *same* script. Confirmed against a real BF003 playthrough: the reinforcement Goblin
+  Wolfriders regiment attacked from the very first tick instead of respecting its own `SetWait 60`
+  gate (and Goblin Stickers likely attacked faster than intended too, for the same reason). Fixed:
+  `SetBehaviour` now only records `state.behaviour_id`; there is no confirmed public documentation
+  of exactly when a declared library behavior like TrackThreat is meant to run relative to a unit's
+  own script instructions, so this is deliberately a no-op rather than a second guessed
+  reimplementation — a unit's own `AttackNearestEnemy`/`AttackNearestVisibleEnemy`/`FindTarget*`
+  calls (item 2, now implemented) are what actually drive targeting. Regression tests:
+  `tests/test_interpreter_wiring.py`.
 
 ---
 
