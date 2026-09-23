@@ -45,20 +45,13 @@ class CombatIntegrationTests(unittest.TestCase):
         # Verify attack target is set
         self.assertEqual(self.enemy.attack_target, "player_1")
 
-    def test_fire_at_target_requires_missile_range(self):
-        """Test that FireAtTarget only works for units with missile range."""
-        interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
-        state = self.battle.event_bus.unit_states["enemy_1"]
-
-        # Set target and try to fire
-        state.current_target = ("player_1", 0)
-        interp.op_FireAtTarget(state, None, [], "enemy_1", 0, None)
-
-        # Non-missile unit should not set attack target for shooting
-        self.assertIsNone(self.enemy.attack_target)
-
-    def test_fire_at_target_with_missile_range(self):
-        """Test that FireAtTarget works for archer units."""
+    def test_fire_at_target_never_sets_attack_target(self):
+        """Regression test: FireAtTarget must NOT set regiment.attack_target, for any unit,
+        regardless of missile range. attack_target means "melee charge target" to both
+        Battle._advance_regiments (would charge the shooter into melee) and
+        combat.resolve_shooting (explicitly skips any unit with attack_target set, since it already
+        does its own independent targeting) -- a prior version set it here too, which silently
+        broke scripted shooting orders entirely."""
         archer = Regiment(
             "archer_1", "Archer", 200, 100, 0, Side.ENEMY,
             models=10, ranks=2, ws=2, bs=4, strength=3, toughness=3,
@@ -72,7 +65,14 @@ class CombatIntegrationTests(unittest.TestCase):
         state.current_target = ("player_1", 0)
         interp.op_FireAtTarget(state, None, [], "archer_1", 0, None)
 
-        self.assertEqual(archer.attack_target, "player_1")
+        self.assertIsNone(archer.attack_target)
+
+        # Also true for a non-missile unit (no branching left in the opcode at all).
+        interp2 = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
+        state2 = self.battle.event_bus.unit_states["enemy_1"]
+        state2.current_target = ("player_1", 0)
+        interp2.op_FireAtTarget(state2, None, [], "enemy_1", 0, None)
+        self.assertIsNone(self.enemy.attack_target)
 
     def test_kill_all_models_destroys_unit(self):
         """Test that KillAllModels removes all models from a unit."""

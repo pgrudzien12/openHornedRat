@@ -85,6 +85,13 @@ class UnitScriptState:
     # library behaviour like 15/TrackThreat actually gets invoked versus a unit's own script opcodes
     # driving targeting directly, so nothing currently acts on this field automatically)
 
+    # Interrupt handling (SetInterruptScript/CallInterruptScript/ReturnInterrupt)
+    interrupt_return: tuple | None = None  # (script_id, pc) to resume after ReturnInterrupt, set by
+    # CallInterruptScript; None when not currently inside an interrupt call
+    last_attack_target: str | None = None  # this unit's own attack_target as of the last tick, used
+    # by ScriptInterpreter.raise_charge_events to detect a *fresh* charge (event 0x07) rather than
+    # re-raising it every tick the same charge continues
+
     # Script metadata (loaded once at init)
     script_dll = None  # behaviour.ScriptDll instance for script lookup
 
@@ -222,6 +229,34 @@ class ScriptInterpreter:
         if regiment is not None and not regiment.moving:
             state.unit_flags |= ARRIVED_FLAG
             state.pending_arrival = False
+
+    def raise_charge_events(self):
+        """Queue event 0x07 ("you are being charged") to any regiment whose attacker just set a
+        fresh attack_target on it this tick (game_rules.md event table: 0x07 = charge start).
+
+        Called once per tick from Battle.tick(), after every unit's script has run -- centralized
+        here rather than duplicated in every opcode that can set attack_target (ChargeTarget,
+        AttackNearestEnemy and its many variants, AttackTagged, LibraryBehaviors.track_threat, ...)
+        so they all raise it consistently. Fires once per fresh charge (None/other -> this target),
+        not every tick the same charge continues, and fires again if the same target is charged a
+        second time after an intervening gap (target lost, then re-acquired).
+
+        This is what a charged unit's own event-handling frame (GetEvent; CaseEvent 7; ...) reacts
+        to -- typically a fear/terror test (op 0x42, FearWhenCharged) then bracing in place, per
+        game_rules.md's documented default handling for this event. Without this, a charged unit's
+        script never learns it is being charged at all and keeps running whatever it was already
+        doing (e.g. its own independent TrackThreat-driven approach), which looked like both units
+        charging each other instead of the charged one holding -- exactly the discrepancy from the
+        original this was written to fix.
+        """
+        for attacker_id, attacker in self.battle.regiments.items():
+            state = self.event_bus.unit_states.get(attacker_id)
+            if state is None:
+                continue
+            target_id = attacker.attack_target
+            if target_id is not None and target_id != state.last_attack_target:
+                self.event_bus.queue_event(target_id, Event(code=0x07, source=attacker_id), route="self")
+            state.last_attack_target = target_id
 
     def run(self, unit_id: str, state: UnitScriptState, tick_count: int, rng):
         """Execute one unit's script for one tick.
@@ -931,14 +966,17 @@ class ScriptInterpreter:
         return state.pc + 1
 
     def op_FireAtTarget(self, state, operand, script_words, unit_id, tick_count, rng):
-        """FireAtTarget: order unit to shoot at the current target."""
-        regiment = self.battle.regiments.get(unit_id)
-        if regiment and state.current_target and regiment.missile_range:
-            # Combat resolution happens in Battle.tick() → resolve_shooting()
-            # Just verify the target exists
-            target_id = state.current_target[0]
-            if target_id in self.battle.regiments:
-                regiment.attack_target = target_id
+        """FireAtTarget: mark the current target for shooting.
+
+        Must NOT set regiment.attack_target: that field means "melee charge target" to both
+        Battle._advance_regiments (charges the unit into melee range of it) and
+        combat.resolve_shooting (which explicitly skips any unit with attack_target set, since it
+        already does its own independent nearest-in-arc-and-range targeting). A prior version set
+        it here too, which silently made every scripted FireAtTarget order charge the shooter into
+        melee instead of holding position and shooting -- and resolve_shooting would then skip the
+        unit regardless, on top of that. There is nothing else to do here in this simplified engine:
+        the actual target for the shot is combat.resolve_shooting's own search, not script-directed.
+        """
         return state.pc + 1
 
     def op_KillAllModels(self, state, operand, script_words, unit_id, tick_count, rng):
@@ -1048,6 +1086,37 @@ class ScriptInterpreter:
         """
         if operand is not None:
             state.interrupt_script = operand
+        return state.pc + 1
+
+    def op_CallInterruptScript(self, state, operand, script_words, unit_id, tick_count, rng):
+        """CallInterruptScript: jump into the script registered by SetInterruptScript -- a one-level
+        gosub reserved for event-driven reactions (e.g. bracing when charged, game_rules.md event
+        0x07 "you are being charged"). Saves (script_id, pc + 1) to interrupt_return so
+        ReturnInterrupt can resume here; a no-op fall-through if nothing was ever registered.
+        """
+        if state.interrupt_script is not None:
+            state.interrupt_return = (state.script_id, state.pc + 1)
+            state.script_id = state.interrupt_script
+            return 0
+        return state.pc + 1
+
+    def op_ReturnInterrupt(self, state, operand, script_words, unit_id, tick_count, rng):
+        """ReturnInterrupt: end of an event handler -- return to the script CallInterruptScript
+        jumped from, or apply a pending switch immediately instead if the interrupt handler itself
+        requested one (game_rules.md: opcode 0x14 "end of an event handler: return to the
+        interrupted script or apply a pending switch"). Falls through if neither applies (e.g. this
+        opcode reached without ever going through CallInterruptScript).
+        """
+        if state.pending_switch is not None:
+            state.script_id = state.pending_switch
+            state.pending_switch = None
+            state.interrupt_return = None
+            return 0
+        if state.interrupt_return is not None:
+            script_id, pc = state.interrupt_return
+            state.interrupt_return = None
+            state.script_id = script_id
+            return pc
         return state.pc + 1
 
     def op_HaltAndReform(self, state, operand, script_words, unit_id, tick_count, rng):

@@ -451,6 +451,7 @@ class Battle:
         if self.interpreter:
             for unit_id, state in self.event_bus.unit_states.items():
                 self.interpreter.run(unit_id, state, self.tick_count, self.rng)
+            self.interpreter.raise_charge_events()
         else:
             ai.decide_orders(self)
         combat.refresh_melee_state(self)

@@ -116,6 +116,32 @@ Landed against this document's "Proposed" section:
     (`kind: "script_gap"`) -- deduplicated per (unit, script, opcode) so a tight retry loop doesn't
     spam the same complaint every tick for the rest of the battle. Visible in every battle log
     without needing `WHSHR_TRACE_SCRIPTS` at all.
+- **User-reported gap, long-standing**: in the original, a charged unit freezes and waits, rather
+  than continuing to close on its attacker; without this, both units instead independently charge
+  each other (visible in play, not from a log). Two things were missing together:
+  - `CallInterruptScript`/`ReturnInterrupt` (opcodes 0x12/0x14): the interpreter plumbing a script's
+    event-handling frame uses to jump into, and return from, the script registered by
+    `SetInterruptScript`. Implemented as a one-level gosub (`state.interrupt_return`), with
+    `ReturnInterrupt` applying a pending switch immediately instead of returning if the interrupt
+    handler itself requested one -- matching game_rules.md's own description of opcode 0x14 ("end
+    of an event handler: return to the interrupted script or apply a pending switch").
+  - `ScriptInterpreter.raise_charge_events()`: nothing in the engine ever raised event 0x07 ("you
+    are being charged", per game_rules.md's event table) in the first place, so even with the above
+    working, a charged unit's script had nothing to react to. Now called once per tick from
+    `Battle.tick()`, after every unit's script has run: queues event 0x07 to a regiment the moment
+    another regiment's `attack_target` freshly names it (not every tick the same charge continues).
+    Once queued, the target's own already-implemented event-handling opcodes (`GetEvent`,
+    `CaseEvent`, `FearWhenCharged`, `SwitchScript`, ...) drive whatever reaction its real script
+    data specifies -- no "freeze" behavior is hardcoded here, it should fall out of the real
+    bytecode once the event actually reaches it.
+  - **Bug found and fixed while investigating this**: `op_FireAtTarget` set `regiment.attack_target`,
+    which both charges the shooter into melee (`Battle._advance_regiments`) and makes
+    `combat.resolve_shooting` skip the unit entirely (it explicitly skips anyone with
+    `attack_target` set, since it already does independent nearest-in-arc-and-range targeting) --
+    silently breaking every scripted shooting order. Fixed to a documented no-op: the actual target
+    for a shot is `resolve_shooting`'s own search, not script-directed, in this simplified engine.
+  - Tests: `tests/test_interpreter_charge_events.py` (12 new), plus an updated
+    `test_fire_at_target_never_sets_attack_target` in `tests/test_interpreter_phase3.py`.
 
 ---
 
