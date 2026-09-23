@@ -43,6 +43,19 @@ class GridSeedingTests(unittest.TestCase):
         owner = self.battle.regiments[_grid(self.battle, self.defender).owner_id]
         self.assertTrue(all(model.arrived for model in owner.melee_models))
 
+    def test_given_an_at_rest_owner_in_melee_when_its_slot_changes_then_it_stays_put(self):
+        self.battle.tick()
+        owner = self.battle.regiments[_grid(self.battle, self.defender).owner_id]
+        model = owner.melee_models[0]
+        self.assertTrue(model.at_rest)
+        before = owner.positions[0]
+        owner.x += 20
+
+        self.battle._advance_models(owner, 1)
+
+        self.assertEqual(owner.positions[0], before)
+        self.assertTrue(model.at_rest)
+
     def test_given_a_grid_when_cells_are_stamped_then_they_identify_a_regiment_not_just_a_side(self):
         # The original stamps only the side; this engine keeps the regiment id so a model can be
         # found again, but two allied units must still share one undivided pool of cells.
@@ -82,6 +95,35 @@ class JoiningTests(unittest.TestCase):
         grid = _grid(self.battle, self.defender)
         joiner = self.attacker if grid.owner_id != self.attacker.identifier else self.defender
         self.assertTrue(battle_grid.fighting_models(self.battle, joiner))
+
+    def test_given_a_fresh_cell_when_a_joiner_has_a_stale_heading_then_it_reaims(self):
+        self.battle.tick()
+        grid = _grid(self.battle, self.defender)
+        joiner = self.attacker if grid.owner_id != self.attacker.identifier else self.defender
+        owner = self.battle.regiments[grid.owner_id]
+        index = next(i for i, model in enumerate(joiner.melee_models) if model.cell is None)
+        model = joiner.melee_models[index]
+        px, py = joiner.positions[index]
+        model.at_rest = True
+        model.current_speed = 5.0
+        model.distance_budget = 100.0
+        model.heading_x, model.heading_y = 1.0, 0.0
+
+        placed = battle_grid._place_next_to_enemy(
+            grid, joiner, model, px, py, [(owner, 0, owner.melee_models[0])])
+
+        self.assertTrue(placed)
+        self.assertFalse(model.at_rest)
+        self.assertEqual(model.current_speed, 5.0)
+        self.assertEqual(model.distance_budget, 0.0)
+        target_x, target_y = grid.cell_world(*model.cell)
+        distance = ((target_x - px) ** 2 + (target_y - py) ** 2) ** 0.5
+        self.assertGreater(distance, 3)
+
+        self.battle._advance_models(joiner, 1)
+
+        self.assertAlmostEqual(model.heading_x, (target_x - px) / distance)
+        self.assertAlmostEqual(model.heading_y, (target_y - py) / distance)
 
 
 class PileOnTests(unittest.TestCase):

@@ -742,6 +742,9 @@ class Battle:
         updated, still_moving = [], False
         for index, ((px, py), slot) in enumerate(zip(regiment.positions, targets)):
             model = regiment.melee_models[index]
+            if regiment.in_melee and model.at_rest:
+                updated.append((px, py))
+                continue
             cell = battle_grid.cell_target(self, regiment, index)
             tx, ty = cell if cell is not None else slot
             dx, dy = tx - px, ty - py

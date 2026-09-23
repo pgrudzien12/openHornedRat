@@ -209,6 +209,8 @@ def _place_next_to_enemy(grid, regiment, model, px, py, enemies):
             grid.place(row, col, regiment.identifier, model.uid)
             model.cell = (row, col)
             model.arrived = False
+            model.at_rest = False
+            model.distance_budget = 0.0  # the new cell must replace any pre-contact heading
             model.opponent = (enemy.identifier, enemy_model.uid)
             if enemy_model.opponent is None:
                 enemy_model.opponent = (regiment.identifier, model.uid)
