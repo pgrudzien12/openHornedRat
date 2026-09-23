@@ -142,6 +142,19 @@ Landed against this document's "Proposed" section:
     for a shot is `resolve_shooting`'s own search, not script-directed, in this simplified engine.
   - Tests: `tests/test_interpreter_charge_events.py` (12 new), plus an updated
     `test_fire_at_target_never_sets_attack_target` in `tests/test_interpreter_phase3.py`.
+- **The remaining two opcodes real BF003 traces showed as unimplemented** (beyond
+  `ScatterModelsToNode`, already fixed above): `SetParentByTag` (every regiment traced --
+  Stickers, Wolfriders, all three peasant regiments -- calls it early in their script) and
+  `SnapModelsToFormation` (every peasant regiment, right after `ScatterModelsToNode`). Implemented:
+  `SetParentByTag` looks up the tag in the same `Battle._unit_tags` registry `SetTag`/`AttackTagged`
+  already use and records the result on a new `UnitScriptState.parent_id`; `SnapModelsToFormation`
+  is a documented no-op for the same reason `PlaceAtNode`'s "in formation" aspect already was --
+  `Regiment.model_positions()` always recomputes every model's slot from the regiment's current
+  anchor/models/ranks/direction, so there is no separate scattered-model state to snap back from in
+  this engine. `parent_id` itself is not yet consumed by anything (`FollowParent`/
+  `SendEventToParent` remain unimplemented/no-op stubs -- not confirmed as actually called by any
+  traced BF003 script, so left alone rather than guessed at). Tests:
+  `tests/test_interpreter_phase3.py` (`UnitTaggingTests`, 3 new).
 
 ---
 

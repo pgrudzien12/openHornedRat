@@ -84,6 +84,7 @@ class UnitScriptState:
     # (see op_SetBehaviour -- there is no confirmed public evidence for when/how often a declared
     # library behaviour like 15/TrackThreat actually gets invoked versus a unit's own script opcodes
     # driving targeting directly, so nothing currently acts on this field automatically)
+    parent_id: str | None = None  # set by SetParentByTag; the regiment this unit follows/reports to
 
     # Interrupt handling (SetInterruptScript/CallInterruptScript/ReturnInterrupt)
     interrupt_return: tuple | None = None  # (script_id, pc) to resume after ReturnInterrupt, set by
@@ -1020,6 +1021,31 @@ class ScriptInterpreter:
             if not hasattr(self.battle, '_unit_tags'):
                 self.battle._unit_tags = {}
             self.battle._unit_tags[operand] = unit_id
+        return state.pc + 1
+
+    def op_SetParentByTag(self, state, operand, script_words, unit_id, tick_count, rng):
+        """SetParentByTag TAG: find the unit registered with TAG (SetTag) and set it as this unit's
+        parent (state.parent_id), for FollowParent/SendEventToParent.
+
+        Confirmed used by every BF003 regiment traced this session (Stickers, Wolfriders, all three
+        peasant regiments each SetParentByTag another unit early in their scripts) -- exact
+        real-world meaning of the parent relationship for those specific missions is not otherwise
+        documented, but recording it is unambiguous and this is what FollowParent already expects.
+        """
+        if operand is not None:
+            tags = getattr(self.battle, '_unit_tags', {})
+            state.parent_id = tags.get(operand)
+        return state.pc + 1
+
+    def op_SnapModelsToFormation(self, state, operand, script_words, unit_id, tick_count, rng):
+        """SnapModelsToFormation: re-form scattered models back into tight formation.
+
+        A documented no-op here, same reasoning as PlaceAtNode: this engine has no separate
+        "scattered per-model position" state to snap back from -- Regiment.model_positions() always
+        recomputes every model's slot from the regiment's current anchor/models/ranks/direction, so
+        formation is implicitly always current. Confirmed used once, right after ScatterModelsToNode,
+        in every BF003 peasant regiment's script.
+        """
         return state.pc + 1
 
     def op_SetBehaviour(self, state, operand, script_words, unit_id, tick_count, rng):

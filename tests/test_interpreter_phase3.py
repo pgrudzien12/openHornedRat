@@ -194,6 +194,38 @@ class UnitTaggingTests(unittest.TestCase):
         # Should fail gracefully and set cond_flags to 0
         self.assertEqual(state.cond_flags, 0)
 
+    def test_set_parent_by_tag_resolves_to_the_tagged_units_identifier(self):
+        """Confirmed used by every BF003 regiment traced this session (Stickers, Wolfriders, all
+        three peasant regiments each SetParentByTag another unit early in their scripts)."""
+        interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
+        leader_state = self.battle.event_bus.unit_states["cargo_1"]
+        tag = 0xABC1
+        interp.op_SetTag(leader_state, tag, [], "cargo_1", 0, None)
+
+        follower_state = self.battle.event_bus.unit_states["hunter_1"]
+        interp.op_SetParentByTag(follower_state, tag, [], "hunter_1", 0, None)
+
+        self.assertEqual(follower_state.parent_id, "cargo_1")
+
+    def test_set_parent_by_tag_leaves_parent_none_if_tag_does_not_exist(self):
+        interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
+        state = self.battle.event_bus.unit_states["hunter_1"]
+
+        interp.op_SetParentByTag(state, 0xDEAD, [], "hunter_1", 0, None)
+
+        self.assertIsNone(state.parent_id)
+
+    def test_snap_models_to_formation_is_a_harmless_noop(self):
+        """Confirmed used once, right after ScatterModelsToNode, in every BF003 peasant regiment's
+        script; this engine always recomputes formation slots from the regiment's own anchor, so
+        there is no separate scattered state to snap back from."""
+        interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
+        state = self.battle.event_bus.unit_states["cargo_1"]
+
+        result = interp.op_SnapModelsToFormation(state, None, [], "cargo_1", 0, None)
+
+        self.assertEqual(result, state.pc + 1)
+
 
 class MoraleRoutingTests(unittest.TestCase):
     """Test morale and routing-related opcodes."""
