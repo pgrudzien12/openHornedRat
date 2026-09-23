@@ -327,6 +327,76 @@ class CatchUpWalkTests(unittest.TestCase):
         self.assertAlmostEqual(regiment.positions[1][1] - before[1][1], 28 * 2.4 / 256)
 
 
+class ChargeStartFreezeTests(unittest.TestCase):
+    """game_rules.md "Models chase the unit": figures pause briefly when a charge starts."""
+
+    def setUp(self):
+        self.charger = Regiment("charger", "Charger", 0, 0, 0, Side.PLAYER,
+                                models=8, ranks=2, speed_per_tick=speed_per_tick(4, 3))
+        self.target = Regiment("target", "Target", 0, 130, 0, Side.ENEMY)
+        self.battle = Battle(1000, 1000, [self.charger, self.target])
+
+    def test_given_a_charge_in_reach_when_ticked_then_each_model_waits_its_staggered_delay(self):
+        before = list(self.charger.model_positions())
+        self.battle.order_attack("charger", "target")
+
+        self.battle.tick()
+
+        self.assertGreater(self.charger.y, 0)
+        self.assertEqual(self.charger.positions, before)
+        self.assertEqual([model.freeze_ticks for model in self.charger.melee_models], list(range(8)))
+
+        for _ in range(7):
+            self.battle.tick()
+
+        self.assertGreater(self.charger.positions[0][1], before[0][1])
+        self.assertEqual(self.charger.positions[7], before[7])
+        self.assertTrue(all(model.freeze_ticks == 0 for model in self.charger.melee_models))
+
+        self.battle.tick()
+
+        self.assertGreater(self.charger.positions[7][1], before[7][1])
+
+    def test_given_an_attack_order_outside_charge_reach_then_freeze_starts_only_on_entering_reach(self):
+        self.target.y = 200
+        self.battle.order_attack("charger", "target")
+
+        self.battle.tick()
+
+        self.assertIsNone(self.charger.charge_started_target)
+        self.assertTrue(all(model.freeze_ticks == 0 for model in self.charger.melee_models))
+
+        for _ in range(40):
+            self.battle.tick()
+            if self.charger.charge_started_target == "target":
+                break
+
+        self.assertEqual(self.charger.charge_started_target, "target")
+        self.assertTrue(any(model.freeze_ticks > 0 for model in self.charger.melee_models))
+
+    def test_given_a_halted_charge_when_the_same_target_is_ordered_again_then_freeze_restarts(self):
+        self.battle.order_attack("charger", "target")
+        for _ in range(10):
+            self.battle.tick()
+        self.assertTrue(all(model.freeze_ticks == 0 for model in self.charger.melee_models))
+        self.battle.order_halt("charger")
+        self.battle.order_attack("charger", "target")
+
+        self.battle.tick()
+
+        self.assertEqual([model.freeze_ticks for model in self.charger.melee_models], list(range(8)))
+
+    def test_given_a_charge_is_cancelled_then_its_pending_model_delays_are_cleared(self):
+        self.battle.order_attack("charger", "target")
+        self.battle.tick()
+        self.battle.order_halt("charger")
+        self.battle.order_move("charger", 0, 100)
+
+        self.battle.tick()
+
+        self.assertTrue(all(model.freeze_ticks == 0 for model in self.charger.melee_models))
+
+
 def formation_positions(regiment):
     from whshr import formation
     return formation.place(regiment.x, regiment.y, regiment.direction,

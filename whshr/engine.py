@@ -82,6 +82,7 @@ class ModelState:
     heading_x: float = 0.0
     heading_y: float = 0.0
     at_rest: bool = True
+    freeze_ticks: int = 0  # charge-start pause, (stagger & 7) + 1 ticks
 
 
 @dataclass
@@ -129,6 +130,7 @@ class Regiment:
 
     # Combat/order state (whshr.combat).
     attack_target: str | None = None  # identifier of an enemy regiment this regiment is charging
+    charge_started_target: str | None = None  # target whose current charge already froze its models
     # game_rules.md "Braced" (flag 0x100000): set when this regiment passes its fear/terror test on
     # being charged (interpreter.op_FearWhenCharged, event 0x07). While set, move/attack/turn/rank/
     # charge/fire orders are ignored -- for the player exactly like for a script -- until the charger
@@ -401,6 +403,7 @@ class Battle:
         if not 0 <= x <= self.width or not 0 <= y <= self.height:
             raise ValueError("destination is outside the battlefield")
         regiment.attack_target = None
+        regiment.charge_started_target = None
         regiment.target_x, regiment.target_y = float(x), float(y)
 
     def order_attack(self, identifier, target_id):
@@ -433,6 +436,7 @@ class Battle:
             raise ValueError(f"{identifier} is in melee and cannot be ordered")
         regiment.target_x = regiment.target_y = None
         regiment.attack_target = None
+        regiment.charge_started_target = None
         # game_rules.md "Braced": Halt is the one order still accepted while braced, and clears it.
         regiment.braced = False
         regiment.braced_target = None
@@ -509,6 +513,8 @@ class Battle:
                 regiment.animation_seconds = 0.0
                 continue
             regiment.model_positions()  # seed positions at the current anchor/facing before it moves
+            if regiment.attack_target is None:
+                regiment.charge_started_target = None
             moved = False
             if regiment.in_melee:
                 pass  # frozen in place while fighting; the view shows the attack animation instead
@@ -527,12 +533,23 @@ class Battle:
                 target = self.regiments.get(regiment.attack_target)
                 if target is None or not target.active:
                     regiment.attack_target = None
+                    regiment.charge_started_target = None
                 else:
+                    if (regiment.charge_started_target != target.identifier
+                            and math.hypot(target.x - regiment.x, target.y - regiment.y)
+                            <= regiment.charge_reach):
+                        for model in regiment.melee_models:
+                            model.freeze_ticks = (model.stagger & 7) + 1
+                            model.current_speed = 0.0
+                        regiment.charge_started_target = target.identifier
                     moved = self._advance_toward(regiment, (target.x, target.y),
                                                  regiment.speed_for_mode(CHARGING_K) * scale, arrive=False)
             elif regiment.moving:
                 moved = self._advance_toward(regiment, (regiment.target_x, regiment.target_y),
                                              regiment.speed_per_tick * scale, arrive=True)
+            if regiment.attack_target is None and not regiment.in_melee:
+                for model in regiment.melee_models:
+                    model.freeze_ticks = 0
             models_catching_up = self._advance_models(regiment, scale)
             regiment.walking = moved or models_catching_up
             regiment.animation_seconds = regiment.animation_seconds + seconds if regiment.walking else 0.0
@@ -626,7 +643,12 @@ class Battle:
             tx, ty = cell if cell is not None else slot
             dx, dy = tx - px, ty - py
             distance = math.hypot(dx, dy)
-            if distance <= MODEL_ARRIVAL_DISTANCE:
+            if model.freeze_ticks > 0:
+                model.freeze_ticks -= 1
+                model.at_rest = distance <= MODEL_ARRIVAL_DISTANCE
+                new_position = (px, py)
+                still_moving |= not model.at_rest
+            elif distance <= MODEL_ARRIVAL_DISTANCE:
                 model.current_speed = model.distance_budget = 0.0
                 model.at_rest = True
                 new_position = (px, py)
