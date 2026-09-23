@@ -397,6 +397,89 @@ class ChargeStartFreezeTests(unittest.TestCase):
         self.assertTrue(all(model.freeze_ticks == 0 for model in self.charger.melee_models))
 
 
+class GradualTurningTests(unittest.TestCase):
+    """game_rules.md "Turning, wheeling and reversing": facing changes over multiple ticks."""
+
+    def _battle(self, ranks):
+        regiment = Regiment("block", "Block", 100, 100, 0, Side.PLAYER,
+                            models=20, ranks=ranks, speed_per_tick=speed_per_tick(4, 3))
+        return Battle(1000, 1000, [regiment]), regiment
+
+    def test_given_a_sixty_degree_order_when_ticked_then_the_block_halts_and_turns_gradually(self):
+        battle, regiment = self._battle(4)
+        half_frontage = (regiment.frontage - 1) * 6
+        battle.order_move("block", 100 + 300 * math.sin(math.pi / 3),
+                          100 + 300 * math.cos(math.pi / 3))
+
+        battle.tick()
+
+        self.assertEqual(regiment.turn_mode, "halted")
+        self.assertAlmostEqual(regiment.direction, 11 * (144 - 7 * 7) / 256)
+        angle = regiment.direction * math.tau / 512
+        self.assertAlmostEqual(regiment.x + half_frontage * math.cos(angle), 100 + half_frontage)
+        self.assertAlmostEqual(regiment.y - half_frontage * math.sin(angle), 100)
+
+    def test_given_a_thirty_degree_order_when_ticked_then_the_block_wheels_at_half_speed(self):
+        battle, regiment = self._battle(4)
+        half_frontage = (regiment.frontage - 1) * 6
+        battle.order_move("block", 100 + 300 * math.sin(math.pi / 6),
+                          100 + 300 * math.cos(math.pi / 6))
+
+        battle.tick()
+
+        self.assertEqual(regiment.turn_mode, "wheel")
+        self.assertAlmostEqual(regiment.direction, 11 * (144 - 7 * 7) / 512)
+        angle = regiment.direction * math.tau / 512
+        pivot_x = regiment.x + half_frontage * math.cos(angle)
+        pivot_y = regiment.y - half_frontage * math.sin(angle)
+        self.assertAlmostEqual(math.hypot(pivot_x - (100 + half_frontage), pivot_y - 100),
+                               regiment.speed_per_tick / 2)
+
+    def test_given_the_same_models_in_wide_and_deep_blocks_then_the_wide_block_turns_slower(self):
+        deep_battle, deep = self._battle(4)
+        wide_battle, wide = self._battle(2)
+        target = (100 + 300 * math.sin(math.pi / 3), 100 + 300 * math.cos(math.pi / 3))
+        deep_battle.order_move("block", *target)
+        wide_battle.order_move("block", *target)
+
+        deep_battle.tick()
+        wide_battle.tick()
+
+        self.assertAlmostEqual(deep.direction, 11 * 95 / 256)
+        self.assertAlmostEqual(wide.direction, 11 * 23 / 256)
+
+    def test_given_a_new_eastward_order_then_the_ninety_degree_snap_happens_only_once(self):
+        battle, regiment = self._battle(4)
+        battle.order_move("block", 500, 100)
+
+        battle.tick()
+        first_direction = regiment.direction
+        battle.tick()
+
+        self.assertEqual(first_direction, 128)
+        self.assertLessEqual(abs(Battle._turn_delta(regiment.direction, first_direction)), 10)
+        self.assertEqual((regiment.ranks, regiment.frontage), (5, 4))
+
+    def test_given_a_charging_target_changes_bearing_then_the_charge_reaims_at_the_next_segment(self):
+        charger = Regiment("charger", "Charger", 100, 100, 0, Side.PLAYER,
+                           models=20, ranks=4, speed_per_tick=speed_per_tick(4, 3))
+        target = Regiment("target", "Target", 100, 400, 0, Side.ENEMY)
+        battle = Battle(1000, 1000, [charger, target])
+        battle.order_attack("charger", "target")
+        battle.tick()
+        self.assertEqual(charger.direction, 0)
+        target.x = 300
+
+        for _ in range(18):
+            battle.tick()
+
+        self.assertEqual(charger.direction, 0)
+        battle.tick()  # tick 19 begins a new segment
+
+        self.assertEqual(charger.turn_mode, "charge_reaim")
+        self.assertGreater(charger.direction, 0)
+
+
 def formation_positions(regiment):
     from whshr import formation
     return formation.place(regiment.x, regiment.y, regiment.direction,

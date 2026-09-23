@@ -131,6 +131,12 @@ class Regiment:
     # Combat/order state (whshr.combat).
     attack_target: str | None = None  # identifier of an enemy regiment this regiment is charging
     charge_started_target: str | None = None  # target whose current charge already froze its models
+    turn_order_key: tuple | None = None
+    turn_goal: float | None = None
+    turn_remaining: float = 0.0
+    turn_sign: int = 0
+    turn_shift: int = 0
+    turn_mode: str | None = None  # "halted", "wheel", or "charge_reaim"
     # game_rules.md "Braced" (flag 0x100000): set when this regiment passes its fear/terror test on
     # being charged (interpreter.op_FearWhenCharged, event 0x07). While set, move/attack/turn/rank/
     # charge/fire orders are ignored -- for the player exactly like for a script -- until the charger
@@ -404,6 +410,7 @@ class Battle:
             raise ValueError("destination is outside the battlefield")
         regiment.attack_target = None
         regiment.charge_started_target = None
+        regiment.turn_order_key = None
         regiment.target_x, regiment.target_y = float(x), float(y)
 
     def order_attack(self, identifier, target_id):
@@ -424,6 +431,7 @@ class Battle:
             raise ValueError(f"{target_id} is no longer on the field")
         regiment.target_x = regiment.target_y = None
         regiment.attack_target = target_id
+        regiment.turn_order_key = None
 
     def order_halt(self, identifier):
         """Cancel the selected regiment's current movement or charge order in place."""
@@ -437,6 +445,7 @@ class Battle:
         regiment.target_x = regiment.target_y = None
         regiment.attack_target = None
         regiment.charge_started_target = None
+        regiment.turn_order_key = None
         # game_rules.md "Braced": Halt is the one order still accepted while braced, and clears it.
         regiment.braced = False
         regiment.braced_target = None
@@ -517,12 +526,14 @@ class Battle:
                 regiment.charge_started_target = None
             moved = False
             if regiment.in_melee:
+                regiment.turn_order_key = regiment.turn_mode = None
                 pass  # frozen in place while fighting; the view shows the attack animation instead
             elif regiment.routing:
                 if regiment.flee_x is None:  # self-heal: should only happen for pre-existing state
                     regiment.flee_x, regiment.flee_y = self._flee_point(regiment)
                 moved = self._advance_toward(regiment, (regiment.flee_x, regiment.flee_y),
-                                             regiment.speed_for_mode(FLEEING_K) * scale, arrive=False)
+                                             regiment.speed_for_mode(FLEEING_K) * scale, arrive=False,
+                                             order_key=("flee",), scale=scale)
                 if not (0 <= regiment.x <= self.width and 0 <= regiment.y <= self.height):
                     regiment.fled = True
                     self.events.append(BattleEvent(
@@ -543,10 +554,14 @@ class Battle:
                             model.current_speed = 0.0
                         regiment.charge_started_target = target.identifier
                     moved = self._advance_toward(regiment, (target.x, target.y),
-                                                 regiment.speed_for_mode(CHARGING_K) * scale, arrive=False)
+                                                 regiment.speed_for_mode(CHARGING_K) * scale, arrive=False,
+                                                 order_key=("charge", target.identifier), scale=scale)
             elif regiment.moving:
                 moved = self._advance_toward(regiment, (regiment.target_x, regiment.target_y),
-                                             regiment.speed_per_tick * scale, arrive=True)
+                                             regiment.speed_per_tick * scale, arrive=True,
+                                             order_key=("move", regiment.target_x, regiment.target_y), scale=scale)
+            else:
+                regiment.turn_order_key = regiment.turn_mode = None
             if regiment.attack_target is None and not regiment.in_melee:
                 for model in regiment.melee_models:
                     model.freeze_ticks = 0
@@ -572,8 +587,79 @@ class Battle:
         regiment.y += shift_y
 
     @staticmethod
-    def _advance_toward(regiment, target, step, arrive):
-        """Move `regiment`'s anchor by at most `step` toward `target`, turning to face travel direction.
+    def _turn_delta(direction, goal):
+        """Signed shortest turn in 1/512-turn units."""
+        return (goal - direction + 256) % 512 - 256
+
+    @staticmethod
+    def _snap_order_turn(regiment, goal):
+        """Apply the one-time 90/180-degree snap on a new movement order."""
+        delta = Battle._turn_delta(regiment.direction, goal)
+        magnitude = abs(delta)
+        snap = 256 if magnitude > 192 else 128 if magnitude >= 97 else 0
+        if not snap:
+            return
+        old_direction = regiment.direction
+        old_ranks = regiment.ranks
+        new_direction = (old_direction + math.copysign(snap, delta)) % 512
+        if snap == 128:
+            regiment.ranks, regiment.frontage = regiment.frontage, old_ranks
+        old_offset = (old_ranks - 1) * formation.MODEL_SPACING / 2
+        new_offset = (regiment.ranks - 1) * formation.MODEL_SPACING / 2
+        old_angle = old_direction * math.tau / 512
+        new_angle = new_direction * math.tau / 512
+        regiment.x += new_offset * math.sin(new_angle) - old_offset * math.sin(old_angle)
+        regiment.y += new_offset * math.cos(new_angle) - old_offset * math.cos(old_angle)
+        regiment.direction = new_direction
+
+    @staticmethod
+    def _plan_turn(regiment, goal, charge=False):
+        """Choose the gradual turn mode once from the angle still owed."""
+        delta = Battle._turn_delta(regiment.direction, goal)
+        magnitude = abs(delta)
+        regiment.turn_goal = goal
+        regiment.turn_remaining = magnitude
+        regiment.turn_sign = 1 if delta > 0 else -1
+        if magnitude <= 10 or (charge and magnitude <= 32):
+            regiment.turn_mode = None
+            if magnitude <= 10:
+                regiment.direction = goal
+            return
+        if charge:
+            regiment.turn_mode, regiment.turn_shift = "charge_reaim", 9
+        elif magnitude > 64:
+            regiment.turn_mode, regiment.turn_shift = "halted", 8
+        else:
+            regiment.turn_mode, regiment.turn_shift = "wheel", 7
+
+    @staticmethod
+    def _step_turn(regiment, scale):
+        """Advance one active gradual turn, shifting the anchor around the inner corner."""
+        if regiment.turn_mode is None:
+            return None
+        frontage = regiment.frontage
+        ranks = max(1, min(regiment.models, regiment.ranks))
+        size = frontage + ranks - min(frontage, ranks) / 2
+        s_rlmv = regiment.speed_per_tick * 16 / MOVING_FREELY_K
+        step = max(0.0, s_rlmv * (144 - size * size) / (2 ** (16 - regiment.turn_shift))) * scale
+        if step <= 0:
+            return regiment.turn_mode
+        old_direction = regiment.direction
+        amount = min(step, regiment.turn_remaining)
+        new_direction = (old_direction + regiment.turn_sign * amount) % 512
+        shift_x, shift_y = formation.turn_corner_shift(old_direction, new_direction,
+                                                       frontage, regiment.turn_sign)
+        regiment.x += shift_x
+        regiment.y += shift_y
+        regiment.direction = new_direction
+        regiment.turn_remaining -= amount
+        mode = regiment.turn_mode
+        if regiment.turn_remaining <= 10:
+            regiment.turn_mode = None
+        return mode
+
+    def _advance_toward(self, regiment, target, step, arrive, order_key, scale):
+        """Turn toward a target over time, then advance along the current facing.
 
         With `arrive=True` (an ordinary move order) reaching the target clears it, matching the
         original "moving freely" order completion. With `arrive=False` (a charge chase or a rout) the
@@ -586,14 +672,31 @@ class Battle:
             if arrive:
                 regiment.target_x = regiment.target_y = None
             return False
-        # 0 = north/+Y and directions increase clockwise.
-        Battle._turn_to(regiment, round(math.atan2(dx, dy) * 512 / math.tau) % 512)
-        if arrive and distance <= step:
+        goal = round(math.atan2(dx, dy) * 512 / math.tau) % 512
+        new_order = order_key != regiment.turn_order_key
+        if new_order:
+            regiment.turn_order_key = order_key
+            if order_key[0] in ("move", "charge"):
+                self._snap_order_turn(regiment, goal)
+            self._plan_turn(regiment, goal, charge=order_key[0] == "charge")
+        elif order_key[0] == "charge" and self.tick_count % combat.SEGMENT_TICKS == 0:
+            self._plan_turn(regiment, goal, charge=True)
+        elif regiment.turn_mode is None and order_key[0] != "charge":
+            self._plan_turn(regiment, goal, charge=order_key[0] == "charge")
+        mode = self._step_turn(regiment, scale)
+        if mode == "wheel":
+            step /= 2
+        elif mode is not None:
+            step = 0
+        if step <= 0:
+            return mode is not None
+        if arrive and distance <= step and abs(self._turn_delta(regiment.direction, goal)) <= 10:
             regiment.x, regiment.y = target
             regiment.target_x = regiment.target_y = None
             return False
-        regiment.x += dx / distance * step
-        regiment.y += dy / distance * step
+        angle = regiment.direction * math.tau / formation.FULL_TURN
+        regiment.x += math.sin(angle) * min(step, distance)
+        regiment.y += math.cos(angle) * min(step, distance)
         return True
 
     def _nearest_enemy(self, regiment):

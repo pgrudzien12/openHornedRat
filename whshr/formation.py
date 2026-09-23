@@ -112,6 +112,19 @@ def turn_pivot_shift(direction, new_direction, models, ranks, spacing=MODEL_SPAC
     return (offset * (math.sin(new) - math.sin(old)), offset * (math.cos(new) - math.cos(old)))
 
 
+def turn_corner_shift(direction, new_direction, frontage, turn_sign, spacing=MODEL_SPACING):
+    """Move the anchor while a block turns gradually around its inner front corner.
+
+    `turn_sign` is +1 for clockwise and -1 for counterclockwise. The corner is half a
+    frontage from the front-rank centre (game_rules.md, "Turning, wheeling and reversing").
+    """
+    half_frontage = (frontage - 1) * spacing / 2
+    old = direction * math.tau / FULL_TURN
+    new = new_direction * math.tau / FULL_TURN
+    return (turn_sign * half_frontage * (math.cos(old) - math.cos(new)),
+            turn_sign * half_frontage * (math.sin(new) - math.sin(old)))
+
+
 def _point_segment_distance(px, py, ax, ay, bx, by):
     dx, dy = bx - ax, by - ay
     length2 = dx * dx + dy * dy
