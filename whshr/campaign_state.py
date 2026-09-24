@@ -9,7 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 from .campaign import build_campaign_graph, parse_window_ui
-from .glue import MissionRef
+from .glue import MissionRecord, MissionRef
 from .glue_content import GlueContent
 from .paths import Installation
 from . import roster
@@ -52,6 +52,41 @@ def eligible_missions(missions, taken):
     """Return the mission entries a window offers once ``taken`` have been committed to."""
     taken = set(taken)
     return tuple(mission for mission in missions if mission_visible(missions, mission, taken))
+
+
+def _record_gates(record):
+    """Return ``(name_id, gates)`` of one typed ``[MISSION]`` record (``gates``: depend/inactivedepend)."""
+    entry = {}
+    for field_ in record.fields:
+        if field_.command != "set" or "=" not in field_.argument:
+            continue
+        key, value = field_.argument.split("=", 1)
+        key = key.strip().casefold()
+        if key in ("res", "depend", "inactivedepend"):
+            try:
+                entry[key] = int(value.split(None, 1)[0])
+            except (ValueError, IndexError):
+                pass
+    return entry
+
+
+def offered_refs(records, taken):
+    """Return the ``MissionRef`` of every mission record a window offers, in window order.
+
+    ``records`` are the window's typed ``[MISSION]`` records and ``taken`` the set of committed
+    ``MissionRef``.  A taken mission is hidden; ``depend`` / ``inactivedepend`` follow
+    :func:`mission_visible` (notes/mission_selection.md, notes/campaign.md section 7.2).
+    """
+    taken = set(taken)
+    entries = []
+    for record in records:
+        gates = _record_gates(record)
+        gates["name_id"] = gates.pop("res", None)
+        gates["ref"] = record.mission_ref
+        entries.append(gates)
+    taken_ids = {entry["name_id"] for entry in entries if entry["ref"] in taken and entry["name_id"] is not None}
+    return tuple(entry["ref"] for entry in entries
+                 if entry["ref"] not in taken and mission_visible(entries, entry, taken_ids))
 
 
 def initial_flow(hotspots):
@@ -163,6 +198,10 @@ class CampaignState:
                 return self.graph.get("portrait_windows", {}).get(step["window"])
         return None
 
+    def offered_missions(self, records):
+        """The refs of the typed mission ``records`` of one window that are on offer now."""
+        return offered_refs(records, self.taken_missions)
+
     def is_mission_taken(self, mission_ref):
         """Has this mission already been committed to or finished (so it is no longer offered)?"""
         return mission_ref in self.taken_missions
@@ -182,6 +221,19 @@ class CampaignState:
         waits = [index for index, step in enumerate(steps) if step["action"] == "wait_player_choice"]
         return ordinal < len(waits) and waits[ordinal] < self.flow_step
 
+    def _anything_offered(self):
+        """Does the current mission window still offer a row?  Keyed by mission record, because the
+        same name id recurs in several windows (a finished one must not hide another window's row)."""
+        if self.content is not None:
+            try:
+                records = [record for record in self.content.window(self.mission_window).records
+                           if isinstance(record, MissionRecord)]
+            except (KeyError, TypeError):
+                records = None
+            if records is not None:
+                return bool(self.offered_missions(records))
+        return bool(self.missions)
+
     def complete(self, mission):
         """Record a chosen mission and say how the flow continues.
 
@@ -199,7 +251,7 @@ class CampaignState:
             self.flow_history.append(replacement)
             self._open_next_window(0)
             return replacement, False
-        if mission.get("releaseflag") or not self.missions:
+        if mission.get("releaseflag") or not self._anything_offered():
             self._open_next_window(self.flow_step + 1)
             return None, True
         return None, False

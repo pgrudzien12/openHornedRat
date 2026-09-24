@@ -699,8 +699,20 @@ class GlueRuntime:
         return False
 
     def _mission_offered(self, ref):
-        taken = getattr(self.campaign, "is_mission_taken", None)
-        return not (taken and taken(ref))
+        """Is ``ref`` on offer in its window under the campaign's taken set and its depend gates?"""
+        offered = getattr(self.campaign, "offered_missions", None)
+        if offered is None:
+            return True
+        try:
+            records = self.content.window(ref.window).records
+        except (KeyError, TypeError):
+            return True
+        return ref in offered([record for record in records if isinstance(record, MissionRecord)])
+
+    def refresh_selection(self):
+        """Rebuild the selection after the offered list changed: a mission that is no longer on
+        offer is dropped and the first offered row on screen is selected instead."""
+        self._select_first_mission()
 
     def _select_first_mission(self):
         if self.state.selected_mission is not None:

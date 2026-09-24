@@ -9,7 +9,8 @@ import sys
 
 import pygame
 
-from ..campaign_state import CARAVAN_MODE_WINDOWS
+from ..campaign_state import CARAVAN_MODE_WINDOWS, offered_refs
+from ..glue import MissionRecord
 from ..controlpanel import button_y, control_panel
 from ..glue_animation import GlueBitmapAnimator
 from ..glue_render import build_render_model
@@ -254,7 +255,7 @@ class GlueView(NativeScreenView):
 
     def _refresh_missions(self, models, palette):
         rows = _mission_rows(self.scene.runtime.content, models, self.scene.runtime.state.selected_mission,
-                             getattr(self.scene.campaign, "taken_missions", ()))
+                             getattr(self.scene.campaign, "taken_missions", None))
         state = (rows, palette)
         if state == getattr(self, "_mission_state", None):
             return
@@ -559,14 +560,19 @@ def _caravan_hint(campaign, models, hotspot):
     return campaign.hint(hint_id, campaign.coffers) if hint_id == 402 else campaign.hint(hint_id)
 
 
-def _mission_rows(content, models, selected, taken=()):
-    taken = set(taken)
+def _mission_rows(content, models, selected, taken=None):
+    """Rows on offer; ``taken=None`` (no campaign) shows every record ungated."""
     rows = []
     for model in models:
         for mission_list in model.mission_lists:
             y = model.y + mission_list.y
+            windows = {reference.window for reference in mission_list.missions}
+            offered = set()
+            for window in windows:
+                records = [record for record in content.window(window).records if isinstance(record, MissionRecord)]
+                offered.update(offered_refs(records, taken or ()))
             for reference in mission_list.missions:
-                if reference in taken:
+                if taken is not None and reference not in offered:
                     continue
                 record = content.mission(reference)
                 try:

@@ -88,7 +88,7 @@ renumber later work.
   modes first: post-mission, resume, and recruitment. Add books, options, save/load UI, and
   dialogue close-ups only when their underlying activities exist.
 
-- [ ] **GEI10 — Campaign mission progression.** (issue #124) Apply `depend` and `inactivedepend` to generic
+- [x] **GEI10 — Campaign mission progression.** (issue #124) Apply `depend` and `inactivedepend` to generic
   mission rows; advance the campaign for release and replacement paths; rebuild the offered list
   after mission commitment.
 
@@ -110,6 +110,16 @@ renumber later work.
   every live entry, exit, and return path.
 
 ## Implementation findings
+
+- GEI10: the offered mission rows of a window are computed per mission record (`MissionRef`), never by
+  name id across windows: the same ids (601, 615, 628...) recur in many windows. The map view, the
+  runtime's mission selection and the flow advance all use one predicate (taken hides; `depend` needs
+  the named same-window mission taken; `inactivedepend` needs it not on offer). Only four shipped
+  windows carry gates (`MISSIONENWINDOW`, `MISSIONLWINDOW`, `MISSIONL3WINDOW` whose gate names a mission
+  outside the window, `MISSIONSZWINDOW`). A mission is taken at troop selection's Done, so aborting from
+  the briefing or troop selection leaves it offered; after commitment the list is rebuilt and the
+  selection moves to the first offered row. Walking every flow completes without an empty map; a chapter's
+  last window ends with the flow script running on.
 
 - The initial caravan is a top-level generic window; its mission hotspot starts a flow program.
   Later caravan transitions are interpreter activities and need GEI9 rather than another
