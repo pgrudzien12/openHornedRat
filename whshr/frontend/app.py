@@ -63,7 +63,7 @@ class FrameRate:
 
 def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=None, screenshot=None,
         frame_time=None, battle=None, camera=None, log_dir=None, seed=DEFAULT_SEED, glue_program=None,
-        save_dir=None):
+        save_dir=None, no_battle=False):
     """Run the game until the window closes, or for ``frames`` frames when given.
 
     ``frame_time`` replaces the measured wall-clock frame duration, so a capture after a number of frames
@@ -75,12 +75,14 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
     ``glue_program`` is a development shortcut that starts a typed ``[RUN]``
     resource through ``GlueScene`` and its generic static view. ``save_dir`` is the engine's own
     save directory (never the original installation's SAVE/, notes/glue_engine_integration.md GEI7e).
+    ``no_battle`` turns on the campaign-progression shortcut: every battle reached through the
+    scene flow settles as an immediate, lossless win instead of being simulated.
     """
     if hidden:
         # A hidden run is a development/test capture (--frames, --screenshot); it has no listener
         # and should not play audio through the machine's real device while running unattended.
         os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
-    context = scene_context(installation, save_dir=save_dir)
+    context = scene_context(installation, save_dir=save_dir, no_battle=no_battle)
     ctx = open_window(size, hidden)
     gpu = Gpu(ctx, size)
     # Wider debug overlay; unrelated to the battle HUD.

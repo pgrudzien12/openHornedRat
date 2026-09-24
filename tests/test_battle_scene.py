@@ -201,6 +201,37 @@ class BattleSceneTests(unittest.TestCase):
         self.assertEqual(machine.active.result, "victory")
         self.assertTrue(machine.active.summary)
 
+    def test_given_no_battle_mode_when_entered_then_it_settles_immediately_as_a_lossless_victory(self):
+        self.context.no_battle = True
+        scene = BattleScene()
+        machine = SceneMachine(scene, self.context)
+
+        machine.update(BATTLE_TICK_SECONDS)
+
+        self.assertIsInstance(machine.active, ResultScene)
+        self.assertEqual(machine.active.result, "victory")
+        for line in machine.active.summary:
+            if "Grudgebringer" in line:
+                self.assertIn("16/16", line)  # no losses
+            else:
+                self.assertIn("0/", line)  # every enemy destroyed
+
+    def test_given_no_battle_mode_when_reached_through_glue_then_it_resolves_back_into_the_campaign_flow(self):
+        # The mode exists to walk the campaign quickly: the glue-triggered path (playgame -> battle
+        # -> resume campaign script), not just the standalone-battle -> ResultScene -> main menu path.
+        self.context.glue = GlueContent.from_data(resources={
+            "FLOW": "[RUN]\n[START]\nplaygame:bf001\nendgame:\n[END]",
+        })
+        self.context.no_battle = True
+        glue = GlueScene("FLOW")
+        machine = SceneMachine(glue, self.context)
+        self.assertIsInstance(machine.active, BattleScene)
+
+        machine.update(BATTLE_TICK_SECONDS)
+
+        self.assertIs(machine.active, glue)
+        self.assertEqual(glue.take_effects(), (EndGame(),))
+
     def test_given_the_result_scene_when_dismissed_then_it_returns_to_the_main_menu(self):
         from whshr.campaign_scenes import MainMenuScene
         scene = ResultScene("victory", ["Player Regiment: 10/10 models"])

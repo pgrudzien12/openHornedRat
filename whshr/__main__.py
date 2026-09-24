@@ -121,6 +121,9 @@ def main(argv=None):
     engine_parser.add_argument("--save-dir", type=Path, default=REPOSITORY_SAVES,
                                help="directory for engine saves, e.g. ARMY.MRC/MARCH.MRC "
                                     "(default: saves/; never the original installation's SAVE/)")
+    engine_parser.add_argument("--no-battle", action="store_true",
+                               help="skip battle simulation: every battle settles as an immediate, "
+                                    "lossless win, so campaign progression can be walked through quickly")
     viewer_parser = commands.add_parser("viewer", help="render a static 3D battle scene to PNG")
     viewer_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     viewer_parser.add_argument("battle", help="BTS filename or path")
@@ -232,7 +235,7 @@ def main(argv=None):
         log_dir = None if args.no_battle_log else args.battle_log
         result = app.run(args.installation, (args.width, args.height), args.skip_intro, args.hidden,
                          args.frames, args.screenshot, args.frame_time, args.battle, args.camera,
-                         log_dir, args.seed, args.glue_program, args.save_dir)
+                         log_dir, args.seed, args.glue_program, args.save_dir, args.no_battle)
         print(f"{result['frames']} frames, {result['ticks']} ticks, final scene {result['scene']}")
         return 0
     if args.command == "viewer":

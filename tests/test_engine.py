@@ -1079,6 +1079,19 @@ class BattleOutcomeTests(unittest.TestCase):
 
         self.assertEqual(battle.result, "defeat")
 
+    def test_given_a_no_battle_skip_when_resolved_then_it_is_an_immediate_lossless_victory(self):
+        player = Regiment("player", "Player", 0, 0, 0, Side.PLAYER, models=20, ranks=2)
+        enemy = Regiment("enemy", "Enemy", 60, 0, 0, Side.ENEMY, models=30, ranks=3)
+        neutral = Regiment("neutral", "Neutral", 30, 0, 0, Side.NEUTRAL, models=10, ranks=1)
+        battle = Battle(1000, 1000, [player, enemy, neutral], seed=1)
+
+        battle.resolve_no_battle()
+
+        self.assertEqual(battle.result, "victory")
+        self.assertEqual(player.models, 20)  # no losses
+        self.assertEqual(enemy.models, 0)  # every enemy destroyed
+        self.assertEqual(neutral.models, 10)  # neutral regiments are untouched
+
 
 if __name__ == "__main__":
     unittest.main()

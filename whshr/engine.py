@@ -554,6 +554,17 @@ class Battle:
         regiment.braced = False
         regiment.braced_target = None
 
+    def resolve_no_battle(self):
+        """No-battle mode (a campaign-progression shortcut, not a game rule): skip this fight and
+        settle it as an immediate, lossless win -- every enemy regiment destroyed, no player
+        regiment touched -- so the campaign flow past it (debrief, roster, map) can be walked
+        without simulating it. Leaves neutral regiments alone; `_update_result` reads only player
+        and enemy sides."""
+        for regiment in self.regiments.values():
+            if regiment.side == Side.ENEMY:
+                regiment.models = 0
+        self._update_result()
+
     def order_reform(self, identifier, ranks):
         """Change a player regiment's rank count (game_rules.md, "Formation changes: how the figures
         re-sort themselves"): refused while fleeing, held or charging (including once in melee, since

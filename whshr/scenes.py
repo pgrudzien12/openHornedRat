@@ -53,6 +53,9 @@ class SceneAssets:
     glue: object = None
     # The engine's own save directory (never the original installation's SAVE/, GEI7e).
     save_dir: object = None
+    # No-battle mode: BattleScene settles every battle it enters as an immediate, lossless win
+    # instead of simulating it, so the campaign can be walked through quickly.
+    no_battle: bool = False
 
     def load(self, identifier):
         record = self.catalog.get(identifier)

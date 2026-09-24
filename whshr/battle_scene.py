@@ -51,6 +51,8 @@ class BattleScene(Scene):
         self.battle = Battle.from_script(self.field.script, seed=self.seed, script_dll=script_dll,
                                          script_logger=self.logger)
         self.initial_models = {identifier: regiment.models for identifier, regiment in self.battle.regiments.items()}
+        if getattr(context, "no_battle", False):
+            self.battle.resolve_no_battle()
         self.skirmishes = skirmish_log.SkirmishLogger(self.log_dir, self.battle_id.name)
         self._log_closed = False
         if self.logger.enabled:
