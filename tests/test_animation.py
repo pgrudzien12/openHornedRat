@@ -299,3 +299,75 @@ class StaggeredCollapseTests(unittest.TestCase):
 
         self.assertEqual(len(regiment.corpses), 4)
         self.assertEqual(regiment.dying, [])
+
+
+class WalkDesyncAndFireCadenceTests(unittest.TestCase):
+    """#74: walk desynchronisation, one shared walk action, fire events posted by the animation."""
+
+    def test_given_a_regiment_that_starts_marching_together_when_a_loop_passes_then_phases_desynchronise(self):
+        regiment = Regiment("r", "R", 0, 0, 0, Side.PLAYER, models=16, ranks=2)
+        battle = Battle(2000, 2000, [regiment], seed=7)
+        regiment.model_positions()
+        rng = random.Random(3)
+        models = regiment.melee_models
+
+        # All models start marching on the same tick.
+        for _ in range(8):
+            phases = [animation.step(m, animation.WALK, rng)[1] for m in models]
+            self.assertGreater(len(set(phases)), 1)  # never goose-stepping in unison
+        self.assertGreater(len({m.action_entry for m in models}), 3)
+
+    def test_given_charging_marching_pursuing_and_fleeing_then_they_all_play_the_one_walk_action(self):
+        # The engine only ever requests WALK for a model that has not reached its slot, whatever the
+        # regiment's order; there is no separate run action id in the table.
+        self.assertEqual(sorted(animation.STANDARD_INFANTRY), [1, 2, 3, 4, 5, 6, 7])
+        for mode in ("march", "charge", "pursue", "flee"):
+            mover = Regiment("m", "M", 2000, 2000, 0, Side.PLAYER, models=6, ranks=2)
+            other = Regiment("o", "O", 2000, 2600, 0, Side.ENEMY, models=6, ranks=2)
+            battle = Battle(4000, 4000, [mover, other], seed=1)
+            if mode == "march":
+                battle.order_move("m", 2500, 2000)
+            elif mode == "charge":
+                battle.order_attack("m", "o")
+            elif mode == "pursue":
+                other.routing = True
+                other.flee_x, other.flee_y = 2000.0, 3500.0
+                battle.order_attack("m", "o")
+            else:
+                mover.routing = True
+                mover.flee_x, mover.flee_y = 2000.0, 1000.0
+            seen = set()
+            for _ in range(40):  # a fleeing unit pauses briefly before it breaks
+                battle.tick()
+                seen |= {m.action for m in mover.melee_models}
+            self.assertIn(animation.WALK, seen, mode)
+            self.assertLessEqual(seen, {animation.IDLE, animation.WALK}, mode)
+
+    def test_given_an_archer_unit_when_shooting_then_every_4th_model_posts_its_fire_event_on_spread_ticks(self):
+        rng = random.Random(11)
+        models = [ModelState() for _ in range(16)]
+        fire_ticks = {}
+        for tick in range(8):
+            for index, model in enumerate(models):
+                animation.step(model, animation.SHOOT, rng)
+                if model.fire_event:
+                    fire_ticks.setdefault(index, []).append(tick)
+
+        # Each model posts exactly once per shoot pose, 1-4 ticks in, depending on its random entry.
+        self.assertEqual(sorted(fire_ticks), list(range(16)))
+        self.assertTrue(all(len(t) == 1 and 1 <= t[0] <= 4 for t in fire_ticks.values()))
+        self.assertGreater(len({t[0] for t in fire_ticks.values()}), 1)
+
+    def test_given_an_archer_regiment_when_a_volley_resolves_then_it_has_one_shot_per_4_front_rank_models(self):
+        from whshr import combat
+        for models, ranks, expected in ((10, 1, 3), (16, 1, 4)):
+            archer = Regiment("a", "A", 0, 0, 0, Side.PLAYER, models=models, ranks=ranks)
+            archer.missile_range, archer.missile_code, archer.bs = 720.0, 2, 5
+            enemy = Regiment("e", "E", 0, 300, 0, Side.ENEMY, models=10, ranks=2)
+            battle = Battle(2000, 2000, [archer, enemy], seed=2)
+            for _ in range(12):
+                battle.tick()
+                shot = [e for e in battle.events if getattr(e, "kind", "") == "shooting"]
+                if shot:
+                    break
+            self.assertEqual(shot[0].data["shots"], expected)

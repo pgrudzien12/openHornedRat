@@ -754,13 +754,22 @@ class ShootingTests(unittest.TestCase):
         self.target = _regiment("t", 0, 300, Side.ENEMY, toughness=3, armour=0, speed_per_tick=0.0)
         self.battle = Battle(2000, 2000, [self.shooter, self.target], seed=0)
 
-    def test_given_a_target_in_range_and_arc_when_ticked_then_it_fires_and_reloads(self):
-        self.battle.tick()
+    def _tick_until_volley(self, limit=12):
+        """Volleys wait for the archers' animation fire events (a few ticks into the shoot pose)."""
+        for _ in range(limit):
+            self.battle.tick()
+            if self.shooter.reload_ticks > 0:
+                return
+        self.fail("no volley within %d ticks" % limit)
 
-        self.assertEqual(self.target.models, 10)  # seed 0: no casualties from this volley
-        self.assertIn("s shoots t: no casualties.", self.battle.events)
-        # game_rules.md 8.2: an I3 crossbow unit reloads in 96 ticks.
-        self.assertAlmostEqual(self.shooter.reload_ticks, 96)
+    def test_given_a_target_in_range_and_arc_when_ticked_then_it_fires_and_reloads(self):
+        self._tick_until_volley()
+
+        # Fixed seed: the volley now lands on the tick the last shooter's animation posts its fire
+        # event, so the dice stream (and this outcome) differs from the old fire-on-first-tick.
+        self.assertTrue(any(str(e).startswith("s shoots t:") for e in self.battle.events))
+        # game_rules.md 8.2: an I3 crossbow unit reloads in 96 ticks (counting down from the volley tick).
+        self.assertGreater(self.shooter.reload_ticks, 90)
 
     def test_given_a_target_outside_the_front_arc_when_ticked_then_it_does_not_fire(self):
         self.target.x, self.target.y = 300.0, 0.0  # due east: outside the +/-45 degree arc facing north
@@ -771,18 +780,21 @@ class ShootingTests(unittest.TestCase):
         self.assertEqual(self.shooter.reload_ticks, 0.0)
 
     def test_given_a_reloading_shooter_when_ticked_then_it_holds_fire_until_ready(self):
-        self.battle.tick()
-        reload_ticks = int(self.shooter.reload_ticks)
-        models_after_first_volley = self.target.models
+        self._tick_until_volley()
+        volleys = [1]  # the first volley's own tick
 
-        for _ in range(reload_ticks - 1):
-            self.battle.tick()
-        self.assertEqual(self.target.models, models_after_first_volley)  # still reloading
+        def run(ticks):
+            for _ in range(ticks):
+                self.battle.tick()
+                volleys[0] += sum(1 for e in self.battle.events if getattr(e, "kind", "") == "shooting")
+
+        run(int(self.shooter.reload_ticks) - 1)
+        self.assertEqual(volleys[0], 1)  # still reloading
         self.assertGreater(self.shooter.reload_ticks, 0)
 
-        self.battle.tick()  # the reload countdown reaches zero on this tick: it fires again
+        run(12)  # ready again: fires as soon as the next fire events arrive
 
-        self.assertLess(self.target.models, models_after_first_volley)
+        self.assertEqual(volleys[0], 2)
 
 
 class ChargeBonusEndToEndTests(unittest.TestCase):
