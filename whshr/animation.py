@@ -61,6 +61,7 @@ class ActionScript:
     variant_rule: str | None = None
     locks_facing: bool = False
     fire_at: int | None = None  # script step (counting the random entry skip) that posts the fire event
+    skip_ahead: bool = False  # the random entry skips ahead in ONE fixed-length program (bigger skip = sooner end)
 
 
 # Standard infantry (notes/game_rules.md "Figure animation" table). Sprite groups per
@@ -72,8 +73,8 @@ STANDARD_INFANTRY = {
     FIGHT: ActionScript("attack", sequence=(0, 0, 1, 2, 3, 3, 1, 1, 3, 0, 2, 2), random_entry=10),
     WEAPON_READY: ActionScript("attack", random_choice=(0, 2)),
     DEAD: ActionScript("dead", sequence=(0,), loop=False, locks_facing=True),
-    SHOOT: ActionScript("shoot", sequence=(0, 1, 2, 3), random_entry=4, hold_ticks=2, next_action=STAND,
-                         fire_at=4),
+    SHOOT: ActionScript("shoot", sequence=(0, 1, 2, 3), random_entry=4, hold_ticks=3, next_action=STAND,
+                         fire_at=4, skip_ahead=True),
 }
 
 # Per-model costume families (game_rules.md mechanism 4). Groups are first-frame numbers in the sprite
@@ -229,6 +230,8 @@ def _phase_at(script, pc, entry):
         index = (entry + pc) % length if script.loop else min(entry + pc, length - 1)
         return script.sequence[index]
     run = script.run_ticks or length
+    if script.skip_ahead:
+        return script.sequence[min(entry + pc, length - 1)]
     if pc < run:
         index = (entry + pc) % length if script.loop else min(entry + pc, length - 1)
     else:
@@ -247,7 +250,12 @@ def one_shot_running(model, family=DEFAULT_FAMILY):
     script = family_table(family)[model.action]
     if script.next_action is None:
         return False
-    return model.action_pc < (script.run_ticks or len(script.sequence)) + script.hold_ticks
+    total = (script.run_ticks or len(script.sequence)) + script.hold_ticks
+    if script.skip_ahead:
+        # One fixed-length program: the entry skip is spent up front, so a bigger skip ends sooner
+        # (skip 0 plays 7 ticks, skip 3 plays 4; game_rules.md "Figure animation").
+        return model.action_pc + model.action_entry < total
+    return model.action_pc < total
 
 
 def _enter(model, table, action, rng):
