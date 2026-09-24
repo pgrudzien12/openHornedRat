@@ -200,7 +200,7 @@ class GlueWatcher:
         if mission != self._mission:
             self._mission = mission
             if mission is not None:
-                log.write("mission_selected", mission=str(mission))
+                log.write("mission_selected", window=mission.window, record_index=mission.record_index)
         summary = campaign_summary(self.campaign)
         if summary != self._summary:
             log.write("campaign_state", before=self._summary, after=summary)

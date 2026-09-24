@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 from whshr.campaign_log import CampaignLogger, campaign_summary, default_log_path
+from whshr.glue import MissionRef
 from whshr.glue_content import GlueContent
 from whshr.glue_runtime import ActivityResult, GlueInput
 from whshr.glue_scene import GlueScene
@@ -125,6 +126,15 @@ class CampaignLogTests(unittest.TestCase):
         row = next(row for row in self.rows() if row["type"] == "campaign_state")
         self.assertEqual((row["before"]["coffers"], row["after"]["coffers"]), (100, 250))
         self.assertIsNone(campaign_summary(None))
+
+    def test_selected_mission_is_logged_as_window_and_record_index(self):
+        scene = GlueScene("FLOW")
+        scene.enter(self.context)
+        scene.runtime.state.selected_mission = MissionRef("missionbp01window", 3)
+        scene.update(0.016, self.context)
+
+        row = next(row for row in self.rows() if row["type"] == "mission_selected")
+        self.assertEqual((row["window"], row["record_index"]), ("MISSIONBP01WINDOW", 3))
 
     def test_battle_hand_off_points_at_the_battle_log(self):
         class Stub(Scene):
