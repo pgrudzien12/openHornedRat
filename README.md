@@ -68,6 +68,16 @@ export WARFB=/path/to/WARFB
 .venv/bin/python -m whshr engine
 ```
 
+Or skip typing paths altogether with the standalone launcher, which finds the installation (or
+lets you browse for it), remembers it, lists the available battles, and starts the engine for you:
+
+```sh
+python3 -m whshr.launcher
+```
+
+The launcher itself only needs the Python standard library (no `.venv` required to run it), but
+still launches the engine through the `.venv` next to this checkout.
+
 The window opens with the prologue and intro. Any key or click skips the intro; choose **New Campaign** with `N` or Enter. Use Ctrl+Q or close the window to quit.
 
 ### Battle controls

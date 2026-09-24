@@ -101,6 +101,11 @@ whshr/             - unified package and CLI: python3 -m whshr check|extract|cat
                      local .venv/); imported solely by `engine`: app.py (window, loop, overlay), views.py (registry),
                      scene_view.py, battle_view.py (GPU terrain/scenery/sprites, camera, selection and orders),
                      movie_view.py (in-engine Smacker playback and WAV cues, boot intro and glue playmovie), menu_view.py (menu, briefing), result_view.py, gpu.py
+  launcher/        - standalone pre-game launcher (python3 -m whshr.launcher), stdlib-only (tkinter):
+                     discovery.py (finds an installation across GOG/Steam/Proton default locations),
+                     config.py (persists the recognized path), validate.py (quick + full `whshr check`
+                     reuse), battles.py (lists playable battles), engine_launch.py (locates the engine's
+                     own .venv interpreter and starts `whshr engine` as a subprocess), gui.py (tkinter UI)
 tests/             - BDD-style unittest scenarios (docs/testing.md): python3 -m unittest discover -s tests -t .
 docs/              - asset_pipeline.md (lazy loading, scene lifecycle), testing.md (BDD rules)
 tools/ghidra/      - OPTIONAL analysis-only Ghidra headless scripts (Java) + setup notes; not stdlib Python,
