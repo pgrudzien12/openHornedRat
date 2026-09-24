@@ -78,3 +78,13 @@ Suggested breakdown (three GitHub tasks):
    that re-engaging the same opponent gives no bonus, and that an unspent counter survives into a
    later, different engagement. Separately, get an explicit answer (not a default assumption) on
    whether to replicate the original's "monster charge bonus never depletes" quirk.
+
+## Decision: monster charge-bonus quirk (default, not confirmed with the owner)
+
+Resolved in task #60 **without asking** (owner unavailable): the engine does **not** reproduce the
+"charging monster never decrements its counter" behaviour. Reasoning from observable behaviour: it would
+make a monster keep +1 Strength for an entire fight, while every other unit's bonus fades after the
+opening exchange; the source flags it as a low-confidence probable bug, and nothing in the data suggests
+the designers wanted a permanent monster bonus. The engine also has no monster formation type yet, so
+nothing is lost today. Any monster therefore drains the counter like a foot model. This is a default
+decision and can be overruled: if reproduction is wanted later, add it when monster formations exist.

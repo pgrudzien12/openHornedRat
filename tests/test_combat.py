@@ -784,6 +784,56 @@ class ShootingTests(unittest.TestCase):
         self.assertLess(self.target.models, models_after_first_volley)
 
 
+class ChargeBonusEndToEndTests(unittest.TestCase):
+    """game_rules.md 5.5, end to end from the contact grant through the strikes that spend it."""
+
+    def _charge_and_strike(self, models, casualties=0):
+        charger = _regiment("charger", 0, 0, Side.PLAYER, models=models, ranks=2, ws=4, strength=2, attacks=1)
+        target = _regiment("target", 0, 0, Side.ENEMY, models=models, ranks=2, ws=3, toughness=4, armour=0)
+        battle = Battle(2000, 2000, [charger, target], seed=0)
+        charger.models -= casualties
+        charger.attack_target = target.identifier
+        combat.resolve_contacts(battle)
+        charger.model_positions()
+        target.model_positions()
+        fighters = min(charger.models, target.models)
+        pairs = [(i, charger.melee_models[i], target, i) for i in range(fighters)]
+        with patch.object(combat.battle_grid, "fighting_models", return_value=pairs):
+            combat._strike_with_models(charger, charger.melee_group,
+                                       battle.fights[charger.melee_group], 0, 1, battle)
+        return charger, battle.events[-1]
+
+    def test_given_a_full_frontage_charge_when_the_models_strike_then_only_the_opening_models_get_the_bonus(self):
+        charger, event = self._charge_and_strike(10)  # frontage 5, budget 7, two drained per model
+
+        self.assertEqual([d["charge_bonus"] for d in event.data["attacks"]], [1, 1, 1, 1] + [0] * 6)
+        self.assertEqual(charger.charge_counter, 0)
+
+    def test_given_casualties_before_contact_when_the_models_strike_then_the_bonus_still_covers_the_formed_frontage(self):
+        charger, event = self._charge_and_strike(10, casualties=4)  # six models left, formed frontage 5
+
+        self.assertEqual([d["charge_bonus"] for d in event.data["attacks"]], [1, 1, 1, 1, 0, 0])
+
+    def test_given_an_unspent_counter_when_a_new_enemy_engages_it_then_the_counter_is_kept(self):
+        charger = _regiment("charger", 0, 0, Side.PLAYER, models=10, ranks=2)
+        first = _regiment("first", 0, 0, Side.ENEMY)
+        battle = Battle(2000, 2000, [charger, first], seed=0)
+        charger.attack_target = first.identifier
+        combat.resolve_contacts(battle)
+        charger.charge_counter = 3
+        first.models = 0
+        combat.resolve_contacts(battle)
+        charger.attack_target = None
+
+        second = Regiment("second", "second", 0, 0, 0, Side.ENEMY, models=10, ranks=2)
+        battle.regiments["second"] = second
+        second.attack_target = charger.identifier
+        combat.resolve_contacts(battle)
+
+        self.assertTrue(charger.in_melee)
+        self.assertEqual(charger.charge_counter, 3)
+
+
 class ContactAndMeleeStateTests(unittest.TestCase):
     def test_given_casualties_before_a_charge_when_contact_starts_then_the_grant_uses_formed_frontage(self):
         charger = _regiment("charger", 0, 0, Side.PLAYER, models=10, ranks=2)
