@@ -615,7 +615,7 @@ class ReformFormationDifferenceTests(unittest.TestCase):
 class ChargeStretchWorkedExampleTests(unittest.TestCase):
     """game_rules.md "Models chase the unit, they are not carried by it": the full worked Empire
     infantry example (`s_rlmv` 11, 4 ranks) -- marching-speed parity, the charge stretch, a re-aiming
-    charge's frozen translation, and the post-charge concertina recovery."""
+    charge's full-speed translation, and the post-charge concertina recovery."""
 
     def _block(self, x=0, y=0):
         return Regiment("block", "Block", x, y, 0, Side.PLAYER, models=20, ranks=4,
@@ -660,11 +660,10 @@ class ChargeStretchWorkedExampleTests(unittest.TestCase):
         self.assertAlmostEqual(block.y, 144, delta=5)
         self.assertAlmostEqual(self._rear_rank_lag(block), 40, delta=15)
 
-    def test_given_a_charge_that_must_reaim_when_ticked_then_the_anchor_freezes_instead_of_a_flat_step(self):
-        # game_rules.md "Turning, wheeling and reversing": every gradual turn but a wheel -- including a
-        # charge's own re-aim -- "sets the speed to zero" for that tick. A frontage-1 column removes the
-        # turn's own corner-pivot shift (half-frontage 0), isolating the translation term: the anchor
-        # must not move at all while re-aiming, only resuming once its heading is settled.
+    def test_given_a_charge_that_must_reaim_when_ticked_then_the_anchor_keeps_full_charge_speed(self):
+        # A charge keeps full anchor speed on every turning tick (unlike an ordinary wheel, which halves
+        # it, or a halted turn, which stops it). A frontage-1 column removes the turn's own corner-pivot
+        # shift, isolating the translation term.
         column = Regiment("column", "Column", 0, 0, 0, Side.PLAYER, models=4, ranks=4,
                           speed_per_tick=speed_per_tick(4, 3))
         angle = 60 * math.tau / 512  # > 32/512 turn: a charge always re-aims rather than snapping
@@ -674,22 +673,38 @@ class ChargeStretchWorkedExampleTests(unittest.TestCase):
         battle = Battle(4000, 4000, [column, target])
         battle.order_attack("column", "target")
 
-        reaim_positions, settled_step = [], None
+        reaim_steps, settled_step = [], None
         for _ in range(15):
             before = (column.x, column.y)
             battle.tick()
+            step = math.hypot(column.x - before[0], column.y - before[1])
             if column.turn_mode == "charge_reaim":
-                reaim_positions.append((before, (column.x, column.y)))
-            elif column.turn_mode is None:
-                step = math.hypot(column.x - before[0], column.y - before[1])
-                if step > 0:
-                    settled_step = step
+                reaim_steps.append(step)
+            elif column.turn_mode is None and step > 0:
+                settled_step = step
 
-        self.assertTrue(reaim_positions)
-        for before, after in reaim_positions:
-            self.assertAlmostEqual(math.hypot(after[0] - before[0], after[1] - before[1]), 0, places=6)
+        self.assertTrue(reaim_steps)
         self.assertIsNotNone(settled_step)
-        self.assertGreater(settled_step, 0)
+        for step in reaim_steps:
+            self.assertAlmostEqual(step, settled_step, places=6)
+
+    def test_given_a_45_degree_turning_charge_then_the_rear_rank_is_more_stretched_than_a_straight_one(self):
+        # "Turning during a charge makes the stretch worse": ~16 units more on a 5x4 block.
+        lags = {}
+        for turning in (False, True):
+            bearing = math.radians(45 if turning else 0)
+            block = self._block()
+            target = Regiment("target", "Target", 5000 * math.sin(bearing), 5000 * math.cos(bearing), 0,
+                              Side.ENEMY, models=1, ranks=1)
+            target.speed_per_tick = 0
+            battle = Battle(9000, 9000, [block, target])
+            battle.order_attack("block", "target")
+            for _ in range(84):
+                battle.tick()
+            lags[turning] = sum(self._rear_rank_lag(block, i) for i in range(15, 20)) / 5
+
+        self.assertGreaterEqual(lags[True], lags[False])
+        self.assertAlmostEqual(lags[True] - lags[False], 16, delta=10)
 
     def test_given_a_charging_block_when_it_halts_then_the_rear_rank_gap_recovers_in_about_three_seconds(self):
         # "the block visibly concertinas back together over roughly three seconds" once the anchor stops.

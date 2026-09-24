@@ -451,7 +451,8 @@ speeds.
 - **Turning hides the effect, and finishes it.** A wheel halves the unit's translation while leaving the models'
   step length untouched, which halves the keep-up requirement to `F ≥ 3.33 × k` — enough for the rear rank even
   at charge speed. A halted turn stops translation altogether, so the block fully re-compresses while it pivots.
-  This is why a charge that has to wheel onto its target arrives much tidier than one that runs straight in.
+  A charge that has to turn is the exception: it keeps full speed and the turn's slot sweep adds to the lag, so it
+  arrives about 16 units *more* stretched than one that runs straight in.
 
 **For an engine**: the unit's logical position must be advanced by the full charge speed regardless of where the
 sprites are, because every gameplay consequence (contact, engagement, charge bonus, footprint) reads the anchor.
@@ -548,9 +549,9 @@ formation in the campaign data reaches `s` = 10, so it is not reachable in pract
 - the unit's reference point is **displaced by the rotation applied to the half-frontage vector
   `6 × (frontage − 1)`**, which holds the **inner front corner** still — a true wheel rather than a spin about
   the anchor. The side is taken from the same turn-direction flag, and a **frontage of 1 inverts it**.
-- **translation speed is changed for that tick**: a wheel keeps moving at **half speed**; every other kind of
-  turn — halted turn, turn order, charge re-aim, closing redirect — **sets the speed to zero**. Only a wheel
-  turns and travels at once; everything else stops the unit dead while it comes round.
+- **translation speed is changed for that tick**: a wheel keeps moving at **half speed**; a charge re-aim
+  **keeps full speed**; every other kind of turn — halted turn, turn order, closing redirect — **sets the
+  speed to zero**, stopping the unit dead while it comes round.
 - **every model's slot is recomputed from the new facing**, as
   `rotate(12 × column − 6 × (frontage − 1), −12 × rank)`. Ranks that are one model short are offset by a further
   half spacing (6 world units), which is the staggered look of the rear ranks.
