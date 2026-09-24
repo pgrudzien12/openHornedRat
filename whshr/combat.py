@@ -401,8 +401,14 @@ def resolve_contacts(battle):
                 # +1 S on its first strike after joining a fight (whether the fight is brand new or a
                 # third regiment joining one already under way). The counter is spent one attacking
                 # model at a time, so only the first 1.5 x frontage models to strike get the bonus.
-                if regiment.attack_target in touching[identifier]:
-                    regiment.charge_counter = int(1.5 * regiment.frontage)
+                # Re-engaging an opponent this regiment was already recorded fighting stores 0 instead.
+                opponent = regiment.attack_target
+                if opponent in touching[identifier]:
+                    if opponent == regiment.last_fought_opponent:
+                        regiment.charge_counter = 0
+                    else:
+                        regiment.charge_counter = int(1.5 * regiment.frontage)
+                    regiment.last_fought_opponent = opponent
                 regiment.melee_group = group_id
                 regiment.target_x = regiment.target_y = None
             regiment.in_melee = True
@@ -488,6 +494,10 @@ def _strike_with_models(attacker, group_id, fight, turn, segment_number, battle)
                                  "charge_bonus": mount_charge, "source": "mount"})
             rolls.append(mount_detail)
             killed |= mount_killed
+        # game_rules.md 5.5: consumed at two points per model per round -- the attack resolution that
+        # grants the +1 S above, and a second decrement here once this model's round is fully resolved.
+        if attacker.charge_counter > 0:
+            attacker.charge_counter -= 1
         if killed and defender_index not in victims.get(defender.identifier, ()):
             victims.setdefault(defender.identifier, set()).add(defender_index)
             kills += 1

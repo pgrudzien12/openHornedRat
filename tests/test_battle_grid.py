@@ -227,6 +227,84 @@ class CasualtyIdentityTests(unittest.TestCase):
         self.assertEqual({model.uid: model.opponent for model in owner.melee_models}, before)
 
 
+class DirectionalCandidateCellTests(unittest.TestCase):
+    """engagement_dispersal.md "Direction-indexed joiner candidate cells": the candidate cell order
+    around a defending model is a fixed table selected by the joiner's approach direction, not a
+    runtime distance sort."""
+
+    def setUp(self):
+        # A lone defending model, so its neighbouring cells start out empty and the candidate order
+        # can be read off without any of the defender's own formation getting in the way.
+        self.defender = _regiment("def", 0, 0, Side.ENEMY, initiative=5, direction=0, models=1, ranks=1)
+        self.defender.model_positions()
+        self.grid = battle_grid.BattleGrid(
+            self.defender.identifier, self.defender.x, self.defender.y,
+            self.defender.direction, self.defender.front_rank_models())
+        self.grid.seed(self.defender)
+        self.target_index = 0
+        self.target = self.defender.melee_models[0]
+        self.assertEqual(self.target.cell, (8, 8))
+
+    def _joiner(self, approach_x, approach_y, identifier="joiner"):
+        regiment = _regiment(identifier, approach_x, approach_y, Side.PLAYER, initiative=5, models=1, ranks=1)
+        regiment.model_positions()
+        return regiment
+
+    def _place(self, approach_x, approach_y, identifier="joiner"):
+        regiment = self._joiner(approach_x, approach_y, identifier)
+        model = regiment.melee_models[0]
+        placed = battle_grid._place_next_to_enemy(
+            self.grid, regiment, model, approach_x, approach_y,
+            [(self.defender, self.target_index, self.target)])
+        self.assertTrue(placed)
+        row, col = model.cell
+        return row - 8, col - 8
+
+    def test_given_a_front_approach_when_a_joiner_places_then_it_takes_the_cell_ahead_of_the_front_rank(self):
+        self.assertEqual(self._place(0, 40), (-1, 0))
+
+    def test_given_a_rear_approach_when_a_joiner_places_then_it_takes_the_cell_behind_the_rear_rank(self):
+        self.assertEqual(self._place(0, -40), (1, 0))
+
+    def test_given_one_flank_approach_when_a_joiner_places_then_it_takes_the_cell_on_that_side(self):
+        self.assertEqual(self._place(40, 0), (0, 1))
+
+    def test_given_the_other_flank_approach_when_a_joiner_places_then_it_takes_the_cell_on_that_side(self):
+        self.assertEqual(self._place(-40, 0), (0, -1))
+
+    def test_given_a_front_approach_when_the_first_cell_is_taken_then_it_falls_back_in_table_order(self):
+        self.grid.place(7, 8, "blocker", 0)  # occupies the (-1, 0) cell ahead of the target
+
+        self.assertEqual(self._place(0, 40), (0, -1))  # second entry of the dir-1 row
+
+    def test_given_a_distant_joiner_when_the_first_two_cells_are_taken_then_it_finds_no_candidate(self):
+        # Farther than NEAR_DISTANCE: only the row's first two entries are offered, so once both are
+        # occupied placement fails even though the third entry would otherwise be free.
+        self.grid.place(7, 8, "blocker_a", 0)  # dir 1, 1st entry (-1, 0)
+        self.grid.place(8, 7, "blocker_b", 0)  # dir 1, 2nd entry (0, -1)
+        regiment = self._joiner(0, 40)
+        model = regiment.melee_models[0]
+
+        placed = battle_grid._place_next_to_enemy(
+            self.grid, regiment, model, 0, 40, [(self.defender, self.target_index, self.target)])
+
+        self.assertFalse(placed)
+
+    def test_given_a_near_joiner_when_the_first_two_cells_are_taken_then_it_still_finds_a_third(self):
+        self.grid.place(7, 8, "blocker_a", 0)  # dir 1, 1st entry (-1, 0)
+        self.grid.place(8, 7, "blocker_b", 0)  # dir 1, 2nd entry (0, -1)
+        near_x, near_y = 0, 8  # well within NEAR_DISTANCE (18) of the target model
+        regiment = self._joiner(near_x, near_y)
+        model = regiment.melee_models[0]
+
+        placed = battle_grid._place_next_to_enemy(
+            self.grid, regiment, model, near_x, near_y, [(self.defender, self.target_index, self.target)])
+
+        self.assertTrue(placed)
+        row, col = model.cell
+        self.assertEqual((row - 8, col - 8), (0, 1))  # dir 1's 3rd entry
+
+
 class SeparateGridTests(unittest.TestCase):
     """game_rules.md 5.7: separate fights never check proximity to each other, even when their cell
     areas overlap in world space."""

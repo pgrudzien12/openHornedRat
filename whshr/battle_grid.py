@@ -21,10 +21,28 @@ NEAR_DISTANCE = 18.0  # closer than this, all four orthogonal cells are offered,
 ARRIVAL_DISTANCE = 3.0  # a model counts as "in hand-to-hand" within this distance of its cell
 OWNER_SWITCH_RATIO = 1.5  # the owner pairs like a joiner once it outnumbers the enemy by more than this
 
-# Orthogonal neighbour offsets (row, col), ordered so that index 0 is the cell on the side the
-# attacker comes from and index 1 its first flank; only those two are offered while the model is
-# still far away (game_rules.md 5.8 step 3).
+# Orthogonal neighbour offsets (row, col), used for the owner's own in-place pairing, which is not
+# direction-dependent (game_rules.md 5.8 step 5).
 _NEIGHBOURS = ((-1, 0), (0, -1), (0, 1), (1, 0))
+
+# The four ordered (row, col) candidate offsets a joiner tries around its target's cell, indexed by
+# `dir` (notes/engine_gaps/engagement_dispersal.md, "Direction-indexed joiner candidate cells").
+# dir 0 = approaching the defender's rear, 1 = its front, 2/3 = its two flanks.
+_JOIN_OFFSETS = (
+    ((1, 0), (0, -1), (0, 1), (-1, 0)),
+    ((-1, 0), (0, -1), (0, 1), (1, 0)),
+    ((0, 1), (1, 0), (-1, 0), (0, -1)),
+    ((0, -1), (1, 0), (-1, 0), (0, 1)),
+)
+
+# Composes a joiner's approach arc (0 = front, 1 = rear, 2/3 = flanks) with the defender's own
+# direction code into the `dir` that selects a row of `_JOIN_OFFSETS`.
+_COMBINE = (
+    (1, 0, 3, 2),
+    (0, 1, 2, 3),
+    (3, 2, 0, 1),
+    (2, 3, 1, 0),
+)
 
 
 class BattleGrid:
@@ -40,6 +58,9 @@ class BattleGrid:
         self.direction = direction
         self.width = max(1, width)
         self.cells = {}  # (row, col) -> (regiment_id, model_index)
+        # regiment identifier -> its direction code on this grid, used to compose a later joiner's
+        # own `dir`; a freshly created grid's owner always carries code 0 (engagement_dispersal.md).
+        self.direction_codes = {owner_id: 0}
 
     def cell_world(self, row, col):
         """World position of a cell centre, in the frame the grid was created in."""
@@ -202,7 +223,8 @@ def _place_next_to_enemy(grid, regiment, model, px, py, enemies):
         if enemy_model.cell is None:
             continue
         distance = math.hypot(*_delta(px, py, enemy, enemy_index))
-        candidates = _candidate_cells(grid, enemy_model.cell, px, py, distance)
+        direction = _direction_for(grid, regiment, enemy, px, py)
+        candidates = _candidate_cells(enemy_model.cell, direction, distance)
         for row, col in candidates:
             if not grid.free(row, col):
                 continue
@@ -224,20 +246,49 @@ def _delta(px, py, enemy, enemy_index):
     return ex - px, ey - py
 
 
-def _candidate_cells(grid, enemy_cell, px, py, distance):
-    """Orthogonal neighbours of `enemy_cell`, nearest-to-the-attacker first; only the first two are
-    offered while the attacker is still further than `NEAR_DISTANCE` away."""
+def _direction_for(grid, regiment, defender, px, py):
+    """The `dir` a joining regiment uses for every placement against this grid, computed once from
+    its first approach and kept afterwards (engagement_dispersal.md "Direction-indexed joiner
+    candidate cells", step 2)."""
+    stored = grid.direction_codes.get(regiment.identifier)
+    if stored is not None:
+        return stored
+    arc = _arc_code(px, py, defender)
+    defender_code = grid.direction_codes.get(defender.identifier, 0)
+    direction = _COMBINE[defender_code][arc]
+    grid.direction_codes[regiment.identifier] = direction
+    return direction
+
+
+def _arc_code(px, py, defender):
+    """The joining model's approach arc relative to `defender`'s facing: 0 front, 1 rear, 2/3 the two
+    flanks. The front/rear cones are as wide as the defender's own footprint diagonal half-angle
+    (engagement_dispersal.md step 1)."""
+    cx, cy, half_side, half_forward, _, _ = formation.footprint_frame(
+        defender.x, defender.y, defender.direction, defender.models, defender.ranks)
+    half_angle = round(math.atan2(half_side, half_forward) * formation.FULL_TURN / math.tau)
+    dx, dy = cx - px, cy - py
+    bearing = round(math.atan2(dx, dy) * formation.FULL_TURN / math.tau) % formation.FULL_TURN
+    rel = (bearing - defender.direction) % formation.FULL_TURN
+    half_turn = formation.FULL_TURN // 2
+    if rel <= half_angle or rel >= formation.FULL_TURN - half_angle:
+        return 1  # rear
+    if half_turn - half_angle <= rel <= half_turn + half_angle:
+        return 0  # front
+    if rel < half_turn:
+        return 2  # flank A
+    return 3  # flank B
+
+
+def _candidate_cells(enemy_cell, direction, distance):
+    """The fixed offsets around `enemy_cell` for `direction`, tried strictly in order; only the first
+    two are offered while the attacker is still further than `NEAR_DISTANCE` away
+    (engagement_dispersal.md step 4)."""
     row, col = enemy_cell
-    scored = []
-    for d_row, d_col in _NEIGHBOURS:
-        cell = (row + d_row, col + d_col)
-        if not in_bounds(*cell):
-            continue
-        wx, wy = grid.cell_world(*cell)
-        scored.append((math.hypot(wx - px, wy - py), cell))
-    scored.sort()
-    cells = [cell for _, cell in scored]
-    return cells if distance <= NEAR_DISTANCE else cells[:2]
+    offsets = _JOIN_OFFSETS[direction]
+    if distance > NEAR_DISTANCE:
+        offsets = offsets[:2]
+    return [(row + d_row, col + d_col) for d_row, d_col in offsets]
 
 
 def _pair_owner(battle, grid, regiment, members):

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import math
 import random
 
-from . import battle_grid, behaviour, combat, formation, interpreter
+from . import animation, battle_grid, behaviour, combat, formation, interpreter
 from .battle_events import BattleEvent
 from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, MOUNT_PROFILES, Side, can_fight, side_of_code, stat_fields
 from .script import load_battle, resource_name
@@ -88,6 +88,9 @@ class ModelState:
     at_rest: bool = True
     freeze_ticks: int = 0  # charge-start pause, (stagger & 7) + 1 ticks
     rout_pause_ticks: int = 0  # break-and-turn pause, (stagger & 7) * 3 + 6 ticks
+    action: int = animation.STAND  # current action id, whshr.animation (game_rules.md "Figure animation")
+    action_pc: int = 0  # ticks elapsed since the action's program counter was last reset
+    action_entry: int = 0  # random entry/choice drawn on that reset, whshr.animation.step
 
 
 @dataclass
@@ -112,7 +115,6 @@ class Regiment:
     melee_models: list = field(default_factory=list)  # ModelState, index-parallel with `positions`
     _next_uid: int = 0  # next free model identity (see ModelState.uid)
     walking: bool = False  # true while the anchor or any model is still travelling
-    animation_seconds: float = 0.0  # elapsed time while walking, for the frontend's frame-rate placeholder
 
     # Combat profile (game_rules.md section 3, section 5-8), decoded from the script's setstats lines.
     ws: int = DEFAULT_PROFILE["WS"]
@@ -180,6 +182,10 @@ class Regiment:
     # game_rules.md 5.5: floor(1.5 x frontage), set when the regiment charges into a fight and spent
     # one attacking model at a time, so only the first models to strike get the +1 S.
     charge_counter: int = 0
+    # game_rules.md 5.5: "re-engaging an opponent you are already fighting gives no bonus" -- the last
+    # enemy identifier this regiment was recorded fighting, kept across leaving and re-joining a fight,
+    # so a fresh charge counter is granted only against a genuinely new opponent.
+    last_fought_opponent: str | None = None
     rally_next_segment: int | None = None  # absolute segment index of the next scheduled rally attempt (7.4)
 
     def __post_init__(self):
@@ -577,7 +583,6 @@ class Battle:
         for regiment in self.regiments.values():
             if not regiment.active:
                 regiment.walking = False
-                regiment.animation_seconds = 0.0
                 continue
             regiment.model_positions()  # seed positions at the current anchor/facing before it moves
             if regiment.attack_target is None:
@@ -631,7 +636,7 @@ class Battle:
             else:
                 models_catching_up = self._advance_models(regiment, scale)
             regiment.walking = moved or models_catching_up
-            regiment.animation_seconds = regiment.animation_seconds + seconds if regiment.walking else 0.0
+            self._step_animations(regiment)
 
     @staticmethod
     def _turn_to(regiment, direction):
@@ -896,6 +901,23 @@ class Battle:
                 f"{regiment.name} completes its re-form.", "reform_complete",
                 regiment=regiment.identifier))
         return not all_settled
+
+    def _step_animations(self, regiment):
+        """Step every model's action program one battle tick (whshr.animation, game_rules.md "Figure
+        animation"). The requested action mirrors what the model is currently doing: fighting or
+        weapon-ready in melee (paired with an opponent or not), the shoot pose while the regiment
+        holds a missile stance, walking while the model itself has not yet reached its slot
+        (`ModelState.at_rest`), otherwise idling in place."""
+        for model in regiment.melee_models:
+            if regiment.in_melee:
+                requested = animation.FIGHT if model.opponent is not None else animation.WEAPON_READY
+            elif regiment.missile_range and not regiment.moving and not regiment.attack_target:
+                requested = animation.SHOOT
+            elif not model.at_rest:
+                requested = animation.WALK
+            else:
+                requested = animation.IDLE
+            animation.step(model, requested, self.rng)
 
     def side_counts(self):
         """Per-side active/routing/fled/destroyed regiment counts (whshr.battle_log snapshots, and the

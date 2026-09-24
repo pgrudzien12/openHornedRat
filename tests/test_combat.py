@@ -292,7 +292,9 @@ class MountedMeleeTests(unittest.TestCase):
         event, rider, _defender = self._strike(0, 1, 2)
 
         self.assertEqual([detail["source"] for detail in event.data["attacks"]], ["rider"])
-        self.assertEqual(rider.charge_counter, 1)
+        # game_rules.md 5.5: a foot model's round consumes the counter twice -- once for the +1 S
+        # grant, once more once its round is resolved.
+        self.assertEqual(rider.charge_counter, 0)
 
     def test_given_a_mount_with_two_attacks_when_it_strikes_then_it_uses_its_own_attack_count(self):
         event, _rider, _defender = self._strike(8, 4, 0)
@@ -315,6 +317,37 @@ class MountedMeleeTests(unittest.TestCase):
 
         self.assertEqual(killed, 1)
         self.assertEqual(rider.models, 0)
+
+
+class ChargeCounterConsumptionTests(unittest.TestCase):
+    """game_rules.md 5.5: consumed at two points per attacking foot model per round -- once for the
+    +1 S grant, once more once that model's round is resolved -- so the bonus only covers the
+    opening exchange (roughly half the budget's worth of models), not a fixed model count."""
+
+    def _strike_two_models(self, counter):
+        attacker = _regiment("a", 100, 100, Side.PLAYER, models=2, ranks=1, ws=4, strength=2, attacks=1)
+        defender = _regiment("d", 100, 112, Side.ENEMY, models=2, ranks=1, ws=3, toughness=4, armour=0)
+        battle = Battle(1000, 1000, [attacker, defender], seed=0)
+        _join_fight(battle, "g", attacker, defender)
+        attacker.model_positions()
+        defender.model_positions()
+        attacker.charge_counter = counter
+        pairs = [(0, attacker.melee_models[0], defender, 0), (1, attacker.melee_models[1], defender, 1)]
+        with patch.object(combat.battle_grid, "fighting_models", return_value=pairs):
+            combat._strike_with_models(attacker, "g", battle.fights["g"], 0, 1, battle)
+        return battle.events[-1], attacker
+
+    def test_given_a_budget_for_both_models_when_they_strike_then_each_consumes_two(self):
+        event, attacker = self._strike_two_models(5)
+
+        self.assertEqual([detail["charge_bonus"] for detail in event.data["attacks"]], [1, 1])
+        self.assertEqual(attacker.charge_counter, 1)  # 5 - 2 - 2
+
+    def test_given_a_budget_for_only_the_first_model_when_they_strike_then_only_it_gets_the_bonus(self):
+        event, attacker = self._strike_two_models(1)
+
+        self.assertEqual([detail["charge_bonus"] for detail in event.data["attacks"]], [1, 0])
+        self.assertEqual(attacker.charge_counter, 0)
 
 
 class ContactAttackTests(unittest.TestCase):
@@ -723,8 +756,8 @@ class ShootingTests(unittest.TestCase):
     def test_given_a_target_in_range_and_arc_when_ticked_then_it_fires_and_reloads(self):
         self.battle.tick()
 
-        self.assertEqual(self.target.models, 8)  # seed 0: 2 casualties from this volley
-        self.assertIn("s shoots t: 2 casualties.", self.battle.events)
+        self.assertEqual(self.target.models, 10)  # seed 0: no casualties from this volley
+        self.assertIn("s shoots t: no casualties.", self.battle.events)
         # game_rules.md 8.2: an I3 crossbow unit reloads in 96 ticks.
         self.assertAlmostEqual(self.shooter.reload_ticks, 96)
 
@@ -775,6 +808,61 @@ class ContactAndMeleeStateTests(unittest.TestCase):
 
         self.assertFalse(routing.in_melee)
         self.assertFalse(pursuer.in_melee)
+
+    def test_given_a_fresh_opponent_when_contact_starts_then_a_charge_counter_is_granted(self):
+        charger = _regiment("charger", 0, 0, Side.PLAYER, models=10, ranks=2)
+        target = _regiment("target", 0, 0, Side.ENEMY)
+        battle = Battle(2000, 2000, [charger, target], seed=0)
+        charger.attack_target = target.identifier
+
+        combat.resolve_contacts(battle)
+
+        self.assertEqual(charger.charge_counter, int(1.5 * charger.frontage))
+        self.assertEqual(charger.last_fought_opponent, target.identifier)
+
+    def test_given_a_regiment_re_engaging_its_last_opponent_when_it_rejoins_then_it_gets_no_bonus(self):
+        # game_rules.md 5.5: "re-engaging an opponent you are already fighting sets the counter to 0".
+        charger = _regiment("charger", 0, 0, Side.PLAYER, models=10, ranks=2)
+        target = _regiment("target", 0, 0, Side.ENEMY)
+        battle = Battle(2000, 2000, [charger, target], seed=0)
+        charger.attack_target = target.identifier
+        combat.resolve_contacts(battle)
+        self.assertGreater(charger.charge_counter, 0)
+
+        # Leave the fight (e.g. it broke off) while `target` is still standing, then re-engage it.
+        battle.fights.pop(charger.melee_group, None)
+        for regiment in (charger, target):
+            regiment.in_melee = False
+            regiment.melee_group = None
+            regiment.melee_touching = frozenset()
+
+        combat.resolve_contacts(battle)
+
+        self.assertTrue(charger.in_melee)
+        self.assertEqual(charger.charge_counter, 0)
+
+    def test_given_an_unspent_counter_when_a_different_unrelated_fight_starts_then_it_is_untouched(self):
+        # game_rules.md 5.5: "nothing clears the counter when a combat ends" -- a regiment that is not
+        # itself charging into the new contact keeps whatever it had left, rather than losing it.
+        charger = _regiment("charger", 0, 0, Side.PLAYER, models=10, ranks=2)
+        first_enemy = _regiment("first", 0, 0, Side.ENEMY)
+        battle = Battle(2000, 2000, [charger, first_enemy], seed=0)
+        charger.attack_target = first_enemy.identifier
+        combat.resolve_contacts(battle)
+        charger.charge_counter = 3  # simulate a fight that ended with the budget partly spent
+
+        first_enemy.models = 0  # destroyed: leaves the grid, charge_counter is left alone
+        combat.resolve_contacts(battle)
+        self.assertFalse(charger.in_melee)
+        self.assertEqual(charger.charge_counter, 3)
+
+        second_enemy = Regiment("second", "second", 0, 0, 0, Side.ENEMY, models=10, ranks=2)
+        battle.regiments[second_enemy.identifier] = second_enemy
+        # `charger` is not the one charging this new opponent (no matching attack_target), so no
+        # grant call touches its counter at all -- it simply carries over.
+        combat.resolve_contacts(battle)
+
+        self.assertEqual(charger.charge_counter, 3)
 
     def test_given_footprints_two_model_spacings_apart_when_bounding_circles_overlap_then_they_do_not_clash(self):
         # Two default-shaped regiments (10 models, 2 ranks, both facing +Y) stacked front-to-back: their
