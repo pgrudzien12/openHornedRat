@@ -129,6 +129,45 @@ class BattleScene(Scene):
                     self.battle.order_halt(self.selected_id)
                 except ValueError:
                     pass  # no player selection, or the unit is routing/in melee
+        elif kind == "ranks_up":
+            if self.selected_id is not None:
+                try:
+                    regiment = self.battle.regiments[self.selected_id]
+                    self.battle.order_reform(self.selected_id, regiment.ranks + 1)
+                except (ValueError, KeyError):
+                    pass
+        elif kind == "ranks_down":
+            if self.selected_id is not None:
+                try:
+                    regiment = self.battle.regiments[self.selected_id]
+                    self.battle.order_reform(self.selected_id, regiment.ranks - 1)
+                except (ValueError, KeyError):
+                    pass
+        elif kind == "turn_left":
+            if self.selected_id is not None:
+                try:
+                    self.battle.order_turn_left(self.selected_id)
+                except ValueError:
+                    pass
+        elif kind == "turn_right":
+            if self.selected_id is not None:
+                try:
+                    self.battle.order_turn_right(self.selected_id)
+                except ValueError:
+                    pass
+        elif kind == "about_face":
+            if self.selected_id is not None:
+                try:
+                    self.battle.order_about_face(self.selected_id)
+                except ValueError:
+                    pass
+        elif kind == "face_point":
+            x, y = args
+            if self.selected_id is not None:
+                try:
+                    self.battle.order_face_point(self.selected_id, x, y)
+                except ValueError:
+                    pass
         return None
 
     def update(self, seconds, context):

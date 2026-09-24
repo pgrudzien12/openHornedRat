@@ -592,6 +592,70 @@ class Battle:
             raise ValueError(f"{identifier} is charging or in melee and cannot be ordered")
         self._begin_reform(regiment, formation.clamp_ranks(regiment.models, ranks))
 
+    def _check_turn_order(self, identifier):
+        """Shared guard for all standalone turn orders (game_rules.md "Turning, wheeling and reversing")."""
+        regiment = self.regiments[identifier]
+        if regiment.side != Side.PLAYER:
+            raise ValueError(f"{identifier} is not player-controlled")
+        if regiment.routing:
+            raise ValueError(f"{identifier} is routing and cannot be ordered")
+        if regiment.in_melee:
+            raise ValueError(f"{identifier} is in melee and cannot be ordered")
+        return regiment
+
+    def order_turn_left(self, identifier):
+        """Rotate a player regiment 90° counter-clockwise in place (game_rules.md, opcodes 0x0C)."""
+        regiment = self._check_turn_order(identifier)
+        goal = (regiment.direction - 128) % 512
+        self._plan_turn_order(regiment, goal)
+        regiment.target_x = regiment.target_y = None
+        regiment.attack_target = None
+        regiment.turn_order_key = ("turn", goal)
+
+    def order_turn_right(self, identifier):
+        """Rotate a player regiment 90° clockwise in place (game_rules.md, opcodes 0x0D)."""
+        regiment = self._check_turn_order(identifier)
+        goal = (regiment.direction + 128) % 512
+        self._plan_turn_order(regiment, goal)
+        regiment.target_x = regiment.target_y = None
+        regiment.attack_target = None
+        regiment.turn_order_key = ("turn", goal)
+
+    def order_about_face(self, identifier):
+        """Rotate a player regiment 180° in place (game_rules.md, opcodes 0x0E)."""
+        regiment = self._check_turn_order(identifier)
+        goal = (regiment.direction + 256) % 512
+        self._plan_turn_order(regiment, goal)
+        regiment.target_x = regiment.target_y = None
+        regiment.attack_target = None
+        regiment.turn_order_key = ("turn", goal)
+
+    def order_face_point(self, identifier, x, y):
+        """Turn a player regiment to face world coordinates (x, y) in place."""
+        regiment = self._check_turn_order(identifier)
+        dx, dy = x - regiment.x, y - regiment.y
+        if math.hypot(dx, dy) < 1e-9:
+            return  # click on own position: ignore
+        goal = round(math.atan2(dx, dy) * 512 / math.tau) % 512
+        self._plan_turn_order(regiment, goal)
+        regiment.target_x = regiment.target_y = None
+        regiment.attack_target = None
+        regiment.turn_order_key = ("turn", goal)
+
+    @staticmethod
+    def _plan_turn_order(regiment, goal):
+        """Plan a standalone turn order: always halted (shift 8, zero speed) regardless of angle."""
+        delta = Battle._turn_delta(regiment.direction, goal)
+        magnitude = abs(delta)
+        regiment.turn_goal = goal
+        regiment.turn_remaining = magnitude
+        regiment.turn_sign = 1 if delta > 0 else -1
+        if magnitude <= 10:
+            regiment.direction = goal
+            regiment.turn_mode = None
+            return
+        regiment.turn_mode, regiment.turn_shift = "halted", 8
+
     @staticmethod
     def _begin_reform(regiment, ranks):
         """Recompute the shape for `ranks` and re-slot every model into it (game_rules.md, "Formation
@@ -758,6 +822,12 @@ class Battle:
                 moved = self._advance_toward(regiment, (regiment.target_x, regiment.target_y),
                                              regiment.speed_per_tick * move_scale, arrive=True,
                                              order_key=("move", regiment.target_x, regiment.target_y), scale=scale)
+            elif regiment.turn_order_key is not None and regiment.turn_order_key[0] == "turn":
+                # Standalone turn order (game_rules.md "Turning, wheeling and reversing"): speed zero,
+                # shift 8; pivot about the inner front corner like all other gradual turns.
+                self._step_turn(regiment, scale)
+                if regiment.turn_mode is None:
+                    regiment.turn_order_key = None
             else:
                 regiment.turn_order_key = regiment.turn_mode = None
             if regiment.attack_target is None and not regiment.in_melee:

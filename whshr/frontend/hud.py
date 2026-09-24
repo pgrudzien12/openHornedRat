@@ -68,7 +68,8 @@ COMMAND_FRAMES = {
 }
 # Commands whshr.engine.Battle can actually carry out today; everything else in COMMAND_FRAMES
 # renders (and, where it is a set-entry button, still navigates the panel) but is disabled.
-ORDER_SUPPORTED = {"move", "attack", "halt"}
+ORDER_SUPPORTED = {"move", "attack", "halt", "ranks_up", "ranks_down",
+                   "turn_left", "turn_right", "about_face", "face_point"}
 # Buttons that only change which sub-panel is shown (pure HUD state, always clickable when present).
 SET_ENTRY = {"move": "move", "attack": "attack", "ranks_subset": "ranks", "facing_subset": "facing",
             "back": "idle"}
@@ -384,12 +385,12 @@ class Hud:
         """Apply a clicked command's panel-navigation effect; returns the order to issue, if any."""
         if name in SET_ENTRY:
             self.panel_set = SET_ENTRY[name]
-        if name in ("move", "attack"):
+        if name in ("move", "attack", "face_point"):
             self.pending_order = name
         elif name == "back":
             # notes/game_rules.md: "Any completed order or Back returns to idle."
             self.pending_order = None
-        if name in ORDER_SUPPORTED and name not in ("move", "attack"):
+        if name in ORDER_SUPPORTED and name not in ("move", "attack", "face_point"):
             return name
         return None
 

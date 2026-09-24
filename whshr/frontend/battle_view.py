@@ -267,9 +267,9 @@ class BattleView(SceneView):
             if action is not None:
                 self.hud.set_pressed(action)
                 order = self.hud.press(action)
-                if action in {"move", "attack"}:
+                if action in {"move", "attack", "face_point"}:
                     self.order_mode = action
-                    self._set_cursor(action)
+                    self._set_cursor(action if action != "face_point" else "move")
                     return ()
                 if order is not None:
                     self.order_mode = None
@@ -341,6 +341,8 @@ class BattleView(SceneView):
             return (("attack", regiment_id),)
         if mode == "move":
             return (("move_to", x, y),)
+        if mode == "face_point":
+            return (("face_point", x, y),)
         return ()
 
     def _sprite_pick(self, pixel, projection):
