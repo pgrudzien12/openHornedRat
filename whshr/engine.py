@@ -169,6 +169,10 @@ class Regiment:
     # game_rules.md 5.5: floor(1.5 x frontage), set when the regiment charges into a fight and spent
     # one attacking model at a time, so only the first models to strike get the +1 S.
     charge_counter: int = 0
+    # game_rules.md 5.5: "re-engaging an opponent you are already fighting gives no bonus" -- the last
+    # enemy identifier this regiment was recorded fighting, kept across leaving and re-joining a fight,
+    # so a fresh charge counter is granted only against a genuinely new opponent.
+    last_fought_opponent: str | None = None
     rally_next_segment: int | None = None  # absolute segment index of the next scheduled rally attempt (7.4)
 
     def __post_init__(self):
