@@ -15,9 +15,14 @@ class GlueScene(Scene):
     """Own one ``GlueRuntime`` and expose its ordered effects to a presentation host."""
 
     def __init__(self, program=None, campaign=None, *, window=None, speech_enabled=True, accept_battle=None,
-                 accept_mission=None, return_scene=None):
-        if (program is None) == (window is None):
+                 accept_mission=None, return_scene=None, record_battle=None, record_debrief=None):
+        if record_battle is not None:
+            if program is not None or window is not None:
+                raise ValueError("a record battle scene has neither program nor window")
+        elif (program is None) == (window is None):
             raise ValueError("GlueScene needs exactly one program or window")
+        self.record_battle = str(record_battle).upper() if record_battle is not None else None
+        self.record_debrief = record_debrief
         self.program = str(program).upper() if program is not None else None
         self.window = str(window).upper() if window is not None else None
         self.campaign = campaign
@@ -87,7 +92,7 @@ class GlueScene(Scene):
 
         log = getattr(self.context, "campaign_log", None)
         applied, skipped = complete_debrief(self.campaign, effect, log, flawless=bool(getattr(self.context, "no_battle", False)))
-        location = self.program or self.window
+        location = self.program or self.window or self.record_battle
         self._queue(tuple(Diagnostic(location, f"debrief: skipped {text}") for text in skipped))
         log = getattr(self.context, "campaign_log", None)
         if log is not None:
@@ -106,8 +111,11 @@ class GlueScene(Scene):
             if log is not None:
                 self._watcher = GlueWatcher(log, type(self).__name__, self.campaign)
                 log.write("glue_start", program=self.program, window=self.window)
-            self._queue(self.runtime.start(self.program) if self.program is not None
-                        else self.runtime.start_window(self.window))
+            if self.record_battle is not None:
+                self._queue(self.runtime.start_battle(self.record_battle, self.record_debrief))
+            else:
+                self._queue(self.runtime.start(self.program) if self.program is not None
+                            else self.runtime.start_window(self.window))
             history = getattr(self.campaign, "flow_history", ())
             if self.program is not None and history and self.program == history[0]:
                 for flow in history[1:]:  # resume: replay the chain up to the campaign's current flow

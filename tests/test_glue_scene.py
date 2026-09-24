@@ -101,12 +101,14 @@ class GlueSceneTests(unittest.TestCase):
         self.assertEqual(selection.phase, "march_order")
         done = selection.handle("done", self.context)
 
-        self.assertIs(done.scene, briefing_scene)
+        self.assertIsNot(done.scene, briefing_scene)  # a record without a script runs its battle on its own scene
+        self.assertEqual(done.scene.record_battle, "BF001")
+        done.scene.enter(self.context)
         self.assertEqual(campaign.march_units, {2})
         self.assertEqual(campaign.army_units, {2, 5})
         self.assertEqual(campaign.coffers, 510)  # 500 + prepaid 100 - (commander 80 + reserve retainer 10)
         self.assertIn(map_scene.runtime.state.selected_mission, campaign.taken_missions)
-        effects = briefing_scene.take_effects()
+        effects = done.scene.take_effects()
         self.assertIn(StopMusic(), effects)
         self.assertTrue(any(isinstance(e, StartBattle) and e.battle == "BF001" for e in effects))
 
