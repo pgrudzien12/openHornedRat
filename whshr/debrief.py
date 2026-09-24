@@ -6,23 +6,55 @@ lets the script resume. This module applies what the engine can compute and repo
 skipped effect is visible in the campaign log instead of silently vanishing.
 """
 
+from . import payments
+from .payments import settle
 
-def complete_debrief(campaign, effect):
+
+def complete_debrief(campaign, effect, log=None, flawless=False):
     """Apply the completion of a debrief request; returns ``(applied, skipped)`` lists of short strings.
 
-    The final payment is a function of the mission's payment program and of the objective records the
-    battle writes (notes/debrief_evaluation.md section 6); the engine's battles do not write objective
-    records yet, so the payment is skipped rather than guessed. Armour rewards, doubled experience,
-    promotions and army merges are not part of this handler at all (notes/activity_results.md section 5).
+    With ``flawless`` (no-battle mode) a mission without any battle result counts as a flawless win.
+    The final payment is the mission's balance sheet (whshr.payments, notes/campaign.md section 2.5) over the
+    objective records of the latest battle: the initial payment was already credited at troop selection, so the
+    payment credited here is the sheet's Total Final Payment. A battle that wrote no objective records (a played
+    battle: the engine does not evaluate objectives yet) skips the payment instead of guessing it. When ``log`` is
+    given a ``payment`` row records the amount and the line items applied and skipped. Armour rewards, doubled
+    experience, promotions and army merges are not part of this handler (notes/activity_results.md section 5).
     """
     applied, skipped = [], []
     if campaign is None:
         return applied, ["final payment: no campaign state"]
-    if getattr(campaign, "objective_results", None):
-        skipped.append("final payment: the payment programs are not implemented")
+    terms = getattr(campaign, "mission_cash", None)
+    if terms is None:
+        skipped.append("final payment: the mission has no payment terms")
+    elif campaign.mission_paid:
+        skipped.append("final payment: already credited for this mission")
     else:
-        skipped.append("final payment: no objective results from the battle")
+        if flawless and not campaign.objective_results and not campaign.flawless_result:
+            # no-battle mode, and the mission fought no battle (a march or summary page): still a perfect win
+            payments.store_flawless(campaign)
+        if not campaign.objective_results and not campaign.flawless_result:
+            skipped.append("final payment: no objective results from the battle")
+        else:
+            settlement = settle(terms, campaign.objective_results, campaign.bonus_counter)
+            campaign.mission_paid = True
+            campaign.add_cash(settlement.final)
+            applied.append(f"final payment: {settlement.final} crowns")
+            applied.extend(f"{label}: {amount}" for label, amount in settlement.lines if label != "final")
+            skipped.extend(f"final payment line {text}" for text in settlement.skipped)
+            if log is not None:
+                _log_payment(log, "final", settlement.final, campaign, settlement.lines, settlement.skipped)
+    if terms is not None and not applied and log is not None:
+        _log_payment(log, "final", 0, campaign, [], skipped)
     pending = sorted(getattr(campaign, "pending_join", ()))
     if pending:
         skipped.append(f"pending-join units {pending}: merged when the after-mission caravan opens (not implemented)")
     return applied, skipped
+
+
+def _log_payment(log, kind, amount, campaign, lines, skipped):
+    try:
+        log.write("payment", kind=kind, amount=amount, coffers=campaign.coffers,
+                  lines=[list(line) for line in lines], skipped=list(skipped))
+    except Exception:
+        pass

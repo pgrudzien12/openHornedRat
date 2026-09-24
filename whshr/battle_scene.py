@@ -2,7 +2,7 @@
 
 import os
 
-from . import battle_log, behaviour, combat, skirmish_log
+from . import battle_log, behaviour, combat, payments, skirmish_log
 from .assets import AssetId
 from .battlefield import sprite_files
 from .clock import FixedStepClock
@@ -191,12 +191,21 @@ class BattleScene(Scene):
                 self.close_log("result")
             if self.glue_scene is not None and self.no_battle:
                 # No-battle mode: the completion handler runs at once, without a result screen.
-                self.glue_scene.complete_activity(ActivityResult(self.request_id, "battle"))
+                self._store_flawless_results()
+                self.glue_scene.finish_battle(self.request_id)
                 return Transition(self.glue_scene, "glue battle resolved")
             return Transition(ResultScene(self.battle.result, self._casualty_summary(),
                                           glue_scene=self.glue_scene, request_id=self.request_id),
                               "battle resolved")
         return None
+
+    def _store_flawless_results(self):
+        """No-battle mode counts every mission as a flawless win: every objective met with its full values, no
+        casualties (whshr.payments.flawless_results), so the debrief pays in full."""
+        campaign = getattr(self.glue_scene, "campaign", None)
+        if campaign is None:
+            return
+        payments.store_flawless(campaign, (self.field.script.get("mission") or {}).get("objectives", ()))
 
     def _casualty_summary(self):
         return [f"{regiment.name}: {regiment.models}/{self.initial_models[identifier]} models"

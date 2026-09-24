@@ -210,6 +210,7 @@ class GlueRuntimeState:
     caravan_after_battle: bool = False
     selected_mission: MissionRef | None = None
     debrief_index: int = 0
+    battle_with_debrief: bool = False  # the pending battle request is a *withdebrief* one (paid, mode 2)
     palette_id: int = 0
     context_stack: list[ContextSnapshot] = field(default_factory=list)
     animations: list[RuntimeAnimation] = field(default_factory=list)
@@ -473,8 +474,11 @@ class GlueRuntime:
             if record is None:
                 effects.append(Diagnostic(command, f"no battle result for objective {letter!r}: treated as not met"))
         else:
-            met = False  # the evaluators need a battle result (notes/debrief_evaluation.md section 4)
-            effects.append(Diagnostic(command, "no battle result to evaluate: treated as lost"))
+            # Every evaluator of notes/debrief_evaluation.md section 4 reports victory for a flawless result
+            # (all win letters met, nothing lost); any other case needs a real battle result.
+            met = bool(getattr(self.campaign, "flawless_result", False))
+            if not met:
+                effects.append(Diagnostic(command, "no battle result to evaluate: treated as lost"))
         self._set_status(met)
         if command == "testmission":
             if self.campaign is not None:
@@ -950,6 +954,7 @@ class GlueRuntime:
         if len(parts) > 1 and self._parse_int(parts[1], 0):
             self._set_debrief(parts[1])
         self.state.current_battle = battle
+        self.state.battle_with_debrief = command.endswith("withdebrief")
         encounter = command.startswith("encounter")
         self._request("battle", effects, restore_context=encounter, battle=battle,
                       debrief_index=self.state.debrief_index,
