@@ -8,6 +8,7 @@ from .engine import DEFAULT_SEED
 from .glue_runtime import ActivityResult
 from .glue_scene import GlueScene
 from .glue_fonts import glue_font_asset
+from . import payments
 from .legacy import module
 from .scenes import Quit, Scene, SceneManifest, Transition
 from .si import load_si, walk_objects
@@ -348,20 +349,30 @@ class TroopSelectionScene(Scene):
     def enter(self, context):
         # Army Records returns to this exact scene instance.  It must not rebuild the
         # selection model or lose P0/P1 page state on that return.
+        self.context = context
         if self.model is not None:
             return
         if not self.campaign or not self.campaign.company:
             # notes/troop_selection.md §1.1: no company file skips the screen and runs Done immediately.
+            if self.campaign:
+                self.campaign.begin_mission(self._payment_terms())
             self._start_mission()
             self.phase = "skip"
             return
         self.record = self.glue_scene.runtime.content.mission(self.mission_ref)
-        forced = tuple(int(field.argument) for field in self.record.fields if field.command == "forceunits")
-        excluded = tuple(int(field.argument) for field in self.record.fields if field.command == "excludeunits")
+        self.campaign.begin_mission(payments.mission_terms(self.record))
+        forced = _unit_ids(self.record, "forceunits")
+        excluded = _unit_ids(self.record, "excludeunits")
         self.model = TroopSelection(self.campaign.company, forced=forced, excluded=excluded,
                                     coffers=self.campaign.coffers, prepaid=_prepaid_payment(self.record))
         if self.model.bankrupt:
             self.phase = "bankrupt"
+
+    def _payment_terms(self):
+        try:
+            return payments.mission_terms(self.glue_scene.runtime.content.mission(self.mission_ref))
+        except (KeyError, TypeError, AttributeError):
+            return None
 
     def _start_mission(self):
         """Done: run the mission's own script when its record names one (it starts the battle and
@@ -443,6 +454,13 @@ class TroopSelectionScene(Scene):
                 return None
             deployment = self.model.confirm()
             self.campaign.commit_troop_selection(deployment)
+            log = getattr(getattr(self, "context", None), "campaign_log", None)
+            if log is not None:
+                try:
+                    log.write("payment", kind="initial", amount=self.model.prepaid, mission_fee=self.model.total_cost,
+                              coffers=self.campaign.coffers)
+                except Exception:
+                    pass
             self.campaign.mark_mission_taken(self.mission_ref)
             self._start_mission()
             return Transition(self.destination, "troop selection done")
@@ -509,16 +527,16 @@ class ArmyRecordsScene(Scene):
         return None
 
 
+def _unit_ids(mission_record, command):
+    """The whoami ids of a mission record's ``forceunits``/``excludeunits`` lines; an argument may list several ids."""
+    return tuple(int(part) for field in mission_record.fields if field.command == command
+                 for part in field.argument.split(",") if part.strip())
+
+
 def _prepaid_payment(mission_record):
     """The initial cash payment, credited at troop-selection Done; notes/campaign.md §2.2-2.3."""
-    cash = next((field.argument for field in mission_record.fields if field.command == "cash"), None)
-    if not cash:
-        return 0
-    parts = [part.strip() for part in cash.split(",")]
-    try:
-        return int(parts[1])
-    except (IndexError, ValueError):
-        return 0
+    terms = payments.mission_terms(mission_record)
+    return terms.initial if terms else 0
 
 
 def default_scene_loaders():

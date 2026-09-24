@@ -150,6 +150,12 @@ class CampaignState:
     # The latest battle's objective records: letter -> (met, (v1, v2, v3, v4)), the ``Result:`` lines of
     # notes/debrief_evaluation.md section 2.1. Empty until a battle writes its result.
     objective_results: dict[str, tuple] = field(default_factory=dict)
+    # The payment terms (whshr.payments.CashTerms) of the mission being played, and whether its final
+    # payment was already credited; both are reset when the next mission's troop selection opens.
+    mission_cash: object = field(default=None, repr=False, compare=False)
+    mission_paid: bool = False
+    # True while ``objective_results`` is the no-battle mode's flawless win (whshr.payments.flawless_results).
+    flawless_result: bool = False
 
     def __post_init__(self):
         if not self.flow_history or self.flow_history[-1] != self.flow:
@@ -159,6 +165,13 @@ class CampaignState:
 
     def add_cash(self, amount):
         self.coffers += int(amount)
+
+    def begin_mission(self, terms):
+        """A new mission starts: remember its payment terms, forget the previous battle result."""
+        self.mission_cash = terms
+        self.mission_paid = False
+        self.objective_results = {}
+        self.flawless_result = False
 
     def is_unit_in_army(self, unit_id):
         return int(unit_id) in self.army_units

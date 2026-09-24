@@ -27,7 +27,7 @@ class ResultScene(Scene):
     def handle(self, event, context):
         if event in DISMISS_EVENTS:
             if self.glue_scene is not None:
-                self.glue_scene.complete_activity(ActivityResult(self.request_id, "battle"))
+                self.glue_scene.finish_battle(self.request_id)
                 return Transition(self.glue_scene, "glue battle resolved")
             from .campaign_scenes import MainMenuScene
             return Transition(MainMenuScene(), "battle result acknowledged")

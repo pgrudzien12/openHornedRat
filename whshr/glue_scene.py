@@ -70,9 +70,23 @@ class GlueScene(Scene):
     def resolve_debrief(self, effect):
         """Complete a debrief request without a screen (minimal debrief, :mod:`whshr.debrief`): log what was
         applied or skipped, then resume the script exactly as the completion handler would."""
+        self._apply_debrief(effect)
+        self.complete_activity(ActivityResult(effect.request_id, "debrief"))
+
+    def finish_battle(self, request_id):
+        """A battle this scene started has ended.  A *withdebrief* battle is followed by the debrief, whose
+        completion pays the mission (notes/campaign.md section 5, mode 2); a plain one is never paid."""
+        state = self.runtime.state
+        if state.battle_with_debrief:
+            state.battle_with_debrief = False
+            self._apply_debrief(StartDebrief(request_id, 2, state.debrief_index, False))
+        self.complete_activity(ActivityResult(request_id, "battle"))
+
+    def _apply_debrief(self, effect):
         from .debrief import complete_debrief
 
-        applied, skipped = complete_debrief(self.campaign, effect)
+        log = getattr(self.context, "campaign_log", None)
+        applied, skipped = complete_debrief(self.campaign, effect, log, flawless=bool(getattr(self.context, "no_battle", False)))
         location = self.program or self.window
         self._queue(tuple(Diagnostic(location, f"debrief: skipped {text}") for text in skipped))
         log = getattr(self.context, "campaign_log", None)
@@ -82,7 +96,6 @@ class GlueScene(Scene):
                           applied=applied, skipped=skipped)
             except Exception:
                 pass
-        self.complete_activity(ActivityResult(effect.request_id, "debrief"))
 
     def enter(self, context):
         self.context = context

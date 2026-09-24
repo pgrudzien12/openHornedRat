@@ -44,7 +44,8 @@ class TroopSelection:
 
     def __init__(self, company, forced=(), excluded=(), limit=DEFAULT_LIMIT, coffers=0, prepaid=0):
         self.company = {regiment.whoami: regiment for regiment in company}
-        self.forced = frozenset(forced) | {ALWAYS_FORCED_WHOAMI}
+        # a forced regiment that is not in the company file (it has not joined yet) cannot be selected or paid for
+        self.forced = (frozenset(forced) | {ALWAYS_FORCED_WHOAMI}) & self.company.keys()
         self.excluded = frozenset(excluded)
         self.limit = max(LIMIT_RANGE[0], min(LIMIT_RANGE[1], limit))
         self.coffers = coffers
