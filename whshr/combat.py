@@ -102,14 +102,13 @@ def kill_models(regiment, indices, battle):
         return 0
     grid = _grid_of(battle, regiment)
     dead_uids = set()
-    destroyed = len(victims) >= len(positions)
     for index in victims:
         model = regiment.melee_models[index]
-        delay = animation.collapse_delay_ticks(model.stagger, regiment.in_melee, destroyed)
+        delay = animation.collapse_delay_ticks(model.stagger, regiment.in_melee)
         if delay > 0:
             regiment.dying.append(animation.DyingModel(*positions[index], model=model, ticks_left=delay))
         else:
-            animation.step(model, animation.DEAD, battle.rng)
+            animation.step(model, animation.DEAD, battle.rng, regiment.animation_family)
             regiment.corpses.append((*positions[index], battle.rng.randrange(animation.FULL_TURN)))
         dead_uids.add(model.uid)
         if grid is not None and model.cell is not None:
