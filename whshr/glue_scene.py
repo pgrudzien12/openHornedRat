@@ -27,6 +27,8 @@ class GlueScene(Scene):
         self.return_scene = return_scene
         self.runtime = None
         self.context = None
+        self.caravan_return = None  # (scene, mode): the caravan that led to this map, for its Caravan button
+        self._mission_released = False
         self._fonts = {}
         self._effects = []
         self._watcher = None
@@ -118,6 +120,11 @@ class GlueScene(Scene):
         parent = self.return_scene
         if self.campaign is None or self.accept_mission is None:
             return parent
+        if self._mission_released:  # back from the map into the same caravan: nothing more to complete
+            if parent is not None and parent.runtime is not None:
+                parent.runtime.refresh_selection()
+            return parent
+        self._mission_released = True
         replacement, released = self.campaign.complete_mission(self.accept_mission)
         if parent is not None and parent.runtime is not None:
             if replacement:
@@ -169,6 +176,10 @@ class GlueScene(Scene):
             elif event.kind == "panel-action" and event.target in ("abort_briefing", "return_to_caravan") and self.return_scene:
                 self._queue(self.runtime.handle(GlueInput("panel-action", "abort_briefing")))
                 return Transition(self.return_scene, "generic briefing dismissed")
+            elif (event.kind == "panel-action" and event.target == "return_to_caravan"
+                  and self._reopen_caravan()):
+                scene = self.caravan_return[0]
+                return Transition(scene, "map returned to its caravan")
             elif event.kind == "panel-action" and event.target == "return_to_caravan" and hasattr(context, "locator"):
                 from .campaign_state import CampaignState
 
@@ -183,6 +194,21 @@ class GlueScene(Scene):
             self._queue(self.runtime.resume(event))
         return None
 
+    def _reopen_caravan(self):
+        """The map's Caravan button pops back to the caravan that led here (notes/activity_results.md
+        section 6.2): park the finished script again and open the same caravan window on top."""
+        if self.caravan_return is None:
+            return False
+        scene, mode = self.caravan_return
+        if scene.runtime is None or scene.runtime.state.pending is not None:
+            return False
+        effects = []
+        scene.runtime._request("caravan", effects, restore_context=True, mode=mode)
+        if scene.runtime.state.pending is None:
+            return False
+        scene._queue(effects)
+        return True
+
     def _caravan_open(self):
         pending = self.runtime.state.pending
         return pending is not None and pending.kind == "caravan" and pending.restore_context
@@ -195,6 +221,7 @@ class GlueScene(Scene):
         hotspot (books, options, speech, save/load) has no activity yet and stays inert."""
         pending = self.runtime.state.pending
         name = (target or "").casefold()
+        mode = pending.mode
         if name not in ("unwindmission", "popandresume"):
             self._queue((Diagnostic("caravan", f"hotspot {target!r} is not yet implemented"),))
             return None
@@ -202,6 +229,8 @@ class GlueScene(Scene):
         if name == "unwindmission":
             parent = self.release_mission()
             if parent is not None:
+                if mode:
+                    parent.caravan_return = (self, mode)
                 return Transition(parent, "mission released")
         return None
 

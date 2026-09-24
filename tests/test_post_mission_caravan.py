@@ -114,6 +114,39 @@ class PostMissionCaravanTests(DirectMissionRouteTests):
         resolved = [row for row in rows if row["type"] == "wait_resolved" and row.get("kind") == "caravan"]
         self.assertEqual(len(resolved), 1)
 
+    def test_given_the_map_after_a_caravan_when_its_caravan_button_is_pressed_then_that_caravan_returns(self):
+        for mode, window in (("select", "CARAVANAFTERMISSION"), ("infoABC", "INFOCARAVANABC")):
+            with self.subTest(mode=mode):
+                script = RESOURCES["MSCRIPT"].replace("gocaravan:select", f"gocaravan:{mode}")
+                self.context.glue = GlueContent.from_data(resources={**RESOURCES, "MSCRIPT": script})
+                machine, map_scene, campaign = self._play(("missionawindow.0",), False)
+                caravan = machine.active
+                machine.handle(GlueInput("hotspot-release", "UnwindMission"))
+                self.assertIs(machine.active, map_scene)
+
+                machine.handle(GlueInput("panel-action", "return_to_caravan"))
+
+                self.assertIs(machine.active, caravan)
+                self.assertEqual(self._names(caravan), [window])
+                self.assertEqual(len(caravan.runtime.state.context_stack), 1)
+                self.assertEqual(campaign.completed, {601})
+
+    def test_given_repeated_round_trips_when_the_caravan_is_left_again_then_nothing_leaks_or_completes_twice(self):
+        machine, map_scene, campaign = self._play(("missionawindow.0",), False)
+        caravan = machine.active
+        for _ in range(3):
+            machine.handle(GlueInput("hotspot-release", "UnwindMission"))
+            self.assertIs(machine.active, map_scene)
+            self.assertEqual(self._names(map_scene)[-1], "MISSIONBWINDOW")
+            machine.handle(GlueInput("panel-action", "return_to_caravan"))
+            self.assertIs(machine.active, caravan)
+            self.assertEqual(len(caravan.runtime.state.context_stack), 1)
+        machine.handle(GlueInput("hotspot-release", "UnwindMission"))
+
+        self.assertEqual(caravan.runtime.state.context_stack, [])
+        self.assertEqual(campaign.completed, {601})
+        self.assertEqual(len(map_scene.runtime.state.context_stack), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

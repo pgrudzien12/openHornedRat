@@ -101,6 +101,13 @@ class PlayMusic:
 
 
 @dataclass(frozen=True)
+class HotspotSpeech:
+    """A clicked hotspot speaks ``count`` consecutive text lines starting at ``string_id`` (``clickres``)."""
+    string_id: int
+    count: int
+
+
+@dataclass(frozen=True)
 class StopMusic:
     pass
 
@@ -131,7 +138,7 @@ class Diagnostic:
 
 
 GlueEffect = (OpenWindow | CloseWindow | UpdateWindow | StartMovie | StartBattle | StartDialogue |
-              EnterCaravan | StartDebrief | PlayMusic | StopMusic | StopSpeech | Autosave | EndGame | Diagnostic)
+              EnterCaravan | StartDebrief | PlayMusic | HotspotSpeech | StopMusic | StopSpeech | Autosave | EndGame | Diagnostic)
 
 
 @dataclass
@@ -154,6 +161,7 @@ class PendingRequest:
     request_id: int
     kind: str
     restore_context: bool = False
+    mode: str = ""  # the caravan mode a caravan request was made for
 
 
 @dataclass
@@ -216,6 +224,8 @@ class GlueRuntimeState:
     dialogue_typed: int = 0
     dialogue_ms: int = 0
     dialogue_colour: str = "black"  # live settextcolor value, applies to the *next* queued line
+    speech_lines: tuple = ()  # string ids still to speak after the current hotspot speech line
+    speech_active: bool = False  # a hotspot click speech is typing or holding its current line
     object_positions: dict = field(default_factory=dict)
     portrait_animators: dict = field(default_factory=dict)
     # window name -> (resident-list position, set name) chosen for an `index=-1` block when it was built
@@ -305,7 +315,46 @@ class GlueRuntime:
             effects.extend(self.step_until_blocked())
         if self.state.pending is not None and self.state.pending.kind == "dialogue":
             effects.extend(self._advance_dialogue(milliseconds))
+        elif self.state.speech_active:
+            self._advance_speech(milliseconds)
         return tuple(effects)
+
+    def _advance_speech(self, milliseconds):
+        """Type and hold the current hotspot speech line, then the next one, then clear the box."""
+        text = self.state.dialogue_text
+        self.state.dialogue_ms += milliseconds
+        if self.state.dialogue_typed < len(text):
+            while self.state.dialogue_typed < len(text) and self.state.dialogue_ms >= DIALOGUE_CHAR_MILLISECONDS:
+                self.state.dialogue_ms -= DIALOGUE_CHAR_MILLISECONDS
+                self.state.dialogue_typed += 1
+            if self.state.dialogue_typed < len(text):
+                return
+            self.state.dialogue_ms = min(self.state.dialogue_ms, DIALOGUE_HOLD_MILLISECONDS)
+        if self.state.dialogue_ms < DIALOGUE_HOLD_MILLISECONDS:
+            return
+        if self.state.speech_lines:
+            (next_id, *rest) = self.state.speech_lines
+            self.state.speech_lines = tuple(rest)
+            self._queue_dialogue_line(next_id)
+        else:
+            self.state.speech_active = False
+            self._clear_dialogue()
+
+    def _hotspot_speech(self, argument):
+        """Speak a clicked hotspot's ``clickres`` lines (``"<first id>:<count>"``); ignored while a
+        script dialogue or an earlier click speech is still on screen."""
+        if self.state.speech_active or (self.state.pending is not None and self.state.pending.kind == "dialogue"):
+            return ()
+        try:
+            first, count = (int(part) for part in str(argument).split(":"))
+        except ValueError:
+            return ()
+        if count < 1:
+            return ()
+        self.state.speech_active = True
+        self.state.speech_lines = tuple(range(first + 1, first + count))
+        self._queue_dialogue_line(first)
+        return (HotspotSpeech(first, count),)
 
     def _advance_dialogue(self, milliseconds):
         """Type the pending line, hold it, then resolve the dialogue and resume (§3.5)."""
@@ -340,6 +389,8 @@ class GlueRuntime:
             self.state.dialogue_ms = 0
             self.state.pending = None
             return (StopSpeech(), *self.step_until_blocked())
+        if input_.kind == "hotspot-speech":
+            return self._hotspot_speech(input_.target)
         if input_.kind == "panel-action":
             return self._panel_action(input_.target)
         expected = self.state.wait_reason
@@ -922,7 +973,7 @@ class GlueRuntime:
             return
         request_id = self.state.next_request_id
         self.state.next_request_id += 1
-        self.state.pending = PendingRequest(request_id, kind, restore_context)
+        self.state.pending = PendingRequest(request_id, kind, restore_context, details.get("mode", "") if kind == "caravan" else "")
         if kind == "movie":
             effects.append(StartMovie(request_id, details["movie"], details["fade"]))
         elif kind == "battle":
@@ -1014,6 +1065,8 @@ class GlueRuntime:
         self._clear_dialogue()
 
     def _clear_dialogue(self):
+        self.state.speech_lines = ()
+        self.state.speech_active = False
         self.state.dialogue_lines = ()
         self.state.dialogue_text = ""
         self.state.dialogue_typed = 0

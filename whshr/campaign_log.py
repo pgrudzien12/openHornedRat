@@ -228,6 +228,8 @@ class GlueWatcher:
         elif name in ("StartMovie", "StartBattle", "StartDialogue", "EnterCaravan", "StartDebrief"):
             kind = "caravan" if name == "EnterCaravan" else name[5:].lower()
             log.write("activity_request", kind=kind, **vars(effect))
+        elif name == "HotspotSpeech":
+            log.write("hotspot_speech", string_id=effect.string_id, count=effect.count)
         elif name in ("PlayMusic", "StopMusic", "Autosave", "EndGame"):
             log.write("glue_effect", effect=name, **vars(effect))
 

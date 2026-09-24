@@ -48,6 +48,8 @@ class RenderHotspot:
     cursor: str | None
     up_bitmap: str | None
     down_bitmap: str | None
+    click_text: int | None = None  # first speech text id spoken when the hotspot is clicked
+    click_count: int = 0  # number of consecutive speech lines
 
 
 @dataclass(frozen=True)
@@ -155,9 +157,19 @@ def build_render_model(content, window, positions=None):
             target = next((field.argument for field in record.fields if field.command == "res"), None)
             up_bitmap = values.get("setupbitmap") or None
             down_bitmap = values.get("setdownbitmap") or None
+            click_text, click_count = None, 0
+            if values.get("clickres") is not None:  # notes/glue_keywords.md: speech played when clicked
+                click_text = _integer(values.get("clickres"), None)
+                click_count = max(1, _integer(values.get("clickrescnt"), 1))
+            elif (target is None and not values.get("cursor") and not values.get("script")
+                  and hint is not None and hint > 0):
+                # PROVISIONAL: a hotspot with no cursor, target or script is a reaction: its text is
+                # spoken when clicked, not shown as a hover hint.
+                click_text, click_count, hint = hint, 1, None
             hotspots.append(RenderHotspot(_integer(values.get("x")), _integer(values.get("y")),
                                           _integer(values.get("vx")), _integer(values.get("vy")), hint,
-                                          target, values.get("cursor") or None, up_bitmap, down_bitmap))
+                                          target, values.get("cursor") or None, up_bitmap, down_bitmap,
+                                          click_text, click_count))
         elif isinstance(record, AnimRecord):
             animations.append(RenderAnimation(values.get("name") or None, _integer(values.get("x")),
                                               _integer(values.get("y")),
