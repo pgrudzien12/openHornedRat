@@ -383,9 +383,11 @@ class TroopSelectionScene(Scene):
         that map, exactly like one started from a briefing: the map's release wait stays open until the
         mission ends, and the mission's release then completes it and advances the flow."""
         script = ""
+        values = {}
         if self.mission_ref is not None:
             try:
-                script = self.glue_scene.runtime.content.mission(self.mission_ref).values.get("setmissionscript", "")
+                values = self.glue_scene.runtime.content.mission(self.mission_ref).values
+                script = values.get("setmissionscript", "")
             except (KeyError, TypeError):
                 script = ""
         host = self.glue_scene
@@ -394,6 +396,13 @@ class TroopSelectionScene(Scene):
                                          accept_mission=self.mission_ref, return_scene=host)
         elif script:
             host.start_mission_script(script)
+        elif self.mission_ref is not None and self.battle:
+            # No mission script: the record's own battle, debrief and completion run on a scene of their
+            # own, the same from the briefing and straight from the map (notes/activity_results.md 2.4).
+            debrief = str(values.get("debrief", "")).strip() or None
+            self.destination = GlueScene(record_battle=self.battle, record_debrief=debrief, campaign=self.campaign,
+                                         accept_mission=self.mission_ref,
+                                         return_scene=host.return_scene or host)
         else:
             self.glue_scene.start_battle(self.battle)
 

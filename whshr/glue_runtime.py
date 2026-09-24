@@ -402,7 +402,10 @@ class GlueRuntime:
             self.state.current.parked = False
         return self.step_until_blocked()
 
-    def start_battle(self, battle):
+    def start_battle(self, battle, debrief=None):
+        """Start ``battle`` outside any script: the play-game step of a mission record that names no mission
+        script.  With a ``debrief`` number it is a *withdebrief* battle, so the debrief (and its payment)
+        follows it exactly as after a scripted one; afterwards the caravan opens (``gocaravan:select``)."""
         battle = str(battle).upper()
         if not battle or self.state.pending is not None and self.state.pending.kind == "battle":
             return ()
@@ -413,7 +416,10 @@ class GlueRuntime:
             self._clear_dialogue()
             effects.append(StopSpeech())
         effects.append(StopMusic())
-        self._request_battle("playgame", battle, effects)
+        if debrief:
+            self._request_battle("playgamewithdebrief", f"{battle},{debrief}", effects)
+        else:
+            self._request_battle("playgame", battle, effects)
         self.state.caravan_after_battle = True
         return tuple(effects)
 

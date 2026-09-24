@@ -110,3 +110,44 @@ class RealPaymentDriveTests(unittest.TestCase):
             self.assertGreater(coffers[-1], 500)
             self.assertGreaterEqual(len([row for row in payments if row["kind"] == "initial"]), 8)
             self.assertTrue(any(row["kind"] == "final" and row["amount"] > 0 for row in payments))
+
+
+@unittest.skipUnless(WARFB and Path(WARFB).is_dir(), "WARFB is not set")
+class RealScriptlessMissionDriveTests(unittest.TestCase):
+    def test_given_a_no_battle_campaign_when_the_scriptless_west_missions_are_played_then_each_completes_and_pays(self):
+        # MISSIONWE45WINDOW's two records name a battle, a debrief and a replacement flow but no mission script
+        for record in (0, 1):
+            with self.subTest(record=record), tempfile.TemporaryDirectory() as directory:
+                save_dir = Path(directory)
+                context = scene_context(WARFB, save_dir=save_dir, no_battle=True)
+                campaign = CampaignState.from_installation(context.locator.installation, context.glue, save_dir=save_dir)
+                map_scene = GlueScene(campaign.flow, campaign)
+                machine = SceneMachine(map_scene, context)
+                played = False
+                for _ in range(40):
+                    if campaign.mission_window == "MISSIONWE45WINDOW":
+                        machine.handle(GlueInput("mission-select", f"missionwe45window.{record}"))
+                        played = True
+                    taken, coffers, flow = len(campaign.taken_missions), campaign.coffers, campaign.flow
+                    machine.handle(GlueInput("panel-action", "open_troop_select"))
+                    for _ in range(30):
+                        if isinstance(machine.active, TroopSelectionScene):
+                            machine.handle("done")
+                        machine.update(0.1)
+                    for _ in range(8000):
+                        state = machine.active.runtime.state if isinstance(machine.active, GlueScene) else None
+                        if machine.active is map_scene and len(campaign.taken_missions) > taken:
+                            break
+                        if state is not None and state.pending is not None and state.pending.kind == "caravan":
+                            machine.handle(GlueInput("hotspot-release",
+                                                     "PopAndResume" if state.pending.mode == "recruit" else "UnwindMission"))
+                        elif state is not None and state.wait_reason == "panel-resume" and state.pending is None:
+                            machine.handle(GlueInput("panel-action", "encounter_battle"))
+                        else:
+                            machine.update(0.1)
+                    if played:
+                        break
+                self.assertTrue(played)
+                self.assertIs(machine.active, map_scene)
+                self.assertEqual(campaign.flow, "FLOWSCRIPTSZENGML")  # the record's replacescript ran
+                self.assertGreater(campaign.coffers, coffers)  # paid at the debrief
