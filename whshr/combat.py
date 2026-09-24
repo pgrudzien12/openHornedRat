@@ -110,6 +110,11 @@ def kill_models(regiment, indices, battle):
             grid.clear(model.cell)
         del regiment.positions[index]
         del regiment.melee_models[index]
+        # Keep an in-progress re-form's per-model slot assignment index-parallel with the survivors
+        # (game_rules.md "Formation changes"): a stale entry here would hand some other model's
+        # target to whoever now sits at this index.
+        if index < len(regiment.reform_slots):
+            del regiment.reform_slots[index]
     regiment.models -= len(victims)
     _unpair_dead(battle, regiment, dead_uids)
     return len(victims)
