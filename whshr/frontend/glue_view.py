@@ -532,6 +532,8 @@ def _wrap(font, text, width):
 
 def _dialogue_state(state):
     """The (window, (text, colour) lines) fingerprint refresh() diffs against, §3.3's ring buffer."""
+    if not state.windows:
+        return "", ()  # nothing is open (a request parked the windows): no stale text
     typed = state.dialogue_text[:state.dialogue_typed]
     current = (typed, state.dialogue_line_colour) if typed else None
     lines = (*state.dialogue_lines, current) if current else state.dialogue_lines
