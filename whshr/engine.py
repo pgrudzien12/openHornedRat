@@ -174,6 +174,7 @@ class Regiment:
     # index-parallel with `positions`/`melee_models`, turned into a world target every tick with
     # `formation.place` so it tracks a moving or turning anchor.
     reforming: bool = False
+    anchor_cleared: bool = False  # set by `clear_anchor` (artillery misfire); see `anchored`
     reform_slots: list = field(default_factory=list)
     routing: bool = False  # fleeing the field; ignores orders, moves away from the nearest enemy
     # game_rules.md "Flight and catching fleeing units": the flight bearing is fixed once, "directly
@@ -214,8 +215,19 @@ class Regiment:
     @property
     def anchored(self):
         """War machines are anchored by rule, not by AI or mission choice (game_rules.md "Turning,
-        wheeling and reversing"): the artillery class always carries the anchor flag."""
-        return self.hud_class == "art"
+        wheeling and reversing"): the artillery class always carries the anchor flag, until an
+        artillery misfire explosion clears it (`clear_anchor`; there is no limbering).
+
+        The flag refuses move orders (including deployment placement), every turn type, charge
+        orders and internal charge starts, pursuit and script-initiated melee contact. It does not
+        stop shooting/reloading, halting, being attacked or engaged, being pushed by collisions,
+        rank changes, flight movement or the Independent/rally toggles."""
+        return self.hud_class == "art" and not self.anchor_cleared
+
+    def clear_anchor(self):
+        """Hook for an artillery misfire explosion, the only thing that frees an anchored war machine.
+        The engine has no misfire mechanic yet, so nothing calls this."""
+        self.anchor_cleared = True
 
     @property
     def is_wagon(self):
@@ -488,6 +500,8 @@ class Battle:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
         if regiment.braced:
             raise ValueError(f"{identifier} is braced against a charge and cannot be ordered")
+        if regiment.anchored:
+            raise ValueError(f"{identifier} is anchored and cannot be ordered to move")
         if not 0 <= x <= self.width or not 0 <= y <= self.height:
             raise ValueError("destination is outside the battlefield")
         regiment.attack_target = None
@@ -506,6 +520,8 @@ class Battle:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
         if regiment.braced:
             raise ValueError(f"{identifier} is braced against a charge and cannot be ordered")
+        if regiment.anchored:
+            raise ValueError(f"{identifier} is anchored and cannot charge")
         target = self.regiments.get(target_id)
         if target is None or target.side == Side.PLAYER:
             raise ValueError("attack target must not be a player regiment")
@@ -562,12 +578,21 @@ class Battle:
         regiment.ranks = ranks
         sizes = formation.rank_sizes(regiment.models, ranks)
         regiment.frontage = sizes[0] if sizes else 0
-        if regiment.is_wagon or regiment.anchored:
+        if regiment.is_wagon or regiment.hud_class == "art":
             # game_rules.md "Formation differences": war machines and wagons never use the flat
             # re-form mover; their models keep the ordinary rank-dependent catch-up walk toward the
-            # new raster slots (crew re-settle at varied rates), at the unit's normal speed.
-            # TODO(#70): some war-machine layouts take the FARTHEST eligible model per slot instead of
-            # the nearest; the trigger is unconfirmed, so no re-slotting is done for them at all.
+            # new raster slots (crew re-settle at varied rates), at the unit's normal speed. The
+            # re-slotting is applied as a permutation into raster order. War machine crew always
+            # take the FARTHEST unplaced model per slot; the machine's own front-rank centre slot is
+            # filled directly (nearest fallback here); wagons use the ordinary nearest search.
+            assignment = formation.reform_assignment(
+                regiment.x, regiment.y, regiment.direction, regiment.models, ranks, positions,
+                farthest=regiment.hud_class == "art")
+            raster_index = {offset: index for index, offset in
+                            enumerate(formation.block_slots(regiment.models, ranks))}
+            order = sorted(range(len(assignment)), key=lambda i: raster_index[assignment[i]])
+            regiment.positions = [positions[i] for i in order]
+            regiment.melee_models = [regiment.melee_models[i] for i in order]
             regiment.reform_slots = []
             regiment.reforming = False
             return
@@ -661,6 +686,10 @@ class Battle:
                 regiment.walking = False
                 continue
             regiment.model_positions()  # seed positions at the current anchor/facing before it moves
+            if regiment.anchored and not regiment.routing:
+                # An anchored war machine never starts a move or charge, from whatever source.
+                regiment.target_x = regiment.target_y = None
+                regiment.attack_target = None
             if regiment.attack_target is None:
                 regiment.charge_started_target = None
             moved = False
@@ -723,7 +752,7 @@ class Battle:
         the collision footprint is built around -- does not move. Turning the anchor in place instead
         swings the footprint away and can break a contact that should have held.
         """
-        if direction == regiment.direction:
+        if direction == regiment.direction or regiment.anchored:
             return
         shift_x, shift_y = formation.turn_pivot_shift(
             regiment.direction, direction, regiment.models, regiment.ranks)
