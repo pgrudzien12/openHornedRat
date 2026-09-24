@@ -52,6 +52,14 @@ HUD_CLASS_BY_RACE_TYPE = {
 }
 
 
+def snap_facing_to_view(direction, view_angle):
+    """Round `direction` to the nearest 45 degree step (64 of 512) of a grid offset by where the
+    camera sits inside a 45 degree sector."""
+    step = formation.FULL_TURN / 8
+    offset = view_angle % step
+    return (round((direction - offset) / step) * step + offset) % formation.FULL_TURN
+
+
 def speed_per_tick(move_stat, initiative_stat, k=MOVING_FREELY_K):
     """World units a regiment covers in one 100 ms tick (game_rules.md, "Real time and movement"):
     ``s_rlmv = trunc(4.8 * M + I) / 2``, then ``s_rlmv * k / 16`` units per tick. ``k`` selects the
@@ -196,6 +204,22 @@ class Regiment:
             self.frontage = sizes[0] if sizes else 0
 
     @property
+    def anchored(self):
+        """War machines are anchored by rule, not by AI or mission choice (game_rules.md "Turning,
+        wheeling and reversing"): the artillery class always carries the anchor flag."""
+        return self.hud_class == "art"
+
+    @property
+    def is_wagon(self):
+        return self.unit_class == 7 and self.models == 2
+
+    @property
+    def turns_on_the_spot(self):
+        """Single-model units and units mid-re-form skip the pivot, slot-shift and speed-penalty
+        machinery of a gradual turn (game_rules.md, same section); their turn rate is unchanged."""
+        return self.models <= 1 or self.reforming
+
+    @property
     def moving(self):
         return self.target_x is not None
 
@@ -333,6 +357,9 @@ class Battle:
         if len(self.regiments) != len(regiments):
             raise ValueError("regiment identifiers must be unique")
         self.tick_count = 0
+        # Camera rotation in 1/512 turns, set by the frontend; wagons snap to it (see set_view_angle).
+        self.view_angle = None
+        self._snapped_view_angle = None
         self.rng = random.Random(seed)
         self.events = []  # battle events emitted by the most recent tick (plain strings)
         # {node id: (x, y)} from the battle's own [NODES] section (whshr.script.load_battle),
@@ -552,6 +579,19 @@ class Battle:
                 best_id, best_distance = regiment.identifier, distance
         return best_id
 
+    def set_view_angle(self, angle):
+        """Record the camera rotation (1/512 turns). Wagons re-snap their facing to the nearest 45 degree
+        step of a grid offset by the camera's position in its 45 degree sector, only when it changed
+        (game_rules.md "Turning, wheeling and reversing")."""
+        angle = angle % formation.FULL_TURN
+        self.view_angle = angle
+        if angle == self._snapped_view_angle:
+            return
+        self._snapped_view_angle = angle
+        for regiment in self.regiments.values():
+            if regiment.is_wagon:
+                regiment.direction = snap_facing_to_view(regiment.direction, angle)
+
     def tick(self, seconds=TICK_SECONDS):
         if seconds <= 0:
             raise ValueError("tick duration must be positive")
@@ -663,6 +703,8 @@ class Battle:
     @staticmethod
     def _snap_order_turn(regiment, goal):
         """Apply the one-time 90/180-degree snap on a new movement order."""
+        if regiment.turns_on_the_spot:
+            return
         delta = Battle._turn_delta(regiment.direction, goal)
         magnitude = abs(delta)
         snap = 256 if magnitude > 192 else 128 if magnitude >= 97 else 0
@@ -716,10 +758,11 @@ class Battle:
         old_direction = regiment.direction
         amount = min(step, regiment.turn_remaining)
         new_direction = (old_direction + regiment.turn_sign * amount) % 512
-        shift_x, shift_y = formation.turn_corner_shift(old_direction, new_direction,
-                                                       frontage, regiment.turn_sign)
-        regiment.x += shift_x
-        regiment.y += shift_y
+        if not regiment.turns_on_the_spot:
+            shift_x, shift_y = formation.turn_corner_shift(old_direction, new_direction,
+                                                           frontage, regiment.turn_sign)
+            regiment.x += shift_x
+            regiment.y += shift_y
         regiment.direction = new_direction
         regiment.turn_remaining -= amount
         mode = regiment.turn_mode
@@ -753,7 +796,9 @@ class Battle:
         elif regiment.turn_mode is None and order_key[0] != "charge":
             self._plan_turn(regiment, goal, charge=order_key[0] == "charge")
         mode = self._step_turn(regiment, scale)
-        if mode == "wheel":
+        if regiment.turns_on_the_spot:
+            pass  # no speed penalty: translates at full speed while turning
+        elif mode == "wheel":
             step /= 2
         elif mode is not None:
             step = 0
