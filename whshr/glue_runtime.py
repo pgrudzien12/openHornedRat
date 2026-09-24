@@ -13,7 +13,7 @@ from .campaign_runtime import CampaignRuntime
 from .campaign_state import caravan_window
 from .glue_animation import GlueBitmapAnimator
 from .glue import AnimRecord, BitmapRecord, GlueInstruction, MissionRecord, MissionRef
-from .portraits import PortraitAnimator
+from .portraits import PORTRAIT_SPRITES, SPEAKER_INDEX, PortraitAnimator
 
 # notes/briefing_dialogue.md §3.5, "no speech / no audio device" fallback path (§7 point 9): the
 # engine has no WAV playback yet, so dialogue always uses the fixed no-speech pacing rather than
@@ -218,6 +218,8 @@ class GlueRuntimeState:
     dialogue_colour: str = "black"  # live settextcolor value, applies to the *next* queued line
     object_positions: dict = field(default_factory=dict)
     portrait_animators: dict = field(default_factory=dict)
+    # window name -> (resident-list position, set name) chosen for an `index=-1` block when it was built
+    portrait_speakers: dict = field(default_factory=dict)
     paused: bool = False
     waits_passed: int = 0  # waitforrelease commands reached so far, to resume a flow at the saved step
 
@@ -651,12 +653,34 @@ class GlueRuntime:
         anim = next((record for record in definition.records if isinstance(record, AnimRecord)), None)
         if anim is not None:
             self.state.portrait_animators[name] = PortraitAnimator(anim.values.get("sequence", 1))
+            self.state.portrait_speakers.pop(name, None)
+            self.portrait_index(name, anim.values.get("index"))
         effects.append(OpenWindow(name, parent, palette))
+
+    def portrait_index(self, window_name, index):
+        """Resident-list position a window's portrait block shows.
+
+        ``index=-1`` is the current commander (notes/glue_portraits.md §1.4): resolved once when the
+        window is built and kept while it is open.
+        """
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return index
+        if index != SPEAKER_INDEX:
+            return index
+        chosen = self.state.portrait_speakers.get(window_name)
+        if chosen is None:
+            speaker = getattr(self.campaign, "current_speaker", None)
+            position = self.content.resolve_speaker_position(speaker)
+            chosen = self.state.portrait_speakers[window_name] = (position, PORTRAIT_SPRITES[position])
+        return chosen[0]
 
     def _close_window(self, argument, effects):
         name = self._resource_argument(argument)
         self.state.windows = [window for window in self.state.windows if window.name != name]
         self.state.portrait_animators.pop(name, None)
+        self.state.portrait_speakers.pop(name, None)
         effects.append(CloseWindow(name))
 
     def _add_object(self, argument, animated, effects):
@@ -919,6 +943,7 @@ class GlueRuntime:
         self.state.pending = None
         self.state.wait_reason = None
         self.state.portrait_animators.clear()
+        self.state.portrait_speakers.clear()
         self._clear_dialogue()
 
     def _clear_dialogue(self):
@@ -1013,6 +1038,7 @@ class GlueRuntime:
         self.state.pending = None
         self.state.wait_reason = None
         self.state.portrait_animators.clear()
+        self.state.portrait_speakers.clear()
         self._clear_dialogue()
         popped = self.pop_context()
         effects = [StopSpeech(), StopMusic()]

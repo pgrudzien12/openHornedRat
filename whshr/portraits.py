@@ -1,6 +1,7 @@
 """Runtime compositing for the verified campaign speaker portraits."""
 
 from .battlefield import read_sprite_sheet
+from .script import resource_name
 
 # Glue's resident portrait list, notes/glue_portraits.md §1.  Index 36 is
 # BACKALL itself and is not a foreground speaker.
@@ -11,6 +12,47 @@ PORTRAIT_SPRITES = {
     24: "GINF", 25: "RAMO", 26: "CARO", 27: "ART1", 28: "CELE", 29: "HALB", 30: "KEEL", 31: "XBOW",
     32: "TREE", 33: "HAMM", 34: "IRON", 35: "KING",
 }
+
+# `[ANIM] index=-1` means "the player's current commander" (notes/glue_portraits.md §1.4).
+SPEAKER_INDEX = -1
+FALLBACK_POSITION = 4  # SCRI: no roster loaded, or the speaker's set is not in the resident list
+VOID_LEADER_PORTRAIT = "VoidType"  # sprite-table entry 0: the regiment has no leader portrait
+
+
+def first_leader_speaker(leader_portraits, portrait_sets):
+    """The current speaker for a marching roster (§1.4 items 1-2).
+
+    ``leader_portraits`` are the ``leaderportrait:`` names of the marching regiments in file
+    order; the first one that is not the void entry wins. ``portrait_sets`` maps a lower-case
+    sprite name to its portrait set name. Returns the upper-case set name (an unresolved name
+    is returned as it is and later misses the resident list), or None without a leader.
+    """
+    for name in leader_portraits:
+        token = resource_name(name)
+        if token is None or token.casefold() == VOID_LEADER_PORTRAIT.casefold():
+            continue
+        return portrait_sets.get(token.casefold(), token).upper()
+    return None
+
+
+def speaker_position(speaker, available=None):
+    """Resident-list position for ``index=-1`` (§1.4 items 3-4).
+
+    A linear search of the list for the speaker's set; a miss (or no speaker) uses position 4.
+    ``available(position)`` says whether that set's frames can be loaded; when they cannot the
+    next available position is used (wrapping around; the start when none is available).
+    """
+    start = next((position for position, sprite in PORTRAIT_SPRITES.items()
+                  if speaker is not None and sprite == str(speaker).upper()), FALLBACK_POSITION)
+    if available is None:
+        return start
+    count = len(PORTRAIT_SPRITES)
+    for step in range(count):
+        position = (start + step) % count
+        if available(position):
+            return position
+    return start
+
 
 # Roster-book crop window: x, y origin of the 72x104 box cropped from a set's 120x152 frame 0,
 # shared by the background (BACKALL frame 0) and the leader portrait so the face stays centred;

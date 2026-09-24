@@ -9,7 +9,8 @@ from the front-end code and checked against data/renders), 🟡 inferred, ⬜ un
 
 `index` is **not** a position in the leader-portrait category of the sprite-name table and not a name lookup. The front end
 keeps one **resident portrait list** of 37 records (loaded when the glue is initialised, terminated by a `-1` marker). Each
-record holds a sprite-table index (`notes/sprite_names.md`); the `[ANIM]` `index` is the position in this list.
+record holds a sprite-table index (`notes/sprite_names.md`); the `[ANIM]` `index` is the position in this list. The one
+value that is not a position, `-1`, means "the army's commander" (§1.4).
 Each record also carries two further integers: the crop-window origin used by the roster book, not by glue windows (§1.3).
 The list is also what the roster book uses to find a regiment's portrait from a sprite-table index (§1.3).
 
@@ -131,6 +132,55 @@ frame each face centrally with nothing cut off.
 Lookup: the roster book searches this list linearly for the sprite-table index stored in the regiment's leader block; the
 match position gives the window. Without a match: no portrait, the background window defaults to (25, 5), and the regiment's
 banner is drawn at full size in the box instead (🟡: how often this happens with shipped `.MRC` data).
+
+### 1.4 `index = -1`: the speaker is the army's commander ✅
+
+`-1` is not a position in the list. It means **"show the portrait of the player's current commander"**, resolved
+each time the window is built (a script opens it, or the campaign restores it), never stored in the window
+definition:
+
+1. The front end keeps one **current speaker**: the leader-portrait sprite-table index of the **first regiment in
+   the player's marching roster** (`MARCH.MRC`, in file order) that has a leader portrait at all. Regiments without one
+   (`VoidType`, index 0) are skipped. In the shipped roster the first regiment is the Grudgebringer Cavalry, whose
+   leader block says `leaderportrait:Commander`, so the current speaker is the **Commander** (`COMM`, list position 2,
+   "Cmdr. Bernhardt").
+2. The current speaker is (re)computed only when the marching roster is loaded: when troop selection is finished, when a
+   campaign save is restored, and on the other reload of the roster after a battle. It does not change inside a
+   mission or while a window is open.
+3. When a window with an `[ANIM]` `index=-1` is built, the speaker is looked up in the 37-entry resident list by
+   sprite-table index (the same linear search the roster book uses, §1.3) and the block behaves exactly as if the
+   script had said `index=<that position>`: the same sprite set, the same overlay frames, the same
+   mouth/eye sequences (§3).
+4. **Fallbacks.** If the speaker's sprite-table index is not in the list, or no roster has been loaded yet, the
+   block uses position **4** (`SCRI`, the Dietrich/Scribe portrait). If the chosen set's frames are not available, the
+   block moves on to the next available list position.
+5. The block's `name:` label is filled with the speaker's sprite name. It is a display label only (no lookup keys on
+   it), so it changes nothing visible.
+
+Only five windows use `index=-1` — the four ambush windows and `EncounterWindow`; every other `[ANIM]` block names
+a fixed position. (Windows with `palindex=-1` are a different key and unrelated.) All five draw the **same person**;
+they differ only in the backdrop and the button panel:
+
+| window | opened by | `bkindex` | `BACKALL` backdrop | panel |
+|---|---|---|---|---|
+| `AmbushWindow` | `StandardAmbush` (Chapter-1 `BPMISSION2` twice, `BPMISSION5` directly, `ENMISSION1`) | 8 | open grassland under a blue sky | 3: one button, Defend |
+| `ForestAmbushWindow` | `ForestAmbush` (`GMMISSION3` x2, `LMISSION1` x2) | 2 | forest canopy | 3 |
+| `MountainAmbushWindow` | `MountainAmbush` (`ZHUFBARMISSION`) | 10 | rocky mountain pass | 3 |
+| `SnowyAmbushWindow` | `SnowyAmbush` (`ENMISSION4`) | 19 | snow-capped mountain | 3 |
+| `EncounterWindow` | **no shipped script or executable string opens it** (only the separate `CeridanEncounterWindow` / `HarkonEncounterWindow*`, which use fixed indices) | 15 | red stage curtain with gold ornaments (the same backdrop Dietrich's windows use) | 4: Evade / Attack! |
+
+So the backdrop is chosen to match the terrain of the ambush (grass, forest, mountain, snow) with the commander
+standing in front of it. All five backdrops render correctly with `STANDARD.PAL` (§2.1: only frames 16 and 17 need the
+map palette).
+
+**Animation.** Nothing differs from other portrait windows. Every block starts with `sequence=1`; `StandardAmbush`
+sets `animseq=1` and applies it (the Commander talks while the red "Ambush!" line is shown), then sets `animseq=2`
+and applies it (mouth closed, eyes still blinking) while it waits for the player, so the portrait is silent and
+blinking on the Defend button. Portrait window frames use `frame=3` (no ornaments), as everywhere.
+
+🟡 The field the roster's first regiment supplies is the same leader sprite index the roster book uses to pick a
+regiment's portrait, but it has not been checked against a running original that a different first regiment (for
+example after the Commander regiment is lost or reordered) shows a different speaker.
 
 ## 2. `bkindex` and the background frames ✅
 
