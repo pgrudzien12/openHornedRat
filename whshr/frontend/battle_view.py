@@ -544,6 +544,13 @@ class BattleView(SceneView):
         log_list = list(self.battle_log)
         end = max(0, len(log_list) - self.log_scroll)
         self.hud.set_log(log_list[max(0, end - 4):end])
+        sel = self.scene.selected_id
+        if sel is not None and sel in self.scene.battle.regiments:
+            reg = self.scene.battle.regiments[sel]
+            initial = getattr(self.scene, "initial_models", {})
+            self.hud.set_unit_info(reg.name, reg.hud_class, reg.models, initial.get(sel))
+        else:
+            self.hud.set_unit_info("", None, None, None)
         self.hud.draw(width, height, self.camera)
 
     def release(self):

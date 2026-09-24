@@ -150,6 +150,13 @@ COMPASS_FRAMES = (99, 105)
 # Battle log panel: 4-line scrollable message area, left of the scroll arrows (panel-native coords).
 # Scroll arrows are at (424, 9) and (424, 34); readout ends at ~200; log fills the space between.
 LOG_RECT = (205, 2, 215, 68)
+# Unit info panel: below the log, left of the toggle buttons at (337, 66).
+UNIT_INFO_RECT = (205, 72, 128, 98)
+
+HUD_CLASS_NAMES = {
+    "inf": "Infantry", "arch": "Archers", "art": "Artillery",
+    "wiz": "Wizard", "mon": "Monster",
+}
 
 BLACK = (0, 0, 0)
 
@@ -187,6 +194,7 @@ class Hud:
         self.pressed = None
         self._marker_order = []
         self._log_panel = None
+        self._unit_info_panel = None
 
     def _scale(self):
         """The same integer-snap scale NativeScreenView._layout() uses (scene_view.py), applied to
@@ -409,6 +417,13 @@ class Hud:
         if self._log_panel is None:
             self._log_panel = self.gpu.battle_log((LOG_RECT[2], LOG_RECT[3]))
         self._log_panel.set_entries(entries)
+
+    def set_unit_info(self, name, unit_class, models, max_models):
+        """Render selected unit name, class and casualty count into the info panel."""
+        if self._unit_info_panel is None:
+            self._unit_info_panel = self.gpu.unit_info((UNIT_INFO_RECT[2], UNIT_INFO_RECT[3]))
+        class_name = HUD_CLASS_NAMES.get(unit_class, unit_class or "")
+        self._unit_info_panel.set_info(name, class_name, models, max_models)
 
     # ------------------------------------------------------------------ minimap
 
@@ -647,6 +662,9 @@ class Hud:
         if self._log_panel is not None:
             self._draw_panel(self._log_panel, LOG_RECT[0], LOG_RECT[1],
                              LOG_RECT[2], LOG_RECT[3])
+        if self._unit_info_panel is not None:
+            self._draw_panel(self._unit_info_panel, UNIT_INFO_RECT[0], UNIT_INFO_RECT[1],
+                             UNIT_INFO_RECT[2], UNIT_INFO_RECT[3])
 
     def _draw_fixed_buttons(self):
         for name, (pos, frames, size) in FIXED_BUTTONS.items():
@@ -723,3 +741,5 @@ class Hud:
                 quad.release()
         if self._log_panel is not None:
             self._log_panel.release()
+        if self._unit_info_panel is not None:
+            self._unit_info_panel.release()

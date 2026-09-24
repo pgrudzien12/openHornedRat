@@ -216,6 +216,41 @@ class BattleLogPanel(ScreenQuad):
         self.write(pygame.image.tobytes(surface, "RGBA"))
 
 
+class UnitInfoPanel(ScreenQuad):
+    """Selected unit name, class and casualty readout in the HUD panel."""
+
+    def __init__(self, gpu, size, bold_font, normal_font,
+                 color=(220, 50, 50), background=(0, 0, 0, 140)):
+        super().__init__(gpu, size)
+        self.bold_font = bold_font
+        self.normal_font = normal_font
+        self.color = color
+        self.background = background
+        self._info = None
+
+    def set_info(self, name, unit_class, models, max_models):
+        info = (name, unit_class, models, max_models)
+        if info == self._info:
+            return
+        self._info = info
+        surface = pygame.Surface(self.size, pygame.SRCALPHA)
+        if self.background:
+            surface.fill(self.background)
+        w, h = self.size
+        y = 4
+        name_surf = self.bold_font.render(name or "", True, self.color)
+        surface.blit(name_surf, (4, y))
+        y += self.bold_font.get_linesize()
+        if unit_class:
+            class_surf = self.normal_font.render(unit_class, True, self.color)
+            surface.blit(class_surf, (4, y))
+        if models is not None and max_models is not None:
+            cas = f"{models}/{max_models}"
+            cas_surf = self.normal_font.render(cas, True, self.color)
+            surface.blit(cas_surf, (w - cas_surf.get_width() - 4, h - cas_surf.get_height() - 4))
+        self.write(pygame.image.tobytes(surface, "RGBA"))
+
+
 class Gpu:
     """The zengl context, the frame render target and shared fonts."""
 
@@ -236,3 +271,6 @@ class Gpu:
 
     def battle_log(self, size, **options):
         return BattleLogPanel(self, size, self.battle_log_font_bold, self.battle_log_font, **options)
+
+    def unit_info(self, size, **options):
+        return UnitInfoPanel(self, size, self.battle_log_font_bold, self.battle_log_font, **options)
