@@ -99,6 +99,8 @@ class ModelState:
     action: int = animation.STAND  # current action id, whshr.animation (game_rules.md "Figure animation")
     action_pc: int = 0  # ticks elapsed since the action's program counter was last reset
     action_entry: int = 0  # random entry/choice drawn on that reset, whshr.animation.step
+    pending_action: int | None = None  # action queued behind a running one-shot script
+    drawn_facing: int | None = None  # facing (0-511) the sprite direction is drawn from; None until first set
 
 
 @dataclass
@@ -178,6 +180,7 @@ class Regiment:
     flee_y: float | None = None
     fled: bool = False  # a routing regiment that has left the battlefield (removed from play)
     reload_ticks: float = 0.0  # ticks remaining before a missile regiment may shoot again
+    dying: list = field(default_factory=list)  # animation.DyingModel entries awaiting their collapse tick
     corpses: list = field(default_factory=list)  # (x, y, direction) of models that have died, for the view
 
     # Traced close-combat/rally timing (game_rules.md 5.5, 6.1-6.2, 7.4), see whshr.combat.
@@ -621,6 +624,7 @@ class Battle:
 
     def _advance_regiments(self, scale, seconds):
         for regiment in self.regiments.values():
+            self._step_dying(regiment)
             if not regiment.active:
                 regiment.walking = False
                 continue
@@ -980,12 +984,45 @@ class Battle:
                 regiment=regiment.identifier))
         return not all_settled
 
+    def _step_dying(self, regiment):
+        """Count down each dying model's collapse delay, then lay it down as a corpse with a random
+        facing (game_rules.md "Figure animation", mechanism 5)."""
+        for dying in list(regiment.dying):
+            dying.ticks_left -= 1
+            if dying.ticks_left > 0:
+                animation.step(dying.model, dying.model.action, self.rng)
+                continue
+            regiment.dying.remove(dying)
+            animation.step(dying.model, animation.DEAD, self.rng)
+            regiment.corpses.append((dying.x, dying.y, self.rng.randrange(animation.FULL_TURN)))
+
+    def _drawn_facing_target(self, regiment, model):
+        """Facing a model's drawn direction turns toward: the unit's for stand/weapon-ready/shoot, its own
+        heading (or its opponent) for walk/fight."""
+        if animation.facing_follows_unit(model.action):
+            return regiment.direction
+        if model.action == animation.FIGHT and model.opponent is not None:
+            other = self.regiments.get(model.opponent[0])
+            index = other.index_of(model.opponent[1]) if other is not None else None
+            index_self = regiment.index_of(model.uid)
+            if index is not None and index_self is not None and index < len(other.positions):
+                dx = other.positions[index][0] - regiment.positions[index_self][0]
+                dy = other.positions[index][1] - regiment.positions[index_self][1]
+                if dx or dy:
+                    return round(math.atan2(dx, dy) * formation.FULL_TURN / math.tau) % formation.FULL_TURN
+        if model.heading_x or model.heading_y:
+            return round(math.atan2(model.heading_x, model.heading_y)
+                         * formation.FULL_TURN / math.tau) % formation.FULL_TURN
+        return regiment.direction
+
     def _step_animations(self, regiment):
         """Step every model's action program one battle tick (whshr.animation, game_rules.md "Figure
         animation"). The requested action mirrors what the model is currently doing: fighting or
         weapon-ready in melee (paired with an opponent or not), the shoot pose while the regiment
         holds a missile stance, walking while the model itself has not yet reached its slot
-        (`ModelState.at_rest`), otherwise idling in place."""
+        (`ModelState.at_rest`), otherwise idling in place. Then the drawn facing slews toward its
+        action-dependent target (wagons snap; a facing-locked script freezes it)."""
+        wagon = regiment.unit_class == 7 and regiment.models == 2
         for model in regiment.melee_models:
             if regiment.in_melee:
                 requested = animation.FIGHT if model.opponent is not None else animation.WEAPON_READY
@@ -996,6 +1033,13 @@ class Battle:
             else:
                 requested = animation.IDLE
             animation.step(model, requested, self.rng)
+            self._slew_drawn_facing(regiment, model, wagon)
+
+    def _slew_drawn_facing(self, regiment, model, wagon=False):
+        if animation.family_table(animation.DEFAULT_FAMILY)[model.action].locks_facing:
+            return
+        target = self._drawn_facing_target(regiment, model)
+        model.drawn_facing = target if wagon else animation.slew_facing(model.drawn_facing, target)
 
     def side_counts(self):
         """Per-side active/routing/fled/destroyed regiment counts (whshr.battle_log snapshots, and the
