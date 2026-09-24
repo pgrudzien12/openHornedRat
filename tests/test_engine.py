@@ -548,6 +548,70 @@ class FlatReformMoverTests(unittest.TestCase):
         self.assertEqual(rounded_positions, rounded_targets)
 
 
+class ReformFormationDifferenceTests(unittest.TestCase):
+    """game_rules.md "Formation differences" and "A formation change costs no time of its own"."""
+
+    def _wagon_battle(self):
+        source = {"field": {"width": 1000, "height": 1000}, "merc": None,
+                  "armies": [{"units": [{
+                      "id": "wagon", "name": "Wagon", "set": {"x": 0, "y": 0},
+                      "stats": {"s_side": [0, 2, 2, 2], "s_race": [7 * 8]},
+                      "profile": {"M": 4, "I": 3},
+                  }]}]}
+        return Battle.from_script(source)
+
+    def test_given_a_wagon_when_reform_is_ordered_then_it_keeps_the_catch_up_walk(self):
+        battle = self._wagon_battle()
+        wagon = battle.regiments["wagon"]
+        wagon.model_positions()
+
+        battle.order_reform("wagon", 2)
+
+        self.assertFalse(wagon.reforming)
+        self.assertEqual(wagon.reform_slots, [])
+
+    def test_given_a_wagon_and_a_block_when_reforming_then_wagon_speeds_are_rank_dependent_and_the_blocks_uniform(self):
+        battle = self._wagon_battle()
+        wagon = battle.regiments["wagon"]
+        wagon.model_positions()
+        wagon.y = 100
+        before = list(wagon.positions)
+        battle._advance_models(wagon, 1)
+        wagon_steps = [b[1] - a[1] for a, b in zip(before, wagon.positions)]
+        self.assertNotAlmostEqual(wagon_steps[0], wagon_steps[1])
+
+        block = Regiment("block", "Block", 0, 0, 0, Side.PLAYER, models=4, ranks=2,
+                         speed_per_tick=speed_per_tick(4, 3))
+        battle = Battle(1000, 1000, [block])
+        block.model_positions()
+        block.positions = [(-30.0, -50.0), (30.0, -50.0), (-30.0, -80.0), (30.0, -80.0)]
+        block.reforming = True
+        block.reform_slots = [(0.0, 100.0)] * 4
+        before = list(block.positions)
+        battle._advance_reforming_models(block, 1)
+        steps = {round(math.hypot(b[0] - a[0], b[1] - a[1]), 6) for a, b in zip(before, block.positions)}
+        self.assertEqual(len(steps), 1)
+
+    def test_given_an_already_settled_shape_when_reform_is_ordered_then_it_completes_with_no_extra_delay(self):
+        block = Regiment("block", "Block", 0, 0, 0, Side.PLAYER, models=8, ranks=2,
+                         speed_per_tick=speed_per_tick(4, 3))
+        battle = Battle(1000, 1000, [block])
+        block.model_positions()
+        battle.order_reform("block", 4)
+        block.positions = formation.place(0, 0, 0, block.reform_slots)
+
+        battle._advance_reforming_models(block, 1)
+
+        self.assertFalse(block.reforming)
+
+    def test_given_a_leader_index_when_reslotted_then_it_takes_the_front_rank_centre_directly(self):
+        positions = [(float(i * 10), 500.0) for i in range(6)]  # all far from the slots
+
+        slots = formation.reform_assignment(0, 0, 0, 6, 2, positions, leader_index=5)
+
+        self.assertEqual(slots[5], formation.reform_slot_order(6, 2)[0])
+
+
 class ChargeStretchWorkedExampleTests(unittest.TestCase):
     """game_rules.md "Models chase the unit, they are not carried by it": the full worked Empire
     infantry example (`s_rlmv` 11, 4 ranks) -- marching-speed parity, the charge stretch, a re-aiming

@@ -539,6 +539,15 @@ class Battle:
         regiment.ranks = ranks
         sizes = formation.rank_sizes(regiment.models, ranks)
         regiment.frontage = sizes[0] if sizes else 0
+        if regiment.is_wagon or regiment.anchored:
+            # game_rules.md "Formation differences": war machines and wagons never use the flat
+            # re-form mover; their models keep the ordinary rank-dependent catch-up walk toward the
+            # new raster slots (crew re-settle at varied rates), at the unit's normal speed.
+            # TODO(#70): some war-machine layouts take the FARTHEST eligible model per slot instead of
+            # the nearest; the trigger is unconfirmed, so no re-slotting is done for them at all.
+            regiment.reform_slots = []
+            regiment.reforming = False
+            return
         regiment.reform_slots = formation.reform_assignment(
             regiment.x, regiment.y, regiment.direction, regiment.models, ranks, positions)
         regiment.reforming = bool(regiment.reform_slots)
