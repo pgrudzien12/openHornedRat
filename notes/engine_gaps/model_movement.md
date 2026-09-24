@@ -62,12 +62,15 @@ all of this")
   tracks almost exactly). War machine crew sit at the back ranks of the 3-/4-deep layout by design
   (machine at rank 0, `F`=28–34) so the crew always re-settle around the machine. Wagons (rank 0 and
   1 of a 4-deep layout, `F`=36–42 and 28–34) never stretch.
-- **Turning halves the keep-up requirement** (`F ≥ 3.33 × k` while wheeling, since a wheel halves
-  translation but not the models' own step length) and a halted turn stops translation altogether, so
-  a charge that has to wheel onto its target arrives visibly tidier than one that runs straight in.
-  This should fall out for free of task 1's formula *if* it measures the anchor's actual per-tick
-  translation that tick rather than a flat `s_rlmv × k / 16` constant independent of turning state —
-  worth a specific wheeling-charge test case in task 3, not a separate implementation task.
+- **Turning during a charge makes the stretch worse.** A wheel (ordinary move only) halves the anchor's
+  translation, giving `F ≥ 3.33 × k`, and a halted turn or pursuit re-aim stops it — but a charge does
+  neither: it keeps full speed on every turning tick, and each turning tick rotates the slot lattice about
+  the inner front corner, adding `≈ 0.0175 × r` world units of slot sweep per degree to the rear ranks' lag.
+  A turning charge therefore never ends tidier than a straight one (5×4 block, 45° turn: about 16 world
+  units worse on average; see `notes/game_rules.md`, "Turning, wheeling and reversing"). Task 3's test
+  case is the invariant *rear-rank lag of a turning charge ≥ that of a straight charge*, plus a check that
+  the anchor advances at full charge speed on turning ticks; the catch-up walk must read the anchor's
+  actual per-tick translation, not a flat constant.
 
 **Scope boundary**: `whshr/formation.py` only implements the plain block layout (infantry/cavalry/
 archers/special/notype); its own docstring already states "War machine, monster and wagon layouts are

@@ -37,10 +37,9 @@ combat), marked ✅.
 - **A unit that joins an ongoing fight also gets a counter** (whichever side is newly joining a grid,
   brand new or already under way) — already correctly matched (existing code comment: "whether the
   fight is brand new or a third regiment joining one already under way").
-- 🟡 **Open decision, not a confirmed fact**: the report flags a "probable bug" in the original where a
-  charging monster's own melee round never decrements its counter, so it effectively keeps +1 S for
-  the rest of the fight. Flagged low-confidence in the source research; an engine choice (replicate for
-  fidelity, or treat as a bug not worth reproducing) rather than something to silently implement.
+- 🟡 **Original quirk, deliberately not reproduced**: in the original a charging monster's own melee
+  round appears never to decrement its counter, so it keeps +1 S for the rest of the fight. This is
+  low-confidence and looks like a bug; the engine does not replicate it (see "Decision" below).
 
 ## Scope boundary
 
@@ -55,11 +54,7 @@ tasks are scoped to foot models.
 Tracked as [epic #57](https://github.com/pgrudzien12/openHornedRat/issues/57) (tasks #58-#60), under a
 new `area:combat` label since this is a close-combat rule, not a formation/movement one.
 
-- **Replicate the monster charge-bonus quirk, or not?** The source research flags this as a "probable
-  bug" in the original with low confidence, not a confirmed intended rule. Settling method: an engine
-  choice, decided by asking rather than defaulting either way — see task #60.
-
-Nothing else is open — fully specified for foot models above.
+Nothing is open — fully specified for foot models above; the monster quirk is decided (see "Decision").
 
 ## Implementation notes
 
@@ -73,18 +68,14 @@ Suggested breakdown (three GitHub tasks):
    newly joins a melee group against an opponent it was already recorded as fighting in a previous
    stint on the same grid (needs tracking the last-fought-opponent identifier per regiment, compared
    at grant time). Mount-specific faster draining stays deferred per the scope boundary above.
-3. **Verification, and an explicit decision on the monster quirk**: tests confirming the bonus only
-   covers roughly the opening exchange (not a fixed model count) at the corrected 2x drain rate,
-   that re-engaging the same opponent gives no bonus, and that an unspent counter survives into a
-   later, different engagement. Separately, get an explicit answer (not a default assumption) on
-   whether to replicate the original's "monster charge bonus never depletes" quirk.
+3. **Verification**: tests confirming the bonus only covers roughly the opening exchange (not a fixed
+   model count) at the corrected 2x drain rate, that re-engaging the same opponent gives no bonus,
+   and that an unspent counter survives into a later, different engagement.
 
-## Decision: monster charge-bonus quirk (default, not confirmed with the owner)
+## Decision: monster charge-bonus quirk — not reproduced ✅
 
-Resolved in task #60 **without asking** (owner unavailable): the engine does **not** reproduce the
-"charging monster never decrements its counter" behaviour. Reasoning from observable behaviour: it would
-make a monster keep +1 Strength for an entire fight, while every other unit's bonus fades after the
-opening exchange; the source flags it as a low-confidence probable bug, and nothing in the data suggests
-the designers wanted a permanent monster bonus. The engine also has no monster formation type yet, so
-nothing is lost today. Any monster therefore drains the counter like a foot model. This is a default
-decision and can be overruled: if reproduction is wanted later, add it when monster formations exist.
+Confirmed by the project owner: the engine does **not** reproduce the "charging monster never
+decrements its counter" behaviour. In the original it would make a monster keep +1 Strength for an
+entire fight, while every other unit's bonus fades after the opening exchange; it is a low-confidence
+probable bug and nothing suggests a permanent monster bonus was intended. A monster therefore drains
+the counter exactly like a foot model. No further research is planned on this point.

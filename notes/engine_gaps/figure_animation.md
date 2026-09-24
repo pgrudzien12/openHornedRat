@@ -50,14 +50,23 @@ all share action 3 (no separate run animation).
 3. **Uneven frame holds inside the loop** (e.g. infantry hold each walk phase 2 ticks, the fight loop
    visits phases out of order) — combined with random entry, two models on the same loop rarely look
    alike even at the same tick-offset.
-4. **Per-model variant selection** from the fixed stagger value: one of three group variants
-   (`stagger % 3`) in six scripts, one of two (`stagger` bit 1) in two more; the same value also picks
-   one of three death cries.
-5. **Staggered collapse on death.** A model whose wounds run out doesn't fall immediately: it keeps
-   playing its current animation for `(stagger & 3 + 1) × 18` ticks (1.8–7.2s) — quartered outside
-   melee (`(stagger >> 2) + 1`, 0.5–1.9s) — before switching to action 6, then gets a **random facing**
-   (why corpses lie at all angles). A few special death kinds collapse in one tick or use a dedicated
-   multi-phase death sprite set. A whole regiment destroyed outright falls together with zero delay.
+4. **Per-model variant selection** from the stagger value, used by exactly three sprite sets — Peasants
+   and Slaves (`stagger % 3`, three costumes) and Wagon (`stagger` bit 1, two looks). No soldier family
+   uses it. Group formulas and the table are in `notes/game_rules.md`, "Figure animation". The same value
+   also picks one of three death cries.
+5. **Staggered collapse on death.** A model whose wounds run out doesn't fall immediately:
+   `d = ((stagger & 3) + 1) × 18` ticks (18/36/54/72); death kinds 1–3 (fire, missile / slain outright,
+   warpfire) use `d = 1`; otherwise, if the model's **unit** is not in close combat,
+   `d = (d >> 2) + 1` (5/10/14/19 — not "a quarter rounded up", which would give 5/9/14/18). The model
+   keeps playing its current animation, then switches to action 6 with a **random facing**. Kinds 1 and 3
+   swap the model onto the battle-effects sprite set for a burning sequence (41–56 ticks) before a
+   charred corpse; full kind table in `notes/game_rules.md`. Only slain-outright effects (kind 2, one
+   tick) and building destruction (zero delay) drop a whole unit together; an ordinary wipe keeps each
+   model's own delay.
+
+**The stagger value is 16 bits, not 0–7**: `29 × n mod 65536` with `n` a battle-wide creation counter.
+Keep one running counter and read `& 3`, `& 6`, `& 7`, `mod 3` and bit 1 from the full value — a stored
+0–7 number unbalances `mod 3` (3/3/2) and steps the low bits by 1 instead of 5.
 
 **Drawn facing has its own slew**, separate from the model's body-position facing: turns at most
 **22.5° (32/512 turn) per tick** toward a target that depends on the action — stand/weapon-ready/shoot
@@ -65,12 +74,13 @@ face the **unit's** facing, walking/fighting face the **model's own** heading (t
 opponent). Dead/one-shot-locked models keep their facing frozen. **Exception: RollingStock (wagons)
 snap instantly, no slew.**
 
-**The shoot fire event is posted by the animation script**, not combat code — 4 ticks into the shoot
-pose. Since shoot-pose entry is itself randomised 0…3, archers in one unit reach their fire event on
-different ticks, which is what produces the documented "every 4th model posts the fire event" volley
-rule (section 8.1) — an engine wiring the fire event through the animation state gets that rule mostly
-for free; wiring it independently (as this engine currently does) risks a different, un-volleyed
-cadence.
+**The shoot fire event is posted by the animation script**, not combat code. The random entry **skips
+ahead** 0…3 of the four pose ticks, so each archer's fire tick is uniform over **2, 3, 4, 5** (skip 0 → tick
+5, skip 3 → tick 2; "4 ticks in" is only the latest case). A volley sets a countdown to the model count N;
+each model reaching its fire event decrements it and posts when the new value is divisible by 4, giving
+exactly `ceil(N / 4)` events decided by **arrival order**, not model index. Posted events always launch;
+reload only gates ordering a new volley. Per-tick tables in `notes/game_rules.md`. Do not pre-pick the
+posting models — let the countdown decide.
 
 **Explicitly out of scope for a first pass** (listed so it isn't silently forgotten, not something to
 implement blind): 59 further script operations exist beyond frame stepping — set/clear model flags,

@@ -16,7 +16,7 @@ the bearing to the target every tick.
 ```
 step  = s_rlmv × (144 − s²) / 2^(16 − shift)      units of 1/512 turn
 s     = frontage + ranks − min(frontage, ranks) / 2
-shift = 9 charge re-aim · 8 halted turn / turn order · 7 wheel · 6 closing redirect
+shift = 9 pursuit re-aim · 8 halted turn / turn order · 7 wheel · 6 charge
 ```
 
 - Facing is a fixed-point value whose integer part is 0…511 (1/512 of a turn); the turn always goes
@@ -29,9 +29,12 @@ shift = 9 charge re-aim · 8 halted turn / turn order · 7 wheel · 6 closing re
   would never finish; no formation in the campaign data reaches it (max observed `s` = 10).
 - **Which `shift` applies is a state, not an angle threshold read in isolation** — though in practice
   the four states line up with angle ranges too (also documented in "Real time and movement"): a
-  required turn **>45°** halts and turns on the spot (no translation that tick — halted-turn/turn-order/
-  charge-re-aim/closing-redirect all zero translation), **7.7°–45°** wheels while moving at **half**
-  speed, **<7.7°** is absorbed instantly. A charge re-aims every segment and only wheels above 22.5°.
+  required turn **>45°** halts and turns on the spot (no translation that tick — halted turn, turn order and
+  pursuit re-aim all zero translation), **7.7°–45°** wheels while moving at **half** speed, **<7.7°** is
+  absorbed instantly. That is the ordinary-move ladder. A **pursuing** unit re-aims once per segment and
+  turns only above 22.5° (shift 9, zero translation). A **charge** is separate: it turns for any non-zero
+  angle at its start (shift 6, about 0.72°/tick for a 5×4 block), keeps full charge speed on every turning
+  tick, and re-reads its aim once at its halfway point.
 - **At the moment a move order is issued** (not every tick) a required turn of 68.2°–135° snaps
   instantly 90°, and >135° snaps instantly 180° — the only place the original snaps, and only once per
   order; the remainder is then wheeled normally. This is a *separate* mechanism from the per-tick
@@ -46,9 +49,8 @@ shift = 9 charge re-aim · 8 halted turn / turn order · 7 wheel · 6 closing re
   anchor by `(ranks − 1) × 12` backwards along the old facing; a 90° order-issue snap moves it to the
   new front-rank centre and swaps ranks/frontage. `whshr/engine.py: Battle._turn_to` already calls
   `formation.turn_pivot_shift` for this — the pivot math exists.)
-- Translation speed for that tick: a wheel keeps moving at **half speed**; every other kind of turn —
-  halted turn, turn order, charge re-aim, closing redirect — **sets speed to zero**. Only a wheel turns
-  and travels at once.
+- Translation speed for that tick: a wheel keeps moving at **half speed**; a halted turn, turn order and
+  pursuit re-aim have **zero** translation; a **charge keeps full speed** (it moves, then turns).
 - Every model's slot is recomputed from the new facing (`rotate(12 × column − 6 × (frontage − 1), −12 ×
   rank)`; short ranks offset by a further half spacing).
 - A re-form is queued; a turn order ends by halting and re-forming to the script's rank count.
@@ -87,8 +89,13 @@ turn-rate/pivot mechanism itself does not.
   formation kind, and when it comes out as the war-machine layout, it unconditionally sets the unit's
   anchor flag (and marks the leader model as the machine) — a property of being a war machine, decided
   at set-up, that an engine has to implement as a rule, not something an AI/mission script opts into.
-  They still get the same small `s` (≈4–5, quick turn) as anyone else per the formula on the rare
-  occasions they do turn.
+  An anchored unit refuses move orders (deployment placement included), every turn order (left, right,
+  about-face, face-point), the charge order and charge start, pursuit, and script-initiated melee
+  contact. It still shoots and reloads, halts, defends when attacked, is pushed by collisions, can
+  change ranks, and flees. The flag is set only for artillery and cleared only by the misfire
+  explosion; there is no limbering. Keep the command panel class-driven and enforce the refusals at
+  order execution. Details and the two unsettled edge cases: `notes/game_rules.md`, "Turning, wheeling
+  and reversing".
 
 **Break-and-turn pause on rout** (previously untracked — new): when a unit breaks, every model
 currently at rest gets a pause of `(stagger value & 7) × 3 + 6` = **6–27 ticks** with its timed-pause

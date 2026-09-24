@@ -41,8 +41,11 @@ re-form flag, no alternate mover, and no model re-slotting search.
 and wagons do the opposite** — their layouts explicitly *clear* the re-forming flag, so their models
 stay on the ordinary rank-dependent catch-up walk (epic #49/#50) instead, ramping up and moving at
 rank-dependent speeds; a war machine's crew re-settles around the machine at varied rates rather than
-in a uniform shuffle. War-machine layouts also sometimes invert the slot search to take the
-**farthest** eligible model instead of the nearest.
+in a uniform shuffle. **The war-machine layout inverts the slot search**: the machine model goes
+straight to the front-rank-centre slot, and every crew slot takes the **farthest** unplaced model (not the
+nearest) whenever the battle is not in its deployment phase — which is always, for an engine with no
+deployment phase. Wagons, monsters and blocks never invert. Full rule and the phase's life cycle in
+`notes/game_rules.md`, "Formation changes".
 
 **Cost and gating**: a formation change costs no time of its own (only the walking); rank counts clamp
 to `[min, models/min]` with `min = max(1, trunc(0.75 × √models))`; a re-form is refused while fleeing,
@@ -69,8 +72,9 @@ Suggested breakdown (three GitHub tasks):
    full slot assignment (position, index, rank, column) instead of one walking through the other.
    Builds on task 1's re-form state.
 3. **Formation-type differences + verification.** War machines and wagons must clear the re-forming
-   flag so their models stay on the ordinary catch-up walk instead of the flat mover; war-machine slot
-   search sometimes takes the farthest eligible model, not the nearest. Add tests confirming: a
+   flag so their models stay on the ordinary catch-up walk instead of the flat mover; the war-machine
+   layout places the machine directly at the front-rank centre and fills every crew slot with the
+   **farthest** unplaced model (always, absent a deployment phase). Add tests confirming: a
    re-form costs no extra time beyond walking, is refused while fleeing/held/charging, and a
    war-machine/wagon re-form visibly differs from a block/monster one (rank-dependent speeds, not the
    uniform flat shuffle).

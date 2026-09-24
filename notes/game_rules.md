@@ -217,15 +217,19 @@ never use `AlwaysPursue`.
 - **Turning** ✅ (the game, reached only through the game): facing is a **16.16 accumulator** at
   `+0xCC` whose high word `+0xCE` is the integer facing in 1/512 turn. Per tick it advances by
   `s_rlmv × (144 − s²) × 2^(scale − 9)` facing units, with `s = frontage + ranks − min(frontage, ranks) / 2`
-  and `scale` by state: **2 charging** (the game), **1** halted-turn or turn order, **0 wheeling**,
-  **−1** closing/redirect. The turn counts as finished once under 11/512 (≈ 7.7°) remains. (For `s ≥ 12` the
+  and `scale` by state: **2 pursuing** (re-aiming at the fugitive), **1** halted-turn or turn order,
+  **0 wheeling** (ordinary move), **−1 charging**. The turn counts as finished once under 11/512 (≈ 7.7°)
+  remains. (For `s ≥ 12` the
   formula stops working; no deployed unit reaches it.)
   **Facing is never snapped to the travel bearing per tick**: the goal bearing lives in `+0x1DE` and the
   amount still owed in `+0x1F4`, and the unit always translates along its **current** facing (`+0xD0/+0xD4`
   = sin/cos of `+0xCE`), so a unit whose facing has not caught up walks off-axis and re-plans.
   Thresholds (the game): required turn **> 45°** → halt and turn on the spot (`+0xBC |= 8`, no
   translation that tick); **7.7°…45°** → wheel while moving (`+0xBC |= 4`, half speed); **< 7.7°** → absorbed.
-  A charge re-aims every segment and wheels above only 22.5°. Separately, **at the moment a move order is
+  A **pursuing** unit re-aims once per segment and turns only when the bearing error exceeds 22.5°; a
+  **charge** turns for any non-zero angle at its start (no threshold, no snap), re-reads its aim point once at
+  its halfway point, and never uses the half-speed wheel or the zero-translation turn (see "Turning,
+  wheeling and reversing"). Separately, **at the moment a move order is
   issued** (the game from `GotoTarget`) a required turn of **68.2°–135°** snaps instantly 90°
   (the game) and **> 135°** snaps instantly 180° (the game); the residue is then wheeled.
 - **A turn always moves the unit position to keep the pivot still** ✅ — the rule an engine is most likely to
@@ -364,9 +368,14 @@ step length per unit of current_speed = F × 2.4 / 256  world units
 F = (ranks − rank_index) × 8 + (per-model stagger value & 6) + 4      rank_index 0 = front rank
 ```
 
-The per-model stagger value is a small fixed per-model number (its low three bits are also what stagger the
-charge start and the rout scatter), so models within one rank differ slightly, giving the block its ragged,
-non-rigid look. Its contribution to `F` is 0, 2, 4 or 6.
+The per-model stagger value is a fixed 16-bit number given to each model when it is created: **29 × n mod
+65536**, where n is a single battle-wide counter of models created so far (starting from an arbitrary constant
+that the game never resets). Only its low bits are read — `& 3`, `& 6`, `& 7`, `mod 3` and bit 1 — and because
+29 ≡ 1 (mod 4), `& 3` cycles 0, 1, 2, 3 across consecutive models, `& 7` steps by 5 (0, 5, 2, 7, 4, 1, 6, 3)
+and still visits all eight values, `mod 3` cycles through all three values, and bit 1 runs in pairs (0, 0, 1, 1).
+So neighbouring models differ, giving the block its ragged, non-rigid look; the same value also staggers the
+charge start, the rout pause and the figure animation. Its contribution to `F` is 0, 2, 4 or 6. An engine
+should keep one running counter and take these fields from the full value rather than storing a 0–7 number.
 
 **Top speed of a model, and whether it can keep station:**
 
@@ -448,11 +457,20 @@ speeds.
   crew always re-settle around the machine rather than the other way round.
 - **Wagons never stretch**: the two models sit at rank 0 and rank 1 of a 4-deep layout (`F` = 36…42 and 28…34),
   both far above the charge threshold.
-- **Turning hides the effect, and finishes it.** A wheel halves the unit's translation while leaving the models'
-  step length untouched, which halves the keep-up requirement to `F ≥ 3.33 × k` — enough for the rear rank even
-  at charge speed. A halted turn stops translation altogether, so the block fully re-compresses while it pivots.
-  A charge that has to turn is the exception: it keeps full speed and the turn's slot sweep adds to the lag, so it
-  arrives about 16 units *more* stretched than one that runs straight in.
+- **Turning during a charge makes the stretch worse, not better.** A charge never uses the half-speed wheel or
+  the zero-translation turn: it moves first and turns afterwards in the same tick, so it keeps full charge
+  speed (`k` 2.5) on every turning tick and loses no translation. Its turn is its own very slow case
+  (0.72°/tick for a 5×4 M4 I3 block, 0.17°/tick for a 10-wide line, 0.90°/tick for a single file), and every
+  turning tick rotates the slot lattice about the inner front corner while the models stay put, so the whole
+  slot sweep — about `0.0175 × r` world units per degree, `r` being the slot's distance from the inner front
+  corner — is added to the rear ranks' lag. Simulated rear-rank lag after a full ~84-tick charge (±30 %;
+  straight charge ≈ 29 mean / ≈ 45 for the slowest `F` = 12 model): a 5×4 block with a 45° turn ends about
+  16 (worst model 22) units worse and cannot finish 90° or 135° within the charge (about 60° at most, +27 /
+  +39); a 10×2 line ends about 14 (21) worse whatever the angle, having turned only ~15°; a single file about 2–5
+  worse. A turning charge is never tidier than a straight one. Only the states that do cut translation trade
+  it against the sweep — the half-speed wheel and the zero-translation turns of ordinary movement, pursuit
+  re-aims and turn orders — and there the result depends on formation shape (for a 5×4 the sweep outweighs the
+  translation saved; a slow-turning 10×2 comes out slightly better).
 
 **For an engine**: the unit's logical position must be advanced by the full charge speed regardless of where the
 sprites are, because every gameplay consequence (contact, engagement, charge bonus, footprint) reads the anchor.
@@ -503,8 +521,18 @@ global planning.
 wagons** do the opposite — their layouts explicitly clear the re-forming flag, so their models are carried by
 the ordinary rank-dependent catch-up walk instead, ramping up and moving at rank-dependent speeds. A war
 machine's crew therefore re-settle around the machine at their own varied rates rather than in the uniform
-flat-speed shuffle of a regiment. War machine layouts also invert the model search for some slots, taking the
-**farthest** eligible model rather than the nearest.
+flat-speed shuffle of a regiment. **The war machine layout also inverts the model search** ✅: the machine
+model itself is placed directly at the front-rank-centre slot with no search (if the machine is gone, every
+slot is searched), and every **crew** slot then takes the **farthest** unplaced model (same octagonal
+distance, greedy slot by slot, the last slot getting whoever is left) instead of the nearest. The condition is
+global: the battle keeps one phase value (0 no battle, 1 deployment, 2 the battle proper; pausing does not
+change it), and the layout takes the nearest only while that phase is **deployment**. The phase is 2 from the
+moment a mission starts loading, becomes deployment only if the mission script requests it, returns to 2 when
+the player starts the battle, and is 0 after the battle. Wagons, monsters and blocks never invert. In practice
+artillery cannot be moved or re-ranked during deployment and crews cannot die there, so **a war machine layout is
+always "farthest"**: after crew casualties the survivors are sent to the slots furthest from them and scramble
+across the machine on the slow rank-dependent walk. An engine with no deployment phase should always use
+farthest.
 
 A formation change **costs no time of its own** — the only delay is the walking. Requested rank counts are
 clamped to `[min, models / min]` with `min = max(1, trunc(0.75 × √models))`, and a re-form is refused outright
@@ -523,8 +551,27 @@ turn, wrapped to 0…511. Each tick the unit turns by
 ```
 step    = s_rlmv × (144 − s²) / 2^(16 − shift)      units of 1/512 turn
 s       = frontage + ranks − min(frontage, ranks) / 2
-shift   = 9 charge re-aim · 8 halted turn and turn order · 7 wheel · 6 closing redirect
+shift   = 9 pursuit re-aim · 8 halted turn and turn order · 7 wheel · 6 charge
 ```
+
+Which case applies is decided by the unit's movement state, checked in this priority order: waiting, fleeing,
+pursuit, ordinary move, charge, turn order. Starting a charge clears the ordinary-move and wheel states, so a
+charging unit can never wheel at half speed. For 5×4 infantry at `s_rlmv` 11 (`s` = 7):
+
+| state | shift | turn rate | translation on a turning tick |
+|---|---|---|---|
+| **charge** | 6 | 1.02 units/tick (0.72°) | **unchanged, full charge speed** — movement is applied before the turn |
+| **pursuit** re-aim | 9 | 8.16 units/tick (5.7°) | **zero** — the turn is applied before movement |
+| ordinary move, 7.7°–45° owed, > 32 units to go | 7 | 2.04 units/tick (1.44°) | **half speed** — the only wheel |
+| ordinary move, > 45° owed (halted turn) | 8 | 4.08 units/tick (2.9°) | zero, then re-plans; the residue is wheeled |
+| turn order | 8 | 4.08 units/tick | zero |
+
+A charge lasts two halves of about 42 ticks (about 84 in all, a reach of `12 × (s_rlmv + 1)` world units), re-reads its aim point once at the halfway
+point and ends whether or not it arrived; its length does not depend on turning, and nothing steers it toward a
+moving target after the order. Because of the slow turn rate a charging block turns at most about 40° for a 5×4
+block (60° in the whole charge), about 15° for a 10×2 line and 75° for a single file; a larger required angle
+just means it spends the whole charge slowly wheeling and arrives facing part of the way round. Unit speed is
+recomputed at the start of every tick, so the charge's request for zero speed after its turn has no effect.
 
 so a halted turn advances `s_rlmv × (144 − s²) / 256` per tick. The direction is always **the shorter way
 round** (the turn setup compares the required difference against a half turn and folds it, recording the side in
@@ -549,9 +596,9 @@ formation in the campaign data reaches `s` = 10, so it is not reachable in pract
 - the unit's reference point is **displaced by the rotation applied to the half-frontage vector
   `6 × (frontage − 1)`**, which holds the **inner front corner** still — a true wheel rather than a spin about
   the anchor. The side is taken from the same turn-direction flag, and a **frontage of 1 inverts it**.
-- **translation speed is changed for that tick**: a wheel keeps moving at **half speed**; a charge re-aim
-  **keeps full speed**; every other kind of turn — halted turn, turn order, closing redirect — **sets the
-  speed to zero**, stopping the unit dead while it comes round.
+- **translation speed is changed for that tick**: a wheel keeps moving at **half speed**; every other kind of
+  turn — halted turn, turn order, charge re-aim, closing redirect — **sets the speed to zero**. Only a wheel
+  turns and travels at once; everything else stops the unit dead while it comes round.
 - **every model's slot is recomputed from the new facing**, as
   `rotate(12 × column − 6 × (frontage − 1), −12 × rank)`. Ranks that are one model short are offset by a further
   half spacing (6 world units), which is the staggered look of the rear ranks.
@@ -594,9 +641,9 @@ rear rank trailing, converging again once the facing settles.
   they hardly ever turn because **they are anchored intrinsically** ✅: unit set-up computes the formation kind
   and, when it comes out as the war machine layout, **unconditionally sets the unit's anchor flag** (and marks
   the leader model as the machine). This is a property of being a war machine, decided at set-up — not a
-  mission script or AI choice — so an engine has to implement it as a rule. Their crew placement also
-  inverts the slot search (taking the **farthest** eligible model rather than the nearest) — always, not
-  phase-dependent: real artillery can never move, re-rank or lose crew mid-battle.
+  mission script or AI choice — so an engine has to implement it as a rule. 🟡 Their crew placement also
+  inverts the slot search (taking the **farthest** eligible model rather than the nearest) depending on a
+  global phase flag, which appears to distinguish the deployment phase from the battle proper.
 
 **When a unit breaks and turns to run**, every model that is currently at rest is given a pause of
 `(per-model stagger value & 7) × 3 + 6` — **6 to 27 ticks** — with its timed-pause flag set, and is scattered
@@ -660,17 +707,42 @@ fleeing all use action 3.
    the fight loop visits phases out of order and unevenly (`0,0,1,2,3,3,1,1,3,0,2,2`). Combined with the
    random entry, two models on the same loop rarely look alike even when they are the same number of ticks
    apart.
-4. **Per-model variant selection.** Some families pick the *group* itself from the model's fixed stagger
-   value — one of three variants (`value mod 3`) in six scripts, one of two (`bit 1 of the value`) in two
-   more — so a few models permanently play a different version of the same action. The same value picks
-   one of three death cries.
-5. **Staggered collapse.** A model whose wounds run out does **not** fall immediately. It is marked dying
-   and keeps playing its current animation for `(stagger value & 3 + 1) × 18` ticks — **1.8 to 7.2 s** —
-   before switching to action 6. Outside melee that delay is quartered (`(value >> 2) + 1`, i.e. 0.5–1.9 s),
-   and a few special death kinds collapse in one tick or swap the model onto a dedicated death sprite set
-   with a long multi-phase sequence. A unit destroyed outright as a whole gets zero delay and falls
-   together. On reaching action 6 the model is given a **random facing**, which is why corpses lie at all
-   angles rather than facing the way the figure died.
+4. **Per-model variant selection.** Exactly three sprite sets pick their group from the model's stagger
+   value, so each figure has a fixed look for life and its corpse matches it. `V = stagger mod 3`, `B = bit 1
+   of stagger`, group = base + variant × step, frame = group + phase × 8 + direction as usual:
+
+   | sprite set | actions | group |
+   |---|---|---|
+   | Peasants | stand, fight, weapon-ready, idle | `120 + 32 V` (120 / 152 / 184) |
+   | Peasants | walk (random entry 0…7) | `0 + 32 V` (0 / 32 / 64) |
+   | Peasants | dead | `96 + 8 V` (96 / 104 / 112) |
+   | Slaves | stand, fight, weapon-ready | `216 + 32 V` (216 / 248 / 280), one held frame |
+   | Slaves | idle **and** walk (the same 10-tick loop, no random entry) | `216 + 32 V` |
+   | Slaves | dead | `96 + 8 V` |
+   | Wagon | stand, walk, fight, ready | `0 + 32 B` (0 / 32), one held frame — a wagon never animates |
+   | Wagon | idle (8-tick loop `0,0,1,1,2,2,3,3`, no random entry) | `0 + 32 B` |
+   | Wagon | dead | wreck, group 64, no variant |
+
+   The peasant sheet holds three characters (three costumes), so a peasant crowd is a 1 : 1 : 1 mix and each
+   corpse matches its living costume; slaves use a different block of the same sheet and never use the move
+   block, so they shuffle at idle pace. Wagons of a caravan alternate between two looks in pairs. No soldier
+   family uses these. 🟡 Why slaves use the 216 block rather than 120 is worth one visual check.
+5. **Staggered collapse.** A model whose wounds run out does **not** fall immediately. It is marked dying and
+   keeps playing its current animation until the delay `d` has elapsed, then switches to action 6; the collapse
+   comes exactly `d` ticks after the lethal wound (a delay of 1 means the next tick):
+
+   ```
+   d = ((stagger & 3) + 1) × 18                       # 18, 36, 54, 72 ticks = 1.8 … 7.2 s
+   if death_kind in (1, 2, 3): d = 1                  # fire, missile / slain outright, warpfire — in and out of melee
+   elif the model's unit is not in close combat: d = (d >> 2) + 1      # 5, 10, 14, 19 ticks
+   ```
+
+   The test is the **unit** being in close combat, not whether the individual model has a partner: a unit that
+   is only shooting, charging or routing gets the short delay, an engaged unit the long one. A whole unit falls
+   together only when it is slain outright (kind 2, one tick — Da Krunch, the Conflagration finale, artillery
+   misfire, fanatic death) or a building is destroyed (zero delay); a regiment wiped out by ordinary wounds
+   still uses each model's own delay. On reaching action 6 the model is given a **random facing**, which is
+   why corpses lie at all angles rather than facing the way the figure died.
 
 **Drawn facing is its own slew.** The facing used to pick the sprite direction is not snapped to the
 target each tick: it turns by at most **32/512 of a turn (22.5°) per tick**, i.e. one of the eight sprite
@@ -680,10 +752,63 @@ heading** — its direction of travel or its opponent. A dead or one-shot-locked
 where it was. The exception is RollingStock (wagons), whose models snap their drawn facing instantly with
 no slew.
 
-**The shooting fire event** is posted by the script, not by the combat code: four ticks into the shoot
-pose. Because the entry into the shoot pose is itself randomised over 0…3 ticks, the models of an archer
-unit reach their fire event on different ticks, which is what feeds the "every 4th model posts the fire
-event" volley rule (section 8.1).
+**The shooting fire event** is posted by the script, not by the combat code. The shoot script is: set the
+shoot pose, **skip ahead a random 0…3 of its first four pose ticks**, hold the pose, fire, hold two more ticks,
+then return to the stand pose. The random entry skips *ahead*, so it makes the shooter fire *sooner*. Counting
+the tick on which the order applies as tick 1:
+
+| skip | fire event on tick | back to stand on tick |
+|---|---|---|
+| 0 | 5 | 8 |
+| 1 | 4 | 7 |
+| 2 | 3 | 6 |
+| 3 | 2 | 5 |
+
+So each archer's fire tick is uniform over 2…5 (the note "four ticks into the pose" is only the latest case).
+A volley is ordered for the whole unit at once (shoot action, modulus 4, countdown = the number of models N)
+with the reload time stamped at that moment. Each model reaching its fire event decrements the countdown and
+**posts an event when the new value is divisible by 4**, so exactly `ceil(N / 4)` events are posted — decided
+by *arrival order*, not model index (N = 10 posts on the 2nd, 6th and 10th arrivals; N = 4 on the 4th). Each
+posted event launches one projectile from the model that posted it, and events already posted always launch,
+even if the unit has since become "not ready"; the reload only gates ordering a new volley. If models die
+before firing they never post and the posting positions shift. Artillery and other classes order only the
+leader or machine, with modulus 1. Expected launches per tick over a volley (each fire tick uniform 2…5):
+N = 4 → 0.00 / 0.06 / 0.25 / 0.68 on ticks 2 / 3 / 4 / 5; N = 10 → 0.77 / 0.59 / 0.61 / 1.02; N = 16 → 0.62 /
+1.01 / 1.00 / 1.37; N = 20 → 0.88 / 1.25 / 1.25 / 1.62 (small units tend to launch late).
+Implement the per-model fire tick through the animation and the countdown rule; do not pre-pick the posting
+models.
+
+**Death kinds.** The kind is the damage type of the killing wound, kept on the model and read by the death
+script:
+
+| kind | meaning | produced by | collapse delay | shown |
+|---|---|---|---|---|
+| 0 | ordinary | close combat and every damage-type-0 spell | staggered (above) | the family's own corpse |
+| 1 | fire | fire spells, Dragon breath, Flamestorm, Conflagration damage, a collapsing building | 1 tick | burning figure, then charred corpse |
+| 2 | missile / slain outright | every missile weapon and shot, Da Krunch, the Conflagration finale, artillery misfire, fanatic death, the Giant's blast | 1 tick | the family's own corpse |
+| 3 | warpfire | Warpfire Thrower flames and its death blast | 1 tick | green burning figure, then charred corpse |
+
+On kind 1 or 3 the death script switches the model onto the general battle-effects sprite set and plays a fire
+sequence; that covers standard infantry, archers, mercenaries, Dwarfs, Orcs and Goblins, mounted units, Skaven,
+wizards, Troll / Rat Ogre / Treeman, peasants and slaves, squig hoppers, sheep, the Doom Diver and the Warpfire
+Thrower. Wagons, pack ponies, fanatics, mortars and all war machines, Wyvern, Dragon, Giant, Gyrocopter and
+Doomwheel never burn (their dead script ignores the kind); the caravan and machine wagons chain into the wagon
+wreck. The model is removed from its unit's roster (strength drops, the formation re-forms) when the sequence
+starts and then burns as a free figure:
+
+| body class | orange (kind 1) group | green (kind 3) group | burn phases | burn length | charred corpse group |
+|---|---|---|---|---|---|
+| infantry and everything else | 0 | 16 | 0…7 cycling | 41–56 ticks | 32 (8 directions) |
+| cavalry (and sheep) | 8 | 24 | 0…3 cycling | 41–48 ticks | 40 |
+| monster | 12 | 28 | 0…3 cycling | 41–48 ticks | 48 |
+
+Infantry start a random 0…15 ticks into a 16-tick lead-in and then run five full laps (`16 − r + 40` ticks);
+cavalry and monsters start a random 0…7 into 8 lead-in ticks and then run ten laps of 0…3 (`8 − r + 40`). After
+the burn the corpse takes a random facing, phase 0, held forever. The burning groups are not direction-indexed.
+A Warpfire Thrower that dies from a non-fire kind does not simply fall: it spawns five flame puffs (centre, then
+8 units right, left, up and down, two ticks apart) and a final blast of radius 48, D6 wounds, strength 5, damage
+type 3, so anything it kills burns green; the Giant's death ends with a radius-40 blast (D6, S5, damage type 2).
+🟡 The battle-effects frames are matched to these groups by eye, one frame per phase.
 
 **Other things the scripts can do**, listed here because an engine that only implements frames will look
 wrong: set and clear model flags, branch on model or unit flags and on the death kind, mark/loop/repeat
