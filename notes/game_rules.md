@@ -593,9 +593,9 @@ rear rank trailing, converging again once the facing settles.
   they hardly ever turn because **they are anchored intrinsically** ✅: unit set-up computes the formation kind
   and, when it comes out as the war machine layout, **unconditionally sets the unit's anchor flag** (and marks
   the leader model as the machine). This is a property of being a war machine, decided at set-up — not a
-  mission script or AI choice — so an engine has to implement it as a rule. 🟡 Their crew placement also
-  inverts the slot search (taking the **farthest** eligible model rather than the nearest) depending on a
-  global phase flag, which appears to distinguish the deployment phase from the battle proper.
+  mission script or AI choice — so an engine has to implement it as a rule. Their crew placement also
+  inverts the slot search (taking the **farthest** eligible model rather than the nearest) — always, not
+  phase-dependent: real artillery can never move, re-rank or lose crew mid-battle.
 
 **When a unit breaks and turns to run**, every model that is currently at rest is given a pause of
 `(per-model stagger value & 7) × 3 + 6` — **6 to 27 ticks** — with its timed-pause flag set, and is scattered

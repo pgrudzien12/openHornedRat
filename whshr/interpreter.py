@@ -899,7 +899,8 @@ class ScriptInterpreter:
         target_id = self._nearest_enemy_id(regiment, n, side=side) if regiment else None
         if target_id:
             state.current_target = (target_id, 0)
-            regiment.attack_target = target_id
+            if not regiment.anchored:
+                regiment.attack_target = target_id
             state.cond_flags = 1
         else:
             state.cond_flags = 0
@@ -985,7 +986,7 @@ class ScriptInterpreter:
             state.current_node = operand
             regiment = self.battle.regiments.get(unit_id)
             coords = self.battle.nodes.get(operand)
-            if regiment and coords:
+            if regiment and coords and not regiment.anchored:
                 regiment.target_x, regiment.target_y = coords
                 state.unit_flags &= ~ARRIVED_FLAG
                 state.pending_arrival = True
@@ -1034,7 +1035,7 @@ class ScriptInterpreter:
             state.current_node = operand
             regiment = self.battle.regiments.get(unit_id)
             coords = self.battle.nodes.get(operand)
-            if regiment and coords:
+            if regiment and coords and not regiment.anchored:
                 regiment.x, regiment.y = coords
                 state.unit_flags |= ARRIVED_FLAG
                 state.pending_arrival = False
@@ -1060,7 +1061,7 @@ class ScriptInterpreter:
             state.current_node = operand
             regiment = self.battle.regiments.get(unit_id)
             coords = self.battle.nodes.get(operand)
-            if regiment and coords:
+            if regiment and coords and not regiment.anchored:
                 regiment.target_x = coords[0] + self.battle.rng.uniform(-SCATTER_RADIUS, SCATTER_RADIUS)
                 regiment.target_y = coords[1] + self.battle.rng.uniform(-SCATTER_RADIUS, SCATTER_RADIUS)
                 state.unit_flags &= ~ARRIVED_FLAG
@@ -1074,7 +1075,7 @@ class ScriptInterpreter:
         exactly as for a player's own click), matching Battle.order_attack's player-side guard.
         """
         regiment = self.battle.regiments.get(unit_id)
-        if regiment and regiment.braced:
+        if regiment and (regiment.braced or regiment.anchored):
             return state.pc + 1
         if regiment and state.current_target:
             target_id = state.current_target[0]
@@ -1121,7 +1122,7 @@ class ScriptInterpreter:
                 target_id = self.battle._unit_tags[operand]
                 state.current_target = (target_id, 0)
                 regiment = self.battle.regiments.get(unit_id)
-                if regiment:
+                if regiment and not regiment.anchored:
                     regiment.attack_target = target_id
                 state.cond_flags = 1
             else:
@@ -1489,7 +1490,7 @@ class ScriptInterpreter:
         """StartPursuit: chase down a fleeing unit."""
         if state.current_target:
             regiment = self.battle.regiments.get(unit_id)
-            if regiment:
+            if regiment and not regiment.anchored:
                 regiment.attack_target = state.current_target[0]
         return state.pc + 1
 

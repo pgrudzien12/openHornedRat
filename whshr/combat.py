@@ -657,6 +657,8 @@ def _react_to_rout(routed, opponents, group_id, battle):
             for other in battle.regiments.values())
         if still_fighting:
             continue  # another enemy is still on this grid: keep fighting it, do not pursue
+        if opponent.anchored:
+            continue  # an anchored war machine never pursues
         if opponent.missile_range:
             # game_rules.md 7.5: which classes decline is encoded in the behaviour scripts and applies
             # to both sides -- artillery never pursues, and shooters and wizards divert to scripts

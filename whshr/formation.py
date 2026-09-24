@@ -202,7 +202,8 @@ def _octagonal_distance(ax, ay, bx, by):
     return larger + smaller / 2
 
 
-def reform_assignment(x, y, direction, models, ranks, positions, leader_index=None, spacing=MODEL_SPACING):
+def reform_assignment(x, y, direction, models, ranks, positions, leader_index=None, spacing=MODEL_SPACING,
+                    farthest=False):
     """Re-slot every model of a re-forming unit (game_rules.md, "Formation changes"): process the new
     shape's slots front rank first, centre outward; each slot after the first takes the not-yet-placed
     model nearest to it by `_octagonal_distance`, scanning every remaining model and stopping early on
@@ -210,6 +211,9 @@ def reform_assignment(x, y, direction, models, ranks, positions, leader_index=No
     no search, if it names a still-unplaced model; otherwise (no persistent leader identity to hand
     it to) it falls back to the model that is itself nearest that slot, which is the documented
     fallback for a codebase without a leader-model concept.
+
+    With `farthest=True` (war machine crews) every slot after the first instead takes the
+    not-yet-placed model *farthest* from it; the first slot (the machine) is unchanged.
 
     Returns a list of local `(side, forward)` slot offsets index-parallel with `positions`, meant to be
     turned into world targets each tick with `place(x, y, direction, ...)` so they track a moving or
@@ -220,14 +224,14 @@ def reform_assignment(x, y, direction, models, ranks, positions, leader_index=No
     assigned = [None] * len(positions)
     remaining = list(range(len(positions)))
 
-    def _take_nearest(target):
+    def _take_nearest(target, far=False):
         best_index, best_distance = None, None
         for index in remaining:
             px, py = positions[index]
             distance = _octagonal_distance(px, py, target[0], target[1])
-            if best_distance is None or distance < best_distance:
+            if best_distance is None or (distance > best_distance if far else distance < best_distance):
                 best_index, best_distance = index, distance
-                if distance == 0:
+                if distance == 0 and not far:
                     break
         remaining.remove(best_index)
         return best_index
@@ -244,7 +248,7 @@ def reform_assignment(x, y, direction, models, ranks, positions, leader_index=No
     for offset, target in zip(slot_offsets, slot_targets):
         if not remaining:
             break
-        assigned[_take_nearest(target)] = offset
+        assigned[_take_nearest(target, farthest)] = offset
 
     return assigned
 
