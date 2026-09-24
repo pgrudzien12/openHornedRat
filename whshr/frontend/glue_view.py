@@ -405,6 +405,8 @@ class GlueView(NativeScreenView):
             if pressed_button is not None and pressed_button == released_button:
                 return (GlueInput("panel-action", pressed_button),)
             released = self.hotspot_at(self.models, point)
+            if pressed is not None and pressed == released and pressed.click_text is not None:
+                return (GlueInput("hotspot-speech", f"{pressed.click_text}:{pressed.click_count}"),)
             if pressed is not None and pressed == released:
                 return (GlueInput("hotspot-release", pressed.target),)
             if pressed is None and released is None and pressed_button is None and released_button is None:
