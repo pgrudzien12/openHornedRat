@@ -269,9 +269,9 @@ never use `AlwaysPursue`.
   (the `bnd_*` flags of the script keyword table).
 - **Flight check**: the "flee counter" of `FleeingUnitUpdate` is not a distance; it only schedules the battle-edge
   check about every half footprint radius.
-- **Animation bytecode**: objects also run per-object animation scripts. Negative words are frame
-  delays; other words are opcodes from a 59-entry table (fire event 21, model death 23, `ApplyImpact` 52,
-  sounds, effects, removal; 🟡 names).
+- **Animation bytecode**: models and free-standing objects both run per-object animation scripts, one
+  word per tick. Negative words set the sprite phase; other words are operations from a 59-entry set.
+  Full behaviour in "Figure animation: actions, timing, and why the figures are never in step".
 
 ### Formations ✅
 
@@ -459,6 +459,56 @@ The sprites must be a *separate* per-model pursuit of an anchor-relative slot, a
 charge multiplier. Treating the models as rigidly attached to the formation removes the stretch, the ragged
 start and the concertina — the most recognisable visual features of movement in this game.
 
+### Formation changes: how the figures re-sort themselves ✅
+
+Traced September 2026. A rank change, or any queued re-form, is **not** the same process as the continuous
+slot-chasing of ordinary movement. Three things differ, and together they are what makes a unit changing
+formation look like men finding their places rather than a lattice snapping.
+
+**1. Models are re-assigned to slots, not kept in them.** Re-forming first recomputes the shape —
+`frontage = ceil(models / ranks)`, with the **leftover models going into the front ranks** (18 models in 4 ranks
+gives rows of 5, 5, 4, 4) — and then fills the slots one at a time, front rank first, centre outwards. For each
+slot it scans **every not-yet-placed model and takes the nearest one**, measured with an octagonal metric
+(`larger + smaller / 2` of the two axis distances) rather than true distance, stopping early if it finds an
+exact match. So a soldier does not keep his old place in the formation: he takes **whichever slot in the new
+shape happens to be closest to where he is already standing**, and the unit re-sorts itself with the shortest
+total walking. The front-rank centre slot is the exception — it is handed to the **leader model** directly,
+without the search, whenever the leader has not already been placed.
+
+**2. A different mover takes over.** Re-forming raises a flag meaning "models are off their slots", and while it
+is set the unit switches away from the rank-dependent catch-up walk to a **separate mover**:
+
+- each model moves at a **flat `s_rlmv / 8` world units per tick** — no rank factor, no `F`, and **no
+  ramp-up**: it goes to full speed on the first tick and holds it. Every model in the unit re-forms at the
+  same speed regardless of which rank it is in or is heading to.
+- **it decelerates into its slot.** Inside the last 6 world units the step is divided by `7 − distance`, so it
+  covers the final approach at a half, a third, a quarter … of speed and settles smoothly instead of stopping
+  dead. (A separate cap holds any single step to one world unit, which only bites for the fastest units.)
+- **arrival snaps the model's heading to the unit's facing**, which is what makes a finished formation suddenly
+  read as aligned — the figures turn to face front only as they land.
+- **the unit's own translation speed is halved** for as long as the re-form is in progress, so a unit that is
+  changing formation on the move slows to half pace until everyone is in place.
+- when the last model settles the flag clears and the unit raises a "re-form complete" event.
+
+**3. Models trade places rather than walk through each other.** Each tick, before stepping, a moving model
+checks its projected next position against every comrade that is **already at rest**. If it is about to step
+onto one about half a spacing away and is heading into it, the two **exchange their entire slot assignment** —
+target position, slot index, rank and column — and both re-aim. The walking model inherits the settled one's
+place and stops; the settled one is woken up and walks off to the slot the first was heading for. This is the
+shuffling, place-swapping motion a re-forming block shows, and it falls out of a purely local rule with no
+global planning.
+
+**Formation differences** ✅: **blocks and monsters** re-form through the flat mover above. **War machines and
+wagons** do the opposite — their layouts explicitly clear the re-forming flag, so their models are carried by
+the ordinary rank-dependent catch-up walk instead, ramping up and moving at rank-dependent speeds. A war
+machine's crew therefore re-settle around the machine at their own varied rates rather than in the uniform
+flat-speed shuffle of a regiment. War machine layouts also invert the model search for some slots, taking the
+**farthest** eligible model rather than the nearest.
+
+A formation change **costs no time of its own** — the only delay is the walking. Requested rank counts are
+clamped to `[min, models / min]` with `min = max(1, trunc(0.75 × √models))`, and a re-form is refused outright
+while the unit is fleeing, held or charging.
+
 ### Turning, wheeling and reversing ✅
 
 Traced September 2026. Turning is where the formation system is most visible, and where the differences between
@@ -522,20 +572,123 @@ rear rank trailing, converging again once the facing settles.
   scale with frontage and depth.
 - **Single-model units (monsters)** skip the entire pivot-and-slot block, which is guarded on the unit having
   **more than one model**. A monster therefore turns **on the spot with no reference-point displacement, no slot
-  recomputation, and no speed penalty at all** — it keeps translating at full speed while it comes round. Its
-  pseudo-formation is small (`s` = 3 for a 2 × 2, 5 for a 3 × 3), so it also turns very fast. Monsters are
-  by far the most agile things on the field, and deliberately so.
+  recomputation, and no speed penalty at all** — it keeps translating at full speed while it comes round.
+  That skip is the whole of a monster's agility; its **turn rate still follows the ordinary formula** from
+  whatever pseudo-formation its footprint gives it. For the common footprints that is fast (`s` = 3 for a
+  2 × 2, 5 for a 3 × 3), but it does not generalise: the **Mole Machine's 5 × 8 footprint gives `s` = 11**, so
+  it turns as sluggishly as a ten-wide line while still paying none of the pivot or speed penalties. "Single
+  model" and "turns quickly" are two separate properties and must be implemented separately.
 - **Units currently re-forming** are also skipped by the same guard, so a unit that is still settling its models
   does not additionally drag its reference point around.
-- **Wagons** carry a further restriction from their layout: their facing is **snapped to 45° steps**, so they
-  turn in visible increments rather than smoothly.
-- **War machines** use a 2–3 wide, 3–4 deep layout (`s` ≈ 4–5, so a quick turn), but are usually anchored in
-  place by a separate flag and rarely turn at all in practice.
+- **Wagons** are snapped to **45° steps — but relative to the camera, not to the world** ✅. The battle update
+  keeps a global view angle (the camera's rotation converted into the same 1/512 turn scale, with the previous
+  frame's value retained), and the wagon layout rounds the unit's facing to the nearest 45° step **of a grid
+  offset by where the camera currently sits inside a 45° sector**. The wagon layout is then re-run **only when
+  the view angle has changed since the last update** — if the camera has not moved, the re-form is skipped
+  outright. The effect is that a wagon always presents one of eight clean aspects *to the viewer* and re-snaps
+  as the camera swings, which is a sprite-rendering accommodation rather than a movement rule. An engine that
+  implements a world-aligned 45° snap will look wrong in exactly the situation the original handles: rotating
+  the camera around a stationary wagon.
+- **War machines** use a 2–3 wide, 3–4 deep layout (`s` ≈ 4–5, so a quick turn by the formula), but in practice
+  they hardly ever turn because **they are anchored intrinsically** ✅: unit set-up computes the formation kind
+  and, when it comes out as the war machine layout, **unconditionally sets the unit's anchor flag** (and marks
+  the leader model as the machine). This is a property of being a war machine, decided at set-up — not a
+  mission script or AI choice — so an engine has to implement it as a rule. 🟡 Their crew placement also
+  inverts the slot search (taking the **farthest** eligible model rather than the nearest) depending on a
+  global phase flag, which appears to distinguish the deployment phase from the battle proper.
 
 **When a unit breaks and turns to run**, every model that is currently at rest is given a pause of
 `(per-model stagger value & 7) × 3 + 6` — **6 to 27 ticks** — with its timed-pause flag set, and is scattered
 slightly from its position. If the unit is in melee, **each model's opponent is given the same pause**, so both
 sides visibly hesitate together at the moment of the break before the routers turn about.
+
+### Figure animation: actions, timing, and why the figures are never in step ✅
+
+Every model runs **its own little animation program**, one step per tick, and several of those programs
+deliberately start at a random point in their loop. That is the whole reason a marching or fighting
+regiment in the original looks like a crowd of individuals rather than a rank of clones, and it is cheap
+to reproduce exactly.
+
+**The pieces.** A model carries five drawing fields — sprite set, shading, drawn facing, **group base
+frame**, **phase** — plus an **action id**, a **program counter**, and the same small fixed
+**per-model stagger value** used by the movement and rout rules. Sprite set + group base + phase +
+direction resolve to a frame exactly as `notes/animations.md` describes:
+`frame = group_base + phase × 8 + direction`. For the standard `32+8+32+32+8` unit sets the group bases
+are **0 = move, 32 = dead, 40 = attack, 72 = stand, 104 = shoot**.
+
+**The seven actions.** Each creature family has a table of 8 action scripts (slot 0 unused). The actions
+are the same everywhere:
+
+| action | meaning | what the script does (standard infantry) |
+|---|---|---|
+| **1** | stand still | stand group, **phase 1 held forever** — a single static frame |
+| **2** | idle / mark time | stand group, 10-tick loop `0,0,0,1,1,2,2,2,3,3`, **not** randomised |
+| **3** | walk | move group, 8-tick loop `0,0,1,1,2,2,3,3`, **random entry point 0…7** |
+| **4** | fighting | attack group, 12-tick loop `0,0,1,2,3,3,1,1,3,0,2,2`, **random entry point 0…9** |
+| **5** | weapon ready (in melee, unpaired) | attack group, **phase 0 or 2 chosen at random**, then held |
+| **6** | dead | random facing, then the single corpse frame, held |
+| **7** | shoot | shoot pose, **random entry 0…3**, 4 ticks, fire event, 2 more ticks, then back to action 1 |
+
+Other creature families use the same seven meanings with their own loop lengths and hold patterns. The
+second most common family, for example, walks on a flat 4-tick loop `0,1,2,3` with a random entry 0…3,
+marks time on a lopsided 6-tick loop `0,0,1,2,2,3`, and makes even its *stand still* a random choice
+between phases 0 and 2 instead of one fixed pose. There are **37 such families** in the data, each with
+its own 8-action table, and **116 distinct scripts** between them.
+
+**One script word per tick.** The animation stepper runs once per model per battle tick, inside the same
+100 ms tick as everything else, so a "frame" word is exactly one tick. Standard infantry therefore walk a
+0.8 s four-phase cycle, fight a 1.2 s cycle and mark time on a 1.0 s cycle. **Nothing scales this with
+speed**: a charging unit's figures cover far more ground per tick (see "Models chase the unit") but their
+legs cycle at the same 0.8 s, and there is no separate run animation — charging, marching, pursuing and
+fleeing all use action 3.
+
+**Where the desynchronisation comes from.** Five independent mechanisms, in rough order of visual weight:
+
+1. **Random entry into the loop.** The dominant one. When a model *enters* a looping action, the script
+   skips a random 0…n−1 steps before the first frame of the loop, then loops from there forever. Each
+   model rolls independently, so a regiment that starts marching on one tick immediately spreads across
+   the whole walk cycle instead of goose-stepping. It appears 39 times across the 116 scripts; the skip
+   count is the loop length or close to it (4, 6, 8, 10, 12, 14, 15 or 16 depending on the creature).
+2. **The offset is chosen once, and only on a change of action.** Re-issuing the action a model is already
+   playing does nothing — the script is only reset when the action id actually changes. So the phase
+   offsets a unit picks up when it starts marching persist for the whole march, and a unit that walks,
+   stops and walks again re-rolls them. A model that is mid one-shot animation cannot be interrupted: the
+   new action is queued and applied when the one-shot finishes, which desynchronises it further.
+3. **Uneven frame holds inside the loop.** The loops are not `0,1,2,3` at a flat rate — infantry hold
+   phases for 2 ticks each (`0,0,1,1,2,2,3,3`), the stand loop is lopsided (`0,0,0,1,1,2,2,2,3,3`), and
+   the fight loop visits phases out of order and unevenly (`0,0,1,2,3,3,1,1,3,0,2,2`). Combined with the
+   random entry, two models on the same loop rarely look alike even when they are the same number of ticks
+   apart.
+4. **Per-model variant selection.** Some families pick the *group* itself from the model's fixed stagger
+   value — one of three variants (`value mod 3`) in six scripts, one of two (`bit 1 of the value`) in two
+   more — so a few models permanently play a different version of the same action. The same value picks
+   one of three death cries.
+5. **Staggered collapse.** A model whose wounds run out does **not** fall immediately. It is marked dying
+   and keeps playing its current animation for `(stagger value & 3 + 1) × 18` ticks — **1.8 to 7.2 s** —
+   before switching to action 6. Outside melee that delay is quartered (`(value >> 2) + 1`, i.e. 0.5–1.9 s),
+   and a few special death kinds collapse in one tick or swap the model onto a dedicated death sprite set
+   with a long multi-phase sequence. A unit destroyed outright as a whole gets zero delay and falls
+   together. On reaching action 6 the model is given a **random facing**, which is why corpses lie at all
+   angles rather than facing the way the figure died.
+
+**Drawn facing is its own slew.** The facing used to pick the sprite direction is not snapped to the
+target each tick: it turns by at most **32/512 of a turn (22.5°) per tick**, i.e. one of the eight sprite
+directions per tick. Which target it turns towards depends on the action: a model playing *stand still*,
+*weapon ready* or *shoot* faces **the unit's facing**, while a walking or fighting model faces **its own
+heading** — its direction of travel or its opponent. A dead or one-shot-locked model's facing is frozen
+where it was. The exception is RollingStock (wagons), whose models snap their drawn facing instantly with
+no slew.
+
+**The shooting fire event** is posted by the script, not by the combat code: four ticks into the shoot
+pose. Because the entry into the shoot pose is itself randomised over 0…3 ticks, the models of an archer
+unit reach their fire event on different ticks, which is what feeds the "every 4th model posts the fire
+event" volley rule (section 8.1).
+
+**Other things the scripts can do**, listed here because an engine that only implements frames will look
+wrong: set and clear model flags, branch on model or unit flags and on the death kind, mark/loop/repeat
+with a counter, yield a tick without changing the frame, chain into another action or sprite set, play one
+sound or one of a random list, spawn blood decals, randomise the model's facing, and toggle the unit's
+attached light/effect. There are 59 such operations in total.
 
 ### Routes, collisions and visibility ✅
 

@@ -2,7 +2,7 @@ import math
 import random
 import unittest
 
-from whshr import combat
+from whshr import combat, formation
 from whshr.engine import Battle, Regiment, TICK_SECONDS, speed_per_tick
 from whshr.rules import Side
 
@@ -325,6 +325,104 @@ class CatchUpWalkTests(unittest.TestCase):
 
         self.assertAlmostEqual(regiment.positions[0][1] - before[0][1], 36 * 2.4 / 256)
         self.assertAlmostEqual(regiment.positions[1][1] - before[1][1], 28 * 2.4 / 256)
+
+
+class ChargeStretchWorkedExampleTests(unittest.TestCase):
+    """game_rules.md "Models chase the unit, they are not carried by it": the full worked Empire
+    infantry example (`s_rlmv` 11, 4 ranks) -- marching-speed parity, the charge stretch, a re-aiming
+    charge's frozen translation, and the post-charge concertina recovery."""
+
+    def _block(self, x=0, y=0):
+        return Regiment("block", "Block", x, y, 0, Side.PLAYER, models=20, ranks=4,
+                        speed_per_tick=speed_per_tick(4, 3))
+
+    @staticmethod
+    def _rear_rank_lag(regiment, index=16):
+        ideal = formation.place(regiment.x, regiment.y, regiment.direction,
+                                formation.block_slots(regiment.models, regiment.ranks))
+        px, py = regiment.positions[index]
+        ix, iy = ideal[index]
+        return math.hypot(px - ix, py - iy)
+
+    def test_given_a_block_marching_freely_when_many_ticks_pass_then_the_rear_rank_holds_a_stable_gap(self):
+        # "the rearmost rank's minimum step ... is identical" to the anchor's moving-freely speed: the
+        # gap opened while ramping up to speed stops growing once both sides reach a steady march.
+        block = self._block()
+        battle = Battle(6000, 6000, [block])
+        battle.order_move("block", 0, 5000)
+        for _ in range(250):
+            battle.tick()
+        lag_early = self._rear_rank_lag(block)
+        for _ in range(100):
+            battle.tick()
+        lag_late = self._rear_rank_lag(block)
+
+        self.assertLessEqual(lag_late, lag_early + 1.0)
+
+    def test_given_a_full_infantry_charge_when_it_completes_then_the_rear_rank_trails_by_about_40_units(self):
+        # "the back rank ends up on the order of 40 world units ... behind" -- reproduced here with the
+        # target placed at the documented charge distance (144 units, "about 84 ticks").
+        block = self._block()
+        # The target sits well beyond charge reach so the charge is still running -- not already
+        # resolved into contact -- at the documented 84-tick mark.
+        target = Regiment("target", "Target", 0, 5000, 0, Side.ENEMY, models=1, ranks=1)
+        target.speed_per_tick = 0
+        battle = Battle(6000, 6000, [block, target])
+        battle.order_attack("block", "target")
+        for _ in range(84):
+            battle.tick()
+
+        self.assertAlmostEqual(block.y, 144, delta=5)
+        self.assertAlmostEqual(self._rear_rank_lag(block), 40, delta=15)
+
+    def test_given_a_charge_that_must_reaim_when_ticked_then_the_anchor_freezes_instead_of_a_flat_step(self):
+        # game_rules.md "Turning, wheeling and reversing": every gradual turn but a wheel -- including a
+        # charge's own re-aim -- "sets the speed to zero" for that tick. A frontage-1 column removes the
+        # turn's own corner-pivot shift (half-frontage 0), isolating the translation term: the anchor
+        # must not move at all while re-aiming, only resuming once its heading is settled.
+        column = Regiment("column", "Column", 0, 0, 0, Side.PLAYER, models=4, ranks=4,
+                          speed_per_tick=speed_per_tick(4, 3))
+        angle = 60 * math.tau / 512  # > 32/512 turn: a charge always re-aims rather than snapping
+        target = Regiment("target", "Target", 140 * math.sin(angle), 140 * math.cos(angle), 0,
+                          Side.ENEMY, models=1, ranks=1)
+        target.speed_per_tick = 0
+        battle = Battle(4000, 4000, [column, target])
+        battle.order_attack("column", "target")
+
+        reaim_positions, settled_step = [], None
+        for _ in range(15):
+            before = (column.x, column.y)
+            battle.tick()
+            if column.turn_mode == "charge_reaim":
+                reaim_positions.append((before, (column.x, column.y)))
+            elif column.turn_mode is None:
+                step = math.hypot(column.x - before[0], column.y - before[1])
+                if step > 0:
+                    settled_step = step
+
+        self.assertTrue(reaim_positions)
+        for before, after in reaim_positions:
+            self.assertAlmostEqual(math.hypot(after[0] - before[0], after[1] - before[1]), 0, places=6)
+        self.assertIsNotNone(settled_step)
+        self.assertGreater(settled_step, 0)
+
+    def test_given_a_charging_block_when_it_halts_then_the_rear_rank_gap_recovers_in_about_three_seconds(self):
+        # "the block visibly concertinas back together over roughly three seconds" once the anchor stops.
+        block = self._block()
+        target = Regiment("target", "Target", 0, 5000, 0, Side.ENEMY, models=1, ranks=1)
+        target.speed_per_tick = 0
+        battle = Battle(6000, 6000, [block, target])
+        battle.order_attack("block", "target")
+        for _ in range(84):
+            battle.tick()
+        lag_at_halt = self._rear_rank_lag(block)
+        battle.order_halt("block")
+
+        for _ in range(40):  # 4 s at 10 ticks/s -- "roughly three seconds", with headroom
+            battle.tick()
+
+        self.assertGreater(lag_at_halt, 20)
+        self.assertLessEqual(self._rear_rank_lag(block), 3.5)  # MODEL_ARRIVAL_DISTANCE, plus headroom
 
 
 class ChargeStartFreezeTests(unittest.TestCase):

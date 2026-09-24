@@ -14,7 +14,7 @@ verified visually on labelled, anchor-aligned sheets. No disassembly.
 | Standard unit layout `32+8+32+32(+8…)` = move, dead, attack, stand (+ shoot/cast) | ✅ move and dead, 🟡 attack/stand/shoot (visual, partly ambiguous) |
 | Anchor: byte 3 = x, byte 2 = distance of the anchor row from the frame bottom | 🟡 x well supported; y only statistically |
 | Script `dir` (0..511): 0 = +Y (north on the plan map), clockwise, so `direction = round(dir/64) mod 8` in a north-up view | 🟡 rotation sense from BTS statistics and scenery vs plan maps (`notes/battle_viewer.md`); zero frame derived, not observed |
-| Frame timing | ❌ needs the running game |
+| Frame timing | ✅ per-action animation scripts, one step per 100 ms tick — `notes/game_rules.md`, "Figure animation: actions, timing, and why the figures are never in step" |
 
 ## Inventory (`scripts/anim_inventory.py`)
 
@@ -258,8 +258,10 @@ python3 scripts/anim_export.py ".../WARFB"      # all 72 directional sets: 274 G
   `dir` in a `.BTS` with its facing in the running game.
 - Anchor y (byte 2): the ground contact point is only a statistical fit; byte 3 as x is much better supported.
   Why do portraits use bytes 0–3 as two int16 while directional sprites use bytes 2–3 as two u8?
-- Frame timing (frames per second per action), whether attack/shoot loop or play once, and
-  which of the 4 attack phases is the "hit" moment — not in the files, probably in `GAMEF.DLL`.
+- ~~Frame timing (frames per second per action), whether attack/shoot loop or play once~~ — answered in
+  `notes/game_rules.md`, "Figure animation: actions, timing, and why the figures are never in step":
+  one step per 100 ms tick, attack loops, shoot plays once and returns to standing. Still open: which of
+  the 4 attack phases is the visual "hit" moment (the rules resolve the blow independently of the frame).
 - Labels that are not certain: attack vs stand in sets where both look calm (`AVENGERS`, `BLACKORC`,
   `GOURARD`, `MTDRKS`, `VANHEIMS`…), `MORTAR` group 3, `DOOMDIVR` groups 1–4, `PEASANT` groups 6–11,
   `DRAGON` (a single 4-phase group).
