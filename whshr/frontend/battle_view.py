@@ -274,7 +274,10 @@ class BattleView(SceneView):
                 if order is not None:
                     self.order_mode = None
                     self._set_cursor("default")
-                    self.hud.order_completed()
+                    # Stay on the sub-panel for repeat-friendly formation buttons so the
+                    # player can click ranks or facing adjustments multiple times in a row.
+                    if action not in {"ranks_up", "ranks_down", "turn_left", "turn_right", "about_face"}:
+                        self.hud.order_completed()
                     return ((order,),)
                 return ()
             if self.hud.occupies(event.pos):
