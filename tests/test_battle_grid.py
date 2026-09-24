@@ -331,3 +331,63 @@ class SeparateGridTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EngagementAsymmetryTests(unittest.TestCase):
+    """notes/game_rules.md "Why the charger disperses and the charged unit stands still"."""
+
+    def setUp(self):
+        self.defender = _regiment("aaa_def", 0, 0, Side.ENEMY, initiative=5, models=12, ranks=3)
+        self.attacker = _regiment("bbb_att", 0, 14, Side.PLAYER, initiative=5, models=12, ranks=3)
+        self.battle = Battle(1000, 1000, [self.defender, self.attacker], seed=0)
+
+    def _owner(self):
+        return self.battle.regiments[_grid(self.battle, self.defender).owner_id]
+
+    def _by_uid(self, regiment):
+        return {model.uid: pos for model, pos in zip(regiment.melee_models, regiment.positions)}
+
+    def test_given_a_defender_when_the_fight_continues_then_its_surviving_models_never_move(self):
+        self.battle.tick()
+        owner = self._owner()
+        before = self._by_uid(owner)
+
+        for _ in range(combat.SEGMENT_TICKS * 6):
+            self.battle.tick()
+            now = self._by_uid(owner)
+            for uid, position in now.items():
+                if uid in before:
+                    self.assertEqual(position, before[uid])
+
+        self.assertTrue(battle_grid.fighting_models(self.battle, owner))
+
+    def test_given_a_charge_when_it_connects_then_the_charger_models_do_walk_to_new_cells(self):
+        self.battle.tick()
+        joiner = self.attacker if self._owner() is self.defender else self.defender
+        before = self._by_uid(joiner)
+
+        for _ in range(combat.SEGMENT_TICKS):
+            self.battle.tick()
+
+        self.assertNotEqual(self._by_uid(joiner), before)
+
+    def test_given_the_same_blocked_cells_when_approached_from_different_sides_then_the_fallback_order_differs(self):
+        fallbacks = set()
+        for approach in ((0, 8), (0, -8), (8, 0), (-8, 0)):  # all within the near range
+            defender = _regiment("def", 0, 0, Side.ENEMY, initiative=5, models=1, ranks=1)
+            defender.model_positions()
+            grid = battle_grid.BattleGrid("def", 0, 0, 0, 1)
+            grid.seed(defender)
+            target = defender.melee_models[0]
+            chosen = []
+            for n in range(4):
+                joiner = _regiment("j%d" % n, approach[0], approach[1], Side.PLAYER, initiative=5, models=1, ranks=1)
+                joiner.model_positions()
+                model = joiner.melee_models[0]
+                self.assertTrue(battle_grid._place_next_to_enemy(
+                    grid, joiner, model, approach[0], approach[1], [(defender, 0, target)]))
+                chosen.append((model.cell[0] - 8, model.cell[1] - 8))
+            self.assertEqual(len(set(chosen)), 4)  # four distinct neighbouring cells
+            fallbacks.add(tuple(chosen))
+
+        self.assertEqual(len(fallbacks), 4)  # each approach direction wraps in its own order
