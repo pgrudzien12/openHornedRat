@@ -300,6 +300,22 @@ class MountedMeleeTests(unittest.TestCase):
         self.assertEqual([detail["attacks"] for detail in event.data["attacks"]], [1, 2])
         self.assertEqual(event.data["attacks"][1]["wound_need"], 3)
 
+    def test_given_a_mounted_rider_when_wounded_then_rider_and_mount_die_together_as_one_model(self):
+        # game_rules.md "Mounts": "single wound counter, rider's T/W only, the mount is never
+        # separately wounded or killed" -- a mounted model has exactly one ModelState (there is no
+        # second, mount-only model to wound or remove independently), whatever the mount's own
+        # T/W happen to be in MOUNT_PROFILES; killing the model removes rider and mount together.
+        rider = _regiment("r", 100, 100, Side.PLAYER, models=1, ranks=1, toughness=8,
+                          armour=8, mount=1)  # Warhorse: T3 W1, well below the rider's own T8
+        rider.model_positions()
+
+        self.assertEqual(len(rider.melee_models), 1)
+
+        killed = combat.kill_models(rider, [0], battle=Battle(1000, 1000, [rider]))
+
+        self.assertEqual(killed, 1)
+        self.assertEqual(rider.models, 0)
+
 
 class ContactAttackTests(unittest.TestCase):
     """game_rules.md 7.7: a pursuer cannot re-engage a fleeing unit, so contact attacks are the only
