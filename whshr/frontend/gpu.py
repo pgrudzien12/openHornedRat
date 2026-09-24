@@ -171,6 +171,51 @@ class TextLabel(ScreenQuad):
             self._lines = None
 
 
+class BattleLogPanel(ScreenQuad):
+    """4-line scrollable battle log: each entry is a (sender, message) pair.
+
+    The sender is rendered in bold and the message follows on the same line; both use the
+    same small font at the battle HUD's own size. Color is red per the original's style.
+    """
+
+    LINES = 4
+
+    def __init__(self, gpu, size, bold_font, normal_font,
+                 color=(220, 50, 50), background=(0, 0, 0, 140)):
+        super().__init__(gpu, size)
+        self.bold_font = bold_font
+        self.normal_font = normal_font
+        self.color = color
+        self.background = background
+        self._entries = None
+
+    def set_entries(self, entries):
+        """Render *entries* (list of (sender, message) tuples, newest last) into the panel."""
+        entries = tuple(entries[-self.LINES:])
+        if entries == self._entries:
+            return
+        self._entries = entries
+        surface = pygame.Surface(self.size, pygame.SRCALPHA)
+        if self.background:
+            surface.fill(self.background)
+        line_h = max(self.bold_font.get_linesize(), self.normal_font.get_linesize())
+        y = 2
+        for sender, message in entries:
+            bold_surf = self.bold_font.render(sender, True, self.color)
+            surface.blit(bold_surf, (4, y))
+            x = 4 + bold_surf.get_width() + 3
+            remaining = self.size[0] - x - 4
+            if remaining > 0:
+                msg_surf = self.normal_font.render(message, True, self.color)
+                if msg_surf.get_width() > remaining:
+                    msg_surf = msg_surf.subsurface((0, 0, remaining, msg_surf.get_height()))
+                surface.blit(msg_surf, (x, y))
+            y += line_h
+            if y + line_h > self.size[1]:
+                break
+        self.write(pygame.image.tobytes(surface, "RGBA"))
+
+
 class Gpu:
     """The zengl context, the frame render target and shared fonts."""
 
@@ -179,9 +224,15 @@ class Gpu:
         self.target = RenderTarget(ctx, size)
         self.small_font = pygame.font.Font(None, 22)
         self.title_font = pygame.font.Font(None, 40)
+        self.battle_log_font = pygame.font.Font(None, 16)
+        self.battle_log_font_bold = pygame.font.Font(None, 16)
+        self.battle_log_font_bold.bold = True
         # A single opaque white pixel, stretched and tinted black for scene-transition fades.
         self.fade = ScreenQuad(self, (1, 1))
         self.fade.write(b"\xff\xff\xff\xff")
 
     def text(self, size, font=None, **options):
         return TextLabel(self, size, font or self.small_font, **options)
+
+    def battle_log(self, size, **options):
+        return BattleLogPanel(self, size, self.battle_log_font_bold, self.battle_log_font, **options)

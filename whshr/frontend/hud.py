@@ -147,6 +147,10 @@ DOT_BASE = {
 }
 COMPASS_FRAMES = (99, 105)
 
+# Battle log panel: 4-line scrollable message area, left of the scroll arrows (panel-native coords).
+# Scroll arrows are at (424, 9) and (424, 34); readout ends at ~200; log fills the space between.
+LOG_RECT = (205, 2, 215, 68)
+
 BLACK = (0, 0, 0)
 
 
@@ -182,6 +186,7 @@ class Hud:
         # value (fixed-button names and command names never collide).
         self.pressed = None
         self._marker_order = []
+        self._log_panel = None
 
     def _scale(self):
         """The same integer-snap scale NativeScreenView._layout() uses (scene_view.py), applied to
@@ -398,6 +403,12 @@ class Hud:
         """Called once a pending move/attack order has actually been issued (a ground/minimap click)."""
         self.pending_order = None
         self.panel_set = "idle"
+
+    def set_log(self, entries):
+        """Render (sender, message) pairs into the battle log panel (4 visible lines)."""
+        if self._log_panel is None:
+            self._log_panel = self.gpu.battle_log((LOG_RECT[2], LOG_RECT[3]))
+        self._log_panel.set_entries(entries)
 
     # ------------------------------------------------------------------ minimap
 
@@ -633,6 +644,9 @@ class Hud:
         self._draw_minimap(regiment, camera)
         if camera is not None:
             self._draw_camera_marker(camera)
+        if self._log_panel is not None:
+            self._draw_panel(self._log_panel, LOG_RECT[0], LOG_RECT[1],
+                             LOG_RECT[2], LOG_RECT[3])
 
     def _draw_fixed_buttons(self):
         for name, (pos, frames, size) in FIXED_BUTTONS.items():
@@ -707,3 +721,5 @@ class Hud:
         for quad in quads:
             if quad:
                 quad.release()
+        if self._log_panel is not None:
+            self._log_panel.release()

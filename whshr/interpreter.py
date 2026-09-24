@@ -179,6 +179,16 @@ class LibraryBehaviors:
             regiment.attack_target = best_threat
 
 
+# PROVISIONAL: react message text by code (game_rules.md §React N); varies by s_race & 7 (race).
+# Race-specific variants are not yet mapped from the public spec; codes 10-14 (shooting/orders)
+# are noted in the spec but their exact strings are unconfirmed.
+_REACT_MESSAGES = {
+    1: "Engage!", 2: "CHARGE!", 3: "Destroy them!", 4: "Retreat!",
+    5: "My men fear the beast!", 6: "Flee the abomination!",
+    7: "We fight to the death!", 8: "No mercy!", 17: "Re-group!", 19: "Hold!",
+}
+
+
 class ScriptInterpreter:
     """Executes one unit's behaviour script for one tick.
 
@@ -1188,14 +1198,19 @@ class ScriptInterpreter:
         state.behaviour_id = operand
         return state.pc + 1
 
-    def op_React(self, state, operand, script_words, unit_id, tick_count, rng):
-        """React N: display a battle message/voice with leader portrait.
 
-        Messages per game_rules.md:
-        1="Engage!", 2="CHARGE!", 3="Destroy them!", 4="Retreat!",
-        5="My men fear the beast!", 6="Flee the abomination!", 7="We fight to the death!"
+    def op_React(self, state, operand, script_words, unit_id, tick_count, rng):
+        """React N: display a battle message/voice with leader portrait (game_rules.md §React N).
+
+        The actual text varies by s_race & 7; this table covers the code-level semantics only.
+        PROVISIONAL: race-specific variants (e.g. "WAARRGGH!" for code 2) are not yet mapped.
         """
-        # TODO: queue message display event (frontend integration)
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment is not None:
+            msg = _REACT_MESSAGES.get(operand, f"React {operand}")
+            self.battle.events.append(BattleEvent(
+                f"{regiment.name}: {msg}", "react",
+                regiment=unit_id, code=operand, sender=regiment.name, message=msg))
         return state.pc + 1
 
     def op_RemoveFromBattle(self, state, operand, script_words, unit_id, tick_count, rng):

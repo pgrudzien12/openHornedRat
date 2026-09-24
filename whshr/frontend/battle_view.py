@@ -178,6 +178,8 @@ class BattleView(SceneView):
         self.order_mode = None  # a HUD Move/Attack click changes how the next battlefield click is interpreted
         self.event_log = deque(maxlen=EVENT_LOG_LINES)  # recent whshr.engine.Battle.events, newest last
         self._banner_order = []  # promoted selection order; persists after deselect like the original battle view
+        self.battle_log = deque(maxlen=100)  # full react-message history for the HUD log panel
+        self.log_scroll = 0  # lines scrolled back from the newest entry (0 = show latest)
 
         ctx.includes["camera"] = CAMERA_BLOCK
         self.camera_buffer = ctx.buffer(size=CAMERA.size, uniform=True)
@@ -266,6 +268,12 @@ class BattleView(SceneView):
             action = self.hud.hit_test(event.pos)
             if action is not None:
                 self.hud.set_pressed(action)
+                if action == "scroll_up":
+                    self.log_scroll = min(self.log_scroll + 1, max(0, len(self.battle_log) - 1))
+                    return ()
+                if action == "scroll_down":
+                    self.log_scroll = max(0, self.log_scroll - 1)
+                    return ()
                 order = self.hud.press(action)
                 if action in {"move", "attack", "face_point"}:
                     self.order_mode = action
@@ -422,6 +430,12 @@ class BattleView(SceneView):
         if tilt := keys[pygame.K_PAGEUP] - keys[pygame.K_PAGEDOWN]:
             self.camera.tilt(tilt * TILT_SPEED * seconds)
         self.scene.battle.set_view_angle(view_angle(self.camera.yaw))
+        for event in self.scene.battle.events:
+            if hasattr(event, "kind") and event.kind == "react":
+                sender = event.data.get("sender", "")
+                message = event.data.get("message", str(event))
+                self.battle_log.append((f"{sender}:", message))
+                self.log_scroll = 0  # auto-scroll to newest on a new message
         self.event_log.extend(self.scene.battle.events)
 
     def status(self):
@@ -527,6 +541,9 @@ class BattleView(SceneView):
         self.mesh.render()
         self.sprites.render()
         self.hud.set_selected(self.scene.selected_id)
+        log_list = list(self.battle_log)
+        end = max(0, len(log_list) - self.log_scroll)
+        self.hud.set_log(log_list[max(0, end - 4):end])
         self.hud.draw(width, height, self.camera)
 
     def release(self):
