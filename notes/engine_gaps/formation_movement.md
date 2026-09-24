@@ -68,14 +68,27 @@ turn-rate/pivot mechanism itself does not.
 - **Single-model units (monsters) turn on the spot with none of the pivot/slot/speed-penalty
   machinery** — the whole block guarded on "more than one model" is skipped entirely: no
   reference-point displacement, no slot recomputation, and **no speed penalty at all** (translates at
-  full speed while turning). Their pseudo-formation `s` is small (3 for 2×2, 5 for 3×3), so they also
-  turn very fast — monsters are deliberately the most agile things on the field.
+  full speed while turning). That skip is the *whole* of a monster's agility bonus — "single model"
+  and "turns quickly" are two separate properties. Turn *rate* still follows the ordinary formula from
+  whatever pseudo-formation footprint the monster has: common footprints are fast (`s` = 3 for 2×2, 5
+  for 3×3), but the Mole Machine's 5×8 footprint gives `s` = 11 — as sluggish as a ten-wide line,
+  despite paying none of the pivot/speed penalties. Compute `s` from the real footprint; don't
+  hard-code "monster = fast turn".
 - **Units currently re-forming** are skipped by the same guard (don't additionally drag the reference
   point around mid-reform).
-- **Wagons** snap facing to **45° steps** instead of turning smoothly (on top of their existing layout
-  restriction).
-- **War machines** have a small `s` (≈4–5, quick turn) but are usually anchored by a separate flag and
-  rarely turn in practice.
+- **Wagons snap facing to 45° steps — relative to the camera, not the world.** The battle update keeps
+  a global view angle (camera rotation in the same 1/512-turn scale); the wagon layout rounds facing
+  to the nearest 45° step of a grid offset by where the camera currently sits inside a 45° sector, and
+  is only re-run when the view angle has changed since the last update (skipped outright otherwise).
+  The effect is a wagon always presents one of eight clean aspects *to the viewer*, re-snapping as the
+  camera swings — a sprite-rendering accommodation, not a world-space movement rule. A world-aligned
+  snap looks visibly wrong specifically when the camera orbits a stationary wagon.
+- **War machines are anchored intrinsically, not by mission/AI choice.** Unit set-up computes the
+  formation kind, and when it comes out as the war-machine layout, it unconditionally sets the unit's
+  anchor flag (and marks the leader model as the machine) — a property of being a war machine, decided
+  at set-up, that an engine has to implement as a rule, not something an AI/mission script opts into.
+  They still get the same small `s` (≈4–5, quick turn) as anyone else per the formula on the rare
+  occasions they do turn.
 
 **Break-and-turn pause on rout** (previously untracked — new): when a unit breaks, every model
 currently at rest gets a pause of `(stagger value & 7) × 3 + 6` = **6–27 ticks** with its timed-pause
@@ -105,11 +118,13 @@ Three GitHub tasks (one already existed, #17, now rewritten to the corrected/exp
    depends on epic #49/#50 to look right (front ranks fastest, rear slowest) but the anchor-level state
    machine itself does not.
 2. **Per-formation-type turn differences**: monsters skip the whole pivot/slot/speed-penalty block
-   (full-speed on-the-spot turning); units mid-reform skip it too; wagons snap facing to 45° steps;
-   war machines get the same small-`s` fast turn as anyone else (their "usually anchored" behaviour is
-   a mission/AI choice, not a distinct movement rule, so nothing extra to implement there beyond
-   correct `s` for their layout — cross-reference `notes/engine_gaps/model_movement.md`'s scope
-   boundary on war-machine/monster pseudo-formation layouts not existing in `whshr/formation.py` yet).
+   (full-speed on-the-spot turning), but still compute their turn rate `s` from their real footprint
+   (a 5×8 Mole Machine turns as slowly as a ten-wide line); units mid-reform skip it too; wagons snap
+   facing to the nearest 45° step of a *camera-relative* grid, re-run only when the view angle has
+   changed, not a world-aligned snap; war machines are unconditionally anchored at set-up (an engine
+   rule, not an AI/mission choice) but use the same small-`s` fast-turn formula as anyone else on the
+   rare occasions they do turn — cross-reference `notes/engine_gaps/model_movement.md`'s scope
+   boundary on war-machine/monster pseudo-formation layouts not existing in `whshr/formation.py` yet.
 3. **Break-and-turn stagger pause**: on `combat._start_rout`, give every currently-at-rest model of the
    breaking unit (and, if it was in melee, every model of its opponent) a pause of
    `(stagger & 7) × 3 + 6` ticks before it may turn/move, plus a small scatter from its current
