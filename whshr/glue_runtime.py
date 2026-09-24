@@ -10,6 +10,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 from .campaign_runtime import CampaignRuntime
+from .campaign_state import caravan_window
 from .glue_animation import GlueBitmapAnimator
 from .glue import AnimRecord, BitmapRecord, GlueInstruction, MissionRecord, MissionRef
 from .portraits import PortraitAnimator
@@ -83,6 +84,7 @@ class StartDialogue:
 class EnterCaravan:
     request_id: int
     mode: str
+    window: str = ""
 
 
 @dataclass(frozen=True)
@@ -572,8 +574,14 @@ class GlueRuntime:
             self._request_battle(command, argument, effects)
         elif command in ("gocaravan", "iftruegocaravan", "iffalsegocaravan"):
             if self._conditional(command):
-                mode = argument.casefold()
-                self._request("caravan", effects, restore_context=mode != "start", mode=mode)
+                mode = argument.strip().casefold()
+                if mode == "start":
+                    self._request("caravan", effects, mode=mode)
+                elif caravan_window(mode) is None:
+                    # notes/glue_interpreter.md section 7.3: an unknown name is logged and the script goes on
+                    effects.append(Diagnostic(self._location(instruction), f"unknown caravan {argument!r}"))
+                else:
+                    self._request("caravan", effects, restore_context=True, mode=mode)
         elif command == "endgame":
             self._clear_for_endgame()
             effects.append(EndGame())
@@ -809,7 +817,14 @@ class GlueRuntime:
         elif kind == "dialogue":
             effects.append(StartDialogue(request_id, details["string_id"], details["queued"]))
         elif kind == "caravan":
-            effects.append(EnterCaravan(request_id, details["mode"]))
+            window = (caravan_window(details["mode"]) or "") if restore_context else ""
+            try:
+                self.content.window(window)
+            except (KeyError, TypeError):
+                window = ""  # the installation lacks this window: the host resolves the request at once
+            effects.append(EnterCaravan(request_id, details["mode"], window))
+            if window:  # the parked runtime stays below; the caravan window is on top
+                self._open_window(f"res={window}", False, effects)
         elif kind == "debrief":
             effects.append(StartDebrief(request_id, details["mode"], details["debrief_index"], details["summary"]))
 
