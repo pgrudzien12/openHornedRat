@@ -78,20 +78,39 @@ class SevenActionStepperTests(unittest.TestCase):
     def test_given_shoot_action_when_its_run_and_hold_finish_then_it_auto_switches_back_to_stand(self):
         model, rng = ModelState(), random.Random(6)
 
-        groups = [animation.step(model, animation.SHOOT, rng)[0] for _ in range(6)]
-        self.assertEqual(groups, ["shoot"] * 6)  # 4 running ticks + 2 held ticks
+        animation.step(model, animation.SHOOT, rng)
+        length = 7 - model.action_entry  # 7 ticks for skip 0 down to 4 for skip 3
+        groups = [animation.step(model, animation.SHOOT, rng)[0] for _ in range(length - 1)]
+        self.assertEqual(groups, ["shoot"] * (length - 1))
 
         group, phase = animation.step(model, animation.SHOOT, rng)
 
         self.assertEqual((group, phase), ("stand", 1))
         self.assertEqual(model.action, animation.STAND)
 
-    def test_given_shoot_action_when_it_changes_then_all_four_phases_are_shown_regardless_of_entry(self):
+    def test_given_each_random_skip_when_shooting_then_fire_and_return_ticks_match_the_timing_table(self):
+        # Tick 1 is the tick the order applies; skip -> (fire tick, first stand tick).
+        table = {0: (5, 8), 1: (4, 7), 2: (3, 6), 3: (2, 5)}
+        for skip, (fire_tick, stand_tick) in table.items():
+            model, rng = ModelState(), random.Random(0)
+            rng.randrange = lambda n, skip=skip: skip
+            fires, stands = [], []
+            for tick in range(1, 9):
+                animation.step(model, animation.SHOOT if not stands else animation.STAND, rng)
+                if model.fire_event:
+                    fires.append(tick)
+                if model.action == animation.STAND:
+                    stands.append(tick)
+            self.assertEqual(fires, [fire_tick], skip)
+            self.assertEqual(stands[0], stand_tick, skip)
+
+    def test_given_shoot_action_when_it_changes_then_the_entry_skips_ahead_through_the_phases(self):
         model, rng = ModelState(), random.Random(7)
 
         phases = [animation.step(model, animation.SHOOT, rng)[1] for _ in range(4)]
 
-        self.assertEqual(sorted(phases), [0, 1, 2, 3])
+        start = phases[0]
+        self.assertEqual(phases, [min(start + i, 3) for i in range(4)])
 
     def test_given_an_undecoded_family_when_looked_up_then_it_falls_back_to_standard_infantry(self):
         self.assertIs(animation.family_table("some_future_family"), animation.STANDARD_INFANTRY)
@@ -406,17 +425,17 @@ class WalkDesyncAndFireCadenceTests(unittest.TestCase):
             self.assertIn(animation.WALK, seen, mode)
             self.assertLessEqual(seen, {animation.IDLE, animation.WALK}, mode)
 
-    def test_given_an_archer_unit_when_shooting_then_every_4th_model_posts_its_fire_event_on_spread_ticks(self):
+    def test_given_an_archer_unit_when_shooting_then_each_model_posts_one_fire_event_on_a_tick_from_2_to_5(self):
         rng = random.Random(11)
         models = [ModelState() for _ in range(16)]
         fire_ticks = {}
-        for tick in range(8):
+        for tick in range(5):
             for index, model in enumerate(models):
                 animation.step(model, animation.SHOOT, rng)
                 if model.fire_event:
                     fire_ticks.setdefault(index, []).append(tick)
 
-        # Each model posts exactly once per shoot pose, 1-4 ticks in, depending on its random entry.
+        # Each model posts exactly once per shoot pose, on tick 2-5 (0-based 1-4) by its random skip.
         self.assertEqual(sorted(fire_ticks), list(range(16)))
         self.assertTrue(all(len(t) == 1 and 1 <= t[0] <= 4 for t in fire_ticks.values()))
         self.assertGreater(len({t[0] for t in fire_ticks.values()}), 1)

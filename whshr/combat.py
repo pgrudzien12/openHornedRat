@@ -809,11 +809,11 @@ def resolve_shooting(battle):
             regiment.reload_ticks = max(0.0, regiment.reload_ticks - 1)
         if not regiment.missile_range or not regiment.active or regiment.in_melee or regiment.routing:
             continue
-        # Charging cancels the volley entirely; moving merely delays the next one.
-        if regiment.attack_target is not None:
-            regiment.fire_posts = 0
-            regiment.volley_countdown = None
-            regiment.volley_age = 0
+        # Reload, moving and charging only gate STARTING a volley; a volley already in flight keeps
+        # its posted events (game_rules.md 8.1: a posted launch event always fires its projectile).
+        in_flight = (regiment.volley_countdown is not None or regiment.volley_age > 0
+                     or regiment.fire_posts > 0)
+        if regiment.attack_target is not None and not in_flight:
             continue
         target = _shooting_target(battle, regiment)
         if target is None:
@@ -822,7 +822,7 @@ def resolve_shooting(battle):
             regiment.volley_age = 0
             continue
         # Start a volley: no volley in progress, not moving, reload done.
-        if (regiment.volley_countdown is None and regiment.volley_age == 0
+        if (regiment.attack_target is None and regiment.volley_countdown is None and regiment.volley_age == 0
                 and not regiment.moving and regiment.reload_ticks <= 0):
             regiment.volley_countdown = 1 if regiment.hud_class == "art" else regiment.models
             regiment.reload_ticks = _reload_ticks(regiment)
