@@ -69,6 +69,9 @@ class CampaignState:
 
     graph: dict
     flow: str = FIRST_FLOW
+    # Every flow the campaign has run, oldest first, ending with ``flow``: a replacement flow carries
+    # on inside the map its predecessors built, so resuming replays the chain (notes/mission_selection.md §10).
+    flow_history: list[str] = field(default_factory=list)
     flow_step: int = 0
     mission_window: str = None
     completed: set[int] = field(default_factory=set)
@@ -88,6 +91,8 @@ class CampaignState:
     save_dir: object = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
+        if not self.flow_history or self.flow_history[-1] != self.flow:
+            self.flow_history.append(self.flow)
         if self.mission_window is None:
             self._open_next_window(0)
 
@@ -158,6 +163,25 @@ class CampaignState:
                 return self.graph.get("portrait_windows", {}).get(step["window"])
         return None
 
+    def is_mission_taken(self, mission_ref):
+        """Has this mission already been committed to or finished (so it is no longer offered)?"""
+        return mission_ref in self.taken_missions
+
+    def wait_already_released(self, flow, ordinal):
+        """Was the ``ordinal``-th (0-based) ``waitforrelease`` of ``flow`` already passed?
+
+        A flow script restarted at the campaign's saved position replays its set-up and skips the
+        parks the campaign has moved beyond (``flow_step`` is the step of the window now offered),
+        so the map comes back on the current mission window (notes/mission_selection.md section 3).
+        """
+        if flow in self.flow_history[:-1]:
+            return True
+        if flow != self.flow:
+            return False
+        steps = self.graph["flow_scripts"].get(flow, ())
+        waits = [index for index, step in enumerate(steps) if step["action"] == "wait_player_choice"]
+        return ordinal < len(waits) and waits[ordinal] < self.flow_step
+
     def complete(self, mission):
         """Record a chosen mission and say how the flow continues.
 
@@ -167,9 +191,12 @@ class CampaignState:
         the replacement flow name (or None) and whether the parked flow script resumes.
         """
         self.completed.add(mission["name_id"])
+        if mission.get("mission_ref") is not None:
+            self.taken_missions.add(mission["mission_ref"])
         replacement = mission.get("replacescript")
         if replacement:
             self.flow = replacement
+            self.flow_history.append(replacement)
             self._open_next_window(0)
             return replacement, False
         if mission.get("releaseflag") or not self.missions:

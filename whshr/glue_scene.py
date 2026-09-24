@@ -76,6 +76,10 @@ class GlueScene(Scene):
                 log.write("glue_start", program=self.program, window=self.window)
             self._queue(self.runtime.start(self.program) if self.program is not None
                         else self.runtime.start_window(self.window))
+            history = getattr(self.campaign, "flow_history", ())
+            if self.program is not None and history and self.program == history[0]:
+                for flow in history[1:]:  # resume: replay the chain up to the campaign's current flow
+                    self._queue(self.runtime.continue_with(flow))
 
     def complete_activity(self, result):
         if self.runtime is None:
@@ -100,7 +104,7 @@ class GlueScene(Scene):
         replacement, released = self.campaign.complete_mission(self.accept_mission)
         if parent is not None and parent.runtime is not None:
             if replacement:
-                parent._queue(parent.runtime.start(replacement))
+                parent._queue(parent.runtime.continue_with(replacement))
             elif released:
                 parent._queue(parent.runtime.handle(GlueInput("mission-release")))
         return parent
@@ -122,7 +126,8 @@ class GlueScene(Scene):
                     return Transition(MainMenuScene(), "generic caravan exited")
                 if event.target.casefold() not in {"armybook", "encyclopediabook", "loadsavewindow", "magicbook",
                                                    "optionsdialog"}:
-                    return Transition(GlueScene(event.target, self.campaign), "generic caravan mission map opened")
+                    return Transition(GlueScene(self._map_program(event.target), self.campaign),
+                                      "generic caravan mission map opened")
             if event.kind == "panel-action" and event.target in ("accept_briefing", "open_troop_select") and self.accept_battle:
                 from .campaign_scenes import TroopSelectionScene
 
@@ -156,6 +161,18 @@ class GlueScene(Scene):
         elif isinstance(event, ActivityResult):
             self._queue(self.runtime.resume(event))
         return None
+
+    def _map_program(self, target):
+        """The flow program the caravan's map hotspot opens.
+
+        The hotspot names the campaign's first flow, but the campaign moves on (a mission's
+        ``replacescript`` switches flow), so a flow target opens the campaign's flow chain; the runtime
+        then replays its set-up up to the saved step (``CampaignState.wait_already_released``) instead
+        of offering the opening mission window again.
+        """
+        flows = getattr(getattr(self.campaign, "graph", None), "get", lambda *_: None)("flow_scripts") or {}
+        history = getattr(self.campaign, "flow_history", ())
+        return history[0] if target.upper() in flows and history else target
 
     def _selected_values(self):
         return self.runtime.content.mission(self.runtime.state.selected_mission).values

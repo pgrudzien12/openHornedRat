@@ -211,6 +211,7 @@ class GlueRuntimeState:
     object_positions: dict = field(default_factory=dict)
     portrait_animators: dict = field(default_factory=dict)
     paused: bool = False
+    waits_passed: int = 0  # waitforrelease commands reached so far, to resume a flow at the saved step
 
 
 class GlueRuntime:
@@ -229,6 +230,14 @@ class GlueRuntime:
     def start(self, program):
         """Start a fresh named program and run until it blocks or ends."""
         self.state = GlueRuntimeState(current=ScriptFrame(str(program).upper()))
+        return self.step_until_blocked()
+
+    def continue_with(self, program):
+        """Run a replacement flow inside the windows the current one built (the parked frame is dropped)."""
+        self.state.current = ScriptFrame(str(program).upper())
+        self.state.call_stack.clear()
+        self.state.wait_reason = None
+        self.state.waits_passed = 0
         return self.step_until_blocked()
 
     def start_window(self, window):
@@ -358,7 +367,8 @@ class GlueRuntime:
                     continue
                 for record in records:
                     if isinstance(record, MissionRecord) and record.mission_ref is not None:
-                        if record.mission_ref.key == str(key).casefold():
+                        if (record.mission_ref.key == str(key).casefold()
+                                and self._mission_offered(record.mission_ref)):
                             return record.mission_ref
         return None
 
@@ -492,7 +502,11 @@ class GlueRuntime:
             self.state.status_bits |= self.state.status_mask
         elif command == "clrgluestatus":
             self.state.status_bits &= ~self.state.status_mask
+        elif command == "waitforrelease" and self._wait_already_released():
+            self.state.waits_passed += 1
         elif command in ("waitforrelease", "waitforresume"):
+            if command == "waitforrelease":
+                self.state.waits_passed += 1
             self.state.wait_reason = "mission-release" if command == "waitforrelease" else "panel-resume"
             self.state.current.parked = True
         elif command in ("gosub", "iftruegosub", "iffalsegosub"):
@@ -647,11 +661,52 @@ class GlueRuntime:
             return
         if argument.casefold() == "bitmap" and target.objects:
             target.objects.pop()
+        elif argument.casefold() == "mission":
+            # Drop the mission list the flow added last (notes/campaign.md section 7.5).
+            for index in range(len(target.objects) - 1, -1, -1):
+                if self._has_mission_list(target.objects[index]):
+                    del target.objects[index]
+                    break
+            if self.state.selected_mission is not None and not self._selection_offered():
+                self.state.selected_mission = None
         effects.append(UpdateWindow(target.name))
+
+    def _wait_already_released(self):
+        check = getattr(self.campaign, "wait_already_released", None)
+        frame = self.state.current
+        return bool(check and frame is not None and not self.state.call_stack
+                    and check(frame.program, self.state.waits_passed))
+
+    def _has_mission_list(self, name):
+        try:
+            return any(isinstance(record, MissionRecord) for record in self.content.window(name).records)
+        except (KeyError, TypeError):
+            return False
+
+    def _selection_offered(self):
+        """Is the selected mission still in a mission list on screen and not yet taken?"""
+        ref = self.state.selected_mission
+        if not self._mission_offered(ref):
+            return False
+        for window in self.state.windows:
+            for name in (window.name, *window.objects):
+                try:
+                    records = self.content.window(name).records
+                except (KeyError, TypeError):
+                    continue
+                if any(isinstance(record, MissionRecord) and record.mission_ref == ref for record in records):
+                    return True
+        return False
+
+    def _mission_offered(self, ref):
+        taken = getattr(self.campaign, "is_mission_taken", None)
+        return not (taken and taken(ref))
 
     def _select_first_mission(self):
         if self.state.selected_mission is not None:
-            return
+            if self._selection_offered():
+                return
+            self.state.selected_mission = None
         for window in self.state.windows:
             for name in (window.name, *window.objects):
                 try:
@@ -659,7 +714,8 @@ class GlueRuntime:
                 except (KeyError, TypeError):
                     continue
                 for record in records:
-                    if isinstance(record, MissionRecord) and record.mission_ref is not None:
+                    if (isinstance(record, MissionRecord) and record.mission_ref is not None
+                            and self._mission_offered(record.mission_ref)):
                         self.state.selected_mission = record.mission_ref
                         if self.campaign is not None:
                             self.campaign.select_mission(record.mission_ref)
