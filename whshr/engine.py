@@ -28,6 +28,10 @@ DEFAULT_S_RLMV = 11.0
 # game_rules.md, "Models chase the unit": a model rests within three world units of its slot.
 MODEL_ARRIVAL_DISTANCE = 3.0
 MODEL_STEP_SCALE = 2.4 / 256
+# game_rules.md "Formation changes": the flat re-form mover decelerates inside the last 6 world
+# units, and a single step is capped at 1 world unit (only the fastest units ever reach that cap).
+REFORM_DECEL_DISTANCE = 6.0
+REFORM_STEP_CAP = 1.0
 # Basic bow-type missile codes this engine models as shooters (game_rules.md 8.1/8.3): artillery and
 # special weapons (cannons, mortars, breath weapons, ...) are not modelled in this simplified engine.
 ARCHER_MISSILE_CODES = {1, 2, 9, 18, 19}
@@ -148,6 +152,13 @@ class Regiment:
     in_melee: bool = False
     melee_group: str | None = None  # id of the shared multi-regiment fight (Battle.fights), if any
     melee_touching: frozenset = field(default_factory=frozenset)  # enemy ids this footprint touches now
+    held: bool = False  # reserved for a Tangling-Thorn-style hold; already gates re-forms if ever set
+    # game_rules.md "Formation changes": true while models are still walking to their newly assigned
+    # slots after a re-form; `reform_slots` holds each model's assigned local (side, forward) offset,
+    # index-parallel with `positions`/`melee_models`, turned into a world target every tick with
+    # `formation.place` so it tracks a moving or turning anchor.
+    reforming: bool = False
+    reform_slots: list = field(default_factory=list)
     routing: bool = False  # fleeing the field; ignores orders, moves away from the nearest enemy
     # game_rules.md "Flight and catching fleeing units": the flight bearing is fixed once, "directly
     # away from its opponent", when the rout starts (combat._start_rout) - not re-aimed every tick
@@ -222,6 +233,11 @@ class Regiment:
                                             stagger=(self._next_uid + offset) & 7)
                                  for offset in range(len(self.positions))]
             self._next_uid += len(self.positions)
+            # A reseed (casualties changing the model count outside kill_models, reinforcement, ...)
+            # invalidates any in-progress re-slotting: `reform_slots` would no longer be index-parallel
+            # with the renewed `positions`/`melee_models`.
+            self.reforming = False
+            self.reform_slots = []
         return self.positions
 
     def index_of(self, uid):
@@ -457,6 +473,40 @@ class Battle:
         regiment.braced = False
         regiment.braced_target = None
 
+    def order_reform(self, identifier, ranks):
+        """Change a player regiment's rank count (game_rules.md, "Formation changes: how the figures
+        re-sort themselves"): refused while fleeing, held or charging (including once in melee, since
+        a charge's `attack_target` is never cleared on contact); the request is clamped into
+        `formation.rank_range`. Re-slots every model (`formation.reform_assignment`) and switches the
+        unit to the flat re-form mover for as long as any model is still off its assigned slot.
+        """
+        regiment = self.regiments[identifier]
+        if regiment.side != Side.PLAYER:
+            raise ValueError(f"{identifier} is not player-controlled")
+        if regiment.routing:
+            raise ValueError(f"{identifier} is routing and cannot be ordered")
+        if regiment.held:
+            raise ValueError(f"{identifier} is held and cannot be ordered")
+        if regiment.attack_target is not None or regiment.in_melee:
+            raise ValueError(f"{identifier} is charging or in melee and cannot be ordered")
+        self._begin_reform(regiment, formation.clamp_ranks(regiment.models, ranks))
+
+    @staticmethod
+    def _begin_reform(regiment, ranks):
+        """Recompute the shape for `ranks` and re-slot every model into it (game_rules.md, "Formation
+        changes"). `leader_index` is left unset: this engine has no persistent leader-model identity
+        to hand the front-rank-centre slot to directly, so `formation.reform_assignment` falls back to
+        whichever model is currently nearest that slot, the documented fallback for that case.
+        """
+        positions = regiment.model_positions()
+        ranks = max(1, min(regiment.models, ranks)) if regiment.models else 1
+        regiment.ranks = ranks
+        sizes = formation.rank_sizes(regiment.models, ranks)
+        regiment.frontage = sizes[0] if sizes else 0
+        regiment.reform_slots = formation.reform_assignment(
+            regiment.x, regiment.y, regiment.direction, regiment.models, ranks, positions)
+        regiment.reforming = bool(regiment.reform_slots)
+
     def snapshot(self):
         """Per-regiment state for `whshr.battle_log` (a segment snapshot or the final battle state):
         position, facing, models, corpse count, and every order/engagement flag needed to trace a
@@ -467,6 +517,7 @@ class Battle:
                 "models": regiment.models, "corpses": len(regiment.corpses),
                 "walking": regiment.walking, "routing": regiment.routing, "fled": regiment.fled,
                 "in_melee": regiment.in_melee, "melee_group": regiment.melee_group,
+                "reforming": regiment.reforming,
                 "melee_touching": sorted(regiment.melee_touching),
                 "attack_target": regiment.attack_target, "reload_ticks": regiment.reload_ticks,
                 "braced": regiment.braced, "braced_target": regiment.braced_target,
@@ -532,6 +583,9 @@ class Battle:
             if regiment.attack_target is None:
                 regiment.charge_started_target = None
             moved = False
+            # game_rules.md "Formation changes": "the unit's own translation speed is halved for as
+            # long as the re-form is in progress".
+            move_scale = scale * (0.5 if regiment.reforming else 1.0)
             if regiment.in_melee:
                 regiment.turn_order_key = regiment.turn_mode = None
                 pass  # frozen in place while fighting; the view shows the attack animation instead
@@ -539,7 +593,7 @@ class Battle:
                 if regiment.flee_x is None:  # self-heal: should only happen for pre-existing state
                     regiment.flee_x, regiment.flee_y = self._flee_point(regiment)
                 moved = self._advance_toward(regiment, (regiment.flee_x, regiment.flee_y),
-                                             regiment.speed_for_mode(FLEEING_K) * scale, arrive=False,
+                                             regiment.speed_for_mode(FLEEING_K) * move_scale, arrive=False,
                                              order_key=("flee",), scale=scale)
                 if not (0 <= regiment.x <= self.width and 0 <= regiment.y <= self.height):
                     regiment.fled = True
@@ -561,18 +615,21 @@ class Battle:
                             model.current_speed = 0.0
                         regiment.charge_started_target = target.identifier
                     moved = self._advance_toward(regiment, (target.x, target.y),
-                                                 regiment.speed_for_mode(CHARGING_K) * scale, arrive=False,
+                                                 regiment.speed_for_mode(CHARGING_K) * move_scale, arrive=False,
                                                  order_key=("charge", target.identifier), scale=scale)
             elif regiment.moving:
                 moved = self._advance_toward(regiment, (regiment.target_x, regiment.target_y),
-                                             regiment.speed_per_tick * scale, arrive=True,
+                                             regiment.speed_per_tick * move_scale, arrive=True,
                                              order_key=("move", regiment.target_x, regiment.target_y), scale=scale)
             else:
                 regiment.turn_order_key = regiment.turn_mode = None
             if regiment.attack_target is None and not regiment.in_melee:
                 for model in regiment.melee_models:
                     model.freeze_ticks = 0
-            models_catching_up = self._advance_models(regiment, scale)
+            if regiment.reforming:
+                models_catching_up = self._advance_reforming_models(regiment, scale)
+            else:
+                models_catching_up = self._advance_models(regiment, scale)
             regiment.walking = moved or models_catching_up
             regiment.animation_seconds = regiment.animation_seconds + seconds if regiment.walking else 0.0
 
@@ -792,6 +849,53 @@ class Battle:
             updated.append(new_position)
         regiment.positions = updated
         return still_moving
+
+    def _advance_reforming_models(self, regiment, scale):
+        """Drive a re-forming unit's models with the flat re-form mover instead of the ordinary
+        rank-dependent catch-up walk (game_rules.md, "Formation changes: how the figures re-sort
+        themselves"): a flat `s_rlmv / 8` world units/tick, no ramp-up, decelerating in the last
+        `REFORM_DECEL_DISTANCE` world units (the step divided by `7 - distance`) and capped at
+        `REFORM_STEP_CAP` world units/tick. A model's heading snaps to the unit's facing as soon as it
+        settles into its slot. Clears `regiment.reforming` and raises a "re-form complete" event once
+        the last model settles.
+        """
+        targets = formation.place(regiment.x, regiment.y, regiment.direction, regiment.reform_slots)
+        facing_angle = regiment.direction * math.tau / formation.FULL_TURN
+        facing_x, facing_y = math.sin(facing_angle), math.cos(facing_angle)
+        step_base = regiment.speed_per_tick * 16 / MOVING_FREELY_K / 8 * scale
+        updated, all_settled = [], True
+        for index, ((px, py), (tx, ty)) in enumerate(zip(regiment.positions, targets)):
+            model = regiment.melee_models[index]
+            dx, dy = tx - px, ty - py
+            distance = math.hypot(dx, dy)
+            if distance <= MODEL_ARRIVAL_DISTANCE:
+                model.at_rest = True
+                model.current_speed = model.distance_budget = 0.0
+                model.heading_x, model.heading_y = facing_x, facing_y
+                updated.append((tx, ty))
+                continue
+            all_settled = False
+            model.at_rest = False
+            step = step_base / (7 - distance) if distance <= REFORM_DECEL_DISTANCE else step_base
+            step = min(step, REFORM_STEP_CAP * scale, distance)
+            updated.append((px + dx / distance * step, py + dy / distance * step))
+        regiment.positions = updated
+        if all_settled:
+            # The rest of the engine (`_advance_models`, `model_positions`) assumes `positions[i]`
+            # belongs to `formation.block_slots`'s raster slot `i`; restore that ordering now that the
+            # re-slotting permutation has done its job, or the very next tick's ordinary catch-up walk
+            # would immediately send every model chasing a different slot again.
+            raster_index = {offset: index for index, offset in
+                            enumerate(formation.block_slots(regiment.models, regiment.ranks))}
+            order = sorted(range(len(regiment.reform_slots)), key=lambda i: raster_index[regiment.reform_slots[i]])
+            regiment.positions = [regiment.positions[i] for i in order]
+            regiment.melee_models = [regiment.melee_models[i] for i in order]
+            regiment.reforming = False
+            regiment.reform_slots = []
+            self.events.append(BattleEvent(
+                f"{regiment.name} completes its re-form.", "reform_complete",
+                regiment=regiment.identifier))
+        return not all_settled
 
     def side_counts(self):
         """Per-side active/routing/fled/destroyed regiment counts (whshr.battle_log snapshots, and the

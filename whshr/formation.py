@@ -166,6 +166,89 @@ def footprint_gap(a_corners, b_corners):
     return best
 
 
+def rank_range(models):
+    """Allowed rank-count range for a re-form request (game_rules.md, "Formation changes: how the
+    figures re-sort themselves"): clamped to ``[min, models // min]`` with
+    ``min = max(1, trunc(0.75 * sqrt(models)))``. Matches the documented examples: 8 models -> 2-4
+    ranks, 18 -> 3-6, 24 -> 3-8, 32 -> 4-8."""
+    if models <= 0:
+        return 1, 1
+    minimum = max(1, math.trunc(0.75 * math.sqrt(models)))
+    return minimum, max(minimum, models // minimum)
+
+
+def clamp_ranks(models, ranks):
+    """Clamp a requested rank count into `rank_range`'s allowed span."""
+    minimum, maximum = rank_range(models)
+    return max(minimum, min(maximum, ranks))
+
+
+def reform_slot_order(models, ranks, spacing=MODEL_SPACING):
+    """Slot offsets in re-slotting search order: front rank first, each rank's columns centre
+    outward (game_rules.md, "Formation changes"). Same offsets as `block_slots`, reordered."""
+    order = []
+    for rank, width in enumerate(rank_sizes(models, ranks)):
+        centre = (width - 1) / 2
+        columns = sorted(range(width), key=lambda column: abs(column - centre))
+        order.extend(((column - centre) * spacing, -rank * spacing) for column in columns)
+    return order
+
+
+def _octagonal_distance(ax, ay, bx, by):
+    """The re-slotting search's distance metric: `larger + smaller / 2` of the two axis deltas
+    (game_rules.md, "Formation changes"), not true Euclidean distance."""
+    dx, dy = abs(ax - bx), abs(ay - by)
+    larger, smaller = (dx, dy) if dx >= dy else (dy, dx)
+    return larger + smaller / 2
+
+
+def reform_assignment(x, y, direction, models, ranks, positions, leader_index=None, spacing=MODEL_SPACING):
+    """Re-slot every model of a re-forming unit (game_rules.md, "Formation changes"): process the new
+    shape's slots front rank first, centre outward; each slot after the first takes the not-yet-placed
+    model nearest to it by `_octagonal_distance`, scanning every remaining model and stopping early on
+    an exact match. The front-rank centre (the first slot) is handed to `leader_index` directly, with
+    no search, if it names a still-unplaced model; otherwise (no persistent leader identity to hand
+    it to) it falls back to the model that is itself nearest that slot, which is the documented
+    fallback for a codebase without a leader-model concept.
+
+    Returns a list of local `(side, forward)` slot offsets index-parallel with `positions`, meant to be
+    turned into world targets each tick with `place(x, y, direction, ...)` so they track a moving or
+    turning anchor for as long as the re-form is in progress.
+    """
+    slot_offsets = reform_slot_order(models, ranks, spacing)
+    slot_targets = place(x, y, direction, slot_offsets)
+    assigned = [None] * len(positions)
+    remaining = list(range(len(positions)))
+
+    def _take_nearest(target):
+        best_index, best_distance = None, None
+        for index in remaining:
+            px, py = positions[index]
+            distance = _octagonal_distance(px, py, target[0], target[1])
+            if best_distance is None or distance < best_distance:
+                best_index, best_distance = index, distance
+                if distance == 0:
+                    break
+        remaining.remove(best_index)
+        return best_index
+
+    if slot_offsets and remaining:
+        if leader_index is not None and leader_index in remaining:
+            leader = leader_index
+            remaining.remove(leader)
+        else:
+            leader = _take_nearest(slot_targets[0])
+        assigned[leader] = slot_offsets[0]
+        slot_offsets, slot_targets = slot_offsets[1:], slot_targets[1:]
+
+    for offset, target in zip(slot_offsets, slot_targets):
+        if not remaining:
+            break
+        assigned[_take_nearest(target)] = offset
+
+    return assigned
+
+
 def unit_size(unit):
     """Return a script unit's (models, ranks); s_side is [side, orgsize, size, ranks] and the current size counts."""
     stats = unit["stats"].get("s_side", [])

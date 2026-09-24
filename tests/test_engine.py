@@ -331,6 +331,188 @@ class CatchUpWalkTests(unittest.TestCase):
         self.assertAlmostEqual(regiment.positions[1][1] - before[1][1], 28 * 2.4 / 256)
 
 
+class ReformOrderGatingTests(unittest.TestCase):
+    """game_rules.md "Formation changes": refused while fleeing, held or charging; the requested rank
+    count is clamped into `formation.rank_range`."""
+
+    def setUp(self):
+        self.regiment = Regiment("block", "Block", 0, 0, 0, Side.PLAYER, models=8, ranks=2,
+                                 speed_per_tick=speed_per_tick(4, 3))
+        self.enemy = Regiment("enemy", "Enemy", 200, 0, 0, Side.ENEMY, models=1, ranks=1)
+        self.battle = Battle(1000, 1000, [self.regiment, self.enemy])
+
+    def test_given_a_player_regiment_when_ordered_then_it_reslots_and_begins_reforming(self):
+        before = list(self.regiment.model_positions())
+
+        self.battle.order_reform("block", 4)
+
+        self.assertEqual(self.regiment.ranks, 4)
+        self.assertTrue(self.regiment.reforming)
+        self.assertEqual(len(self.regiment.reform_slots), 8)
+        # every model keeps its own current position until Battle.tick moves it
+        self.assertEqual(self.regiment.positions, before)
+
+    def test_given_a_request_outside_the_clamp_when_ordered_then_it_is_pulled_into_range(self):
+        self.battle.order_reform("block", 1)  # formation.rank_range(8) == (2, 4)
+
+        self.assertEqual(self.regiment.ranks, 2)
+
+    def test_given_a_fleeing_regiment_when_reform_is_ordered_then_it_is_refused(self):
+        self.regiment.routing = True
+
+        with self.assertRaisesRegex(ValueError, "routing"):
+            self.battle.order_reform("block", 4)
+
+    def test_given_a_held_regiment_when_reform_is_ordered_then_it_is_refused(self):
+        self.regiment.held = True
+
+        with self.assertRaisesRegex(ValueError, "held"):
+            self.battle.order_reform("block", 4)
+
+    def test_given_a_charging_regiment_when_reform_is_ordered_then_it_is_refused(self):
+        self.battle.order_attack("block", "enemy")
+
+        with self.assertRaisesRegex(ValueError, "charging"):
+            self.battle.order_reform("block", 4)
+
+    def test_given_a_regiment_in_melee_when_reform_is_ordered_then_it_is_refused(self):
+        self.regiment.in_melee = True
+
+        with self.assertRaisesRegex(ValueError, "charging or in melee"):
+            self.battle.order_reform("block", 4)
+
+    def test_given_a_non_player_or_out_of_range_request_when_ordered_then_it_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "not player-controlled"):
+            self.battle.order_reform("enemy", 2)
+
+
+class ReformSlottingTests(unittest.TestCase):
+    """game_rules.md "Formation changes": the leader is handed the front-rank centre slot directly,
+    and every other model takes the nearest not-yet-placed slot."""
+
+    def test_given_a_rank_count_change_when_reslotted_then_the_shape_matches_the_documented_layout(self):
+        regiment = Regiment("block", "Block", 0, 0, 0, Side.PLAYER, models=18, ranks=4,
+                            speed_per_tick=speed_per_tick(4, 3))
+        battle = Battle(1000, 1000, [regiment])
+        regiment.model_positions()
+
+        battle.order_reform("block", 3)
+
+        self.assertEqual(formation.rank_sizes(18, 3), [6, 6, 6])
+        self.assertEqual(len(regiment.reform_slots), 18)
+        targets = formation.place(regiment.x, regiment.y, regiment.direction, regiment.reform_slots)
+        self.assertEqual(len(set(targets)), 18)  # every model gets a distinct slot
+        self.assertEqual(set(regiment.reform_slots), set(formation.block_slots(18, 3)))
+
+    def test_given_no_leader_identity_when_reslotted_then_the_model_nearest_the_centre_stands_in(self):
+        regiment = Regiment("model", "Model", 0, 0, 0, Side.PLAYER, models=3, ranks=1,
+                            speed_per_tick=speed_per_tick(4, 3))
+        battle = Battle(1000, 1000, [regiment])
+        positions = regiment.model_positions()
+        # model 1 already sits on the front-rank centre slot (0, 0)
+        self.assertEqual(positions[1], (0.0, 0.0))
+
+        battle.order_reform("model", 1)
+
+        self.assertEqual(regiment.reform_slots[1], (0.0, 0.0))
+
+
+class FlatReformMoverTests(unittest.TestCase):
+    """game_rules.md "Formation changes": the flat re-form mover moves every model at a flat
+    `s_rlmv / 8` world units/tick with no ramp-up, decelerating in the last 6 world units, and snaps
+    heading to the unit's facing on arrival."""
+
+    def _regiment(self, **kwargs):
+        fields = {"models": 1, "ranks": 1, "direction": 0, "speed_per_tick": speed_per_tick(4, 3)}
+        fields.update(kwargs)
+        regiment = Regiment("m", "M", 0, 0, fields.pop("direction"), Side.PLAYER, **fields)
+        return regiment, Battle(1000, 1000, [regiment])
+
+    def test_given_a_model_far_from_its_slot_when_advanced_then_it_moves_at_full_flat_speed_immediately(self):
+        regiment, battle = self._regiment()
+        regiment.model_positions()
+        regiment.positions = [(0.0, 0.0)]
+        regiment.reforming = True
+        regiment.reform_slots = [(0.0, 100.0)]  # far outside the deceleration zone
+
+        battle._advance_reforming_models(regiment, 1)
+
+        s_rlmv = regiment.speed_per_tick * 16 / 1.8
+        expected_step = min(s_rlmv / 8, 1.0)  # capped at REFORM_STEP_CAP
+        self.assertAlmostEqual(regiment.positions[0][1], expected_step)
+
+    def test_given_a_model_inside_the_deceleration_zone_when_advanced_then_its_step_shrinks(self):
+        regiment, battle = self._regiment()
+        regiment.model_positions()
+        regiment.positions = [(0.0, 0.0)]
+        regiment.reforming = True
+        regiment.reform_slots = [(0.0, 5.0)]
+
+        battle._advance_reforming_models(regiment, 1)
+
+        s_rlmv = regiment.speed_per_tick * 16 / 1.8
+        expected_step = min(s_rlmv / 8 / (7 - 5), 1.0)
+        self.assertAlmostEqual(regiment.positions[0][1], expected_step)
+
+    def test_given_a_model_within_arrival_distance_when_advanced_then_it_settles_and_snaps_heading(self):
+        regiment, battle = self._regiment(direction=128)
+        regiment.model_positions()
+        regiment.positions = [(0.0, -1.0)]  # within MODEL_ARRIVAL_DISTANCE of the target
+        regiment.reforming = True
+        regiment.reform_slots = list(formation.block_slots(regiment.models, regiment.ranks))
+        target = formation.place(regiment.x, regiment.y, regiment.direction, regiment.reform_slots)[0]
+
+        still_moving = battle._advance_reforming_models(regiment, 1)
+
+        self.assertFalse(still_moving)
+        self.assertAlmostEqual(regiment.positions[0][0], target[0])
+        self.assertAlmostEqual(regiment.positions[0][1], target[1])
+        model = regiment.melee_models[0]
+        self.assertTrue(model.at_rest)
+        angle = 128 * math.tau / 512
+        self.assertAlmostEqual(model.heading_x, math.sin(angle))
+        self.assertAlmostEqual(model.heading_y, math.cos(angle))
+
+    def test_given_the_last_model_settles_when_ticked_then_reforming_clears_and_a_complete_event_fires(self):
+        regiment, battle = self._regiment()
+        regiment.model_positions()
+        regiment.reforming = True
+        regiment.reform_slots = list(formation.block_slots(regiment.models, regiment.ranks))
+
+        battle.tick()
+
+        self.assertFalse(regiment.reforming)
+        self.assertEqual(regiment.reform_slots, [])
+        self.assertTrue(any(event.kind == "reform_complete" for event in battle.events))
+
+    def test_given_a_reform_in_progress_when_the_unit_also_moves_then_its_translation_speed_is_halved(self):
+        regiment, battle = self._regiment(models=8, ranks=2)
+        regiment.model_positions()
+        # Straight ahead along the current facing, so the order needs no turn and the step is pure
+        # translation (a turn's own snap/pivot correction is a separate, already-tested mechanic).
+        battle.order_move("m", 0, 500)
+        battle.order_reform("m", 4)
+
+        battle.tick()
+
+        self.assertAlmostEqual(regiment.y, regiment.speed_per_tick * 0.5)
+
+    def test_given_a_multi_model_unit_when_reforming_completes_then_every_model_is_at_rest(self):
+        regiment, battle = self._regiment(models=8, ranks=2)
+        battle.order_reform("m", 4)
+
+        for _ in range(60):
+            battle.tick()
+
+        self.assertFalse(regiment.reforming)
+        self.assertTrue(all(model.at_rest for model in regiment.melee_models))
+        targets = formation.place(regiment.x, regiment.y, regiment.direction,
+                                  formation.block_slots(regiment.models, regiment.ranks))
+        rounded_positions = {(round(x, 2), round(y, 2)) for x, y in regiment.positions}
+        rounded_targets = {(round(x, 2), round(y, 2)) for x, y in targets}
+        self.assertEqual(rounded_positions, rounded_targets)
+
+
 class ChargeStretchWorkedExampleTests(unittest.TestCase):
     """game_rules.md "Models chase the unit, they are not carried by it": the full worked Empire
     infantry example (`s_rlmv` 11, 4 ranks) -- marching-speed parity, the charge stretch, a re-aiming
