@@ -127,6 +127,7 @@ class CampaignState:
     reinforcements: dict[int, int] = field(default_factory=dict)
     selected_mission: MissionRef | None = None
     taken_missions: set[MissionRef] = field(default_factory=set)
+    book_flags: dict[int, set[int]] = field(default_factory=dict)
     autosave_state: object = field(default=None, repr=False, compare=False)
     tentpos: int = 0
     hints: dict[int, str] = field(default_factory=dict)
@@ -160,6 +161,10 @@ class CampaignState:
 
     def leave_mission(self, unit_id):
         self.march_units.discard(int(unit_id))
+
+    def enable_book(self, book, index):
+        """Unlock a book/encyclopedia page (glue ``enablebook``, notes/campaign.md §4.4)."""
+        self.book_flags.setdefault(int(book), set()).add(int(index))
 
     def select_mission(self, mission):
         self.selected_mission = mission
