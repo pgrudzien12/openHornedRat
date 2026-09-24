@@ -5,7 +5,9 @@ import sys
 from pathlib import Path
 
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+# sys._MEIPASS is PyInstaller's documented, stable base path for bundled data in both
+# onefile and onedir builds (packaging/windows/ohr-engine.spec bundles scripts/ there).
+SCRIPTS = (Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]) / "scripts"
 
 
 def module(name):

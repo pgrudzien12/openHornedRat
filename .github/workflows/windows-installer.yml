@@ -1,0 +1,88 @@
+name: Windows installer
+
+# Builds the Windows installer (issue #97) on a native windows-latest runner (PyInstaller
+# does not support cross-compilation; ISCC and a Python new enough for pygame-ce/zengl's
+# published wheels both ship on this runner image already). Tags starting with "v" attach
+# the installer to the matching GitHub Release; pushes to main run the same build as an
+# unpublished smoke test (packaging/README.md).
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "packaging/windows/**"
+      - "whshr/**"
+      - "scripts/**"
+      - "requirements-engine.txt"
+      - ".github/workflows/windows-installer.yml"
+  pull_request:
+    paths:
+      - "packaging/windows/**"
+      - "whshr/**"
+      - "scripts/**"
+      - "requirements-engine.txt"
+      - ".github/workflows/windows-installer.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install engine dependencies and PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install --only-binary=:all: -r requirements-engine.txt pyinstaller
+
+      - name: Freeze with PyInstaller
+        run: pyinstaller packaging/windows/ohr-engine.spec --distpath dist --workpath build --noconfirm
+
+      - name: Smoke-test the frozen executable
+        shell: bash
+        # `whshr engine` lazily imports pygame/zengl only once past argument parsing (they
+        # are the runtime frontend's own third-party dependencies), so a bare no-args run
+        # only proves argparse works, not that the frozen native DLLs load. Point WARFB at
+        # an empty directory: this is not a real installation (the game is never bundled or
+        # available on a CI runner - see CLAUDE.md), but whshr.frontend.app.run validates the
+        # installation (whshr/assets.py) before ever opening a window/GL context, so this
+        # reaches the pygame/zengl imports and fails deterministically on the installation
+        # check, without needing GPU-accelerated OpenGL to be available on the runner.
+        run: |
+          mkdir -p /tmp/fake_warfb
+          out="$(WARFB=/tmp/fake_warfb ./dist/ohr-engine/ohr-engine.exe --hidden --frames 1 2>&1 || true)"
+          echo "$out"
+          echo "$out" | grep -q "incomplete WARFB installation"
+          ! echo "$out" | grep -qE "ModuleNotFoundError|ImportError"
+
+      - name: Determine installer version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev+${GITHUB_SHA:0:8}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compile installer with Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DMyAppVersion=${{ steps.version.outputs.version }}" packaging\windows\installer.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ohr-engine-windows-installer
+          path: dist/installer/*.exe
+
+      - name: Attach installer to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/installer/*.exe
