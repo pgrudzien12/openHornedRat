@@ -83,10 +83,15 @@ renumber later work.
 - [ ] **GEI8 — Debrief activity.** (issue #123) Present `StartDebrief`, apply the payment and result effects,
   and resume the requesting Glue runtime.
 
-- [ ] **GEI9 — Generic post-mission caravan modes.** (issue #120) Route `EnterCaravan` to the requested
+- [x] **GEI9 — Generic post-mission caravan modes.** (issue #120) Route `EnterCaravan` to the requested
   generic caravan window while retaining the parked runtime. Implement the campaign-required
   modes first: post-mission, resume, and recruitment. Add books, options, save/load UI, and
   dialogue close-ups only when their underlying activities exist.
+  *Implemented:* the request pushes the parked script, opens the mode's caravan window (`select`, `resume`,
+  `recruit*`, `info<letters>`; unknown names resume at once) and the hotspot's own `res` decides the exit
+  (`UnwindMission` finishes the script and releases the mission on the map, `PopAndResume` resumes it);
+  other hotspots stay inert with a diagnostic. The `...WithRecruit` variants are not chosen yet (no
+  recruitable-regiment test).
 
 - [x] **GEI10 — Campaign mission progression.** (issue #124) Apply `depend` and `inactivedepend` to generic
   mission rows; advance the campaign for release and replacement paths; rebuild the offered list

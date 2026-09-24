@@ -6,7 +6,7 @@ campaign Python scenes at every window/activity boundary.
 """
 
 from .campaign_log import GlueWatcher
-from .glue_runtime import ActivityResult, EnterCaravan, GlueInput, GlueRuntime, StartBattle, StartMovie
+from .glue_runtime import ActivityResult, Diagnostic, GlueInput, GlueRuntime, StartBattle, StartMovie
 from .glue_fonts import glue_font_asset
 from .scenes import Scene, Transition
 
@@ -56,12 +56,6 @@ class GlueScene(Scene):
     def take_movie_effect(self):
         for index, effect in enumerate(self._effects):
             if isinstance(effect, StartMovie):
-                return self._effects.pop(index)
-        return None
-
-    def take_caravan_effect(self, mode="select"):
-        for index, effect in enumerate(self._effects):
-            if isinstance(effect, EnterCaravan) and effect.mode == mode:
                 return self._effects.pop(index)
         return None
 
@@ -122,6 +116,8 @@ class GlueScene(Scene):
         if self.runtime is None:
             raise RuntimeError("GlueScene must be entered before handling input")
         if isinstance(event, GlueInput):
+            if event.kind == "hotspot-release" and self._caravan_open():
+                return self._leave_caravan(event.target)
             if event.kind == "hotspot-release" and self.window == "STARTCARAVAN" and event.target:
                 if event.target.casefold() == "abortgame":
                     from .campaign_scenes import MainMenuScene
@@ -162,6 +158,28 @@ class GlueScene(Scene):
                 self._queue(self.runtime.handle(event))
         elif isinstance(event, ActivityResult):
             self._queue(self.runtime.resume(event))
+        return None
+
+    def _caravan_open(self):
+        pending = self.runtime.state.pending
+        return pending is not None and pending.kind == "caravan" and pending.restore_context
+
+    def _leave_caravan(self, target):
+        """A hotspot of the caravan a script asked for (notes/activity_results.md section 6.2).
+
+        The hotspot's own exit name decides: ``UnwindMission`` pops the parked script, lets it finish and
+        releases the mission on the map; ``PopAndResume`` pops it and lets the script carry on. Every other
+        hotspot (books, options, speech, save/load) has no activity yet and stays inert."""
+        pending = self.runtime.state.pending
+        name = (target or "").casefold()
+        if name not in ("unwindmission", "popandresume"):
+            self._queue((Diagnostic("caravan", f"hotspot {target!r} is not yet implemented"),))
+            return None
+        self.complete_activity(ActivityResult(pending.request_id, "caravan"))
+        if name == "unwindmission":
+            parent = self.release_mission()
+            if parent is not None:
+                return Transition(parent, "mission released")
         return None
 
     def _map_program(self, target):

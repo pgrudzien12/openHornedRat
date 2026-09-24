@@ -207,21 +207,23 @@ class SceneMachine:
         self._start_glue_caravan()
 
     def _start_glue_caravan(self):
-        """`gocaravan:select` after a mission: the after-mission caravan screen is not built yet, so
-        the request resolves at once into the mission release step (notes/activity_results.md §6.2)."""
-        from .glue_runtime import ActivityResult
+        """A caravan request whose window the installation lacks resolves at once, as the mission's
+        release step (notes/activity_results.md section 6.2); with a window the scene shows it and the
+        player's exit hotspot resolves the request."""
+        from .glue_runtime import ActivityResult, EnterCaravan
         from .glue_scene import GlueScene
 
         if not isinstance(self.active, GlueScene):
             return
-        effect = self.active.take_caravan_effect("select")
-        if effect is None:
-            return
         scene = self.active
-        scene.complete_activity(ActivityResult(effect.request_id, "caravan"))
-        parent = scene.release_mission()
-        if parent is not None:
-            self._apply(Transition(parent, "mission released"))
+        for index, effect in enumerate(scene._effects):
+            if isinstance(effect, EnterCaravan) and not effect.window:
+                scene._effects.pop(index)
+                scene.complete_activity(ActivityResult(effect.request_id, "caravan"))
+                parent = scene.release_mission() if effect.mode in ("select", "resume") else None
+                if parent is not None:
+                    self._apply(Transition(parent, "mission released"))
+                return
 
     def _start_glue_battle(self):
         from .glue_scene import GlueScene

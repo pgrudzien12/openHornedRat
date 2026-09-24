@@ -28,6 +28,17 @@ CARAVAN_MODE_WINDOWS = {
 }
 
 
+def caravan_window(mode):
+    """The caravan window a ``gocaravan:<mode>`` request names, or ``None`` for an unknown name
+    (notes/glue_interpreter.md section 7.3: ``info<letters>`` names ``InfoCaravan<letters>``; an
+    unknown name is resumed at once).  The window may still be missing from a given installation."""
+    mode = str(mode).casefold()
+    name = CARAVAN_MODE_WINDOWS.get(mode)
+    if name is None and mode.startswith("info") and len(mode) > 4:
+        name = "INFOCARAVAN" + mode[4:].upper()
+    return name
+
+
 def mission_visible(missions, mission, taken):
     """Is ``mission`` offered in its window right now?
 
