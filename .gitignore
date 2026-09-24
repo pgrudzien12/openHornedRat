@@ -28,6 +28,8 @@ saves/
 
 # Native build output.
 build/
+dist/
+install.log
 
 # Local renders of game art (root-level images) - do not distribute.
 /*.png

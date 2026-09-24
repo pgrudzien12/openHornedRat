@@ -13,8 +13,18 @@ from .paths import Installation
 # Battle logs and saves default to the git-ignored logs//saves/ of this checkout, wherever the
 # engine is started from. Saves never go into the original installation (GEI7e): the engine keeps
 # its own save directory, not the original's SAVE/.
-REPOSITORY_LOGS = Path(__file__).resolve().parents[1] / "logs"
-REPOSITORY_SAVES = Path(__file__).resolve().parents[1] / "saves"
+#
+# A frozen install (packaging/windows) has no checkout to default into, and its own install
+# directory is read-only bundled data that the uninstaller removes - user saves must live
+# outside it. Use the same per-user app-data folder epic #88 plans for its config file.
+if getattr(sys, "frozen", False):
+    _USER_DATA = (Path(os.environ["APPDATA"]) / "ohr" if sys.platform == "win32"
+                  else Path.home() / ".ohr")
+    REPOSITORY_LOGS = _USER_DATA / "logs"
+    REPOSITORY_SAVES = _USER_DATA / "saves"
+else:
+    REPOSITORY_LOGS = Path(__file__).resolve().parents[1] / "logs"
+    REPOSITORY_SAVES = Path(__file__).resolve().parents[1] / "saves"
 
 
 def _check(name, callback):
