@@ -181,14 +181,15 @@ class GlueView(NativeScreenView):
         for model_name, animation in animations:
             model = next(model for model in models if model.name == model_name)
             animator = self.scene.runtime.state.portrait_animators.get(model_name)
+            index = self.scene.runtime.portrait_index(model_name, animation.index)
             try:
                 if animator is not None:
                     width, height, rgba = self.scene.runtime.content.portrait_frame(
-                        animation.index, animation.bkindex or 0, animator.mouth_frame, animator.eye_frame,
+                        index, animation.bkindex or 0, animator.mouth_frame, animator.eye_frame,
                         rgb_palette=palette.colours)
                 else:
                     width, height, rgba = self.scene.runtime.content.portrait_data(
-                        animation.index, animation.bkindex or 0, rgb_palette=palette.colours)
+                        index, animation.bkindex or 0, rgb_palette=palette.colours)
             except (ValueError, FileNotFoundError, KeyError):
                 continue
             quad = ScreenQuad(self.gpu, (width, height))

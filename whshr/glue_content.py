@@ -214,6 +214,20 @@ class GlueContent:
         return (AssetId("vanilla", "portrait", sprite),
                 AssetId("vanilla", "portrait", f"backall.{int(bkindex)}"))
 
+    def portrait_available(self, position):
+        """Whether the sprite set at resident-list ``position`` and the backdrop set can be loaded."""
+        from .portraits import PORTRAIT_SPRITES
+        try:
+            self._portrait_sources(int(position), 0, None)
+        except (ValueError, FileNotFoundError, KeyError, OSError, IndexError):
+            return False
+        return int(position) in PORTRAIT_SPRITES
+
+    def resolve_speaker_position(self, speaker):
+        """List position an ``index=-1`` block behaves as for ``speaker`` (notes/glue_portraits.md §1.4)."""
+        from .portraits import speaker_position
+        return speaker_position(speaker, self.portrait_available)
+
     def _portrait_sources(self, index, bkindex, rgb_palette):
         """Resolve the palette, background frame and speaker sprite sheet for one portrait."""
         if self.installation is None:

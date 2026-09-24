@@ -13,6 +13,7 @@ from .glue import MissionRecord, MissionRef
 from .glue_content import GlueContent
 from .paths import Installation
 from . import roster
+from .portraits import first_leader_speaker
 from .roster import load_company
 
 
@@ -136,6 +137,11 @@ class CampaignState:
     # The engine's own save directory (never the original installation's SAVE/, GEI7e); None
     # (e.g. focused tests, --glue-program runs) means troop selection stays in-memory only.
     save_dir: object = field(default=None, repr=False, compare=False)
+    # The portrait set of the first marching regiment with a leader portrait (notes/glue_portraits.md
+    # §1.4); recomputed only when the marching roster is loaded, None until then.
+    current_speaker: str | None = None
+    # Optional lower-case sprite name -> portrait set override; default is read from the installation.
+    portrait_sets: dict | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
         if not self.flow_history or self.flow_history[-1] != self.flow:
@@ -186,6 +192,20 @@ class CampaignState:
             hired = {whoami: whoami in self.army_units for whoami in {r.whoami for r in self.company}}
             roster.write_company(self.save_dir, self.company, hired)
             roster.write_march(self.save_dir, deployment.units, self.company)
+        by_whoami = {regiment.whoami: regiment for regiment in self.company}
+        self.refresh_speaker([by_whoami[whoami] for whoami in deployment.units if whoami in by_whoami])
+
+    def refresh_speaker(self, marching_regiments):
+        """Recompute the current speaker from the marching roster, in file order (§1.4 items 1-2)."""
+        if self.portrait_sets is None:
+            installation = getattr(self.content, "installation", None)
+            try:
+                from .battlefield import resource_files
+                self.portrait_sets = resource_files(installation, {"portraits"}) if installation else {}
+            except (FileNotFoundError, OSError, ValueError, KeyError):
+                self.portrait_sets = {}
+        self.current_speaker = first_leader_speaker(
+            [regiment.leader_portrait for regiment in marching_regiments], self.portrait_sets)
 
     def autosave(self, runtime_state):
         self.autosave_state = deepcopy(runtime_state)
