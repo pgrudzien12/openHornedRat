@@ -80,32 +80,32 @@ renumber later work.
   (`BRTXT 315`: "click to pick up, click again to drop") rather than switching to a continuous
   mouse-button-held drag, which the spec never documents.
 
-- [ ] **GEI8 — Debrief activity.** Present `StartDebrief`, apply the payment and result effects,
+- [ ] **GEI8 — Debrief activity.** (issue #123) Present `StartDebrief`, apply the payment and result effects,
   and resume the requesting Glue runtime.
 
-- [ ] **GEI9 — Generic post-mission caravan modes.** Route `EnterCaravan` to the requested
+- [ ] **GEI9 — Generic post-mission caravan modes.** (issue #120) Route `EnterCaravan` to the requested
   generic caravan window while retaining the parked runtime. Implement the campaign-required
   modes first: post-mission, resume, and recruitment. Add books, options, save/load UI, and
   dialogue close-ups only when their underlying activities exist.
 
-- [ ] **GEI10 — Campaign mission progression.** Apply `depend` and `inactivedepend` to generic
+- [ ] **GEI10 — Campaign mission progression.** (issue #124) Apply `depend` and `inactivedepend` to generic
   mission rows; advance the campaign for release and replacement paths; rebuild the offered list
   after mission commitment.
 
-- [ ] **GEI11 — Remaining scene boundary effects.** Route `EndGame` to the main menu and retain
+- [ ] **GEI11 — Remaining scene boundary effects.** (issue #125) Route `EndGame` to the main menu and retain
   battle logging and seed configuration when Glue starts a battle.
 
-- [ ] **GEI12 — Remaining campaign commands.** Implement `addunit`, `cash`, bonus counters,
+- [ ] **GEI12 — Remaining campaign commands.** (issue #126) Implement `addunit`, `cash`, bonus counters,
   book flags, `testmission`, `testobjective`, and `gomissionselect`. Explicitly reject reachable
   commands that remain unsupported.
 
-- [ ] **GEI13 — Remaining interpreter behavior.** Complete `replacescript`, mission release,
+- [ ] **GEI13 — Remaining interpreter behavior.** (issue #127) Complete `replacescript`, mission release,
   remaining built-in object behavior, and the documented deferred `goto` behavior.
 
-- [ ] **GEI14 — Persistent save/load.** Define save/load semantics, then replace the in-memory
+- [ ] **GEI14 — Persistent save/load.** (issue #128) Define save/load semantics, then replace the in-memory
   autosave snapshot with durable persistence.
 
-- [ ] **GEI15 — Retire legacy map and briefing code.** Delete `MissionMapScene`,
+- [ ] **GEI15 — Retire legacy map and briefing code.** (issue #129) Delete `MissionMapScene`,
   `MissionMapView`, `BriefingScene`, and `BriefingView` after their generic equivalents cover
   every live entry, exit, and return path.
 
