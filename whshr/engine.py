@@ -855,6 +855,21 @@ class Battle:
         regiment.positions = updated
         return still_moving
 
+    @staticmethod
+    def _swap_partner(positions, targets, index, nx, ny, ux, uy):
+        """Index of an at-rest comrade (within its arrival distance of its own target) that the model
+        stepping to (nx, ny) along unit direction (ux, uy) would land on -- about half a model spacing
+        away -- while heading into it; None if there is none."""
+        reach = formation.MODEL_SPACING / 2
+        for other, (ox, oy) in enumerate(positions):
+            if other == index:
+                continue
+            if math.hypot(targets[other][0] - ox, targets[other][1] - oy) > MODEL_ARRIVAL_DISTANCE:
+                continue
+            if math.hypot(ox - nx, oy - ny) <= reach and (ox - nx) * ux + (oy - ny) * uy > 0:
+                return other
+        return None
+
     def _advance_reforming_models(self, regiment, scale):
         """Drive a re-forming unit's models with the flat re-form mover instead of the ordinary
         rank-dependent catch-up walk (game_rules.md, "Formation changes: how the figures re-sort
@@ -868,8 +883,12 @@ class Battle:
         facing_angle = regiment.direction * math.tau / formation.FULL_TURN
         facing_x, facing_y = math.sin(facing_angle), math.cos(facing_angle)
         step_base = regiment.speed_per_tick * 16 / MOVING_FREELY_K / 8 * scale
-        updated, all_settled = [], True
-        for index, ((px, py), (tx, ty)) in enumerate(zip(regiment.positions, targets)):
+        targets = list(targets)
+        current = list(regiment.positions)
+        all_settled = True
+        for index in range(len(current)):
+            px, py = current[index]
+            tx, ty = targets[index]
             model = regiment.melee_models[index]
             dx, dy = tx - px, ty - py
             distance = math.hypot(dx, dy)
@@ -877,13 +896,27 @@ class Battle:
                 model.at_rest = True
                 model.current_speed = model.distance_budget = 0.0
                 model.heading_x, model.heading_y = facing_x, facing_y
-                updated.append((tx, ty))
+                current[index] = (tx, ty)
                 continue
             all_settled = False
-            model.at_rest = False
             step = step_base / (7 - distance) if distance <= REFORM_DECEL_DISTANCE else step_base
             step = min(step, REFORM_STEP_CAP * scale, distance)
-            updated.append((px + dx / distance * step, py + dy / distance * step))
+            nx, ny = px + dx / distance * step, py + dy / distance * step
+            # game_rules.md "Formation changes" point 3: stepping onto an at-rest comrade about half a
+            # spacing away, heading into it, exchanges the two slot assignments (the walker inherits
+            # the comrade's place and stops; the comrade wakes and walks to the walker's old slot).
+            other = self._swap_partner(current, targets, index, nx, ny, dx / distance, dy / distance)
+            if other is not None:
+                slots = regiment.reform_slots
+                slots[index], slots[other] = slots[other], slots[index]
+                targets[index], targets[other] = targets[other], targets[index]
+                regiment.melee_models[other].at_rest = False
+                model.at_rest = True
+                model.current_speed = model.distance_budget = 0.0
+                continue
+            model.at_rest = False
+            current[index] = (nx, ny)
+        updated = current
         regiment.positions = updated
         if all_settled:
             # The rest of the engine (`_advance_models`, `model_positions`) assumes `positions[i]`

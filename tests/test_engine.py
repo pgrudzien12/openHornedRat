@@ -454,6 +454,40 @@ class FlatReformMoverTests(unittest.TestCase):
         expected_step = min(s_rlmv / 8 / (7 - 5), 1.0)
         self.assertAlmostEqual(regiment.positions[0][1], expected_step)
 
+    def _two_model_regiment(self, walker, slots):
+        regiment, battle = self._regiment(models=2, ranks=1)
+        regiment.model_positions()
+        regiment.positions = [walker, (0.0, 0.0)]
+        regiment.reforming = True
+        regiment.reform_slots = list(slots)
+        return regiment, battle
+
+    def test_given_a_walker_about_to_step_onto_a_settled_comrade_when_advanced_then_slots_are_exchanged(self):
+        regiment, battle = self._two_model_regiment((0.0, -5.5), [(0.0, 40.0), (0.0, 0.0)])
+
+        battle._advance_reforming_models(regiment, 1)
+
+        self.assertEqual(regiment.reform_slots, [(0.0, 0.0), (0.0, 40.0)])
+        self.assertEqual(regiment.positions[0], (0.0, -5.5))  # inherited the place; did not step
+
+    def test_given_a_swap_when_advanced_then_the_woken_model_walks_to_the_walkers_original_target(self):
+        regiment, battle = self._two_model_regiment((0.0, -5.5), [(0.0, 40.0), (0.0, 0.0)])
+        regiment.melee_models[1].at_rest = True
+
+        battle._advance_reforming_models(regiment, 1)
+        self.assertFalse(regiment.melee_models[1].at_rest)
+        battle._advance_reforming_models(regiment, 1)
+
+        self.assertGreater(regiment.positions[1][1], 0.0)
+
+    def test_given_no_settled_comrade_nearby_when_advanced_then_slots_are_unchanged(self):
+        regiment, battle = self._two_model_regiment((0.0, -50.0), [(0.0, 40.0), (0.0, 0.0)])
+
+        battle._advance_reforming_models(regiment, 1)
+
+        self.assertEqual(regiment.reform_slots, [(0.0, 40.0), (0.0, 0.0)])
+        self.assertGreater(regiment.positions[0][1], -50.0)
+
     def test_given_a_model_within_arrival_distance_when_advanced_then_it_settles_and_snaps_heading(self):
         regiment, battle = self._regiment(direction=128)
         regiment.model_positions()
