@@ -149,9 +149,9 @@ COMPASS_FRAMES = (99, 105)
 
 # Battle log panel: 4-line scrollable message area, left of the scroll arrows (panel-native coords).
 # Scroll arrows are at (424, 9) and (424, 34); readout ends at ~200; log fills the space between.
-LOG_RECT = (205, 2, 215, 68)
+LOG_RECT = (200, 8, 223, 51)
 # Unit info panel: below the log, left of the toggle buttons at (337, 66).
-UNIT_INFO_RECT = (205, 72, 128, 98)
+UNIT_INFO_RECT = (204, 71, 128, 36)
 
 HUD_CLASS_NAMES = {
     "inf": "Infantry", "arch": "Archers", "art": "Artillery",
@@ -415,13 +415,13 @@ class Hud:
     def set_log(self, entries):
         """Render (sender, message) pairs into the battle log panel (4 visible lines)."""
         if self._log_panel is None:
-            self._log_panel = self.gpu.battle_log((LOG_RECT[2], LOG_RECT[3]))
+            self._log_panel = self.gpu.battle_log((LOG_RECT[2], LOG_RECT[3]), background=(0, 0, 0, 0))
         self._log_panel.set_entries(entries)
 
     def set_unit_info(self, name, unit_class, models, max_models):
         """Render selected unit name, class and casualty count into the info panel."""
         if self._unit_info_panel is None:
-            self._unit_info_panel = self.gpu.unit_info((UNIT_INFO_RECT[2], UNIT_INFO_RECT[3]))
+            self._unit_info_panel = self.gpu.unit_info((UNIT_INFO_RECT[2], UNIT_INFO_RECT[3]), background=(0, 0, 0, 0))
         class_name = HUD_CLASS_NAMES.get(unit_class, unit_class or "")
         self._unit_info_panel.set_info(name, class_name, models, max_models)
 

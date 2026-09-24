@@ -220,7 +220,7 @@ class UnitInfoPanel(ScreenQuad):
     """Selected unit name, class and casualty readout in the HUD panel."""
 
     def __init__(self, gpu, size, bold_font, normal_font,
-                 color=(220, 50, 50), background=(0, 0, 0, 140)):
+                 color=(0, 0, 0), background=(0, 0, 0, 140)):
         super().__init__(gpu, size)
         self.bold_font = bold_font
         self.normal_font = normal_font
@@ -237,17 +237,20 @@ class UnitInfoPanel(ScreenQuad):
         if self.background:
             surface.fill(self.background)
         w, h = self.size
-        y = 4
-        name_surf = self.bold_font.render(name or "", True, self.color)
-        surface.blit(name_surf, (4, y))
-        y += self.bold_font.get_linesize()
-        if unit_class:
-            class_surf = self.normal_font.render(unit_class, True, self.color)
-            surface.blit(class_surf, (4, y))
+        y = 0
+        line_h = self.normal_font.get_linesize()
+        name_splitted = name.split() if name else []
+        for part in name_splitted:
+            name_surf = self.normal_font.render(part, True, self.color)
+            surface.blit(name_surf, (0, y))
+            y += line_h
+        # if unit_class:
+        #     class_surf = self.normal_font.render(unit_class, True, self.color)
+        #     surface.blit(class_surf, (4, y))
         if models is not None and max_models is not None:
             cas = f"{models}/{max_models}"
             cas_surf = self.normal_font.render(cas, True, self.color)
-            surface.blit(cas_surf, (w - cas_surf.get_width() - 4, h - cas_surf.get_height() - 4))
+            surface.blit(cas_surf, (w - cas_surf.get_width(), h - cas_surf.get_height()))
         self.write(pygame.image.tobytes(surface, "RGBA"))
 
 
