@@ -230,6 +230,10 @@ class Regiment:
         self.anchor_cleared = True
 
     @property
+    def animation_family(self):
+        return animation.family_for(self.sprite, self.unit_class)
+
+    @property
     def is_wagon(self):
         return self.unit_class == 7 and self.models == 2
 
@@ -1051,10 +1055,10 @@ class Battle:
         for dying in list(regiment.dying):
             dying.ticks_left -= 1
             if dying.ticks_left > 0:
-                animation.step(dying.model, dying.model.action, self.rng)
+                animation.step(dying.model, dying.model.action, self.rng, regiment.animation_family)
                 continue
             regiment.dying.remove(dying)
-            animation.step(dying.model, animation.DEAD, self.rng)
+            animation.step(dying.model, animation.DEAD, self.rng, regiment.animation_family)
             regiment.corpses.append((dying.x, dying.y, self.rng.randrange(animation.FULL_TURN)))
 
     def _drawn_facing_target(self, regiment, model):
@@ -1093,7 +1097,7 @@ class Battle:
                 requested = animation.WALK
             else:
                 requested = animation.IDLE
-            animation.step(model, requested, self.rng)
+            animation.step(model, requested, self.rng, regiment.animation_family)
             self._slew_drawn_facing(regiment, model, wagon)
             # Every 4th front-rank model is a volley shooter (game_rules.md 8.1); its fire event,
             # posted by the animation, is what combat consumes. Events while reloading are lost.
@@ -1102,7 +1106,7 @@ class Battle:
                 regiment.fire_posts += 1
 
     def _slew_drawn_facing(self, regiment, model, wagon=False):
-        if animation.family_table(animation.DEFAULT_FAMILY)[model.action].locks_facing:
+        if animation.family_table(regiment.animation_family)[model.action].locks_facing:
             return
         target = self._drawn_facing_target(regiment, model)
         model.drawn_facing = target if wagon else animation.slew_facing(model.drawn_facing, target)

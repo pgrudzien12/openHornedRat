@@ -44,7 +44,8 @@ class ActionScript:
     Per-model variant selection (game_rules.md mechanism 4): a script with `variant_rule` set draws its
     group from `variant_groups` by the model's fixed stagger value -- rule "mod3" picks
     ``groups[stagger % 3]`` (three variants), rule "bit1" picks ``groups[(stagger >> 1) & 1]`` (two
-    variants) -- instead of the single `group`. No decoded family uses this yet; it is a data addition.
+    variants) -- instead of the single `group`. Peasants, Slaves and Wagons use it (below); when
+    `variant_groups` holds ints they are first-frame numbers within the sprite file rather than names.
     `locks_facing` freezes the drawn facing while the script plays (the corpse script).
     """
 
@@ -75,13 +76,81 @@ STANDARD_INFANTRY = {
                          fire_at=4),
 }
 
-FAMILY_TABLES = {"standard_infantry": STANDARD_INFANTRY}
+# Per-model costume families (game_rules.md mechanism 4). Groups are first-frame numbers in the sprite
+# file. Peasants: three costumes V = stagger % 3, stand/idle/fight/weapon-ready group 120 + 32V, walk
+# group 32V (random entry 0-7), dead group 96 + 8V. Slaves: three costumes, stand/fight/weapon-ready
+# group 216 + 32V held on one frame, idle and walk share one 10-tick loop with no random entry (the
+# group for that shared loop is not stated separately; the stand group is used -- PROVISIONAL), dead
+# group 96 + 8V. Wagons: two looks B (group 32B; which model bit picks B is not documented, so bit 1 of
+# the stagger value is used -- PROVISIONAL), one held frame that never animates except idle, an 8-tick
+# loop 0,0,1,1,2,2,3,3 with no random entry; dead is one no-variant wreck group 64.
+_MOD3 = dict(variant_rule="mod3")
+
+
+def _peasant_group(base, step):
+    return tuple(base + step * v for v in range(3))
+
+
+PEASANTS = {
+    STAND: ActionScript("stand", sequence=(1,), variant_groups=_peasant_group(120, 32), **_MOD3),
+    IDLE: ActionScript("stand", sequence=(0, 0, 0, 1, 1, 2, 2, 2, 3, 3),
+                       variant_groups=_peasant_group(120, 32), **_MOD3),
+    WALK: ActionScript("move", sequence=(0, 0, 1, 1, 2, 2, 3, 3), random_entry=8,
+                       variant_groups=_peasant_group(0, 32), **_MOD3),
+    FIGHT: ActionScript("attack", sequence=(0, 0, 1, 2, 3, 3, 1, 1, 3, 0, 2, 2), random_entry=10,
+                        variant_groups=_peasant_group(120, 32), **_MOD3),
+    WEAPON_READY: ActionScript("attack", random_choice=(0, 2), variant_groups=_peasant_group(120, 32), **_MOD3),
+    DEAD: ActionScript("dead", sequence=(0,), loop=False, locks_facing=True,
+                       variant_groups=_peasant_group(96, 8), **_MOD3),
+    SHOOT: ActionScript("stand", sequence=(0,), variant_groups=_peasant_group(120, 32), **_MOD3),
+}
+
+_SLAVE_HELD = dict(sequence=(0,), variant_groups=_peasant_group(216, 32), **_MOD3)
+_SLAVE_LOOP = dict(sequence=(0, 0, 0, 1, 1, 2, 2, 2, 3, 3), variant_groups=_peasant_group(216, 32), **_MOD3)
+SLAVES = {
+    STAND: ActionScript("stand", **_SLAVE_HELD),
+    IDLE: ActionScript("stand", **_SLAVE_LOOP),
+    WALK: ActionScript("move", **_SLAVE_LOOP),
+    FIGHT: ActionScript("attack", **_SLAVE_HELD),
+    WEAPON_READY: ActionScript("attack", **_SLAVE_HELD),
+    DEAD: ActionScript("dead", sequence=(0,), loop=False, locks_facing=True,
+                       variant_groups=_peasant_group(96, 8), **_MOD3),
+    SHOOT: ActionScript("stand", **_SLAVE_HELD),
+}
+
+_WAGON_HELD = dict(sequence=(0,), variant_groups=(0, 32), variant_rule="bit1")
+WAGONS = {
+    STAND: ActionScript("stand", **_WAGON_HELD),
+    IDLE: ActionScript("stand", sequence=(0, 0, 1, 1, 2, 2, 3, 3), variant_groups=(0, 32), variant_rule="bit1"),
+    WALK: ActionScript("move", **_WAGON_HELD),
+    FIGHT: ActionScript("attack", **_WAGON_HELD),
+    WEAPON_READY: ActionScript("attack", **_WAGON_HELD),
+    DEAD: ActionScript("dead", sequence=(0,), loop=False, locks_facing=True, variant_groups=(64, 64),
+                       variant_rule="bit1"),
+    SHOOT: ActionScript("stand", **_WAGON_HELD),
+}
+
+FAMILY_TABLES = {"standard_infantry": STANDARD_INFANTRY, "peasants": PEASANTS, "slaves": SLAVES,
+                 "wagons": WAGONS}
+# Script sprite resource names (casefolded) that select a decoded family; anything else is standard.
+SPRITE_FAMILIES = {"peasant": "peasants", "peasants": "peasants", "ratslave": "slaves", "slave": "slaves",
+                   "slaves": "slaves", "wagon": "wagons"}
+WAGON_CLASS = 7  # s_race class RollingStock
 DEFAULT_FAMILY = "standard_infantry"
 
 
 def family_table(family):
     """The 8-slot action table for `family`, or standard infantry's when `family` has none decoded yet."""
     return FAMILY_TABLES.get(family, FAMILY_TABLES[DEFAULT_FAMILY])
+
+
+def family_for(sprite, unit_class=None):
+    """The creature family a regiment's models animate with: chosen by its script sprite resource
+    (peasants, slaves, wagons), RollingStock class as a wagon fallback, else standard infantry."""
+    family = SPRITE_FAMILIES.get((sprite or "").casefold())
+    if family is None and unit_class == WAGON_CLASS:
+        family = "wagons"
+    return family or DEFAULT_FAMILY
 
 
 def script_group(script, stagger):
@@ -98,17 +167,19 @@ def death_cry_index(stagger):
     return stagger % 3
 
 
-def collapse_delay_ticks(stagger, in_melee, whole_unit_destroyed=False):
+def collapse_delay_ticks(stagger, in_melee, death_kind=0):
     """Ticks a dying model keeps playing its current animation before falling (mechanism 5).
 
-    ``((stagger & 3) + 1) * 18`` (1.8-7.2 s) in melee, a quarter of that (rounded up, 0.5-1.8 s)
-    outside it, and zero when the whole unit was destroyed at once. Special death kinds (instant
-    collapse, dedicated death sprite sets) are not modelled: no data for them is decoded yet.
+    ``((stagger & 3) + 1) * 18`` (18/36/54/72 ticks) when the model's unit is in close combat;
+    otherwise ``(d >> 2) + 1`` (5/10/14/19 ticks). Death kinds 1-3 (fire, missile/slain outright,
+    warpfire) always collapse in exactly one tick. There is no zero-delay case: only a destroyed
+    building falls with no delay, and the engine has no buildings, so a regiment wiped out in one hit
+    gives every model its normal delay. `death_kind` 0 is an ordinary wound; kind plumbing is #101.
     """
-    if whole_unit_destroyed:
-        return 0
+    if death_kind in (1, 2, 3):
+        return 1
     delay = ((stagger & 3) + 1) * 18
-    return delay if in_melee else (delay + 3) // 4
+    return delay if in_melee else (delay >> 2) + 1
 
 
 FULL_TURN = 512

@@ -115,12 +115,15 @@ Suggested breakdown (three GitHub tasks):
    across the walk cycle within one loop length, and that charging/marching/fleeing share one walk
    action (no separate run animation).
 
-## Implementation status (task #73)
+## Implementation status (task #73, reopened)
 
 Implemented: queued actions behind a running one-shot; per-script variant selection by stagger
-(`variant_rule` "mod3"/"bit1", no decoded family uses it yet — data addition) and the death-cry index
-(`stagger % 3`, exposed as data only); staggered collapse (in melee `((stagger & 3) + 1) * 18` ticks, outside
-melee a quarter of that rounded up, zero for a whole unit destroyed at once, random facing on falling);
-drawn-facing slew (32/512 per tick, wagons snap, corpse script frozen). Documented gaps: special death
-kinds (instant collapse, dedicated death sprite sets); the "one-shot-locked" freeze only applies to scripts
-flagged `locks_facing` (only the corpse script today, so shoot still slews toward the unit facing).
+(`variant_rule` "mod3"/"bit1") with concrete Peasant (`stagger % 3`), Slave (`stagger % 3`) and Wagon
+(two looks) family tables, chosen per regiment from its script sprite name (RollingStock class as wagon
+fallback); the death-cry index (`stagger % 3`, data only); staggered collapse in melee
+`((stagger & 3) + 1) * 18` ticks, outside melee `(d >> 2) + 1` (5/10/14/19), death kinds 1-3 always one
+tick (`death_kind` parameter, plumbing is #101), no zero-delay case (the engine has no buildings, so a
+regiment wiped out in one hit gives every model its normal delay); random facing on falling; drawn-facing
+slew (wagons snap, corpse script frozen). PROVISIONAL: which stagger bit picks a wagon's look (bit 1
+used) and the group of the Slaves' shared idle/walk loop (the stand group is used). Documented gaps: dedicated
+death sprite sets; the remaining 59 script operations.

@@ -190,6 +190,8 @@ class SpriteSheet:
 
     def frame_index(self, action, phase, direction):
         """``frame = group_start + phase * 8 + direction`` for an action of the standard layout."""
+        if isinstance(action, int):  # a first-frame number from a costume-variant family table
+            return min(action + phase * DIRECTIONS + direction % DIRECTIONS, len(self.frames) - 1)
         start, count = self._group(action)
         if count < DIRECTIONS:
             return start + direction % count

@@ -266,8 +266,18 @@ class DrawnFacingTests(unittest.TestCase):
 class StaggeredCollapseTests(unittest.TestCase):
     def test_collapse_delays_follow_stagger_and_melee_state(self):
         self.assertEqual([animation.collapse_delay_ticks(s, True) for s in range(4)], [18, 36, 54, 72])
-        self.assertEqual([animation.collapse_delay_ticks(s, False) for s in range(4)], [5, 9, 14, 18])
-        self.assertEqual(animation.collapse_delay_ticks(3, True, whole_unit_destroyed=True), 0)
+        self.assertEqual([animation.collapse_delay_ticks(s, False) for s in range(4)], [5, 10, 14, 19])
+
+    def test_death_kinds_one_to_three_collapse_in_one_tick_in_or_out_of_melee(self):
+        for kind in (1, 2, 3):
+            for stagger in range(4):
+                for melee in (True, False):
+                    self.assertEqual(animation.collapse_delay_ticks(stagger, melee, death_kind=kind), 1)
+        self.assertEqual(animation.collapse_delay_ticks(3, True, death_kind=0), 72)
+
+    def test_stagger_uses_the_full_16_bit_value_masked_to_two_bits(self):
+        value = 29 * 40000 % 65536
+        self.assertEqual(animation.collapse_delay_ticks(value, True), ((value & 3) + 1) * 18)
 
     def _battle(self, models=6):
         from whshr import combat
@@ -297,8 +307,61 @@ class StaggeredCollapseTests(unittest.TestCase):
 
         combat.kill_models(regiment, [0, 1, 2, 3], battle)
 
-        self.assertEqual(len(regiment.corpses), 4)
-        self.assertEqual(regiment.dying, [])
+        self.assertEqual(regiment.corpses, [])
+        self.assertEqual(len(regiment.dying), 4)
+        self.assertTrue(all(d.ticks_left >= 5 for d in regiment.dying))
+
+    def test_given_a_regiment_in_melee_when_a_model_dies_then_the_melee_delay_applies(self):
+        battle, regiment, combat = self._battle()
+        regiment.in_melee = True
+        stagger = regiment.melee_models[0].stagger
+
+        combat.kill_models(regiment, [0], battle)
+
+        self.assertEqual(regiment.dying[0].ticks_left, ((stagger & 3) + 1) * 18)
+
+
+class CostumeFamilyTests(unittest.TestCase):
+    def test_family_is_chosen_from_sprite_name_or_rolling_stock_class(self):
+        self.assertEqual(animation.family_for("Peasant"), "peasants")
+        self.assertEqual(animation.family_for("RatSlave"), "slaves")
+        self.assertEqual(animation.family_for("Wagon"), "wagons")
+        self.assertEqual(animation.family_for("Cart", 7), "wagons")
+        self.assertEqual(animation.family_for("ClanRats", 1), "standard_infantry")
+
+    def test_peasants_pick_their_costume_by_stagger_mod_3(self):
+        table = animation.family_table("peasants")
+        for stagger in (0, 1, 2, 3, 29 * 7 % 65536):
+            v = stagger % 3
+            self.assertEqual(animation.script_group(table[animation.STAND], stagger), 120 + 32 * v)
+            self.assertEqual(animation.script_group(table[animation.IDLE], stagger), 120 + 32 * v)
+            self.assertEqual(animation.script_group(table[animation.FIGHT], stagger), 120 + 32 * v)
+            self.assertEqual(animation.script_group(table[animation.WALK], stagger), 32 * v)
+            self.assertEqual(animation.script_group(table[animation.DEAD], stagger), 96 + 8 * v)
+        self.assertEqual(table[animation.WALK].random_entry, 8)
+
+    def test_slaves_hold_one_frame_and_share_an_unrandomised_idle_walk_loop(self):
+        table = animation.family_table("slaves")
+        for stagger in range(3):
+            self.assertEqual(animation.script_group(table[animation.STAND], stagger), 216 + 32 * stagger)
+            self.assertEqual(animation.script_group(table[animation.DEAD], stagger), 96 + 8 * stagger)
+        self.assertEqual(table[animation.FIGHT].sequence, (0,))
+        self.assertEqual(table[animation.IDLE].sequence, table[animation.WALK].sequence)
+        self.assertEqual(len(table[animation.WALK].sequence), 10)
+        self.assertEqual(table[animation.WALK].random_entry, 0)
+
+    def test_wagons_alternate_two_looks_and_only_idle_animates(self):
+        table = animation.family_table("wagons")
+        self.assertEqual({animation.script_group(table[animation.STAND], s) for s in range(4)}, {0, 32})
+        self.assertEqual(table[animation.IDLE].sequence, (0, 0, 1, 1, 2, 2, 3, 3))
+        self.assertEqual(table[animation.IDLE].random_entry, 0)
+        self.assertEqual(len(table[animation.WALK].sequence), 1)
+        self.assertEqual({animation.script_group(table[animation.DEAD], s) for s in range(4)}, {64})
+
+    def test_stepping_a_peasant_reports_its_costume_group(self):
+        model = ModelState(stagger=5)  # 5 % 3 == 2
+        group, _ = animation.step(model, animation.WALK, random.Random(1), "peasants")
+        self.assertEqual(group, 64)
 
 
 class WalkDesyncAndFireCadenceTests(unittest.TestCase):

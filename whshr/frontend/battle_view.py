@@ -446,7 +446,7 @@ class BattleView(SceneView):
                 # Each model already steps its own action/program counter every tick
                 # (whshr.animation, game_rules.md "Figure animation"); this only reads it.
                 def draw_model(x, y, model):
-                    action, phase = animation.current(model)
+                    action, phase = animation.current(model, regiment.animation_family)
                     facing = regiment.direction if model.drawn_facing is None else model.drawn_facing
                     index = sheet.frame_index(action, phase, sprite_direction(yaw, facing))
                     frame, rect = sheet.frames[index], sheet.rects[index]
