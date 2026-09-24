@@ -138,3 +138,19 @@ regiment wiped out in one hit gives every model its normal delay); random facing
 slew (wagons snap, corpse script frozen). PROVISIONAL: which stagger bit picks a wagon's look (bit 1
 used) and the group of the Slaves' shared idle/walk loop (the stand group is used). Documented gaps: dedicated
 death sprite sets; the remaining 59 script operations.
+
+## Implementation status (task #101: special death kinds)
+
+Implemented: every kill carries a death kind (`kill_models`/`apply_casualties` `death_kind`; close combat and
+contact attacks 0, shooting 2), fire/warpfire kills (1, 3) collapse in one tick and then burn as free figures on
+the battle-effects set (`animation.BURN_SEQUENCES`, `BurningModel`; `Regiment.burning`, `Regiment.charred`)
+with the table's lead-in, laps and charred corpse, and the never-burn list; the frontend draws them from the
+`GENBATT` set addressed by first-frame number (burning frame = group + phase, charred = group + direction).
+Death blasts exist as `combat.resolve_death_blast` (Warpfire radius 48 kind 3, Giant radius 40 kind 2) and the
+five-puff schedule `combat.warpfire_death_schedule`.
+
+Not reachable yet (no mechanic in the engine): fire spells, Dragon breath, Flamestorm, Conflagration, collapsing
+buildings (kind 1), warpfire flames (kind 3), Da Krunch, artillery misfire, fanatics (kind 2 beyond shooting), and
+Warpfire Thrower / Giant units firing their death blast. PROVISIONAL: the sprite resource names used for the
+never-burn / sheep / Warpfire / Doom Diver checks and the tick of the final warpfire blast. The `GENBATT`
+first-frame addressing and its frame-to-group matching are by eye and need a visual check in the viewer.

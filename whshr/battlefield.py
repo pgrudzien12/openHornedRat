@@ -363,6 +363,7 @@ def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=D
     # These are engine-global assets rather than files listed in SPRITES.PBX.
     load_ui("ICONS")
     load_ui("BACKALL")
+    load_ui("GENBATT")  # battle-effects set: burning figures and charred corpses (animation.BURN_SEQUENCES)
     planmap = script["field"].get("planmap")
     load_ui(planmap)
     portrait_bg = script["field"].get("portrait_bg")
@@ -377,11 +378,13 @@ def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=D
                 ui_resources.append((resource, base))
                 if resource == banner and base:
                     banner_bases[base] = None
-    for resource, base in (("ICONS", "ICONS"), ("BACKALL", "BACKALL"), (planmap, planmap),
+    for resource, base in (("ICONS", "ICONS"), ("BACKALL", "BACKALL"), ("GENBATT", "GENBATT"), (planmap, planmap),
                            (portrait_bg, portrait_bg), *ui_resources):
         if resource and base in ui_by_base and ui_by_base[base] is not None:
             ui_sheets[resource.casefold()] = ui_by_base[base]
     # Banner frame 2 is an in-world regiment marker, so these sheets also need atlas rectangles.
+    if ui_by_base.get("GENBATT") is not None:
+        banner_bases["GENBATT"] = None
     atlas_sheets = [sheet for sheet in by_base.values() if sheet is not None]
     atlas_sheets.extend(ui_by_base[base] for base in banner_bases
                         if ui_by_base.get(base) is not None)

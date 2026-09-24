@@ -15,6 +15,9 @@ from dataclasses import dataclass
 
 STAND, IDLE, WALK, FIGHT, WEAPON_READY, DEAD, SHOOT = range(1, 8)
 
+# Death kinds: the damage type of the killing wound (notes/game_rules.md "Figure animation", "Death kinds").
+DEATH_ORDINARY, DEATH_FIRE, DEATH_MISSILE, DEATH_WARPFIRE = range(4)
+
 
 @dataclass
 class DyingModel:
@@ -25,6 +28,9 @@ class DyingModel:
     y: float
     model: object  # whshr.engine.ModelState
     ticks_left: int
+    death_kind: int = 0  # DEATH_* of the killing wound; fire/warpfire kinds burn instead of leaving a corpse
+    body: str = "infantry"  # BURN_SEQUENCES key, fixed by the regiment when the model dies
+    burns: bool = False  # True when the model will play a burn sequence on collapse
 
 
 @dataclass(frozen=True)
@@ -181,6 +187,105 @@ def collapse_delay_ticks(stagger, in_melee, death_kind=0):
         return 1
     delay = ((stagger & 3) + 1) * 18
     return delay if in_melee else (delay >> 2) + 1
+
+
+@dataclass(frozen=True)
+class BurnSequence:
+    """One body class's burn data (game_rules.md "Figure animation", burn table). The battle-effects
+    sprite set is addressed by first-frame number: burning frame = ``orange_or_green + phase`` (burning
+    groups are not direction-indexed), charred corpse frame = ``corpse + direction`` (8 directions)."""
+
+    orange: int
+    green: int
+    phases: int  # phases cycled through while burning
+    lead_in: int  # ticks of lead-in the random start offset skips into
+    corpse: int
+
+
+# game_rules.md burn table: infantry and everything else / cavalry (and sheep) / monster. The burn always
+# runs `lead_in - r + 40` ticks for a random start offset r in [0, lead_in): five laps of 8 phases or
+# ten laps of 4 after the lead-in.
+BURN_SEQUENCES = {
+    "infantry": BurnSequence(orange=0, green=16, phases=8, lead_in=16, corpse=32),
+    "cavalry": BurnSequence(orange=8, green=24, phases=4, lead_in=8, corpse=40),
+    "monster": BurnSequence(orange=12, green=28, phases=4, lead_in=8, corpse=48),
+}
+BURN_LAP_TICKS = 40  # the full laps that follow the lead-in
+
+# Body-class mapping. s_race classes: 2 Cavalry, 4 Artillery, 6 Monster, 7 RollingStock
+# (notes/game_rules.md s_race table). Everything the notes name by unit rather than class is matched
+# on the casefolded script sprite resource. PROVISIONAL: the notes list the units but not their sprite
+# resource names; these are the sprite file base names (notes/animations.md) plus the obvious long forms.
+CAVALRY_CLASS, ARTILLERY_CLASS, MONSTER_CLASS = 2, 4, 6
+CAVALRY_SPRITES = frozenset({"sheep"})  # PROVISIONAL: mounts with class Infantry in the data, if any, are not covered
+NEVER_BURN_SPRITES = frozenset({  # PROVISIONAL names: wagons, pack ponies, fanatics, mortars, big monsters
+    "wagon", "caravan", "mrtwag", "impcwag", "grtcwag", "vollywag", "packpony", "fanatic", "mortar",
+    "wyvern", "dragon", "meshdragon", "giant", "gyrocopt", "gyrocopter", "dwheel", "doomwheel"})
+BURN_EXCEPTION_SPRITES = frozenset({"warpfire", "doomdivr", "doomdiver"})  # war machines that do burn
+
+
+def body_class(unit_class, sprite=None):
+    """The burn body class of a regiment: "monster" (class Monster), "cavalry" (class Cavalry, sheep) or
+    "infantry" (everything else)."""
+    if unit_class == MONSTER_CLASS:
+        return "monster"
+    if unit_class == CAVALRY_CLASS or (sprite or "").casefold() in CAVALRY_SPRITES:
+        return "cavalry"
+    return "infantry"
+
+
+def burns_on_death(death_kind, unit_class, sprite=None):
+    """True when a model killed with `death_kind` plays a burn sequence: only kinds 1 and 3, and never
+    for wagons, pack ponies, fanatics, mortars, war machines (except the Warpfire Thrower and Doom
+    Diver), Wyvern, Dragon, Giant, Gyrocopter or Doomwheel, whose dead script ignores the kind."""
+    if death_kind not in (DEATH_FIRE, DEATH_WARPFIRE):
+        return False
+    name = (sprite or "").casefold()
+    if name in BURN_EXCEPTION_SPRITES:
+        return True
+    if name in NEVER_BURN_SPRITES or unit_class in (WAGON_CLASS, ARTILLERY_CLASS):
+        return False
+    return True
+
+
+@dataclass
+class BurningModel:
+    """A model that has left its unit's roster and burns as a free figure on the battle-effects set."""
+
+    x: float
+    y: float
+    death_kind: int
+    body: str
+    start: int  # random start offset r into the lead-in
+    age: int = 0  # ticks burned so far
+
+
+def burn_start(body, rng):
+    """Draw the random start offset r in [0, lead_in) into the lead-in."""
+    return rng.randrange(BURN_SEQUENCES[body].lead_in)
+
+
+def burn_length(body, start):
+    """Total ticks of a burn that starts `start` ticks into its lead-in: ``lead_in - r + 40``
+    (41-56 ticks for infantry, 41-48 for cavalry and monsters)."""
+    return BURN_SEQUENCES[body].lead_in - start + BURN_LAP_TICKS
+
+
+def burning_frame(burning):
+    """Battle-effects frame number a burning model shows now: the orange (kind 1) or green (kind 3)
+    group's first frame plus the cycling phase ``(r + age) % phases``."""
+    sequence = BURN_SEQUENCES[burning.body]
+    base = sequence.green if burning.death_kind == DEATH_WARPFIRE else sequence.orange
+    return base + (burning.start + burning.age) % sequence.phases
+
+
+def burn_finished(burning):
+    return burning.age >= burn_length(burning.body, burning.start)
+
+
+def charred_frame(body, direction):
+    """Battle-effects frame of a charred corpse facing sprite direction `direction` (0-7)."""
+    return BURN_SEQUENCES[body].corpse + direction % 8
 
 
 FULL_TURN = 512

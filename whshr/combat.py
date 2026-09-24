@@ -65,7 +65,7 @@ def _armour_threshold(armour, strength):
     return save + max(0, strength - 3)
 
 
-def apply_casualties(regiment, count, rng, battle):
+def apply_casualties(regiment, count, rng, battle, death_kind=animation.DEATH_ORDINARY):
     """Remove up to `count` randomly chosen models, turning them into corpses at their positions.
 
     Used where the original does not single out a victim (shooting, spells). Close combat kills the
@@ -83,16 +83,23 @@ def apply_casualties(regiment, count, rng, battle):
     positions = regiment.model_positions()
     indices = (rng.sample(range(len(positions)), count) if count < len(positions)
                else list(range(len(positions))))
-    return kill_models(regiment, indices, battle=battle)
+    return kill_models(regiment, indices, battle=battle, death_kind=death_kind)
 
 
-def kill_models(regiment, indices, battle):
+def kill_models(regiment, indices, battle, death_kind=animation.DEATH_ORDINARY):
     """Remove the named models, leaving corpses where they stood and freeing any grid cells they held.
 
     Unlike a whole-formation reseed, the surviving models keep their identity (`ModelState.uid`) and
     their position, so every pairing and cell on the battle grid still names exactly the model it
     named before: nothing has to be renumbered, and a death can never silently re-point a surviving
     pairing at a different model.
+
+    `death_kind` is the damage type of the killing wound (game_rules.md "Figure animation", "Death
+    kinds": 0 ordinary, 1 fire, 2 missile / slain outright, 3 warpfire). Kinds 1-3 collapse in one tick;
+    kinds 1 and 3 then burn (`animation.burns_on_death`) instead of leaving the family's own corpse.
+    Callers: close combat and contact attacks pass 0, shooting passes 2. Fire spells, dragon breath,
+    flamestorm, warpfire and fanatics do not exist in the engine yet, so kinds 1 and 3 are only
+    reachable through `resolve_death_blast` and direct calls.
     """
     if not indices or regiment.models <= 0 or "CantDie" in regiment.psychology:
         return 0
@@ -104,9 +111,11 @@ def kill_models(regiment, indices, battle):
     dead_uids = set()
     for index in victims:
         model = regiment.melee_models[index]
-        delay = animation.collapse_delay_ticks(model.stagger, regiment.in_melee)
+        delay = animation.collapse_delay_ticks(model.stagger, regiment.in_melee, death_kind)
         if delay > 0:
-            regiment.dying.append(animation.DyingModel(*positions[index], model=model, ticks_left=delay))
+            regiment.dying.append(animation.DyingModel(
+                *positions[index], model=model, ticks_left=delay, death_kind=death_kind,
+                body=regiment.body_class, burns=regiment.burns_on(death_kind)))
         else:
             animation.step(model, animation.DEAD, battle.rng, regiment.animation_family)
             regiment.corpses.append((*positions[index], battle.rng.randrange(animation.FULL_TURN)))
@@ -862,7 +871,7 @@ def resolve_shooting(battle):
                 rolls.append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "killed"})
                 kills += 1
         # Pass the battle so a model shot out of a melee also releases whoever was fighting it.
-        apply_casualties(target, kills, battle.rng, battle=battle)
+        apply_casualties(target, kills, battle.rng, battle=battle, death_kind=animation.DEATH_MISSILE)
         battle.events.append(BattleEvent(
             f"{regiment.name} shoots {target.name}: {kills} casualties." if kills else
             f"{regiment.name} shoots {target.name}: no casualties.", "shooting",
@@ -909,3 +918,47 @@ def _reload_ticks(regiment):
             reduction = (2 * k - 10) * 9 / 5 + 36
         base = max(base - reduction, 18)
     return base
+
+
+# Death blasts (game_rules.md "Figure animation", end of the death-kind section).
+WARPFIRE_BLAST = {"radius": 48, "strength": 5, "kind": animation.DEATH_WARPFIRE}
+GIANT_BLAST = {"radius": 40, "strength": 5, "kind": animation.DEATH_MISSILE}
+# Flame puffs of a dying Warpfire Thrower: the centre, then 8 units right, left, up and down, two ticks
+# apart; the final blast follows the last puff (the exact gap is not documented: PROVISIONAL, one tick).
+WARPFIRE_PUFF_OFFSETS = ((0, 0), (8, 0), (-8, 0), (0, 8), (0, -8))
+WARPFIRE_PUFF_SPACING = 2
+
+
+def warpfire_death_schedule(x, y):
+    """Flame puffs of a Warpfire Thrower dying from a non-fire kind: ``[(tick, x, y)]`` with tick 0 the
+    death, then the final blast tick (PROVISIONAL: one tick after the last puff)."""
+    puffs = [(i * WARPFIRE_PUFF_SPACING, x + dx, y + dy) for i, (dx, dy) in enumerate(WARPFIRE_PUFF_OFFSETS)]
+    return puffs, puffs[-1][0] + 1
+
+
+def resolve_death_blast(battle, x, y, blast):
+    """A blast of `blast` (`WARPFIRE_BLAST` or `GIANT_BLAST`) centred at (x, y): every model closer than the
+    radius takes one D6 wound roll at the blast strength (to-wound chart, armour save, then a D6 count of
+    wounds; multi-wound models die when the count reaches their Wounds). Kills carry the blast's death
+    kind, so a warpfire blast's victims burn green. Returns ``{regiment identifier: kills}``.
+
+    Not hooked up: the engine has no Warpfire Thrower or Giant unit with a death event yet, so nothing
+    calls this outside tests (notes/engine_gaps/figure_animation.md).
+    """
+    kills = {}
+    for regiment in battle.regiments.values():
+        if not regiment.active or regiment.models <= 0:
+            continue
+        need = wfb_to_wound(blast["strength"], regiment.toughness)
+        threshold = _armour_threshold(regiment.armour, blast["strength"])
+        victims = []
+        for index, (mx, my) in enumerate(regiment.model_positions()):
+            if math.hypot(mx - x, my - y) >= blast["radius"]:
+                continue
+            if _d6(battle.rng) < need or _d6(battle.rng) >= threshold:
+                continue
+            if _d6(battle.rng) >= regiment.wounds:
+                victims.append(index)
+        if victims:
+            kills[regiment.identifier] = kill_models(regiment, victims, battle=battle, death_kind=blast["kind"])
+    return kills
