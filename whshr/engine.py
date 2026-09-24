@@ -88,7 +88,7 @@ class ModelState:
     opponent: tuple | None = None  # (regiment identifier, model uid) this model is paired with
     arrived: bool = False  # has walked into its cell, so it may strike (model flag 0x10000)
     reserve: bool = False  # found no free cell this tick and waits for one (model flag 0x8000)
-    stagger: int = 0  # fixed 0-7 value for this model's rank-dependent pace and later charge delay
+    stagger: int = 0  # fixed 16-bit value (29 * n % 65536, n battle-wide) for this model's rank-dependent pace and later charge delay
     current_speed: float = 0.0  # speed counter, converted to world units by the rank step factor
     distance_budget: float = 0.0  # travel remaining before recomputing the slot heading
     heading_x: float = 0.0
@@ -125,6 +125,9 @@ class Regiment:
     positions: list = field(default_factory=list)  # current per-model (x, y); lazily seeded in formation
     melee_models: list = field(default_factory=list)  # ModelState, index-parallel with `positions`
     _next_uid: int = 0  # next free model identity (see ModelState.uid)
+    # Battle-wide model counter feeding `ModelState.stagger`; `Battle` shares one across all its regiments.
+    # A regiment used on its own (tests) keeps a private one, created on first use.
+    stagger_counter: object = None
     walking: bool = False  # true while the anchor or any model is still travelling
 
     # Combat profile (game_rules.md section 3, section 5-8), decoded from the script's setstats lines.
@@ -264,8 +267,10 @@ class Regiment:
             # Reseeding the formation renews every model's identity. Identities are drawn from a
             # counter that never restarts, so a pairing left over from before the reseed can never be
             # mistaken for one of the new models: it simply refers to a model that no longer exists.
+            if self.stagger_counter is None:
+                self.stagger_counter = StaggerCounter()
             self.melee_models = [ModelState(uid=self._next_uid + offset,
-                                            stagger=(self._next_uid + offset) & 7)
+                                            stagger=self.stagger_counter.next_value())
                                  for offset in range(len(self.positions))]
             self._next_uid += len(self.positions)
             # A reseed (casualties changing the model count outside kill_models, reinforcement, ...)
@@ -349,6 +354,19 @@ def _decode_combat_profile(unit):
     }
 
 
+class StaggerCounter:
+    """Battle-wide count of models created; the n-th model gets stagger ``29 * n % 65536``
+    (game_rules.md, model stagger). Never reset per regiment."""
+
+    def __init__(self):
+        self.count = 0
+
+    def next_value(self):
+        value = 29 * self.count % 65536
+        self.count += 1
+        return value
+
+
 class Battle:
     """Authoritative fixed-tick state: movement, and (whshr.combat) close combat, shooting, morale."""
 
@@ -361,6 +379,9 @@ class Battle:
         self.regiments = {regiment.identifier: regiment for regiment in regiments}
         if len(self.regiments) != len(regiments):
             raise ValueError("regiment identifiers must be unique")
+        self.stagger_counter = StaggerCounter()
+        for regiment in regiments:
+            regiment.stagger_counter = self.stagger_counter
         self.tick_count = 0
         # Camera rotation in 1/512 turns, set by the frontend; wagons snap to it (see set_view_angle).
         self.view_angle = None
