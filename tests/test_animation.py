@@ -161,3 +161,141 @@ class BattleAnimationWiringTests(unittest.TestCase):
         battle.tick()
 
         self.assertEqual(regiment.melee_models, [])
+
+
+class QueuedActionTests(unittest.TestCase):
+    """game_rules.md mechanism 2: the offset persists until the action id changes; a one-shot is not interrupted."""
+
+    def test_given_a_model_mid_shoot_when_walk_is_requested_then_it_finishes_shooting_before_walking(self):
+        model, rng = ModelState(), random.Random(3)
+        animation.step(model, animation.SHOOT, rng)
+
+        for _ in range(3):
+            animation.step(model, animation.WALK, rng)
+
+        self.assertEqual(model.action, animation.SHOOT)
+        self.assertEqual(model.pending_action, animation.WALK)
+
+        for _ in range(10):
+            animation.step(model, animation.WALK, rng)
+
+        self.assertEqual(model.action, animation.WALK)
+        self.assertIsNone(model.pending_action)
+
+    def test_given_a_walking_model_when_walk_is_reissued_then_its_entry_offset_persists(self):
+        model, rng = ModelState(), random.Random(5)
+        animation.step(model, animation.WALK, rng)
+        entry = model.action_entry
+
+        for _ in range(20):
+            animation.step(model, animation.WALK, rng)
+
+        self.assertEqual(model.action_entry, entry)
+
+
+class VariantSelectionTests(unittest.TestCase):
+    """game_rules.md mechanism 4: the group comes from the model's fixed stagger value."""
+
+    def _family(self, rule, groups):
+        table = dict(animation.STANDARD_INFANTRY)
+        table[animation.WALK] = animation.ActionScript(
+            "move", sequence=(0,), variant_rule=rule, variant_groups=groups)
+        return table
+
+    def test_given_a_three_variant_script_when_stepped_then_stagger_mod_three_picks_the_group(self):
+        animation.FAMILY_TABLES["test3"] = self._family("mod3", ("move", "attack", "stand"))
+        self.addCleanup(animation.FAMILY_TABLES.pop, "test3")
+        groups = []
+        for stagger in (0, 1, 2, 3, 7):
+            model = ModelState(stagger=stagger)
+            groups.append(animation.step(model, animation.WALK, random.Random(0), "test3")[0])
+
+        self.assertEqual(groups, ["move", "attack", "stand", "move", "attack"])
+
+    def test_given_a_two_variant_script_when_stepped_then_stagger_bit_one_picks_the_group(self):
+        animation.FAMILY_TABLES["test2"] = self._family("bit1", ("move", "attack"))
+        self.addCleanup(animation.FAMILY_TABLES.pop, "test2")
+        groups = [animation.step(ModelState(stagger=s), animation.WALK, random.Random(0), "test2")[0]
+                  for s in (0, 1, 2, 3)]
+
+        self.assertEqual(groups, ["move", "move", "attack", "attack"])
+
+    def test_given_a_stagger_value_then_the_death_cry_index_is_stagger_mod_three(self):
+        self.assertEqual([animation.death_cry_index(s) for s in range(7)], [0, 1, 2, 0, 1, 2, 0])
+
+
+class DrawnFacingTests(unittest.TestCase):
+    def test_given_a_target_far_away_when_slewing_then_it_turns_at_most_32_per_tick_the_short_way(self):
+        self.assertEqual(animation.slew_facing(0, 256), 32)
+        self.assertEqual(animation.slew_facing(0, 400), 512 - 32)
+        self.assertEqual(animation.slew_facing(100, 110), 110)
+        self.assertEqual(animation.slew_facing(None, 77), 77)
+
+    def test_given_an_idle_model_facing_away_when_ticked_then_it_slews_toward_the_unit_facing(self):
+        regiment = Regiment("r", "R", 0, 0, 128, Side.PLAYER, models=2, ranks=1)
+        battle = Battle(2000, 2000, [regiment], seed=1)
+        battle.tick()
+        regiment.melee_models[0].drawn_facing = 0
+
+        battle.tick()
+
+        self.assertEqual(regiment.melee_models[0].drawn_facing, 32)
+
+    def test_given_a_wagon_when_ticked_then_its_drawn_facing_snaps_instantly(self):
+        regiment = Regiment("w", "W", 0, 0, 128, Side.PLAYER, models=2, ranks=1, unit_class=7)
+        battle = Battle(2000, 2000, [regiment], seed=1)
+        battle.tick()
+        regiment.melee_models[0].drawn_facing = 0
+
+        battle.tick()
+
+        self.assertEqual(regiment.melee_models[0].drawn_facing, 128)
+
+    def test_given_a_dead_script_then_its_facing_is_frozen(self):
+        regiment = Regiment("r", "R", 0, 0, 128, Side.PLAYER, models=1, ranks=1)
+        battle = Battle(2000, 2000, [regiment], seed=1)
+        battle.tick()
+        model = regiment.melee_models[0]
+        model.action, model.drawn_facing = animation.DEAD, 0
+
+        battle._slew_drawn_facing(regiment, model)
+
+        self.assertEqual(model.drawn_facing, 0)
+
+
+class StaggeredCollapseTests(unittest.TestCase):
+    def test_collapse_delays_follow_stagger_and_melee_state(self):
+        self.assertEqual([animation.collapse_delay_ticks(s, True) for s in range(4)], [18, 36, 54, 72])
+        self.assertEqual([animation.collapse_delay_ticks(s, False) for s in range(4)], [5, 9, 14, 18])
+        self.assertEqual(animation.collapse_delay_ticks(3, True, whole_unit_destroyed=True), 0)
+
+    def _battle(self, models=6):
+        from whshr import combat
+        regiment = Regiment("r", "R", 500, 500, 0, Side.PLAYER, models=models, ranks=2)
+        battle = Battle(2000, 2000, [regiment], seed=4)
+        battle.tick()
+        return battle, regiment, combat
+
+    def test_given_a_model_killed_when_ticked_then_it_collapses_after_its_delay_with_a_random_facing(self):
+        battle, regiment, combat = self._battle()
+        stagger = regiment.melee_models[0].stagger
+        delay = animation.collapse_delay_ticks(stagger, False)
+
+        combat.kill_models(regiment, [0], battle)
+
+        self.assertEqual(len(regiment.dying), 1)
+        self.assertEqual(regiment.corpses, [])
+        for _ in range(delay - 1):
+            battle.tick()
+        self.assertEqual(regiment.corpses, [])
+        battle.tick()
+        self.assertEqual(len(regiment.corpses), 1)
+        self.assertEqual(regiment.dying, [])
+
+    def test_given_a_whole_regiment_destroyed_then_every_model_falls_at_once(self):
+        battle, regiment, combat = self._battle(4)
+
+        combat.kill_models(regiment, [0, 1, 2, 3], battle)
+
+        self.assertEqual(len(regiment.corpses), 4)
+        self.assertEqual(regiment.dying, [])

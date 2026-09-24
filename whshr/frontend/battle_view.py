@@ -445,13 +445,17 @@ class BattleView(SceneView):
             if sheet is not None and regiment.active:
                 # Each model already steps its own action/program counter every tick
                 # (whshr.animation, game_rules.md "Figure animation"); this only reads it.
-                direction = sprite_direction(yaw, regiment.direction)
-                for (x, y), model in zip(positions, regiment.melee_models):
+                def draw_model(x, y, model):
                     action, phase = animation.current(model)
-                    index = sheet.frame_index(action, phase, direction)
+                    facing = regiment.direction if model.drawn_facing is None else model.drawn_facing
+                    index = sheet.frame_index(action, phase, sprite_direction(yaw, facing))
                     frame, rect = sheet.frames[index], sheet.rects[index]
-                    data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
-                                          *rect, frame.anchor_x, frame.anchor_y, selected)
+                    return INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
+                                         *rect, frame.anchor_x, frame.anchor_y, selected)
+                for (x, y), model in zip(positions, regiment.melee_models):
+                    data += draw_model(x, y, model)
+                for dying in regiment.dying:  # still playing their animation until they collapse
+                    data += draw_model(dying.x, dying.y, dying.model)
             if sheet is not None:
                 # Corpses (game_rules.md, "Panic": models that died stay on the ground where they fell).
                 for x, y, corpse_direction in regiment.corpses:

@@ -27,7 +27,7 @@ Leadership tests, rout/rally, shooting) is emitted here as a `whshr.battle_event
 """
 import math
 
-from . import battle_grid, formation
+from . import animation, battle_grid, formation
 from .battle_events import BattleEvent
 from .rules import EXPECTED_ARMOUR_SAVE, Side, can_fight, hostile_sides, wfb_to_hit, wfb_to_wound
 
@@ -102,9 +102,15 @@ def kill_models(regiment, indices, battle):
         return 0
     grid = _grid_of(battle, regiment)
     dead_uids = set()
+    destroyed = len(victims) >= len(positions)
     for index in victims:
-        regiment.corpses.append((*positions[index], regiment.direction))
         model = regiment.melee_models[index]
+        delay = animation.collapse_delay_ticks(model.stagger, regiment.in_melee, destroyed)
+        if delay > 0:
+            regiment.dying.append(animation.DyingModel(*positions[index], model=model, ticks_left=delay))
+        else:
+            animation.step(model, animation.DEAD, battle.rng)
+            regiment.corpses.append((*positions[index], battle.rng.randrange(animation.FULL_TURN)))
         dead_uids.add(model.uid)
         if grid is not None and model.cell is not None:
             grid.clear(model.cell)

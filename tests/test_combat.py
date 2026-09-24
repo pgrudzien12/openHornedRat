@@ -731,7 +731,8 @@ class CloseCombatStrikeTests(unittest.TestCase):
         combat.apply_casualties(self.defender, 3, self.battle.rng, self.battle)
 
         self.assertEqual(self.defender.models, 7)
-        self.assertEqual(len(self.defender.corpses), 3)
+        # Casualties keep playing their animation until they collapse (game_rules.md "Figure animation").
+        self.assertEqual(len(self.defender.corpses) + len(self.defender.dying), 3)
         self.assertEqual(len(self.defender.model_positions()), 7)
 
     def test_given_a_cant_die_defender_when_casualties_are_applied_then_no_models_are_removed(self):
