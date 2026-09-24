@@ -836,8 +836,8 @@ class Battle:
             pass  # no speed penalty: translates at full speed while turning
         elif mode == "wheel":
             step /= 2
-        elif mode is not None:
-            step = 0
+        elif mode is not None and mode != "charge_reaim":
+            step = 0  # a charge re-aim keeps full anchor speed (game_rules.md, model_movement.md)
         if step <= 0:
             return mode is not None
         if arrive and distance <= step and abs(self._turn_delta(regiment.direction, goal)) <= 10:
