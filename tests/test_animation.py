@@ -421,9 +421,12 @@ class WalkDesyncAndFireCadenceTests(unittest.TestCase):
         self.assertTrue(all(len(t) == 1 and 1 <= t[0] <= 4 for t in fire_ticks.values()))
         self.assertGreater(len({t[0] for t in fire_ticks.values()}), 1)
 
-    def test_given_an_archer_regiment_when_a_volley_resolves_then_it_has_one_shot_per_4_front_rank_models(self):
+    def test_given_an_archer_regiment_when_a_volley_resolves_then_it_has_one_shot_per_4_models(self):
         from whshr import combat
-        for models, ranks, expected in ((10, 1, 3), (16, 1, 4)):
+        # N models in any rank layout: shots = N // 4 rounded up (countdown-based, not front-rank).
+        # The (10, 2, 3) case verifies that multi-rank regiments use *total* models, not front rank
+        # (old code gave ceil(5/4)=2 for 10 models in 2 ranks; correct is ceil(10/4)=3).
+        for models, ranks, expected in ((10, 1, 3), (16, 1, 4), (10, 2, 3)):
             archer = Regiment("a", "A", 0, 0, 0, Side.PLAYER, models=models, ranks=ranks)
             archer.missile_range, archer.missile_code, archer.bs = 720.0, 2, 5
             enemy = Regiment("e", "E", 0, 300, 0, Side.ENEMY, models=10, ranks=2)
@@ -433,4 +436,4 @@ class WalkDesyncAndFireCadenceTests(unittest.TestCase):
                 shot = [e for e in battle.events if getattr(e, "kind", "") == "shooting"]
                 if shot:
                     break
-            self.assertEqual(shot[0].data["shots"], expected)
+            self.assertEqual(shot[0].data["shots"], expected, f"models={models} ranks={ranks}")

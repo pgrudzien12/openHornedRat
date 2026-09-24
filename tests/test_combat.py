@@ -755,20 +755,19 @@ class ShootingTests(unittest.TestCase):
         self.battle = Battle(2000, 2000, [self.shooter, self.target], seed=0)
 
     def _tick_until_volley(self, limit=12):
-        """Volleys wait for the archers' animation fire events (a few ticks into the shoot pose)."""
+        """Volleys resolve once all fire events have arrived (a few ticks after the shoot pose begins)."""
         for _ in range(limit):
             self.battle.tick()
-            if self.shooter.reload_ticks > 0:
+            if any(getattr(e, "kind", "") == "shooting" for e in self.battle.events):
                 return
         self.fail("no volley within %d ticks" % limit)
 
     def test_given_a_target_in_range_and_arc_when_ticked_then_it_fires_and_reloads(self):
         self._tick_until_volley()
 
-        # Fixed seed: the volley now lands on the tick the last shooter's animation posts its fire
-        # event, so the dice stream (and this outcome) differs from the old fire-on-first-tick.
         self.assertTrue(any(str(e).startswith("s shoots t:") for e in self.battle.events))
-        # game_rules.md 8.2: an I3 crossbow unit reloads in 96 ticks (counting down from the volley tick).
+        # game_rules.md 8.2: reload is stamped at order time; by the volley tick (~5 ticks later)
+        # about 91 of the original 96 ticks remain.
         self.assertGreater(self.shooter.reload_ticks, 90)
 
     def test_given_a_target_outside_the_front_arc_when_ticked_then_it_does_not_fire(self):

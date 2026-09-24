@@ -797,28 +797,48 @@ def resolve_rally(battle):
 
 def resolve_shooting(battle):
     """Missile regiments (game_rules.md 8.1-8.3, simplified: only bow-type codes, a BS-based hit chart
-    instead of geometric scatter; the volley is ceil(front rank / 4) shots, launched once every 4th model's
-    animation has posted its fire event) fire at the
-    nearest enemy in range and front arc when not moving and not in melee."""
+    instead of geometric scatter) fire at the nearest enemy in range and front arc when not in melee.
+
+    A volley is an N-event countdown (N = model count; 1 for artillery) that starts the moment a
+    regiment is eligible and reload is ready. Reload is stamped at order time so it does not cancel
+    fire events already in flight. Posts arrive one per 4 countdown decrements (1 for artillery) and
+    accumulate over 5 ticks; on tick 5 (or when the countdown is exhausted sooner) the full batch
+    of posts fires as one volley event (game_rules.md 8.1 and "Figure animation")."""
     for regiment in battle.regiments.values():
         if regiment.reload_ticks > 0:
             regiment.reload_ticks = max(0.0, regiment.reload_ticks - 1)
         if not regiment.missile_range or not regiment.active or regiment.in_melee or regiment.routing:
             continue
-        if regiment.moving or regiment.attack_target is not None or regiment.reload_ticks > 0:
+        # Charging cancels the volley entirely; moving merely delays the next one.
+        if regiment.attack_target is not None:
             regiment.fire_posts = 0
+            regiment.volley_countdown = None
+            regiment.volley_age = 0
             continue
         target = _shooting_target(battle, regiment)
         if target is None:
             regiment.fire_posts = 0
+            regiment.volley_countdown = None
+            regiment.volley_age = 0
+            continue
+        # Start a volley: no volley in progress, not moving, reload done.
+        if (regiment.volley_countdown is None and regiment.volley_age == 0
+                and not regiment.moving and regiment.reload_ticks <= 0):
+            regiment.volley_countdown = 1 if regiment.hud_class == "art" else regiment.models
+            regiment.reload_ticks = _reload_ticks(regiment)
+        # The resolve window closes when the countdown is exhausted naturally (all expected fire events
+        # arrived) or after 5 ticks (handles dead-model stalls where countdown > 0 never reaches 0).
+        volley_window_closed = (regiment.volley_age >= 5 or
+                                (regiment.volley_countdown is None and regiment.volley_age > 0))
+        if not volley_window_closed:
+            continue
+        shots = regiment.fire_posts
+        regiment.fire_posts = 0
+        regiment.volley_countdown = None
+        regiment.volley_age = 0
+        if shots == 0:
             continue
         distance = math.hypot(target.x - regiment.x, target.y - regiment.y)
-        # The volley is complete once every 4th front-rank model has posted its animation fire event
-        # (ceil(front rank / 4) shooters, game_rules.md 8.1 and "Figure animation").
-        shots = max(1, -(-regiment.front_rank_models() // 4))
-        if regiment.fire_posts < shots:
-            continue
-        regiment.fire_posts = 0
         strength = MISSILE_STRENGTH.get(regiment.missile_code, regiment.strength)
         hit_need = SHOOT_TO_HIT.get(max(1, min(10, regiment.bs)), 4)
         wound_need = wfb_to_wound(strength, target.toughness)
@@ -849,7 +869,6 @@ def resolve_shooting(battle):
             shooter=regiment.identifier, target=target.identifier, distance=distance,
             range=regiment.missile_range, shots=shots, hit_need=hit_need, wound_need=wound_need,
             save_need=threshold, rolls=rolls, kills=kills))
-        regiment.reload_ticks = _reload_ticks(regiment)
         battle.events.append(BattleEvent(
             f"{regiment.name} reloads: ready in {regiment.reload_ticks:.0f} ticks.", "reload",
             regiment=regiment.identifier, reload_ticks=regiment.reload_ticks))

@@ -185,6 +185,8 @@ class Regiment:
     flee_y: float | None = None
     fled: bool = False  # a routing regiment that has left the battlefield (removed from play)
     fire_posts: int = 0  # fire events posted by this volley's shooters so far (consumed by combat)
+    volley_countdown: int | None = None  # remaining fire-event decrements expected in the current volley
+    volley_age: int = 0  # ticks elapsed since the current volley was ordered; drives the resolve window
     reload_ticks: float = 0.0  # ticks remaining before a missile regiment may shoot again
     dying: list = field(default_factory=list)  # animation.DyingModel entries awaiting their collapse tick
     corpses: list = field(default_factory=list)  # (x, y, direction) of models that have died, for the view
@@ -1088,7 +1090,14 @@ class Battle:
         (`ModelState.at_rest`), otherwise idling in place. Then the drawn facing slews toward its
         action-dependent target (wagons snap; a facing-locked script freezes it)."""
         wagon = regiment.unit_class == 7 and regiment.models == 2
-        for index, model in enumerate(regiment.melee_models):
+        # Advance the volley age counter; the window is clamped at 6 ticks so the second SHOOT
+        # animation cycle (which starts on tick 7 from the order) cannot contaminate this volley.
+        if regiment.volley_countdown is not None:
+            regiment.volley_age += 1
+            if regiment.volley_age >= 6:
+                regiment.volley_countdown = None
+        volley_divisor = 1 if regiment.hud_class == "art" else 4
+        for model in regiment.melee_models:
             if regiment.in_melee:
                 requested = animation.FIGHT if model.opponent is not None else animation.WEAPON_READY
             elif regiment.missile_range and not regiment.moving and not regiment.attack_target:
@@ -1099,11 +1108,16 @@ class Battle:
                 requested = animation.IDLE
             animation.step(model, requested, self.rng, regiment.animation_family)
             self._slew_drawn_facing(regiment, model, wagon)
-            # Every 4th front-rank model is a volley shooter (game_rules.md 8.1); its fire event,
-            # posted by the animation, is what combat consumes. Events while reloading are lost.
-            if (model.fire_event and index % 4 == 0 and index < regiment.front_rank_models()
-                    and regiment.reload_ticks <= 0):
-                regiment.fire_posts += 1
+            # Each model's fire event decrements the volley countdown once; a post is issued each
+            # time the new countdown value is a multiple of the divisor (game_rules.md 8.1).
+            # Reload does not gate this: it was stamped at order time, so reload > 0 is normal
+            # mid-volley. The countdown > 0 guard prevents second-cycle decrements.
+            if model.fire_event and regiment.volley_countdown is not None and regiment.volley_countdown > 0:
+                regiment.volley_countdown -= 1
+                if regiment.volley_countdown % volley_divisor == 0:
+                    regiment.fire_posts += 1
+                if regiment.volley_countdown == 0:
+                    regiment.volley_countdown = None
 
     def _slew_drawn_facing(self, regiment, model, wagon=False):
         if animation.family_table(regiment.animation_family)[model.action].locks_facing:
