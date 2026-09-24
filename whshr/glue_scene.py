@@ -107,6 +107,8 @@ class GlueScene(Scene):
                 parent._queue(parent.runtime.continue_with(replacement))
             elif released:
                 parent._queue(parent.runtime.handle(GlueInput("mission-release")))
+            else:
+                parent.runtime.refresh_selection()  # stays on the map with the list rebuilt
         return parent
 
     def font(self, slot):
