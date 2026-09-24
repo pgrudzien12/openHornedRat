@@ -463,6 +463,20 @@ class BattleView(SceneView):
                     frame, rect = sheet.frames[index], sheet.rects[index]
                     data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
                                           *rect, frame.anchor_x, frame.anchor_y, 0.0)
+            # Burning figures and charred corpses come from the general battle-effects set, addressed by
+            # first-frame number (animation.BURN_SEQUENCES). TODO(visual check): the frame-to-group
+            # matching is by eye in the source notes (game_rules.md "Figure animation").
+            effects = field.ui_sheets.get("genbatt")
+            if effects is not None and effects.rects:
+                def draw_effect(x, y, number):
+                    number = min(number, len(effects.frames) - 1)
+                    frame, rect = effects.frames[number], effects.rects[number]
+                    return INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
+                                         *rect, frame.anchor_x, frame.anchor_y, 0.0)
+                for burning in regiment.burning:
+                    data += draw_effect(burning.x, burning.y, animation.burning_frame(burning))
+                for x, y, charred_direction, body in regiment.charred:
+                    data += draw_effect(x, y, animation.charred_frame(body, sprite_direction(yaw, charred_direction)))
             banner = field.ui_sheets.get((regiment.banner or "").casefold())
             if regiment.active and banner is not None and len(banner.frames) > 2 and banner.rects and positions:
                 frame, rect = banner.frames[2], banner.rects[2]

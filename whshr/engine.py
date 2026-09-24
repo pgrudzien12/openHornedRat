@@ -190,6 +190,8 @@ class Regiment:
     reload_ticks: float = 0.0  # ticks remaining before a missile regiment may shoot again
     dying: list = field(default_factory=list)  # animation.DyingModel entries awaiting their collapse tick
     corpses: list = field(default_factory=list)  # (x, y, direction) of models that have died, for the view
+    burning: list = field(default_factory=list)  # animation.BurningModel: burn sequences in progress (fire/warpfire kills)
+    charred: list = field(default_factory=list)  # (x, y, direction, body class) of models that finished burning
 
     # Traced close-combat/rally timing (game_rules.md 5.5, 6.1-6.2, 7.4), see whshr.combat.
     # The fight's own-side tally, breakdown and next break-test turn (6.1-6.2) live on
@@ -234,6 +236,13 @@ class Regiment:
     @property
     def animation_family(self):
         return animation.family_for(self.sprite, self.unit_class)
+
+    @property
+    def body_class(self):
+        return animation.body_class(self.unit_class, self.sprite)
+
+    def burns_on(self, death_kind):
+        return animation.burns_on_death(death_kind, self.unit_class, self.sprite)
 
     @property
     def is_wagon(self):
@@ -698,6 +707,7 @@ class Battle:
 
     def _advance_regiments(self, scale, seconds):
         for regiment in self.regiments.values():
+            self._step_burning(regiment)
             self._step_dying(regiment)
             if not regiment.active:
                 regiment.walking = False
@@ -1071,8 +1081,23 @@ class Battle:
                 animation.step(dying.model, dying.model.action, self.rng, regiment.animation_family)
                 continue
             regiment.dying.remove(dying)
+            if dying.burns:
+                # Fire/warpfire kills leave the roster's animation and burn as a free figure first.
+                regiment.burning.append(animation.BurningModel(
+                    dying.x, dying.y, dying.death_kind, dying.body, animation.burn_start(dying.body, self.rng)))
+                continue
             animation.step(dying.model, animation.DEAD, self.rng, regiment.animation_family)
             regiment.corpses.append((dying.x, dying.y, self.rng.randrange(animation.FULL_TURN)))
+
+    def _step_burning(self, regiment):
+        """Age each burning model; when its burn ends it becomes a charred corpse with a random facing,
+        held forever (game_rules.md "Figure animation", burn sequences)."""
+        for burning in list(regiment.burning):
+            burning.age += 1
+            if animation.burn_finished(burning):
+                regiment.burning.remove(burning)
+                regiment.charred.append((burning.x, burning.y, self.rng.randrange(animation.FULL_TURN),
+                                         burning.body))
 
     def _drawn_facing_target(self, regiment, model):
         """Facing a model's drawn direction turns toward: the unit's for stand/weapon-ready/shoot, its own
