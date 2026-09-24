@@ -38,6 +38,7 @@ class BattleScene(Scene):
         self._log_closed = True
         self.glue_scene = glue_scene
         self.request_id = request_id
+        self.no_battle = False
 
     def enter(self, context):
         self.field = context.load(self.battle_id)
@@ -51,7 +52,8 @@ class BattleScene(Scene):
         self.battle = Battle.from_script(self.field.script, seed=self.seed, script_dll=script_dll,
                                          script_logger=self.logger)
         self.initial_models = {identifier: regiment.models for identifier, regiment in self.battle.regiments.items()}
-        if getattr(context, "no_battle", False):
+        self.no_battle = bool(getattr(context, "no_battle", False))
+        if self.no_battle:
             self.battle.resolve_no_battle()
         self.skirmishes = skirmish_log.SkirmishLogger(self.log_dir, self.battle_id.name)
         self._log_closed = False
@@ -148,10 +150,13 @@ class BattleScene(Scene):
                 self.logger.write_snapshot(self.battle.tick_count, self.battle)
                 self.logger.write_result(self.battle.tick_count, self.battle)
                 self.close_log("result")
-            if self.glue_scene is not None:
+            if self.glue_scene is not None and self.no_battle:
+                # No-battle mode: the completion handler runs at once, without a result screen.
                 self.glue_scene.complete_activity(ActivityResult(self.request_id, "battle"))
                 return Transition(self.glue_scene, "glue battle resolved")
-            return Transition(ResultScene(self.battle.result, self._casualty_summary()), "battle resolved")
+            return Transition(ResultScene(self.battle.result, self._casualty_summary(),
+                                          glue_scene=self.glue_scene, request_id=self.request_id),
+                              "battle resolved")
         return None
 
     def _casualty_summary(self):

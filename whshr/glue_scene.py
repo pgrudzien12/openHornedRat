@@ -6,7 +6,7 @@ campaign Python scenes at every window/activity boundary.
 """
 
 from .campaign_log import GlueWatcher
-from .glue_runtime import ActivityResult, GlueInput, GlueRuntime, StartBattle, StartMovie
+from .glue_runtime import ActivityResult, EnterCaravan, GlueInput, GlueRuntime, StartBattle, StartMovie
 from .glue_fonts import glue_font_asset
 from .scenes import Scene, Transition
 
@@ -59,6 +59,12 @@ class GlueScene(Scene):
                 return self._effects.pop(index)
         return None
 
+    def take_caravan_effect(self, mode="select"):
+        for index, effect in enumerate(self._effects):
+            if isinstance(effect, EnterCaravan) and effect.mode == mode:
+                return self._effects.pop(index)
+        return None
+
     def enter(self, context):
         self.context = context
         if self.runtime is None:
@@ -78,6 +84,26 @@ class GlueScene(Scene):
 
     def start_battle(self, battle):
         self._queue(self.runtime.start_battle(battle))
+
+    def start_mission_script(self, script):
+        """Run a mission's ``setmissionscript`` in place of this briefing (notes/troop_selection.md
+        §6): it autosaves, starts the battle, and afterwards continues to the after-mission caravan."""
+        self._queue(self.runtime.start(script))
+
+    def release_mission(self):
+        """The mission release step (notes/activity_results.md §6.1): record the finished mission on
+        the campaign, then let the parked flow script on the map continue when the mission calls for it.
+        Returns the map scene to go back to (``return_scene``), or None for a briefing opened alone."""
+        parent = self.return_scene
+        if self.campaign is None or self.accept_mission is None:
+            return parent
+        replacement, released = self.campaign.complete_mission(self.accept_mission)
+        if parent is not None and parent.runtime is not None:
+            if replacement:
+                parent._queue(parent.runtime.start(replacement))
+            elif released:
+                parent._queue(parent.runtime.handle(GlueInput("mission-release")))
+        return parent
 
     def font(self, slot):
         """Load one verified glue font slot only when a view needs it."""

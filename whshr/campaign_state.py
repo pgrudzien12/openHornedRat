@@ -159,19 +159,35 @@ class CampaignState:
         return None
 
     def complete(self, mission):
-        """Record a chosen mission.
+        """Record a chosen mission and say how the flow continues.
 
         A ``replacescript`` switches flow.  Otherwise the mission is marked taken and the
         player stays on the same map window, with one row fewer, unless the mission has
-        ``releaseflag`` or nothing is left on offer.
+        ``releaseflag`` or nothing is left on offer.  Returns ``(replacement, released)``:
+        the replacement flow name (or None) and whether the parked flow script resumes.
         """
         self.completed.add(mission["name_id"])
         replacement = mission.get("replacescript")
         if replacement:
             self.flow = replacement
             self._open_next_window(0)
-        elif mission.get("releaseflag") or not self.missions:
+            return replacement, False
+        if mission.get("releaseflag") or not self.missions:
             self._open_next_window(self.flow_step + 1)
+            return None, True
+        return None, False
+
+    def complete_mission(self, mission_ref):
+        """Complete the mission a glue ``MissionRef`` names (the mission release step,
+        notes/activity_results.md §6.1); see :meth:`complete`.  An unknown reference is ignored."""
+        for window in self.graph["mission_windows"].values():
+            for mission in window:
+                if mission.get("mission_ref") == mission_ref and "name_id" in mission:
+                    try:
+                        return self.complete(mission)
+                    except ValueError:  # the flow has no later window: let the parked script decide
+                        return None, True
+        return None, False
 
     def hotspot(self, hint_id):
         """Return the original hotspot that advertises ``hint_id``."""
