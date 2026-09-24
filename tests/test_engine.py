@@ -88,11 +88,15 @@ class MountedMovementTests(unittest.TestCase):
         return Battle.from_script(source).regiments["rider"]
 
     def test_given_a_warhorse_rider_when_built_then_speed_and_charge_reach_use_the_mounts_movement(self):
+        # game_rules.md "Mounts": "A rider on a Warhorse (M7) with I3 gets a speed stat of 18
+        # against 11 on foot (M4 I3) -- about 64% more of everything above, and a charge reach of
+        # 228 world units (9.5") instead of 144 (6")."
         mounted = self._regiment_from_script(1, 8)
         unmounted = self._regiment_from_script(1, 0)
 
         self.assertAlmostEqual(mounted.speed_per_tick, speed_per_tick(7, 3))
         self.assertAlmostEqual(unmounted.speed_per_tick, speed_per_tick(4, 3))
+        self.assertAlmostEqual(mounted.speed_per_tick / unmounted.speed_per_tick, 18 / 11, places=2)
         self.assertAlmostEqual(mounted.charge_reach, 228)
         self.assertAlmostEqual(unmounted.charge_reach, 144)
 
