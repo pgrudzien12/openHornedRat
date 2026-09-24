@@ -397,6 +397,57 @@ class GlueRuntime:
         else:
             self.state.status_bits &= ~self.state.status_mask
 
+    def _add_unit(self, argument, effects):
+        unit_id = self._parse_int(argument.split(";")[0].strip(), None)
+        if unit_id is None:
+            effects.append(Diagnostic("addunit", f"invalid unit id {argument!r}"))
+        elif not hasattr(self.campaign, "mark_pending_join"):
+            effects.append(Diagnostic("addunit", "campaign runtime is unavailable"))
+        else:
+            self.campaign.mark_pending_join(unit_id)
+
+    def _set_status(self, value):
+        if value:
+            self.state.status_bits |= self.state.status_mask
+        else:
+            self.state.status_bits &= ~self.state.status_mask
+
+    def _test_result(self, command, argument, effects):
+        """``testobjective:<L>`` / ``testmission:`` (notes/debrief_evaluation.md section 5): a letter is met only
+        when the latest battle result has it; a missing result counts as false, as a missing debrief file does."""
+        if command == "testobjective":
+            letter = argument.strip()[:1]
+            record = self.campaign.objective(letter) if letter and hasattr(self.campaign, "objective") else None
+            met = bool(record and record[0])
+            if record is None:
+                effects.append(Diagnostic(command, f"no battle result for objective {letter!r}: treated as not met"))
+        else:
+            met = False  # the evaluators need a battle result (notes/debrief_evaluation.md section 4)
+            effects.append(Diagnostic(command, "no battle result to evaluate: treated as lost"))
+        self._set_status(met)
+        if command == "testmission":
+            if self.campaign is not None:
+                self.campaign.autosave(self.snapshot())
+            effects.append(Autosave())
+
+    def _bonus(self, command, argument, effects):
+        """``bonusadd:<n>,<L>`` adds value ``n`` (1-4) of objective ``L`` to the bonus counter;
+        ``bonussubtract`` subtracts it (notes/campaign.md section 2.5)."""
+        number, _, letter = argument.partition(",")
+        number, letter = self._parse_int(number.strip(), 0), letter.strip()[:1]
+        if not 1 <= number <= 4 or not letter:
+            effects.append(Diagnostic(command, f"invalid bonus argument {argument!r}"))
+            return
+        if not hasattr(self.campaign, "bonus_adjust"):
+            effects.append(Diagnostic(command, "campaign runtime is unavailable"))
+            return
+        record = self.campaign.objective(letter)
+        if record is None:
+            effects.append(Diagnostic(command, f"no battle result for objective {letter!r}: the counter is unchanged"))
+            return
+        sign = -1 if command == "bonussubtract" else 1
+        self.campaign.bonus_adjust(sign * record[1][number - 1])
+
     def _enable_book(self, argument, effects):
         book, index = self._parse_assignment(argument)
         if book is None or index is None:
@@ -580,6 +631,18 @@ class GlueRuntime:
                          "iftruedebriefwithsummary", "iffalsedebriefwithsummary"):
             if self._conditional(command):
                 self._request_debrief(command, argument, effects)
+        elif command == "addunit":
+            self._add_unit(argument, effects)
+        elif command in ("testobjective", "testmission"):
+            self._test_result(command, argument, effects)
+        elif command == "bonusinit":
+            if hasattr(self.campaign, "bonus_init"):
+                self.campaign.bonus_init()
+            else:
+                effects.append(Diagnostic("bonusinit", "campaign runtime is unavailable"))
+        elif command in ("bonusadd", "bonussubtract", "iftruebonusadd", "iffalsebonusadd"):
+            if self._conditional(command):
+                self._bonus(command, argument, effects)
         elif command == "setbattlescript":
             self.state.battle_script = argument.strip().upper()
         elif command == "settextalign":
@@ -679,6 +742,10 @@ class GlueRuntime:
     def _close_window(self, argument, effects):
         name = self._resource_argument(argument)
         self.state.windows = [window for window in self.state.windows if window.name != name]
+        # the text of a window that is gone, or of a scene with no window left, is not shown any more
+        if self.state.dialogue_text and (name == self.state.dialogue_window_name
+                                         or (not self.state.windows and not self.state.context_stack)):
+            self._clear_dialogue()
         self.state.portrait_animators.pop(name, None)
         self.state.portrait_speakers.pop(name, None)
         effects.append(CloseWindow(name))

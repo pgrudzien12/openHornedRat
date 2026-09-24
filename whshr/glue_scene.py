@@ -6,7 +6,7 @@ campaign Python scenes at every window/activity boundary.
 """
 
 from .campaign_log import GlueWatcher
-from .glue_runtime import ActivityResult, Diagnostic, GlueInput, GlueRuntime, StartBattle, StartMovie
+from .glue_runtime import ActivityResult, Diagnostic, GlueInput, GlueRuntime, StartBattle, StartDebrief, StartMovie
 from .glue_fonts import glue_font_asset
 from .scenes import Scene, Transition
 
@@ -58,6 +58,29 @@ class GlueScene(Scene):
             if isinstance(effect, StartMovie):
                 return self._effects.pop(index)
         return None
+
+    def take_debrief_effect(self):
+        for index, effect in enumerate(self._effects):
+            if isinstance(effect, StartDebrief):
+                return self._effects.pop(index)
+        return None
+
+    def resolve_debrief(self, effect):
+        """Complete a debrief request without a screen (minimal debrief, :mod:`whshr.debrief`): log what was
+        applied or skipped, then resume the script exactly as the completion handler would."""
+        from .debrief import complete_debrief
+
+        applied, skipped = complete_debrief(self.campaign, effect)
+        location = self.program or self.window
+        self._queue(tuple(Diagnostic(location, f"debrief: skipped {text}") for text in skipped))
+        log = getattr(self.context, "campaign_log", None)
+        if log is not None:
+            try:
+                log.write("debrief", mode=effect.mode, debrief_index=effect.debrief_index, summary=effect.summary,
+                          applied=applied, skipped=skipped)
+            except Exception:
+                pass
+        self.complete_activity(ActivityResult(effect.request_id, "debrief"))
 
     def enter(self, context):
         self.context = context

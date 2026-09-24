@@ -142,6 +142,14 @@ class CampaignState:
     current_speaker: str | None = None
     # Optional lower-case sprite name -> portrait set override; default is read from the installation.
     portrait_sets: dict | None = field(default=None, repr=False, compare=False)
+    # Roster flag "pending join" set by the glue ``addunit`` (notes/campaign.md section 3.2). The copy into the
+    # army happens when the after-mission caravan is entered; the engine does not merge yet.
+    pending_join: set[int] = field(default_factory=set)
+    # Bonus counter of the payment programs (glue ``bonus*``, notes/campaign.md section 2.5).
+    bonus_counter: int = 0
+    # The latest battle's objective records: letter -> (met, (v1, v2, v3, v4)), the ``Result:`` lines of
+    # notes/debrief_evaluation.md section 2.1. Empty until a battle writes its result.
+    objective_results: dict[str, tuple] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.flow_history or self.flow_history[-1] != self.flow:
@@ -167,6 +175,19 @@ class CampaignState:
 
     def leave_mission(self, unit_id):
         self.march_units.discard(int(unit_id))
+
+    def mark_pending_join(self, unit_id):
+        self.pending_join.add(int(unit_id))
+
+    def objective(self, letter):
+        """The ``(met, values)`` record of an objective letter, or ``None`` when the battle did not define it."""
+        return self.objective_results.get(str(letter).upper()[:1])
+
+    def bonus_init(self):
+        self.bonus_counter = 0
+
+    def bonus_adjust(self, delta):
+        self.bonus_counter += int(delta)
 
     def enable_book(self, book, index):
         """Unlock a book/encyclopedia page (glue ``enablebook``, notes/campaign.md §4.4)."""

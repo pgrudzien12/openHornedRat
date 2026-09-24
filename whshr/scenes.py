@@ -202,9 +202,21 @@ class SceneMachine:
         self._apply(Transition(fallback, "blank glue scene: back to the map"))
 
     def _start_glue_activities(self):
+        self._start_glue_debrief()
         self._start_glue_battle()
         self._start_glue_movie()
         self._start_glue_caravan()
+
+    def _start_glue_debrief(self):
+        """A debrief request has no screen yet: it completes at once, applying what the engine can
+        (notes/activity_results.md section 5), and the script goes on."""
+        from .glue_scene import GlueScene
+
+        while isinstance(self.active, GlueScene):
+            effect = self.active.take_debrief_effect()
+            if effect is None:
+                return
+            self.active.resolve_debrief(effect)
 
     def _start_glue_caravan(self):
         """A caravan request whose window the installation lacks resolves at once, as the mission's
