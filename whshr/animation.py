@@ -59,6 +59,7 @@ class ActionScript:
     variant_groups: tuple = ()
     variant_rule: str | None = None
     locks_facing: bool = False
+    fire_at: int | None = None  # script step (counting the random entry skip) that posts the fire event
 
 
 # Standard infantry (notes/game_rules.md "Figure animation" table). Sprite groups per
@@ -70,7 +71,8 @@ STANDARD_INFANTRY = {
     FIGHT: ActionScript("attack", sequence=(0, 0, 1, 2, 3, 3, 1, 1, 3, 0, 2, 2), random_entry=10),
     WEAPON_READY: ActionScript("attack", random_choice=(0, 2)),
     DEAD: ActionScript("dead", sequence=(0,), loop=False, locks_facing=True),
-    SHOOT: ActionScript("shoot", sequence=(0, 1, 2, 3), random_entry=4, hold_ticks=2, next_action=STAND),
+    SHOOT: ActionScript("shoot", sequence=(0, 1, 2, 3), random_entry=4, hold_ticks=2, next_action=STAND,
+                         fire_at=4),
 }
 
 FAMILY_TABLES = {"standard_infantry": STANDARD_INFANTRY}
@@ -208,6 +210,10 @@ def step(model, requested_action, rng, family=DEFAULT_FAMILY):
         _enter(model, table, target, rng)
         active = table[model.action]
     phase = _phase_at(active, model.action_pc, model.action_entry)
+    # The fire event is posted by the script itself, four steps into the shoot program counting the
+    # random entry skip (game_rules.md "Figure animation"), so models entering at 0-3 reach it on
+    # different ticks. `fire_event` is true for exactly that one tick.
+    model.fire_event = active.fire_at is not None and model.action_pc + model.action_entry == active.fire_at
     if active.random_choice is None:
         model.action_pc += 1
     return script_group(active, model.stagger), phase

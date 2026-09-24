@@ -101,6 +101,7 @@ class ModelState:
     action_entry: int = 0  # random entry/choice drawn on that reset, whshr.animation.step
     pending_action: int | None = None  # action queued behind a running one-shot script
     drawn_facing: int | None = None  # facing (0-511) the sprite direction is drawn from; None until first set
+    fire_event: bool = False  # animation reached its fire point on this tick (whshr.animation)
 
 
 @dataclass
@@ -179,6 +180,7 @@ class Regiment:
     flee_x: float | None = None
     flee_y: float | None = None
     fled: bool = False  # a routing regiment that has left the battlefield (removed from play)
+    fire_posts: int = 0  # fire events posted by this volley's shooters so far (consumed by combat)
     reload_ticks: float = 0.0  # ticks remaining before a missile regiment may shoot again
     dying: list = field(default_factory=list)  # animation.DyingModel entries awaiting their collapse tick
     corpses: list = field(default_factory=list)  # (x, y, direction) of models that have died, for the view
@@ -1032,7 +1034,7 @@ class Battle:
         (`ModelState.at_rest`), otherwise idling in place. Then the drawn facing slews toward its
         action-dependent target (wagons snap; a facing-locked script freezes it)."""
         wagon = regiment.unit_class == 7 and regiment.models == 2
-        for model in regiment.melee_models:
+        for index, model in enumerate(regiment.melee_models):
             if regiment.in_melee:
                 requested = animation.FIGHT if model.opponent is not None else animation.WEAPON_READY
             elif regiment.missile_range and not regiment.moving and not regiment.attack_target:
@@ -1043,6 +1045,11 @@ class Battle:
                 requested = animation.IDLE
             animation.step(model, requested, self.rng)
             self._slew_drawn_facing(regiment, model, wagon)
+            # Every 4th front-rank model is a volley shooter (game_rules.md 8.1); its fire event,
+            # posted by the animation, is what combat consumes. Events while reloading are lost.
+            if (model.fire_event and index % 4 == 0 and index < regiment.front_rank_models()
+                    and regiment.reload_ticks <= 0):
+                regiment.fire_posts += 1
 
     def _slew_drawn_facing(self, regiment, model, wagon=False):
         if animation.family_table(animation.DEFAULT_FAMILY)[model.action].locks_facing:

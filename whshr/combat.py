@@ -796,7 +796,8 @@ def resolve_rally(battle):
 
 def resolve_shooting(battle):
     """Missile regiments (game_rules.md 8.1-8.3, simplified: only bow-type codes, a BS-based hit chart
-    instead of geometric scatter, no volleys other than the model count / 4 shot count) fire at the
+    instead of geometric scatter; the volley is ceil(front rank / 4) shots, launched once every 4th model's
+    animation has posted its fire event) fire at the
     nearest enemy in range and front arc when not moving and not in melee."""
     for regiment in battle.regiments.values():
         if regiment.reload_ticks > 0:
@@ -804,12 +805,19 @@ def resolve_shooting(battle):
         if not regiment.missile_range or not regiment.active or regiment.in_melee or regiment.routing:
             continue
         if regiment.moving or regiment.attack_target is not None or regiment.reload_ticks > 0:
+            regiment.fire_posts = 0
             continue
         target = _shooting_target(battle, regiment)
         if target is None:
+            regiment.fire_posts = 0
             continue
         distance = math.hypot(target.x - regiment.x, target.y - regiment.y)
-        shots = max(1, -(-regiment.front_rank_models() // 4))  # ceil(front rank / 4), game_rules.md 8.1
+        # The volley is complete once every 4th front-rank model has posted its animation fire event
+        # (ceil(front rank / 4) shooters, game_rules.md 8.1 and "Figure animation").
+        shots = max(1, -(-regiment.front_rank_models() // 4))
+        if regiment.fire_posts < shots:
+            continue
+        regiment.fire_posts = 0
         strength = MISSILE_STRENGTH.get(regiment.missile_code, regiment.strength)
         hit_need = SHOOT_TO_HIT.get(max(1, min(10, regiment.bs)), 4)
         wound_need = wfb_to_wound(strength, target.toughness)
