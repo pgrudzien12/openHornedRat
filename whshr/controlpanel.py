@@ -20,7 +20,7 @@ class ControlPanel:
         return 8 + 20 * self.slot_count
 
 
-# Labels are BRTXT ids. Only the map's actions have been traced; unknown
+# Labels are BRTXT ids. The map's and the encounter windows' actions are traced (notes/activity_results.md §3); unknown
 # actions remain deliberately disabled instead of being guessed.
 _PANELS = {
     0: ControlPanel("FRAMEBOTTOM"),
@@ -28,12 +28,12 @@ _PANELS = {
                     ("abort_briefing", "accept_briefing", "toggle_pause")),
     2: ControlPanel("FRAMEPANEL3", (333, 309, 313),
                     ("return_to_caravan", "open_troop_select", "open_briefing")),
-    3: ControlPanel("FRAMEPANEL1", (331,)),
-    4: ControlPanel("FRAMEPANEL2", (330, 329)),
+    3: ControlPanel("FRAMEPANEL1", (331,), ("encounter_battle",)),
+    4: ControlPanel("FRAMEPANEL2", (330, 329), ("encounter_evade", "encounter_attack_status")),
     5: ControlPanel("FRAMEPANEL4", (311, 309, 332, 313)),
     6: ControlPanel("FRAMEPANEL3", (311, 309, 310)),
-    7: ControlPanel("FRAMEPANEL3", (338, 309, 313)),
-    8: ControlPanel("FRAMEPANEL1", (329,)),
+    7: ControlPanel("FRAMEPANEL3", (338, 309, 313), ("encounter_evade", None, None)),
+    8: ControlPanel("FRAMEPANEL1", (329,), ("encounter_battle",)),
     9: ControlPanel("FRAMEPANEL3", (333, 339, 310)),
     10: ControlPanel("FRAMEPANEL3", (333, 309, 313)),
 }

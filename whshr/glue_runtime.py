@@ -120,6 +120,10 @@ class EndGame:
     pass
 
 
+# Panel actions of the encounter windows (whshr.controlpanel): resume, attack with a status bit, battle.
+ENCOUNTER_ACTIONS = frozenset({"encounter_evade", "encounter_attack_status", "encounter_battle"})
+
+
 @dataclass(frozen=True)
 class Diagnostic:
     location: str
@@ -191,6 +195,8 @@ class GlueRuntimeState:
     variables: dict[str, int] = field(default_factory=lambda: {"animseq": 1, "textlines": 1, "tentpos": 0})
     current_window_name: str = ""
     current_battle: str = ""
+    battle_script: str = ""  # the current-mission record's battle name (setbattlescript)
+    text_align: int = 0  # settextalign: left 0, centre 1, right 2 (notes/briefing_dialogue.md)
     # A battle started without a mission script (a record with only a battle name) ends in the
     # after-mission caravan instead of resuming a script (notes/activity_results.md §2.4).
     caravan_after_battle: bool = False
@@ -389,6 +395,15 @@ class GlueRuntime:
         else:
             self.state.status_bits &= ~self.state.status_mask
 
+    def _enable_book(self, argument, effects):
+        book, index = self._parse_assignment(argument)
+        if book is None or index is None:
+            effects.append(Diagnostic("enablebook", f"invalid book entry {argument!r}"))
+        elif self.campaign is None or not hasattr(self.campaign, "enable_book"):
+            effects.append(Diagnostic("enablebook", "campaign runtime is unavailable"))
+        else:
+            self.campaign.enable_book(book, index)
+
     def _add_cash(self, argument, effects):
         amount = self._parse_int(argument, None)
         if amount is None:
@@ -434,7 +449,7 @@ class GlueRuntime:
         if not result.completed and result.kind == "battle":
             self._clear_for_endgame()
             return (EndGame(),)
-        if result.kind == "battle" and self.state.caravan_after_battle:
+        if result.kind == "battle" and self.state.caravan_after_battle and not pending.restore_context:
             self.state.caravan_after_battle = False
             effects = []
             self._request("caravan", effects, restore_context=True, mode="select")
@@ -563,6 +578,14 @@ class GlueRuntime:
                          "iftruedebriefwithsummary", "iffalsedebriefwithsummary"):
             if self._conditional(command):
                 self._request_debrief(command, argument, effects)
+        elif command == "setbattlescript":
+            self.state.battle_script = argument.strip().upper()
+        elif command == "settextalign":
+            self.state.text_align = {"left": 0, "center": 1, "right": 2}.get(argument.strip().casefold(), 0)
+        elif command == "enablebook":
+            self._enable_book(argument, effects)
+        elif command == "addmidiobject":
+            effects.append(PlayMusic(argument.strip()))
         elif command == "settextcolor":
             self.state.dialogue_colour = argument.strip().casefold()
         elif command in ("playtext", "queuetoplaytext"):
@@ -917,6 +940,8 @@ class GlueRuntime:
             return ()
         if action == "abort_briefing":
             return self._panel_abort()
+        if action in ENCOUNTER_ACTIONS:
+            return self._encounter_action(action)
         self.state.paused = False
         effects = []
         if self.state.pending is not None and self.state.pending.kind == "dialogue":
@@ -927,6 +952,51 @@ class GlueRuntime:
         effects.append(Diagnostic("panel", f"{action!r} is not yet implemented"))
         if self.state.current is not None and not self.state.current.parked:
             effects.extend(self.step_until_blocked())
+        return tuple(effects)
+
+    def _selected_battle_name(self):
+        """The battle of the selected mission record: the fallback when no setbattlescript ran."""
+        mission = self.state.selected_mission or getattr(self.campaign, "selected_mission", None)
+        if mission is None:
+            return ""
+        try:
+            return self.content.mission(mission).values.get("setbattlescript", "").strip().upper()
+        except (KeyError, TypeError, AttributeError):
+            return ""
+
+    def _encounter_action(self, action):
+        """Encounter-window buttons (notes/activity_results.md section 3).
+
+        Evade/Decline resume the parked script. Attack! (panel 4) sets the status bits under the
+        current mask first. Attack!/Defend then start an encounter battle: a pushed context, no
+        debrief, and when it ends the script resumes after its ``waitforresume``.
+        """
+        pending = self.state.pending
+        if pending is not None and pending.kind != "dialogue":
+            return ()
+        self.state.paused = False
+        effects = []
+        if pending is not None:
+            self.state.dialogue_typed = len(self.state.dialogue_text)
+            self.state.dialogue_ms = 0
+            self.state.pending = None
+            effects.append(StopSpeech())
+        if self.state.current is not None and not self.state.current.parked:
+            effects.extend(self.step_until_blocked())
+        if self.state.wait_reason != "panel-resume" or self.state.current is None:
+            return tuple(effects)  # the click only drained the text: the script is not waiting yet
+        self.state.wait_reason = None
+        self.state.current.parked = False
+        if action == "encounter_evade":
+            return (*effects, *self.step_until_blocked())
+        if action == "encounter_attack_status":
+            self.state.status_bits |= self.state.status_mask
+        battle = self.state.battle_script or self._selected_battle_name()
+        if not battle:
+            effects.append(Diagnostic("panel", "no battle is named for the encounter"))
+            return (*effects, *self.step_until_blocked())
+        effects.append(StopMusic())
+        self._request_battle("encounterplaygame", battle, effects)
         return tuple(effects)
 
     def _panel_abort(self):
