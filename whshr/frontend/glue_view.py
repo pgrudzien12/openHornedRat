@@ -21,7 +21,7 @@ from .gpu import ScreenQuad
 from .scene_view import NativeScreenView
 
 MIXER_CHANNELS = 8  # matches movie_view's cutscene mixer; music runs on pygame's separate music channel
-MUSIC_VOLUME = 0.01  # engine-level mix setting, not game data: setmidivolume/setwavvolume are unused by any
+MUSIC_VOLUME = 1  # engine-level mix setting, not game data: setmidivolume/setwavvolume are unused by any
                      # script (notes/briefing_dialogue.md §2.1) and default 100, so there is no data value to read
 MISSION_ROW_HEIGHT = 88
 MISSION_TEXT_INSET = 12

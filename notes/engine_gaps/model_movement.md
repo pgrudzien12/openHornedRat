@@ -20,8 +20,13 @@ not carried by it" (under "Formations"), marked ✅.
   `current_speed` ramps toward that target by at most 1/tick (drops to it immediately if the target is
   lower) rather than snapping. `current_speed` is a counter converted to world units via a per-model
   step factor `F = (ranks − rank_index) × 8 + (stagger & 6) + 4`, world units/tick = `F × 2.4 / 256`.
-- **The stagger value** is a small fixed per-model number (0–7), contributing 0/2/4/6 to `F`; it also
-  sets the model's charge-start freeze length.
+- **The stagger value** is a fixed per-model number, **16 bits, not 0–7**: `29 × n mod 65536`, where
+  `n` is a battle-wide counter of models created (across every regiment, never per-regiment). `F`,
+  freeze length, rout-pause length and every other consumer only ever mask/mod it (`& 6`, `& 7`, ...),
+  so the bit-masking formulas below are correct as written — the bug this gap actually shipped with
+  (`ModelState.stagger = (per-regiment uid) & 7`, tracked as [#100](https://github.com/pgrudzien12/openHornedRat/issues/100))
+  was in the *generation* of the stored value, not in how it's read. A stored 0–7 number skews `% 3`
+  and other derived splits away from uniform.
 - **Charge-start freeze**: `(stagger & 7) + 1` = 1–8 ticks of no movement per model when a charge
   begins, staggered model by model, while the anchor is already moving at full charge speed.
 - **Keep-station threshold**: a model holds its slot only while `F ≥ 6.67 × k`. The rearmost rank's

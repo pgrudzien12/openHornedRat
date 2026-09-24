@@ -41,10 +41,12 @@ re-form flag, no alternate mover, and no model re-slotting search.
 and wagons do the opposite** — their layouts explicitly *clear* the re-forming flag, so their models
 stay on the ordinary rank-dependent catch-up walk (epic #49/#50) instead, ramping up and moving at
 rank-dependent speeds; a war machine's crew re-settles around the machine at varied rates rather than
-in a uniform shuffle. **The war-machine layout inverts the slot search**: the machine model goes
-straight to the front-rank-centre slot, and every crew slot takes the **farthest** unplaced model (not the
-nearest) whenever the battle is not in its deployment phase — which is always, for an engine with no
-deployment phase. Wagons, monsters and blocks never invert. Full rule and the phase's life cycle in
+in a uniform shuffle. **The war-machine layout inverts the slot search**: the machine model goes straight to the
+front-rank-centre slot, and every crew slot takes the **farthest** unplaced model (not the nearest) —
+**always, not merely "in practice for an engine without a deployment phase"**: real artillery can
+never be moved or re-ranked once deployed, and its crew can never die there (combat against a war
+machine resolves separately), so there is no live case in the original where the search would ever be
+"nearest" either. Implement it unconditionally. Wagons, monsters and blocks never invert. Full rule in
 `notes/game_rules.md`, "Formation changes".
 
 **Cost and gating**: a formation change costs no time of its own (only the walking); rank counts clamp

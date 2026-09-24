@@ -92,7 +92,8 @@ scoped into the tasks below.
 
 ## Open questions
 
-Tracked as [epic #71](https://github.com/pgrudzien12/openHornedRat/issues/71) (tasks #72-#74).
+Tracked as [epic #71](https://github.com/pgrudzien12/openHornedRat/issues/71) (tasks #72-#74, #101;
+stagger-generation bug #100).
 
 None for the core mechanism — fully specified above. Per-family loop-table data (37 families, 116
 scripts) needs decoding into a lookup table at implementation time, but that's data-extraction work
