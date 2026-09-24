@@ -701,6 +701,35 @@ unwritable log directory, disabled logging, and that every log line parses with 
   has already fled (`fled=True`); harmless (a fled regiment is inert either way) but a slightly misleading
   log entry.
 
+## Campaign session log
+
+`whshr.campaign_log.CampaignLogger` records one JSON Lines file per engine session,
+`<log dir>/campaign-YYYYmmdd-HHMMSS.jsonl` (default `logs/`, next to the battle logs; `--campaign-log DIR` /
+`--no-campaign-log`; the path is printed at exit). Every row has `time` (wall-clock UTC) and `type`. Like the
+battle log it never raises: no directory / an unwritable one disables it silently, and an identical
+consecutive row is dropped. It only observes (scene machine transitions, scene asset access, `GlueScene`
+runtime calls), so behaviour is the same with it off. Row types:
+
+- `session_start` (options: no-battle mode, save dir, glue program, battle shortcut, seed, battle log dir),
+  `session_end` (`reason`, frames, final scene), `quit`.
+- `scene_change` (`from`, `to`, `reason`, written before the switch), `battle_start` (`battle`, `battle_log`:
+  path of that battle's own log), `battle_result` (same fields plus `result`).
+- `glue_start` (program or window), `screen_load` (`window`, `parent`, `palette`, `program`, `location` of the
+  opening instruction, `bitmaps` and `music` named by the window definition), `window_closed`.
+- `script_enter` / `script_return` (`program`, call-stack `depth`), observed each time the interpreter stops or
+  ends a run, so a subroutine that starts and returns within one run is not visible.
+- `activity_request` (`kind` movie/battle/dialogue/caravan/debrief, request id, details), `wait_started` /
+  `wait_resolved` (`kind`, `program`), each exactly once per wait however many frames it lasts;
+  `mission_selected`; `glue_effect` (music start/stop, autosave, end of game).
+- `campaign_state` (`before` / `after` summaries: coffers, flow step, mission window, completed missions,
+  army and march unit counts), written only when the summary changes.
+- `diagnostic` (`text` identical to the stderr line) and `asset_failed` (asset id and error).
+
+Never logged: pointer and key events, redraws, frame counts, animation progress, dialogue typing progress.
+Per-instruction glue tracing (`glue_instruction` rows) is opt-in via the environment variable
+`WHSHR_TRACE_GLUE=1` (analogous to `WHSHR_TRACE_SCRIPTS` for battle scripts). Scenarios:
+`tests/test_campaign_log.py`.
+
 ## Display scaling and fullscreen (research)
 
 Prompted by the owner's reaction to the integer-scale fix (`whshr/frontend/scene_view.py`

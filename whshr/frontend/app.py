@@ -11,6 +11,7 @@ import zengl  # noqa: E402
 
 from ..assets import AssetId  # noqa: E402
 from ..battle_scene import BattleScene  # noqa: E402
+from .. import campaign_log as campaign_log_module  # noqa: E402
 from ..campaign_scenes import OpeningNarrationScene  # noqa: E402
 from ..clock import FixedStepClock  # noqa: E402
 from ..engine import DEFAULT_SEED  # noqa: E402
@@ -63,7 +64,7 @@ class FrameRate:
 
 def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=None, screenshot=None,
         frame_time=None, battle=None, camera=None, log_dir=None, seed=DEFAULT_SEED, glue_program=None,
-        save_dir=None, no_battle=False):
+        save_dir=None, no_battle=False, campaign_log_dir=None):
     """Run the game until the window closes, or for ``frames`` frames when given.
 
     ``frame_time`` replaces the measured wall-clock frame duration, so a capture after a number of frames
@@ -77,12 +78,21 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
     save directory (never the original installation's SAVE/, notes/glue_engine_integration.md GEI7e).
     ``no_battle`` turns on the campaign-progression shortcut: every battle reached through the
     scene flow settles as an immediate, lossless win instead of being simulated.
+    ``campaign_log_dir`` (a path, or ``None`` to disable) turns on the JSON Lines campaign session
+    log (``whshr.campaign_log``, ``--campaign-log``/``--no-campaign-log``).
     """
     if hidden:
         # A hidden run is a development/test capture (--frames, --screenshot); it has no listener
         # and should not play audio through the machine's real device while running unattended.
         os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     context = scene_context(installation, save_dir=save_dir, no_battle=no_battle)
+    campaign_log = None
+    if campaign_log_dir is not None:
+        campaign_log = campaign_log_module.CampaignLogger(campaign_log_module.default_log_path(campaign_log_dir))
+        context.campaign_log = campaign_log
+        campaign_log.session_start(no_battle=no_battle, save_dir=save_dir, glue_program=glue_program,
+                                   battle=battle, skip_intro=skip_intro, seed=seed,
+                                   battle_log_dir=log_dir, trace_glue=campaign_log.trace_glue)
     ctx = open_window(size, hidden)
     gpu = Gpu(ctx, size)
     # Wider debug overlay; unrelated to the battle HUD.
@@ -179,8 +189,14 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
             if machine.active.logger is not None and machine.active.logger.path:
                 battle_log_path = machine.active.logger.path
         pygame.quit()
+        if campaign_log is not None:
+            campaign_log.session_end("player quit" if machine.quit is None else machine.quit.reason,
+                                     frames=frame, scene=type(machine.active).__name__)
+            campaign_log.close()
     if battle_log_path is not None:
         print(f"Battle log: {battle_log_path}")
+    if campaign_log is not None and campaign_log.path is not None:
+        print(f"Campaign log: {campaign_log.path}")
     return {
         "frames": frame, "ticks": clock.ticks, "scene": type(machine.active).__name__,
         "quit": machine.quit.reason if machine.quit is not None else None,

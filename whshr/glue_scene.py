@@ -5,6 +5,7 @@ that gives a future ``GlueView`` one long-lived runtime rather than recreating
 campaign Python scenes at every window/activity boundary.
 """
 
+from .campaign_log import GlueWatcher
 from .glue_runtime import ActivityResult, GlueInput, GlueRuntime, StartBattle, StartMovie
 from .glue_fonts import glue_font_asset
 from .scenes import Scene, Transition
@@ -28,10 +29,18 @@ class GlueScene(Scene):
         self.context = None
         self._fonts = {}
         self._effects = []
+        self._watcher = None
 
     @property
     def effects(self):
         return tuple(self._effects)
+
+    def _queue(self, effects):
+        """Queue runtime effects for the host and let the optional campaign log observe the change."""
+        effects = tuple(effects)
+        self._effects.extend(effects)
+        if self._watcher is not None and self.runtime is not None:
+            self._watcher.update(self.runtime, effects)
 
     def take_effects(self):
         """Return effects emitted since the previous handoff and clear the queue."""
@@ -55,16 +64,20 @@ class GlueScene(Scene):
         if self.runtime is None:
             content = context.glue_content()
             self.runtime = GlueRuntime(content, self.campaign, speech_enabled=self.speech_enabled)
-            self._effects.extend(self.runtime.start(self.program) if self.program is not None
-                                 else self.runtime.start_window(self.window))
+            log = getattr(context, "campaign_log", None)
+            if log is not None:
+                self._watcher = GlueWatcher(log, type(self).__name__, self.campaign)
+                log.write("glue_start", program=self.program, window=self.window)
+            self._queue(self.runtime.start(self.program) if self.program is not None
+                        else self.runtime.start_window(self.window))
 
     def complete_activity(self, result):
         if self.runtime is None:
             raise RuntimeError("GlueScene must be entered before completing an activity")
-        self._effects.extend(self.runtime.resume(result))
+        self._queue(self.runtime.resume(result))
 
     def start_battle(self, battle):
-        self._effects.extend(self.runtime.start_battle(battle))
+        self._queue(self.runtime.start_battle(battle))
 
     def font(self, slot):
         """Load one verified glue font slot only when a view needs it."""
@@ -102,7 +115,7 @@ class GlueScene(Scene):
                                                 accept_mission=self.runtime.state.selected_mission, return_scene=self),
                                       "generic mission briefing opened")
             elif event.kind == "panel-action" and event.target in ("abort_briefing", "return_to_caravan") and self.return_scene:
-                self._effects.extend(self.runtime.handle(GlueInput("panel-action", "abort_briefing")))
+                self._queue(self.runtime.handle(GlueInput("panel-action", "abort_briefing")))
                 return Transition(self.return_scene, "generic briefing dismissed")
             elif event.kind == "panel-action" and event.target == "return_to_caravan" and hasattr(context, "locator"):
                 from .campaign_state import CampaignState
@@ -113,9 +126,9 @@ class GlueScene(Scene):
                 return Transition(GlueScene(campaign=campaign, window="STARTCARAVAN"),
                                   "generic mission map dismissed")
             else:
-                self._effects.extend(self.runtime.handle(event))
+                self._queue(self.runtime.handle(event))
         elif isinstance(event, ActivityResult):
-            self._effects.extend(self.runtime.resume(event))
+            self._queue(self.runtime.resume(event))
         return None
 
     def _selected_values(self):
@@ -130,7 +143,7 @@ class GlueScene(Scene):
     def update(self, seconds, context):
         super().update(seconds, context)
         if self.runtime is not None:
-            self._effects.extend(self.runtime.tick(round(seconds * 1000)))
+            self._queue(self.runtime.tick(round(seconds * 1000)))
         return None
 
     def snapshot(self):
@@ -142,3 +155,4 @@ class GlueScene(Scene):
         if self.runtime is None:
             raise RuntimeError("GlueScene must be entered before restoring")
         self.runtime.restore(snapshot)
+        self._queue(())
