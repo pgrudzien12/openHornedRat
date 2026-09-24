@@ -1086,9 +1086,16 @@ class Battle:
         """Step every model's action program one battle tick (whshr.animation, game_rules.md "Figure
         animation"). The requested action mirrors what the model is currently doing: fighting or
         weapon-ready in melee (paired with an opponent or not), the shoot pose while the regiment
-        holds a missile stance, walking while the model itself has not yet reached its slot
-        (`ModelState.at_rest`), otherwise idling in place. Then the drawn facing slews toward its
-        action-dependent target (wagons snap; a facing-locked script freezes it)."""
+        holds a missile stance and is not still reloading, walking while the model itself has not
+        yet reached its slot (`ModelState.at_rest`), otherwise idling in place. Then the drawn
+        facing slews toward its action-dependent target (wagons snap; a facing-locked script
+        freezes it).
+
+        Holding the shoot pose off until `reload_ticks <= 1` (one tick before the next volley is
+        ordered in `combat.resolve_shooting`, which runs after this method within the same tick)
+        keeps every model entering the shoot program on the same tick, so the whole regiment's fire
+        events land inside the next countdown's resolve window; without the gate models free-run
+        the shoot/stand cycle and drift out of step with the countdown across reloads."""
         wagon = regiment.unit_class == 7 and regiment.models == 2
         # Advance the volley age counter; the window is clamped at 6 ticks so the second SHOOT
         # animation cycle (which starts on tick 7 from the order) cannot contaminate this volley.
@@ -1100,7 +1107,8 @@ class Battle:
         for model in regiment.melee_models:
             if regiment.in_melee:
                 requested = animation.FIGHT if model.opponent is not None else animation.WEAPON_READY
-            elif regiment.missile_range and not regiment.moving and not regiment.attack_target:
+            elif regiment.missile_range and not regiment.moving and not regiment.attack_target \
+                    and regiment.reload_ticks <= 1:
                 requested = animation.SHOOT
             elif not model.at_rest:
                 requested = animation.WALK

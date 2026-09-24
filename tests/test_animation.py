@@ -437,3 +437,20 @@ class WalkDesyncAndFireCadenceTests(unittest.TestCase):
                 if shot:
                     break
             self.assertEqual(shot[0].data["shots"], expected, f"models={models} ranks={ranks}")
+
+    def test_given_repeated_reload_cycles_when_volleys_resolve_then_every_volley_fires_the_same_count(self):
+        from whshr import combat
+        # A regiment must stop re-entering the shoot pose while reloading (engine.py's
+        # reload_ticks <= 1 gate) so every model starts its next shoot pose together; otherwise
+        # models free-run the shoot/stand cycle out of step with the next countdown and only a
+        # fraction of them arrive inside its resolve window.
+        archer = Regiment("a", "A", 0, 0, 0, Side.PLAYER, models=10, ranks=2)
+        archer.missile_range, archer.missile_code, archer.bs = 720.0, 2, 5
+        enemy = Regiment("e", "E", 0, 300, 0, Side.ENEMY, models=10, ranks=2)
+        battle = Battle(2000, 2000, [archer, enemy], seed=0)
+        shots = []
+        for _ in range(1000):
+            battle.tick()
+            shots.extend(e.data["shots"] for e in battle.events if getattr(e, "kind", "") == "shooting")
+        self.assertGreaterEqual(len(shots), 3, "expected several volleys within 1000 ticks")
+        self.assertTrue(all(s == 3 for s in shots), shots)
