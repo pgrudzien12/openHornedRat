@@ -56,25 +56,43 @@ class SceneAssets:
     # No-battle mode: BattleScene settles every battle it enters as an immediate, lossless win
     # instead of simulating it, so the campaign can be walked through quickly.
     no_battle: bool = False
+    # Optional whshr.campaign_log.CampaignLogger; observation only, never changes behaviour.
+    campaign_log: object = None
+
+    def _record_failure(self, identifier, error):
+        log = self.campaign_log
+        if log is not None:
+            try:
+                log.asset_failed(identifier, error)
+            except Exception:
+                pass
 
     def load(self, identifier):
-        record = self.catalog.get(identifier)
         try:
-            loader = self.loaders[record.decoder]
-        except KeyError:
-            raise ValueError(f"no scene loader for decoder: {record.decoder}") from None
-        return self.cache.get(self.locator, self.catalog, record.identifier, loader)
+            record = self.catalog.get(identifier)
+            try:
+                loader = self.loaders[record.decoder]
+            except KeyError:
+                raise ValueError(f"no scene loader for decoder: {record.decoder}") from None
+            return self.cache.get(self.locator, self.catalog, record.identifier, loader)
+        except Exception as error:
+            self._record_failure(identifier, error)
+            raise
 
     def acquire(self, identifier, owner):
         """Load a runtime-discovered asset retained by an explicit owner."""
-        record = self.catalog.get(identifier)
         try:
-            loader = self.loaders[record.decoder]
-        except KeyError:
-            raise ValueError(f"no scene loader for decoder: {record.decoder}") from None
-        return self.cache.acquire(
-            self.locator, self.catalog, record.identifier, loader, owner
-        )
+            record = self.catalog.get(identifier)
+            try:
+                loader = self.loaders[record.decoder]
+            except KeyError:
+                raise ValueError(f"no scene loader for decoder: {record.decoder}") from None
+            return self.cache.acquire(
+                self.locator, self.catalog, record.identifier, loader, owner
+            )
+        except Exception as error:
+            self._record_failure(identifier, error)
+            raise
 
     def release_owner(self, owner):
         self.cache.release_owner(owner)
@@ -121,8 +139,25 @@ class SceneMachine:
 
     def __post_init__(self):
         self.active = self.initial
+        self._log("scene_change", None, self.active, "initial scene")
         self.active.enter(self.context)
+        self._log("entered", None, self.active, "")
         self._start_glue_activities()
+
+    def _log(self, kind, old, new, reason):
+        """Feed the optional campaign log; observation only, so any failure is ignored."""
+        log = getattr(self.context, "campaign_log", None)
+        if log is None:
+            return
+        try:
+            if kind == "quit":
+                log.quit(reason)
+            elif kind == "entered":
+                log.scene_entered(new)
+            else:
+                log.scene_change(old, new, reason)
+        except Exception:
+            pass
 
     def handle(self, event):
         """Give an event to the active scene and apply its transition or quit, if any."""
@@ -176,10 +211,14 @@ class SceneMachine:
             return
         if isinstance(transition, Quit):
             self.quit = transition
+            self._log("quit", self.active, None, transition.reason)
             return
         if not isinstance(transition, Transition):
             raise TypeError("scene callbacks must return Transition, Quit or None")
-        self.active.exit(self.context)
+        previous = self.active
+        self._log("scene_change", previous, transition.scene, transition.reason)
+        previous.exit(self.context)
         self.active = transition.scene
         self.active.enter(self.context)
         self.history.append(transition)
+        self._log("entered", None, self.active, "")

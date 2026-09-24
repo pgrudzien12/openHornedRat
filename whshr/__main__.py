@@ -126,6 +126,9 @@ def main(argv=None):
     engine_parser.add_argument("--battle-log", type=Path, default=REPOSITORY_LOGS,
                                help="directory for JSON Lines battle logs (default: logs/)")
     engine_parser.add_argument("--no-battle-log", action="store_true", help="disable battle logging")
+    engine_parser.add_argument("--campaign-log", type=Path, default=REPOSITORY_LOGS,
+                               help="directory for the JSON Lines campaign session log (default: logs/)")
+    engine_parser.add_argument("--no-campaign-log", action="store_true", help="disable campaign session logging")
     engine_parser.add_argument("--seed", type=int, default=engine.DEFAULT_SEED,
                                help=f"battle RNG seed (default: {engine.DEFAULT_SEED})")
     engine_parser.add_argument("--save-dir", type=Path, default=REPOSITORY_SAVES,
@@ -245,7 +248,8 @@ def main(argv=None):
         log_dir = None if args.no_battle_log else args.battle_log
         result = app.run(args.installation, (args.width, args.height), args.skip_intro, args.hidden,
                          args.frames, args.screenshot, args.frame_time, args.battle, args.camera,
-                         log_dir, args.seed, args.glue_program, args.save_dir, args.no_battle)
+                         log_dir, args.seed, args.glue_program, args.save_dir, args.no_battle,
+                         None if args.no_campaign_log else args.campaign_log)
         print(f"{result['frames']} frames, {result['ticks']} ticks, final scene {result['scene']}")
         return 0
     if args.command == "viewer":
