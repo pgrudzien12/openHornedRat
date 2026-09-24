@@ -329,7 +329,7 @@ class CatchUpWalkTests(unittest.TestCase):
         battle._advance_models(regiment, 1)
 
         self.assertAlmostEqual(regiment.positions[0][1] - before[0][1], 36 * 2.4 / 256)
-        self.assertAlmostEqual(regiment.positions[1][1] - before[1][1], 28 * 2.4 / 256)
+        self.assertAlmostEqual(regiment.positions[1][1] - before[1][1], 32 * 2.4 / 256)  # 28 + stagger 29 & 6 == 4
 
 
 class ReformOrderGatingTests(unittest.TestCase):
@@ -727,18 +727,18 @@ class ChargeStartFreezeTests(unittest.TestCase):
 
         self.assertGreater(self.charger.y, 0)
         self.assertEqual(self.charger.positions, before)
-        self.assertEqual([model.freeze_ticks for model in self.charger.melee_models], list(range(8)))
+        self.assertEqual([model.freeze_ticks for model in self.charger.melee_models], [(29 * n & 7) for n in range(8)])
 
         for _ in range(7):
             self.battle.tick()
 
         self.assertGreater(self.charger.positions[0][1], before[0][1])
-        self.assertEqual(self.charger.positions[7], before[7])
+        self.assertEqual(self.charger.positions[3], before[3])  # stagger & 7 == 7, the longest wait
         self.assertTrue(all(model.freeze_ticks == 0 for model in self.charger.melee_models))
 
         self.battle.tick()
 
-        self.assertGreater(self.charger.positions[7][1], before[7][1])
+        self.assertGreater(self.charger.positions[3][1], before[3][1])
 
     def test_given_an_attack_order_outside_charge_reach_then_freeze_starts_only_on_entering_reach(self):
         self.target.y = 200
@@ -767,7 +767,8 @@ class ChargeStartFreezeTests(unittest.TestCase):
 
         self.battle.tick()
 
-        self.assertEqual([model.freeze_ticks for model in self.charger.melee_models], list(range(8)))
+        self.assertEqual([model.freeze_ticks for model in self.charger.melee_models],
+                         [(29 * n & 7) for n in range(8)])
 
     def test_given_a_charge_is_cancelled_then_its_pending_model_delays_are_cleared(self):
         self.battle.order_attack("charger", "target")
@@ -1066,3 +1067,44 @@ class BattleOutcomeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ModelStaggerValueTests(unittest.TestCase):
+    def _battle(self, *sizes):
+        regiments = [Regiment(f"r{i}", f"R{i}", 100.0 + 400 * i, 100.0, 0, Side.PLAYER, models=n, ranks=4)
+                     for i, n in enumerate(sizes)]
+        return Battle(4000, 4000, regiments), regiments
+
+    def test_given_two_regiments_when_models_created_then_stagger_follows_battle_wide_creation_order(self):
+        battle, (first, second) = self._battle(10, 7)
+        first.model_positions()
+        second.model_positions()
+        self.assertEqual([m.stagger for m in first.melee_models], [29 * n % 65536 for n in range(10)])
+        self.assertEqual([m.stagger for m in second.melee_models], [29 * n % 65536 for n in range(10, 17)])
+
+    def test_given_a_large_battle_when_models_created_then_full_16_bit_values_are_kept(self):
+        battle, (big,) = self._battle(3000)
+        big.model_positions()
+        values = [m.stagger for m in big.melee_models]
+        self.assertEqual(values, [29 * n % 65536 for n in range(3000)])
+        self.assertGreater(max(values), 7)
+
+    def test_given_large_sample_when_split_then_thirds_and_bit_masks_are_balanced(self):
+        battle, (big,) = self._battle(6000)
+        big.model_positions()
+        values = [m.stagger for m in big.melee_models]
+        for modulus, mask in ((3, None), (None, 3), (None, 7)):
+            if modulus:
+                buckets = [v % modulus for v in values]
+                groups = modulus
+            else:
+                buckets = [v & mask for v in values]
+                groups = mask + 1
+            for group in range(groups):
+                share = buckets.count(group) / len(values)
+                self.assertAlmostEqual(share, 1 / groups, delta=0.03)
+
+    def test_given_standalone_regiment_when_models_created_then_stagger_is_still_the_lcg_sequence(self):
+        regiment = Regiment("solo", "Solo", 100.0, 100.0, 0, Side.PLAYER, models=5, ranks=1)
+        regiment.model_positions()
+        self.assertEqual([m.stagger for m in regiment.melee_models], [0, 29, 58, 87, 116])
