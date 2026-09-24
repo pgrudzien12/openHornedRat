@@ -80,6 +80,11 @@ def sprite_direction(camera_yaw, script_dir):
     return math.floor(((script_dir or 0) - heading + 32) / 64) % DIRECTIONS
 
 
+def view_angle(camera_yaw):
+    """Camera rotation as a script `dir` value (1/512 turns): the camera's screen-up heading."""
+    return round((camera_yaw + 180) * FULL_TURN / 360) % FULL_TURN
+
+
 def scenery_transform(item, ground_height, scale=1.0):
     """Return (vertex, normal) transforms placing a scenery mesh at a script ``placefurniture`` item.
 

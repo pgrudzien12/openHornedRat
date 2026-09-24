@@ -20,7 +20,7 @@ import zengl
 
 from .. import animation, picking
 from ..battle3d import SPRITE_DEPTH_BIAS
-from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, sprite_direction
+from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, sprite_direction, view_angle
 from ..camera import BattleCamera
 from ..formation import SPRITE_PIXEL_WORLD_UNITS
 from .cursors import GameCursors
@@ -416,6 +416,7 @@ class BattleView(SceneView):
             self.camera.rotate(turn * ROTATE_SPEED * seconds)
         if tilt := keys[pygame.K_PAGEUP] - keys[pygame.K_PAGEDOWN]:
             self.camera.tilt(tilt * TILT_SPEED * seconds)
+        self.scene.battle.set_view_angle(view_angle(self.camera.yaw))
         self.event_log.extend(self.scene.battle.events)
 
     def status(self):

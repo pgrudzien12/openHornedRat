@@ -23,18 +23,19 @@ class BattleTests(unittest.TestCase):
         self.battle.order_move("player", 70, 10)
         self.battle.tick()
 
-        step = self.speed
-        self.assertAlmostEqual(self.player.x, 10 + step)
-        self.assertAlmostEqual(self.player.y, 10)
-        self.assertEqual(self.player.direction, 128)
+        # A single model turns on the spot (no snap, no pivot shift, no speed penalty) and moves at
+        # full speed along its current facing while the turn toward the destination proceeds.
+        self.assertGreater(self.player.direction, 0)
+        self.assertLess(self.player.direction, 128)
+        self.assertAlmostEqual(math.hypot(self.player.x - 10, self.player.y - 10), self.speed)
         self.assertTrue(self.player.moving)
         self.assertTrue(self.player.walking)
 
     def test_given_nearby_destination_when_tick_reaches_it_then_order_completes_without_overshoot(self):
-        self.battle.order_move("player", self.player.x + self.speed / 2, self.player.y)
+        self.battle.order_move("player", self.player.x, self.player.y + self.speed / 2)
         self.battle.tick()
 
-        self.assertAlmostEqual(self.player.x, 10 + self.speed / 2)
+        self.assertAlmostEqual(self.player.y, 10 + self.speed / 2)
         self.assertFalse(self.player.moving)
 
     def test_given_enemy_or_outside_destination_when_ordered_then_the_order_is_rejected(self):
@@ -802,6 +803,67 @@ def formation_positions(regiment):
     from whshr import formation
     return formation.place(regiment.x, regiment.y, regiment.direction,
                            formation.block_slots(regiment.models, regiment.ranks))
+
+
+class FormationTurnExceptionTests(unittest.TestCase):
+    """game_rules.md "Turning, wheeling and reversing": per-formation-type exceptions (#65)."""
+
+    def _battle(self, **kwargs):
+        regiment = Regiment("r", "R", 100, 100, 0, Side.PLAYER,
+                            speed_per_tick=speed_per_tick(4, 3), **kwargs)
+        return Battle(1000, 1000, [regiment]), regiment
+
+    def test_given_a_single_model_when_ordered_east_then_it_turns_without_snap_pivot_or_speed_penalty(self):
+        battle, regiment = self._battle(models=1, ranks=1)
+        battle.order_move("r", 500, 100)
+
+        battle.tick()
+
+        s_rlmv = regiment.speed_per_tick * 16 / 1.8
+        self.assertAlmostEqual(regiment.direction, s_rlmv * (144 - 1.5 ** 2) / 256)
+        self.assertAlmostEqual(math.hypot(regiment.x - 100, regiment.y - 100), regiment.speed_per_tick)
+
+    def test_given_a_reforming_block_when_ordered_east_then_it_neither_snaps_nor_shifts_its_anchor(self):
+        battle, regiment = self._battle(models=20, ranks=4)
+        regiment.reforming = True
+
+        battle._advance_toward(regiment, (500, 100), regiment.speed_per_tick, True, ("move", 500, 100), 1.0)
+
+        self.assertLess(regiment.direction, 128)
+        self.assertAlmostEqual(math.hypot(regiment.x - 100, regiment.y - 100), regiment.speed_per_tick)
+
+    def test_given_a_wagon_when_the_camera_moves_then_facing_snaps_to_the_camera_relative_grid(self):
+        battle, regiment = self._battle(models=2, ranks=1)
+        regiment.unit_class = 7
+        regiment.direction = 40
+
+        battle.set_view_angle(10)
+
+        self.assertEqual(regiment.direction, 10)
+        battle.set_view_angle(30)
+        self.assertEqual(regiment.direction, 30)
+
+    def test_given_an_unchanged_view_angle_then_the_wagon_is_not_re_snapped(self):
+        battle, regiment = self._battle(models=2, ranks=1)
+        regiment.unit_class = 7
+        battle.set_view_angle(10)
+        regiment.direction = 40
+
+        battle.set_view_angle(10)
+
+        self.assertEqual(regiment.direction, 40)
+
+    def test_given_a_non_wagon_when_the_camera_moves_then_its_facing_is_untouched(self):
+        battle, regiment = self._battle(models=20, ranks=4)
+        regiment.direction = 40
+        battle.set_view_angle(10)
+        self.assertEqual(regiment.direction, 40)
+
+    def test_given_an_artillery_unit_then_it_is_anchored_by_rule_and_others_are_not(self):
+        battle, gun = self._battle(models=5, ranks=3)
+        self.assertFalse(gun.anchored)
+        gun.hud_class = "art"
+        self.assertTrue(gun.anchored)
 
 
 class SelectionTests(unittest.TestCase):
