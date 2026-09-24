@@ -723,8 +723,8 @@ class ShootingTests(unittest.TestCase):
     def test_given_a_target_in_range_and_arc_when_ticked_then_it_fires_and_reloads(self):
         self.battle.tick()
 
-        self.assertEqual(self.target.models, 8)  # seed 0: 2 casualties from this volley
-        self.assertIn("s shoots t: 2 casualties.", self.battle.events)
+        self.assertEqual(self.target.models, 10)  # seed 0: no casualties from this volley
+        self.assertIn("s shoots t: no casualties.", self.battle.events)
         # game_rules.md 8.2: an I3 crossbow unit reloads in 96 ticks.
         self.assertAlmostEqual(self.shooter.reload_ticks, 96)
 

@@ -18,7 +18,7 @@ import struct
 import pygame
 import zengl
 
-from .. import picking
+from .. import animation, picking
 from ..battle3d import SPRITE_DEPTH_BIAS
 from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, sprite_direction
 from ..camera import BattleCamera
@@ -44,10 +44,6 @@ CLICK_DRAG_THRESHOLD = 4  # pixels; a right button press/release closer than thi
 # `python3 scripts/pe_extract.py "$WARFB/FILE/DLL/GMCUR.DLL" extracted/pe_resources/GMCUR` (repo
 # root), then check extracted/pe_resources/GMCUR/cursor/*.png against groups.json's id lists.
 BATTLE_CURSOR_GROUPS = {"default": 100, "attack": 101, "fire": 102, "magic": 103}
-# Frames per second of the walking animation while a regiment is not settled in formation. The original
-# per-frame animation timing is not traced (notes/game_rules.md, "Animation bytecode"): this is a
-# documented placeholder, not a measured value.
-WALK_ANIMATION_FPS = 8.0
 BANNER_MARKER_RAISE = 4.0  # mesh units: above a 64-pixel troop sprite, below the camera's horizon
 SPRITE_MID_HEIGHT = BANNER_MARKER_RAISE / 2  # mesh units: halfway up that ~64px sprite, for picking
 EVENT_LOG_LINES = 3  # battle events shown in the debug overlay (whshr.engine.Battle.events, per tick)
@@ -446,17 +442,13 @@ class BattleView(SceneView):
             # not the anchor, or it visibly floats ahead of/behind the block it marks.
             positions = regiment.model_positions() if regiment.active else []
             if sheet is not None and regiment.active:
-                if regiment.in_melee:
-                    action, phase = "attack", int(regiment.animation_seconds * WALK_ANIMATION_FPS)
-                elif regiment.missile_range and not regiment.moving and not regiment.attack_target:
-                    action, phase = "shoot", 0
-                elif regiment.walking:
-                    action, phase = "move", int(regiment.animation_seconds * WALK_ANIMATION_FPS)
-                else:
-                    action, phase = "stand", 0
-                index = sheet.frame_index(action, phase, sprite_direction(yaw, regiment.direction))
-                frame, rect = sheet.frames[index], sheet.rects[index]
-                for x, y in positions:
+                # Each model already steps its own action/program counter every tick
+                # (whshr.animation, game_rules.md "Figure animation"); this only reads it.
+                direction = sprite_direction(yaw, regiment.direction)
+                for (x, y), model in zip(positions, regiment.melee_models):
+                    action, phase = animation.current(model)
+                    index = sheet.frame_index(action, phase, direction)
+                    frame, rect = sheet.frames[index], sheet.rects[index]
                     data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
                                           *rect, frame.anchor_x, frame.anchor_y, selected)
             if sheet is not None:
