@@ -7,7 +7,7 @@ TITLES = {"victory": "Victory!", "defeat": "Defeat..."}
 
 
 class ResultView(SceneView):
-    """Shows `whshr.result_scene.ResultScene`'s outcome; dismissing it returns to the main menu."""
+    """Shows `whshr.result_scene.ResultScene`'s outcome; dismissing it returns to the glue program that started the battle, or to the main menu."""
 
     def __init__(self, gpu, scene, options=None):
         super().__init__(gpu, scene, options)
@@ -16,7 +16,8 @@ class ResultView(SceneView):
         self.body = gpu.text((700, 400), gpu.small_font)
         self.body.set_lines(tuple(scene.summary))
         self.hint = gpu.text((640, 40), gpu.small_font, background=None)
-        self.hint.set_lines(("Press any key or click to return to the main menu",))
+        target = "continue the campaign" if scene.glue_scene is not None else "return to the main menu"
+        self.hint.set_lines((f"Press any key or click to {target}",))
 
     def events(self, event):
         if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):

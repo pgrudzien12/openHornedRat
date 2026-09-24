@@ -68,7 +68,7 @@ class BattleSceneTests(unittest.TestCase):
         self.assertEqual((infantry.models, infantry.ranks, infantry.side), (16, 4, Side.PLAYER))
         self.assertEqual(len(infantry.model_positions()), 16)
 
-    def test_given_a_glue_battle_when_it_resolves_then_its_same_runtime_resumes(self):
+    def test_given_a_glue_battle_when_its_result_is_dismissed_then_its_same_runtime_resumes(self):
         self.context.glue = GlueContent.from_data(resources={
             "FLOW": "[RUN]\n[START]\nplaygame:bf001\nendgame:\n[END]",
         })
@@ -79,6 +79,10 @@ class BattleSceneTests(unittest.TestCase):
         self.assertIs(machine.active.glue_scene, glue)
         machine.active.battle.result = "victory"
         machine.update(0)
+        self.assertIsInstance(machine.active, ResultScene)
+        self.assertEqual(glue.take_effects(), ())  # still waiting on the battle request
+
+        machine.handle("continue")
 
         self.assertIs(machine.active, glue)
         self.assertEqual(glue.take_effects(), (EndGame(),))

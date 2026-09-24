@@ -189,6 +189,9 @@ class GlueRuntimeState:
     variables: dict[str, int] = field(default_factory=lambda: {"animseq": 1, "textlines": 1, "tentpos": 0})
     current_window_name: str = ""
     current_battle: str = ""
+    # A battle started without a mission script (a record with only a battle name) ends in the
+    # after-mission caravan instead of resuming a script (notes/activity_results.md §2.4).
+    caravan_after_battle: bool = False
     selected_mission: MissionRef | None = None
     debrief_index: int = 0
     palette_id: int = 0
@@ -340,6 +343,7 @@ class GlueRuntime:
             effects.append(StopSpeech())
         effects.append(StopMusic())
         self._request_battle("playgame", battle, effects)
+        self.state.caravan_after_battle = True
         return tuple(effects)
 
     def _visible_mission(self, key):
@@ -418,6 +422,11 @@ class GlueRuntime:
         if not result.completed and result.kind == "battle":
             self._clear_for_endgame()
             return (EndGame(),)
+        if result.kind == "battle" and self.state.caravan_after_battle:
+            self.state.caravan_after_battle = False
+            effects = []
+            self._request("caravan", effects, restore_context=True, mode="select")
+            return tuple(effects)
         return self.step_until_blocked()
 
     def snapshot(self):

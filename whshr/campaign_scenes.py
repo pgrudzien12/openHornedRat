@@ -351,7 +351,7 @@ class TroopSelectionScene(Scene):
             return
         if not self.campaign or not self.campaign.company:
             # notes/troop_selection.md §1.1: no company file skips the screen and runs Done immediately.
-            self.glue_scene.start_battle(self.battle)
+            self._start_mission()
             self.phase = "skip"
             return
         self.record = self.glue_scene.runtime.content.mission(self.mission_ref)
@@ -361,6 +361,21 @@ class TroopSelectionScene(Scene):
                                     coffers=self.campaign.coffers, prepaid=_prepaid_payment(self.record))
         if self.model.bankrupt:
             self.phase = "bankrupt"
+
+    def _start_mission(self):
+        """Done: run the mission's own script when its record names one (it starts the battle and
+        carries the flow on afterwards); a record with only a battle starts that battle directly
+        (notes/troop_selection.md §6)."""
+        script = ""
+        if self.mission_ref is not None:
+            try:
+                script = self.glue_scene.runtime.content.mission(self.mission_ref).values.get("setmissionscript", "")
+            except (KeyError, TypeError):
+                script = ""
+        if script:
+            self.glue_scene.start_mission_script(script)
+        else:
+            self.glue_scene.start_battle(self.battle)
 
     def handle(self, event, context):
         if self.phase == "skip":
@@ -420,7 +435,7 @@ class TroopSelectionScene(Scene):
             deployment = self.model.confirm()
             self.campaign.commit_troop_selection(deployment)
             self.campaign.mark_mission_taken(self.mission_ref)
-            self.glue_scene.start_battle(self.battle)
+            self._start_mission()
             return Transition(self.glue_scene, "troop selection done")
         return None
 
