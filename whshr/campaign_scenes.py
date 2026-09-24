@@ -343,6 +343,7 @@ class TroopSelectionScene(Scene):
         self.march_offset = 0
         self.picked_whoami = None
         self.record = None
+        self.destination = glue_scene  # where Done/skip lands: the scene running the mission
 
     def enter(self, context):
         # Army Records returns to this exact scene instance.  It must not rebuild the
@@ -365,21 +366,29 @@ class TroopSelectionScene(Scene):
     def _start_mission(self):
         """Done: run the mission's own script when its record names one (it starts the battle and
         carries the flow on afterwards); a record with only a battle starts that battle directly
-        (notes/troop_selection.md §6)."""
+        (notes/troop_selection.md §6).
+
+        A mission started straight from the mission map runs on its own scene whose ``return_scene`` is
+        that map, exactly like one started from a briefing: the map's release wait stays open until the
+        mission ends, and the mission's release then completes it and advances the flow."""
         script = ""
         if self.mission_ref is not None:
             try:
                 script = self.glue_scene.runtime.content.mission(self.mission_ref).values.get("setmissionscript", "")
             except (KeyError, TypeError):
                 script = ""
-        if script:
-            self.glue_scene.start_mission_script(script)
+        host = self.glue_scene
+        if script and host.accept_mission is None and host.return_scene is None and self.mission_ref is not None:
+            self.destination = GlueScene(script, self.campaign, accept_battle=self.battle,
+                                         accept_mission=self.mission_ref, return_scene=host)
+        elif script:
+            host.start_mission_script(script)
         else:
             self.glue_scene.start_battle(self.battle)
 
     def handle(self, event, context):
         if self.phase == "skip":
-            return Transition(self.glue_scene, "troop selection skipped (no company)")
+            return Transition(self.destination, "troop selection skipped (no company)")
         if self.phase == "bankrupt":
             # notes/troop_selection.md §§4.4, 7: P5 has no Abort, paging, or row actions.
             # Its ultimate campaign-ending destination is open; retain the current parked-scene
@@ -436,7 +445,7 @@ class TroopSelectionScene(Scene):
             self.campaign.commit_troop_selection(deployment)
             self.campaign.mark_mission_taken(self.mission_ref)
             self._start_mission()
-            return Transition(self.glue_scene, "troop selection done")
+            return Transition(self.destination, "troop selection done")
         return None
 
     @property
@@ -452,7 +461,7 @@ class TroopSelectionScene(Scene):
     def update(self, seconds, context):
         super().update(seconds, context)
         if self.phase == "skip":
-            return Transition(self.glue_scene, "troop selection skipped (no company)")
+            return Transition(self.destination, "troop selection skipped (no company)")
         return None
 
 
