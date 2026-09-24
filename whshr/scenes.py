@@ -164,6 +164,7 @@ class SceneMachine:
         if self.quit is None:
             self._apply(self.active.handle(event, self.context))
             self._start_glue_activities()
+            self._fall_back_to_map()
 
     def update(self, seconds):
         """Give fixed or measured time to the active scene and apply its transition or quit, if any."""
@@ -172,6 +173,33 @@ class SceneMachine:
         if self.quit is None:
             self._apply(self.active.update(seconds, self.context))
             self._start_glue_activities()
+            self._fall_back_to_map()
+
+    def _fall_back_to_map(self):
+        """A campaign glue scene that finished with no window, request or wait left has nothing to show:
+        reopen the current flow's map at the campaign's saved position instead of a blank screen."""
+        from .glue_runtime import EndGame
+        from .glue_scene import GlueScene
+
+        scene = self.active
+        if not isinstance(scene, GlueScene) or scene.runtime is None or scene.campaign is None or scene.program is None:
+            return
+        state = scene.runtime.state
+        history = getattr(scene.campaign, "flow_history", ())
+        if (state.windows or state.pending is not None or state.wait_reason is not None
+                or state.current is not None or not history
+                or getattr(scene, "is_fallback", False) or any(isinstance(effect, EndGame) for effect in scene.effects)):
+            return
+        log = getattr(self.context, "campaign_log", None)
+        if log is not None:
+            try:
+                log.write("diagnostic", text="glue scene ended with no window or request; "
+                                             "falling back to the campaign map", location=scene.program or scene.window)
+            except Exception:
+                pass
+        fallback = GlueScene(history[0], scene.campaign)
+        fallback.is_fallback = True  # a map that is itself blank is not retried every tick
+        self._apply(Transition(fallback, "blank glue scene: back to the map"))
 
     def _start_glue_activities(self):
         self._start_glue_battle()
