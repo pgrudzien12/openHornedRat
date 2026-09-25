@@ -1,0 +1,6 @@
+#!/bin/sh
+# Optional maintainer-side check: block commit messages that contain analysis-tool labels.
+# Runs only if a scanner path is configured: git config whshr.labelScan /path/to/label_scan.py
+scan=$(git config --get whshr.labelScan) || exit 0
+[ -f "$scan" ] || exit 0
+exec python3 "$scan" --message-file "$1"
