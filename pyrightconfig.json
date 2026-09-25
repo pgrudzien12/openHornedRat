@@ -56,6 +56,12 @@
     "whshr/launcher/discovery.py",
     "whshr/launcher/engine_launch.py",
     "whshr/launcher/validate.py",
-    "whshr/launcher/gui.py"
+    "whshr/launcher/gui.py",
+    "whshr/pbx.py",
+    "whshr/picking.py",
+    "whshr/roster.py",
+    "whshr/payments.py",
+    "whshr/smacker.py",
+    "whshr/si.py"
   ]
 }

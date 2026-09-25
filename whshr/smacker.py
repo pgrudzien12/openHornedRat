@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Pure-Python Smacker (SMK2/SMK4) video decoder: palette-index frames and a 256-colour palette.
 
 Moved from ``scripts/si_smacker.py`` (kept as a thin CLI wrapper) so the real-time engine can decode
@@ -11,6 +12,8 @@ independent of the Smacker header's own frame rate.
 """
 import struct
 
+type Tree = int | tuple[Tree, Tree]  # 8-bit Huffman tree: a leaf value or (left, right)
+
 SMK_PAL = [int(i * 255 / 63 + 0.5) for i in range(64)]
 BLOCK_RUNS = list(range(1, 60)) + [128, 256, 512, 1024, 2048]
 NODE = 0x80000000
@@ -18,7 +21,8 @@ NODE = 0x80000000
 ENGINE_FRAME_SECONDS = 0.125  # verified game cadence, independent of the Smacker header's own rate
 
 
-def frame_index_at(elapsed_seconds, frame_count=None, frame_seconds=ENGINE_FRAME_SECONDS):
+def frame_index_at(elapsed_seconds: float, frame_count: int | None = None,
+                   frame_seconds: float = ENGINE_FRAME_SECONDS) -> int:
     """Return the verified-cadence frame index due after ``elapsed_seconds`` of playback.
 
     Once ``elapsed_seconds`` runs past the film's own length, the raw index keeps growing; a caller
@@ -38,27 +42,27 @@ def frame_index_at(elapsed_seconds, frame_count=None, frame_seconds=ENGINE_FRAME
 class Bits:
     """LSB-first bit reader."""
 
-    def __init__(self, data):
+    def __init__(self, data: bytes) -> None:
         self.d, self.p = data, 0
 
-    def bit(self):
+    def bit(self) -> int:
         b = (self.d[self.p >> 3] >> (self.p & 7)) & 1
         self.p += 1
         return b
 
-    def bits(self, n):
+    def bits(self, n: int) -> int:
         v = 0
         for i in range(n):
             v |= self.bit() << i
         return v
 
 
-def read_small_tree(br):
+def read_small_tree(br: Bits) -> Tree | None:
     """8-bit Huffman tree: 1 = node (left, right), 0 = leaf followed by 8-bit value."""
     if not br.bit():
         return None                            # tree absent: values decode as 0
 
-    def rec():
+    def rec() -> Tree:
         if br.bit():
             return (rec(), rec())
         return br.bits(8)
@@ -68,7 +72,7 @@ def read_small_tree(br):
     return t
 
 
-def small_decode(tree, br):
+def small_decode(tree: Tree | None, br: Bits) -> int:
     if tree is None:
         return 0
     while isinstance(tree, tuple):
@@ -79,16 +83,17 @@ def small_decode(tree, br):
 class BigTree:
     """16-bit Huffman tree with a 3-entry recent-value cache (escape leaves)."""
 
-    def __init__(self, br):
+    def __init__(self, br: Bits) -> None:
         self.present = br.bit()
         if not self.present:
             return
         low = read_small_tree(br)
         high = read_small_tree(br)
         esc = [br.bits(16) for _ in range(3)]
-        self.vals, self.last = [], [-1, -1, -1]
+        self.vals: list[int] = []
+        self.last = [-1, -1, -1]
 
-        def rec():
+        def rec() -> int:
             if not br.bit():                   # leaf
                 v = small_decode(low, br) | (small_decode(high, br) << 8)
                 idx = len(self.vals)
@@ -110,12 +115,12 @@ class BigTree:
                 self.last[i] = len(self.vals)
                 self.vals.append(0)
 
-    def reset(self):
+    def reset(self) -> None:
         if self.present:
             for i in range(3):
                 self.vals[self.last[i]] = 0
 
-    def get(self, br):
+    def get(self, br: Bits) -> int:
         if not self.present:
             return 0
         vals, i = self.vals, 0
@@ -135,7 +140,7 @@ class BigTree:
 class Smacker:
     """Decodes one SMK2/SMK4 stream; ``img`` holds the current frame as palette-index bytes."""
 
-    def __init__(self, data):
+    def __init__(self, data: bytes) -> None:
         self.d = data
         (sig, self.w, self.h, self.nframes, self.rate,
          self.flags) = struct.unpack_from('<4sIIIiI', data, 0)
@@ -150,7 +155,8 @@ class Smacker:
         tp = 104 + 5 * n
         br = Bits(data[tp:tp + trees_size])
         self.mmap, self.mclr, self.full, self.type = (BigTree(br) for _ in range(4))
-        self.offsets, o = [], tp + trees_size
+        self.offsets: list[int] = []
+        o = tp + trees_size
         for s in self.sizes:
             self.offsets.append(o)
             o += s & ~3
@@ -158,7 +164,7 @@ class Smacker:
         self.img = bytearray(self.w * self.h)
         self.cur = -1
 
-    def _palette(self, chunk):
+    def _palette(self, chunk: bytes) -> None:
         old, pal = self.pal[:], self.pal
         p, sz = 0, 0
         while sz < 256 and p < len(chunk):
@@ -181,7 +187,7 @@ class Smacker:
                 p += 2
                 sz += 1
 
-    def decode_next(self):
+    def decode_next(self) -> None:
         self.cur += 1
         i = self.cur
         o, end = self.offsets[i], self.offsets[i] + (self.sizes[i] & ~3)
@@ -195,7 +201,7 @@ class Smacker:
                 o += struct.unpack_from('<I', self.d, o)[0]
         self._video(Bits(self.d[o:end]))
 
-    def _video(self, br):
+    def _video(self, br: Bits) -> None:
         w, img = self.w, self.img
         bw, bh = self.w // 4, self.h // 4
         for t in (self.mmap, self.mclr, self.full, self.type):
@@ -256,7 +262,7 @@ class Smacker:
                 blk += 1
                 run -= 1
 
-    def rgb(self, scale_down=1):
+    def rgb(self, scale_down: int = 1) -> tuple[int, int, bytearray]:
         pal, img, w, h = self.pal, self.img, self.w, self.h
         out = bytearray()
         for y in range(0, h, scale_down):
@@ -265,7 +271,7 @@ class Smacker:
                 out += bytes(pal[c * 3:c * 3 + 3])
         return w // scale_down, h // scale_down, out
 
-    def decode_to(self, k):
+    def decode_to(self, k: int) -> None:
         """Decode forward to frame ``k`` (frames are deltas); restarts from 0 if ``k`` is behind."""
         if k < self.cur:
             self.__init__(self.d)

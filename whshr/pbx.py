@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Parses unpacked .PBX containers (textures, meshes, embedded sprite files) and extracts them.
 
 Usage: pbx_extract.py <WARFB dir> <out dir> [BATTLE ...]   # writes <out>/<BATTLE>/<GRND|SCENERY|SPRITES>/
@@ -9,6 +10,8 @@ Output per PBX: files/ (embedded .bop/.fol/.pal, byte-exact), textures/*.png, me
 sprites/<NAME>.png). Container layout: see notes/pbx_rnc.md.
 """
 import glob, json, os, struct, sys
+from collections.abc import Sequence
+from os import PathLike
 from typing import Any
 
 from . import rnc as pbx_rnc
@@ -17,23 +20,28 @@ from .sprites import decode_frame
 
 MAGIC = b'\x60\x75\x45\xc8'
 
+Mesh = dict[str, Any]  # parse_mesh's result: nv, nn, verts, normals, faces, ftex, uv, offset, end (+ name)
+Texture = dict[str, Any]  # name, w, h, palette, pixels, palette_size, trailer
+Cell = tuple[int, int, bytes | None]  # (width, height, rgb bytes)
+
 
 class PbxError(Exception):
     pass
 
 
-def u32s(d, o, n=1):
+def u32s(d: bytes, o: int, n: int = 1) -> tuple[int, ...]:
     return struct.unpack_from('<%dI' % n, d, o)
 
 
-def parse_mesh(d, o, version):
+def parse_mesh(d: bytes, o: int, version: int) -> Mesh:
     """Mesh blob. v2 faces: u32 k, u32 k, k*(u32 vertex, u32 normal); v1 faces: u32 k, k pairs."""
     nv, nn = u32s(d, o, 2)
     p = o + 8
     verts = struct.unpack_from('<%df' % (3 * nv), d, p); p += 12 * nv
     normals = struct.unpack_from('<%df' % (3 * nn), d, p); p += 12 * nn
     nf, nref = u32s(d, p, 2); p += 8
-    faces, refs = [], 0
+    faces: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+    refs = 0
     for _ in range(nf):
         if version == 2:
             k, k2 = u32s(d, p, 2); p += 8
@@ -68,7 +76,7 @@ def parse_container(d: bytes) -> dict[str, Any]:
     else:
         version = 1                                   # only MESH/BF004/GRND.PBX (unused by scripts)
         unk4, unk8, ntex, pix_total, pal_total = u32s(d, 4, 5)
-        nmesh, nfile = None, 0
+        nmesh, nfile = 0, 0
         res['header'] = dict(version=0, unk4=unk4, unk8=unk8, textures=ntex,
                              texture_pixel_bytes=pix_total, texture_palette_bytes=pal_total)
         o = 24
@@ -153,12 +161,13 @@ def parse_container(d: bytes) -> dict[str, Any]:
 
 # ---------------------------------------------------------------- rendering helpers
 
-def texture_rgb(tex):
+def texture_rgb(tex: Texture) -> bytes:
     pal = tex['palette']
     return b''.join(bytes(pal[i]) for i in tex['pixels'])
 
 
-def sheet(cells, cell_w, cell_h, cols, bg=(40, 40, 48)):
+def sheet(cells: Sequence[Cell], cell_w: int, cell_h: int, cols: int,
+          bg: tuple[int, int, int] = (40, 40, 48)) -> tuple[int, int, bytes]:
     """cells: list of (w, h, rgb bytes or None). Returns (W, H, rgb)."""
     rows = max(1, (len(cells) + cols - 1) // cols)
     W, H = cols * (cell_w + 2), rows * (cell_h + 2)
@@ -174,7 +183,7 @@ def sheet(cells, cell_w, cell_h, cols, bg=(40, 40, 48)):
     return W, H, bytes(img)
 
 
-def scale_rgb(w, h, rgb, f):
+def scale_rgb(w: int, h: int, rgb: bytes, f: int) -> tuple[int, int, bytes]:
     out = bytearray()
     for y in range(h * f):
         src = rgb[(y // f) * w * 3:((y // f) + 1) * w * 3]
@@ -182,7 +191,7 @@ def scale_rgb(w, h, rgb, f):
     return w * f, h * f, bytes(out)
 
 
-def render_mesh(mesh, textures, size, view):
+def render_mesh(mesh: Mesh, textures: Sequence[Texture], size: int, view: str) -> bytes:
     """Orthographic textured render. view 'front': screen x=X, y=Y (up); 'top': x=X, y=Z.
     Black texels (RGB 0,0,0) are treated as transparent when the texture trailer flag
     (v2 trailer[2]) is 1 - a hypothesis (D3DRM decal transparency), checked only visually."""
@@ -234,7 +243,7 @@ def render_mesh(mesh, textures, size, view):
     return bytes(img)
 
 
-def write_obj(path, mesh, textures, mtl_name):
+def write_obj(path: str | PathLike[str], mesh: Mesh, textures: Sequence[Texture], mtl_name: str) -> None:
     V, N, UV = mesh['verts'], mesh['normals'], mesh['uv']
     out = ['# %s (from .PBX)' % mesh['name'], 'mtllib %s' % mtl_name]
     out += ['v %g %g %g' % V[i:i + 3] for i in range(0, len(V), 3)]
@@ -249,7 +258,7 @@ def write_obj(path, mesh, textures, mtl_name):
     open(path, 'w').write('\n'.join(out) + '\n')
 
 
-def mtl_ident(name, i):
+def mtl_ident(name: str, i: int) -> str:
     return 't%02d_%s' % (i, os.path.splitext(name)[0])
 
 
@@ -268,7 +277,8 @@ def find_ci(root: str, *parts: str) -> str | None:
     return cur
 
 
-def decode_sprite_sets(files, rgb_pal, outdir=None, max_frames=16, scale=2):
+def decode_sprite_sets(files: Sequence[tuple[str, bytes]], rgb_pal: Sequence[tuple[int, int, int]],
+                       outdir: str | None = None, max_frames: int = 16, scale: int = 2) -> tuple[int, int, int]:
     """Decodes all frames of every .fol/.bop pair. Returns (sets, frames_ok, frames_err)."""
     by = {n.lower(): b for n, b in files}
     sets = ok = err = 0
@@ -283,7 +293,7 @@ def decode_sprite_sets(files, rgb_pal, outdir=None, max_frames=16, scale=2):
         cmaps = [pd[i:i + 512] for i in range(0, len(pd), 512)] if pd and len(pd) % 512 == 0 else []
         recs = [struct.unpack_from('<hhhhIB', fol, i * 16) for i in range(len(fol) // 16)]
         offs = sorted(set(r[4] for r in recs)) + [len(bop)]
-        cells = []
+        cells: list[Cell] = []
         for fi, r in enumerate(recs):
             try:
                 px = decode_frame(bop, r, offs[offs.index(r[4]) + 1], cmaps)
@@ -352,8 +362,8 @@ def extract_pbx(path: str, outdir: str | None, rgb_pal: Any, write: bool = True)
             cells = []
             for m in c['meshes']:
                 cells.append((size, size, render_mesh(m, c['textures'], size, view)))
-            W, H, rgb = sheet(cells, size, size, min(8, len(cells)))
-            write_png(os.path.join(outdir, 'meshes_%s.png' % view), W, H, rgb)
+            sheet_w, sheet_h, sheet_rgb = sheet(cells, size, size, min(8, len(cells)))
+            write_png(os.path.join(outdir, 'meshes_%s.png' % view), sheet_w, sheet_h, sheet_rgb)
             st['png'] += 1
         for m in c['meshes']:
             write_obj(os.path.join(md, os.path.splitext(m['name'])[0] + '.obj'), m, c['textures'],
@@ -370,7 +380,7 @@ def extract_pbx(path: str, outdir: str | None, rgb_pal: Any, write: bool = True)
     return st
 
 
-def main(argv):
+def main(argv: list[str]) -> None:
     check = argv[0] == '--check'
     if check:
         argv = argv[1:]
@@ -378,10 +388,12 @@ def main(argv):
     out = '' if check else argv[1]
     only = set(a.upper() for a in argv[1 if check else 2:])
     pal_path = find_ci(warfb, 'UPDATE', 'BINARY', 'STANDARD.PAL') or find_ci(warfb, 'FILE', 'BINARY', 'STANDARD.PAL')
+    if pal_path is None:
+        raise FileNotFoundError('no STANDARD.PAL under %s' % warfb)
     rgb_pal = load_rgb_palette(pal_path)
     mesh_dir = find_ci(warfb, 'FILE', 'MESH')
     if mesh_dir is None:
-        raise SystemExit('no FILE/MESH directory under %s' % warfb)
+        raise FileNotFoundError('no FILE/MESH directory under %s' % warfb)
     files = sorted(glob.glob(os.path.join(mesh_dir, '*', '*.[Pp][Bb][Xx]')))
     tot = {}
     for f in files:

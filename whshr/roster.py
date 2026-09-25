@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Company roster: the static per-``whoami`` RMYI table, the starting company (STRTARMY.MRC),
 and writing the engine's own roster/marching-order saves.
 
@@ -12,11 +13,13 @@ convenient current implementation choice, not a compatibility commitment (GEI14 
 save/load design).
 """
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from os import PathLike
 from pathlib import Path
 
 from .paths import Installation
-from .rules import PeImage, stat_fields
+from .rules import PeImage, StatFields, stat_fields, stat_int
 from . import script
 
 # WHSHR.EXE .data VA of the 39-record RMYI table (record 38 is the -1 terminator); notes/campaign.md §4.5.
@@ -37,11 +40,11 @@ class RosterRow:
     base_price: int
 
 
-def static_roster(installation):
+def static_roster(installation: Installation | str | PathLike[str]) -> dict[int, RosterRow]:
     """The 38 RMYI rows read from WHSHR.EXE, keyed by whoami."""
     game = installation if isinstance(installation, Installation) else Installation(installation)
     image = PeImage(game.require("WHSHR.EXE"))
-    rows = {}
+    rows: dict[int, RosterRow] = {}
     for whoami in range(RMYI_COUNT - 1):
         record = image.u32(RMYI_VA + RMYI_STRIDE * whoami, 13)
         rows[whoami] = RosterRow(whoami, keep=bool(record[0]), for_hire=bool(record[1]),
@@ -63,22 +66,22 @@ class Regiment:
     weapon_name: int = 0
     armour: int = 0
     banner: str | None = None
-    profile: tuple = ()
+    profile: tuple[int, ...] = ()
     experience: int = 0
     leader_name: str | None = None
     leader_portrait: str | None = None
-    leader_profile: tuple = ()
+    leader_profile: tuple[int, ...] = ()
     leader_armour: int = 0
     leader_weapon: int = 0
-    raw: object = field(default=None, repr=False, compare=False)  # the parse() node, for write_company/write_march
+    raw: script.Node | None = field(default=None, repr=False, compare=False)  # the parse() node, for write_company/write_march
 
     @property
-    def destroyed(self):
+    def destroyed(self) -> bool:
         """notes/troop_selection.md §3.4: artillery with fewer than 2 models, otherwise 0 models."""
         return self.models < 2 if self.row.artillery else self.models <= 0
 
     @property
-    def price(self):
+    def price(self) -> int:
         """notes/campaign.md §2.3: price per model x current models.
 
         Routed models (``s_routed``) are not tracked yet: a freshly loaded company always has
@@ -88,12 +91,20 @@ class Regiment:
         return self.row.base_price * self.models
 
     @property
-    def retainer(self):
+    def retainer(self) -> int:
         """10% of price; notes/campaign.md §2.3."""
         return self.price // 10
 
 
-def load_company(installation, roster=None, path=STARTING_COMPANY):
+def _stat(fields: StatFields, name: str) -> int:
+    return stat_int(fields, name) or 0
+
+
+_PROFILE_STATS = ("s_move", "s_wepn", "s_bals", "s_strn", "s_tuff", "s_wnds", "s_init", "s_atks", "s_lead")
+
+
+def load_company(installation: Installation | str | PathLike[str], roster: Mapping[int, RosterRow] | None = None,
+                 path: Sequence[str] = STARTING_COMPANY) -> tuple[Regiment, ...]:
     """Load a company .MRC (``STRTARMY.MRC`` for a new campaign) into ``Regiment`` records.
 
     ``roster`` may be supplied directly (a ``{whoami: RosterRow}`` mapping) to avoid reading
@@ -102,56 +113,57 @@ def load_company(installation, roster=None, path=STARTING_COMPANY):
     game = installation if isinstance(installation, Installation) else Installation(installation)
     roster = roster if roster is not None else static_roster(game)
     root = script.parse(str(game.file_dir(*path)))
-    regiments = []
+    regiments: list[Regiment] = []
     for node in script.units_of(root):
         unit = script.unit_view(node)
         whoami = unit["set"].get("whoami")
-        row = roster.get(whoami) if whoami is not None else None
+        if whoami is None:
+            continue
+        row = roster.get(whoami)
         if row is None:
             continue
         fields = stat_fields(unit["stats"])[0]
         leader = unit.get("leader")
-        leader_fields = stat_fields(leader["stats"])[0] if leader is not None else {}
+        leader_fields: StatFields = stat_fields(leader["stats"])[0] if leader is not None else {}
         regiments.append(Regiment(
             whoami=whoami, name=unit["name"], hired=bool(unit["set"].get("hired", 0)),
-            models=fields.get("s_size", 0), orgsize=fields.get("s_orgsize", 0),
-            points=fields.get("s_pntval", 0), row=row,
-            weapon_name=fields.get("s_weponame", 0), armour=fields.get("s_armr", 0),
+            models=_stat(fields, "s_size"), orgsize=_stat(fields, "s_orgsize"),
+            points=_stat(fields, "s_pntval"), row=row,
+            weapon_name=_stat(fields, "s_weponame"), armour=_stat(fields, "s_armr"),
             banner=unit.get("banner"),
-            profile=tuple(fields.get(name, 0) for name in
-                          ("s_move", "s_wepn", "s_bals", "s_strn", "s_tuff", "s_wnds", "s_init", "s_atks", "s_lead")),
+            profile=tuple(_stat(fields, name) for name in _PROFILE_STATS),
             # s_Exp is a scalar `set:` field (FORMATS.md's unit block), not a `setstats:`
             # block entry, so it lives in unit["set"], not unit["stats"]; Army Records
             # displays it (§8, campaign.md §1).
             experience=unit["set"].get("s_Exp", 0),
             leader_name=leader["name"] if leader else None,
             leader_portrait=leader["portrait"] if leader else None,
-            leader_profile=tuple(leader_fields.get(name, 0) for name in
-                                 ("s_move", "s_wepn", "s_bals", "s_strn", "s_tuff", "s_wnds", "s_init", "s_atks", "s_lead")),
-            leader_armour=leader_fields.get("s_armr", 0),
-            leader_weapon=leader_fields.get("s_weponame", 0),
+            leader_profile=tuple(_stat(leader_fields, name) for name in _PROFILE_STATS),
+            leader_armour=_stat(leader_fields, "s_armr"),
+            leader_weapon=_stat(leader_fields, "s_weponame"),
             raw=node,
         ))
     return tuple(regiments)
 
 
-def _unit_section(units, label):
+def _unit_section(units: Sequence[script.Node], label: str) -> script.Node:
     """A [MERCARMY]/[UNITS] root wrapping ``units`` (raw addunit nodes); notes/campaign.md §4.4."""
-    units_section = {'kind': 'section', 'name': 'UNITS', 'line': 0, 'label': label,
+    units_section: script.Node = {'kind': 'section', 'name': 'UNITS', 'line': 0, 'label': label,
                      'set': {'count': str(len(units))}, 'stats': {}, 'cmds': [], 'children': list(units)}
     return {'kind': 'section', 'name': 'MERCARMY', 'line': 0, 'label': None,
            'set': {}, 'stats': {}, 'cmds': [], 'children': [units_section]}
 
 
-def _with_hired(node, hired):
+def _with_hired(node: script.Node, hired: bool) -> script.Node:
     """A shallow copy of ``node`` with its ``set:hired`` value replaced; never mutates ``node``."""
-    copy = dict(node)
+    copy = node.copy()
     copy['set'] = dict(node['set'])
     copy['set']['hired'] = '1' if hired else '0'
     return copy
 
 
-def write_company(save_dir, regiments, hired, filename="ARMY.MRC"):
+def write_company(save_dir: str | PathLike[str], regiments: Iterable[Regiment], hired: Mapping[int, bool],
+                  filename: str = "ARMY.MRC") -> None:
     """Write the company roster (notes/troop_selection.md §5.3 point 5: hired regiments only).
 
     ``save_dir`` is the engine's own save directory (never the original installation: this
@@ -165,15 +177,19 @@ def write_company(save_dir, regiments, hired, filename="ARMY.MRC"):
     _write_units_file(save_dir, filename, units, "Mercenary Army")
 
 
-def write_march(save_dir, ordered_whoami, regiments, filename="MARCH.MRC"):
+def write_march(save_dir: str | PathLike[str], ordered_whoami: Iterable[int], regiments: Iterable[Regiment],
+                filename: str = "MARCH.MRC") -> None:
     """Write the marching order (notes/troop_selection.md §5.3 point 3), in list order."""
     by_whoami = {regiment.whoami: regiment for regiment in regiments}
-    units = [_with_hired(by_whoami[whoami].raw, True) for whoami in ordered_whoami
-             if by_whoami.get(whoami) is not None and by_whoami[whoami].raw is not None]
+    units: list[script.Node] = []
+    for whoami in ordered_whoami:
+        regiment = by_whoami.get(whoami)
+        if regiment is not None and regiment.raw is not None:
+            units.append(_with_hired(regiment.raw, True))
     _write_units_file(save_dir, filename, units, "Mercenary Army (Marching Orders)")
 
 
-def _write_units_file(save_dir, filename, units, label):
+def _write_units_file(save_dir: str | PathLike[str], filename: str, units: Sequence[script.Node], label: str) -> None:
     target = Path(save_dir) / filename
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(script.write(_unit_section(units, label)))

@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Parser and extractor for Mindscape Omni '.SI' containers (RIFF 'MxSt', version 1.0).
 
 The .SI files in REMOTE/BINARY/ANIM hold the cutscenes: one Smacker video, sound effects,
@@ -21,6 +22,14 @@ Container layout (verified on all 30 files):
       pad                        fills the file up to a multiple of 64 KB
 """
 import glob, hashlib, json, os, struct
+from collections.abc import Iterator
+from os import PathLike
+from typing import Any
+
+Obj = dict[str, Any]  # one MxOb object (recursive: 'children')
+Si = dict[str, Any]  # load_si's result: header, root object, chunks, coverage stats
+Stream = dict[str, Any]  # assemble_streams' per-object stream: header, frames, end, split_chunks
+PathArg = str | PathLike[str]
 
 BUFFER = 0x10000          # buffer size: files and 'pad ' chunks align to 64 KB
 
@@ -35,11 +44,11 @@ CH_END = 0x02             # end of stream marker (no data, time = end time)
 CH_SPLIT = 0x10           # piece of a chunk split across a buffer boundary
 
 
-def u32(d, o):
+def u32(d: bytes, o: int) -> int:
     return struct.unpack_from('<I', d, o)[0]
 
 
-def cstr(d, o):
+def cstr(d: bytes, o: int) -> tuple[str, int]:
     e = d.index(b'\0', o)
     return d[o:e].decode('latin-1'), e + 1
 
@@ -48,9 +57,9 @@ def cstr(d, o):
 # MxOb: object tree
 # ---------------------------------------------------------------------------
 
-def parse_object(d, o, end):
+def parse_object(d: bytes, o: int, end: int) -> Obj:
     """Parses one MxOb payload d[o:end]. Returns a dict (recursive for containers)."""
-    ob = {'type': struct.unpack_from('<H', d, o)[0]}
+    ob: Obj = {'type': struct.unpack_from('<H', d, o)[0]}
     ob['type_name'] = TYPE_NAMES.get(ob['type'], '?')
     o += 2
     # LEGO Island: sourceName (cstr), u32 unk14. v1.0 has one more byte; parsed as an
@@ -73,7 +82,7 @@ def parse_object(d, o, end):
             var, p = cstr(d, p)
             n = u32(d, p)
             p += 4
-            choices = []
+            choices: list[str] = []
             for _ in range(n):
                 c, p = cstr(d, p)
                 choices.append(c)
@@ -104,7 +113,7 @@ def parse_object(d, o, end):
     return ob
 
 
-def walk_objects(ob):
+def walk_objects(ob: Obj) -> Iterator[Obj]:
     yield ob
     for c in ob.get('children', []):
         yield from walk_objects(c)
@@ -114,14 +123,14 @@ def walk_objects(ob):
 # RIFF structure + chunks
 # ---------------------------------------------------------------------------
 
-def load_si(path):
+def load_si(path: PathArg) -> Si:
     """Parses a .SI file. Returns a dict with header, root object, chunks and coverage stats."""
     d = open(path, 'rb').read()
-    si = {'path': path, 'size': len(d), 'unknown_chunks': [], 'gaps': [], 'pads': 0,
+    si: Si = {'path': path, 'size': len(d), 'unknown_chunks': [], 'gaps': [], 'pads': 0,
           'pad_bytes': 0, 'chunks': []}
     covered = 0
 
-    def fail(msg):
+    def fail(msg: str) -> Any:
         raise ValueError('%s: %s' % (os.path.basename(path), msg))
 
     if d[:4] != b'RIFF' or d[8:12] != b'MxSt':
@@ -167,7 +176,7 @@ def load_si(path):
     return si
 
 
-def parse_data_list(d, o, end, si):
+def parse_data_list(d: bytes, o: int, end: int, si: Si) -> int:
     """Parses LIST 'MxDa' contents. Returns number of bytes covered."""
     covered = 0
     while o < end:
@@ -195,10 +204,11 @@ def parse_data_list(d, o, end, si):
     return covered
 
 
-def assemble_streams(si):
+def assemble_streams(si: Si) -> dict[int, Stream]:
     """Joins split chunks. Returns {id: {'header': bytes|None, 'frames': [(time, data)],
     'end': time|None, 'pieces': n}}."""
-    streams, pending = {}, {}
+    streams: dict[int, Stream] = {}
+    pending: dict[int, dict[str, Any]] = {}
     for ch in si['chunks']:
         st = streams.setdefault(ch['id'], {'header': None, 'frames': [], 'end': None,
                                            'split_chunks': 0})
@@ -234,7 +244,7 @@ def assemble_streams(si):
 # Rebuilding media files
 # ---------------------------------------------------------------------------
 
-def smk_info(header):
+def smk_info(header: bytes) -> dict[str, Any]:
     sig, w, h, nf, rate, flags = struct.unpack_from('<4sIIIiI', header, 0)
     trees = u32(header, 52)
     n = nf + (flags & 1)                       # ring frame adds one entry
@@ -246,7 +256,7 @@ def smk_info(header):
             'header_len_expected': 104 + 5 * n + trees, 'frame_sizes': sizes}
 
 
-def build_smk(ob, st):
+def build_smk(ob: Obj, st: Stream) -> tuple[bytes, dict[str, Any]]:
     """Header chunk = Smacker header + frame size/type tables + Huffman trees; each data
     chunk = one frame. Looped films (loops > 1) store the frames again for every loop:
     f0..f(n-1), then (ring, f1..f(n-1)) per extra loop. Only the first pass is written."""
@@ -276,11 +286,11 @@ def build_smk(ob, st):
     return st['header'] + b''.join(frames[:n]), info
 
 
-def build_wav(ob, st):
+def build_wav(ob: Obj, st: Stream) -> tuple[bytes, dict[str, Any]]:
     """Header chunk (24 B) = PCM WAVEFORMAT (16 B) + u32 data size of the original file
     + u32 44 (hypothesis: original WAV header size). Data chunks = raw PCM, 1 s each."""
     h = st['header']
-    tag, ch, rate, bps, align, bits = struct.unpack_from('<HHIIHH', h, 0)
+    tag, ch, rate, bps, _align, bits = struct.unpack_from('<HHIIHH', h, 0)
     orig_size, unk = struct.unpack_from('<II', h, 16)
     pcm = b''.join(f[1] for f in st['frames'])
     fmt = h[:16]
@@ -293,17 +303,21 @@ def build_wav(ob, st):
     return wav, info
 
 
-def mids_to_smf(blob):
+def mids_to_smf(blob: bytes) -> tuple[bytes, dict[str, Any]]:
     """Converts a RIFF 'MIDS' (MCI MIDI stream buffers) to a format-0 Standard MIDI File.
     Returns (smf_bytes, info)."""
     if blob[:4] != b'RIFF' or blob[8:12] != b'MIDS':
         raise ValueError('not RIFF MIDS')
-    o, events, fmt = 12, [], None
+    o = 12
+    events: list[tuple[int, str, Any]] = []
+    fmt: tuple[int, ...] | None = None
     while o + 8 <= len(blob):
         t, s = struct.unpack_from('<4sI', blob, o)
         if t == b'fmt ':
             fmt = struct.unpack_from('<III', blob, o + 8)      # time format, max buffer, flags
         elif t == b'data':
+            if fmt is None:
+                raise ValueError('MIDS data before fmt')
             nblocks = u32(blob, o + 8)
             p, tick = o + 12, None
             for _ in range(nblocks):
@@ -334,7 +348,7 @@ def mids_to_smf(blob):
     if fmt is None:
         raise ValueError('MIDS without fmt')
 
-    def vlq(v):
+    def vlq(v: int) -> bytes:
         out = [v & 0x7F]
         v >>= 7
         while v:
@@ -358,12 +372,12 @@ def mids_to_smf(blob):
     trk += b'\x00\xff\x2f\x00'
     smf = (b'MThd' + struct.pack('>IHHH', 6, 0, 1, fmt[0] & 0x7FFF)
            + b'MTrk' + struct.pack('>I', len(trk)) + trk)
-    notes = sum(1 for t, k, v in events if k == 'short' and v & 0xF0 == 0x90 and v >> 16 & 0x7F)
+    notes = sum(1 for _, k, v in events if k == 'short' and v & 0xF0 == 0x90 and v >> 16 & 0x7F)
     return smf, {'division': fmt[0], 'mids_flags': fmt[2], 'events': len(events), 'note_ons': notes,
                  'ticks': last}
 
 
-def build_evt(ob, st):
+def build_evt(ob: Obj, st: Stream) -> dict[str, Any]:
     """Header chunk (12 B) = u32 record count, u32 fields per record, u32 fps (8).
     Every data chunk = one record of u32 fields, one per tick (125 ms)."""
     count, nfields, fps = struct.unpack('<III', st['header'])
@@ -374,18 +388,18 @@ def build_evt(ob, st):
             'columns': ['time_ms'] + ['f%d' % i for i in range(nfields)], 'rows': rows}
 
 
-def safe(name):
+def safe(name: str) -> str:
     return ''.join(c if c.isalnum() or c in '._-' else '_' for c in name)
 
 
-def process_si(path, outdir=None):
+def process_si(path: PathArg, outdir: PathArg | None = None) -> dict[str, Any]:
     """Parses + rebuilds all objects of one .SI. Writes files if outdir is given.
     Returns a summary dict (also used by --check)."""
     si = load_si(path)
     streams = assemble_streams(si)
     base = os.path.splitext(os.path.basename(path))[0]
     objs = {o['id']: o for o in walk_objects(si['root'])}
-    problems = []
+    problems: list[str] = []
     if si['covered'] != si['size']:
         problems.append('coverage %d != size %d' % (si['covered'], si['size']))
     if si['unknown_chunks']:
@@ -394,13 +408,14 @@ def process_si(path, outdir=None):
         problems.append('streams without object: %r' % sorted(set(streams) - set(objs)))
     if si['size'] % BUFFER:
         problems.append('file size not a multiple of 64 KB')
+    od = os.path.join(outdir, base) if outdir else ''
     if outdir:
-        od = os.path.join(outdir, base)
         os.makedirs(od, exist_ok=True)
-    written, seen = {}, {}
+    written: dict[int, Obj] = {}
+    seen: dict[str, str] = {}
     for oid, ob in sorted(objs.items()):
         st = streams.get(oid)
-        entry = {k: v for k, v in ob.items() if k != 'children'}
+        entry: Obj = {k: v for k, v in ob.items() if k != 'children'}
         if 'children' in ob:
             entry['children'] = [c['id'] for c in ob['children']]
         if st is None:
@@ -413,8 +428,9 @@ def process_si(path, outdir=None):
                            'bytes': sum(len(f[1]) for f in st['frames'])}
         if st['end'] is None:
             problems.append('object %d %s has no end-of-stream chunk' % (oid, ob['name']))
+        ext = ''
         try:
-            fmt, blob, ext = ob.get('format'), None, None
+            fmt, blob, ext = ob.get('format'), None, ''
             if ob['type'] in CONTAINER_TYPES:
                 if st['frames'] or st['header'] is not None:
                     problems.append('container %d has data' % oid)
@@ -459,7 +475,7 @@ def process_si(path, outdir=None):
             # from a process_si() summary, without writing temporary files.
             entry['blob'] = blob
         written[oid] = entry
-    summary = {'file': os.path.basename(path), 'size': si['size'], 'version': si['version'],
+    summary: dict[str, Any] = {'file': os.path.basename(path), 'size': si['size'], 'version': si['version'],
                'hd_unk': si['hd_unk'], 'chunks': len(si['chunks']), 'pads': si['pads'],
                'pad_bytes': si['pad_bytes'], 'gaps': si['gaps'], 'objects': written,
                'problems': problems}
@@ -476,13 +492,13 @@ def process_si(path, outdir=None):
 # CLI
 # ---------------------------------------------------------------------------
 
-def si_files(p):
+def si_files(p: str) -> list[str]:
     if os.path.isdir(p):
         return sorted(f for f in glob.glob(os.path.join(p, '*')) if f.upper().endswith('.SI'))
     return [p]
 
 
-def describe(e):
+def describe(e: Obj) -> str:
     """One-line description of an object for listings and the index."""
     if 'smk' in e:
         s = e['smk']
@@ -508,14 +524,14 @@ def describe(e):
     return ''
 
 
-def cmd_list(path):
+def cmd_list(path: PathArg) -> None:
     s = process_si(path)
     objs = s['objects']
     print('%s: %d B, version 0x%08x, MxHd unk 0x%x, %d MxCh, %d pad chunks (%d B), gaps %r' % (
         s['file'], s['size'], s['version'], s['hd_unk'], s['chunks'], s['pads'], s['pad_bytes'],
         s['gaps']))
 
-    def show(oid, depth):
+    def show(oid: int, depth: int) -> None:
         e = objs[oid]
         print('%s[%d] %-14s %-26s %-28s start %6d dur %6d  %s' % (
             '  ' * depth, oid, e['type_name'], e['name'], e.get('file', ''), e['start'],
@@ -528,9 +544,10 @@ def cmd_list(path):
         print('PROBLEM:', p)
 
 
-def cmd_check(anim):
+def cmd_check(anim: str) -> bool:
     files = si_files(anim)
-    totals, bad = {}, 0
+    totals: dict[str, int] = {}
+    bad = 0
     for f in files:
         s = process_si(f)
         for e in s['objects'].values():
@@ -549,7 +566,7 @@ def cmd_check(anim):
     return bad == 0
 
 
-def cmd_extract(src, out):
+def cmd_extract(src: str, out: str) -> None:
     os.makedirs(out, exist_ok=True)
     lines = ['# .SI index (generated by scripts/si_omni.py)', '',
              '| SI | id | type | name | source file | start ms | dur ms | output | details |',
@@ -570,7 +587,7 @@ def cmd_extract(src, out):
     print('index:', os.path.join(out, 'INDEX.md'))
 
 
-def main(argv):
+def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[0] == '--check':
         return 0 if cmd_check(argv[1]) else 1
     if len(argv) == 2 and argv[0] == '--list':
