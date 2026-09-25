@@ -60,7 +60,7 @@ class BattleGrid:
     its stable `ModelState.uid`, never by its list index, so a casualty cannot silently re-point a
     surviving pairing at a different model."""
 
-    def __init__(self, owner_id: str, x: float, y: float, direction: int, width: int) -> None:
+    def __init__(self, owner_id: str, x: float, y: float, direction: float, width: int) -> None:
         self.owner_id = owner_id
         self.x = x
         self.y = y
@@ -120,13 +120,6 @@ def in_bounds(row: int, col: int) -> bool:
 
 def _clamp(value: int) -> int:
     return max(0, min(GRID_SIZE - 1, value))
-
-
-def _members(battle: "Battle", group_id: str | None) -> list["Regiment"]:
-    """The regiments sharing one fight, in a fixed order (the original walks the global unit array;
-    identifier order keeps a replay deterministic)."""
-    return [battle.regiments[key] for key in sorted(battle.regiments)
-            if battle.regiments[key].melee_group == group_id and battle.regiments[key].active]
 
 
 def create(battle: "Battle", group_id: str, members: Sequence["Regiment"]) -> BattleGrid:
@@ -352,7 +345,7 @@ def release(battle: "Battle", regiment: "Regiment") -> None:
 
 
 def _grid_of(battle: "Battle", regiment: "Regiment") -> BattleGrid | None:
-    fight = battle.fights.get(regiment.melee_group)
+    fight = battle.fights.get(regiment.melee_group) if regiment.melee_group is not None else None
     return fight.get("grid") if fight else None
 
 

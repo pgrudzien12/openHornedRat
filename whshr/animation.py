@@ -299,7 +299,7 @@ FULL_TURN = 512
 MAX_SLEW = 32  # drawn facing turns at most 32/512 of a turn (one sprite direction) per tick
 
 
-def slew_facing(current: int | None, target: int) -> int:
+def slew_facing(current: float | None, target: float) -> float:
     """Turn the drawn facing `current` toward `target` (both 0-511) by at most `MAX_SLEW`."""
     if current is None:
         return target % FULL_TURN

@@ -161,7 +161,7 @@ class PursuitTests(unittest.TestCase):
         battle = Battle(1000, 1000, [winner, loser], seed=0)
         _join_fight(battle, "g", winner, loser)
 
-        combat._start_rout(loser, battle)
+        combat.start_rout(loser, battle)
 
         self.assertEqual(winner.attack_target, "l")
         self.assertIn("pursuit_start", [e.kind for e in battle.events])
@@ -173,7 +173,7 @@ class PursuitTests(unittest.TestCase):
         battle = Battle(1000, 1000, [winner, loser, other], seed=0)
         _join_fight(battle, "g", winner, loser, other)
 
-        combat._start_rout(loser, battle)
+        combat.start_rout(loser, battle)
 
         self.assertIsNone(winner.attack_target)
         self.assertNotIn("pursuit_start", [e.kind for e in battle.events])
@@ -185,7 +185,7 @@ class PursuitTests(unittest.TestCase):
         loser = _regiment("l", 0, 12, Side.ENEMY, initiative=5, speed_per_tick=1.0)
         battle = Battle(1000, 1000, [winner, loser], seed=0)
         _join_fight(battle, "g", winner, loser)
-        combat._start_rout(loser, battle)
+        combat.start_rout(loser, battle)
         self.assertEqual(winner.attack_target, "l")
 
         combat.refresh_melee_state(battle)
@@ -200,7 +200,7 @@ class PursuitTests(unittest.TestCase):
         battle = Battle(1000, 1000, [archers, loser], seed=0)
         _join_fight(battle, "g", archers, loser)
 
-        combat._start_rout(loser, battle)
+        combat.start_rout(loser, battle)
 
         self.assertIsNone(archers.attack_target)
 
@@ -213,7 +213,7 @@ class RoutPauseTests(unittest.TestCase):
         fleeing.melee_models[0].stagger = 0
         fleeing.melee_models[1].stagger = 7
 
-        combat._start_rout(fleeing, battle)
+        combat.start_rout(fleeing, battle)
 
         self.assertEqual([model.rout_pause_ticks for model in fleeing.melee_models], [6, 27])
         self.assertEqual(fleeing.positions, [(before[0][0] - 1, before[0][1] - 1),
@@ -225,7 +225,7 @@ class RoutPauseTests(unittest.TestCase):
         before = fleeing.model_positions()[0]
         fleeing.melee_models[0].at_rest = False
 
-        combat._start_rout(fleeing, battle)
+        combat.start_rout(fleeing, battle)
 
         self.assertEqual(fleeing.melee_models[0].rout_pause_ticks, 0)
         self.assertEqual(fleeing.positions[0], before)
@@ -241,7 +241,7 @@ class RoutPauseTests(unittest.TestCase):
         fleeing.melee_models[0].opponent = (winner.identifier, winner.melee_models[0].uid)
         winner.melee_models[0].opponent = (fleeing.identifier, fleeing.melee_models[0].uid)
 
-        combat._start_rout(fleeing, battle)
+        combat.start_rout(fleeing, battle)
 
         self.assertEqual(fleeing.melee_models[0].rout_pause_ticks, 21)
         self.assertEqual(winner.melee_models[0].rout_pause_ticks, 21)
@@ -251,7 +251,7 @@ class RoutPauseTests(unittest.TestCase):
         battle = Battle(1000, 1000, [fleeing], seed=0)
         fleeing.model_positions()
         fleeing.melee_models[0].stagger = 0
-        combat._start_rout(fleeing, battle)
+        combat.start_rout(fleeing, battle)
         before = fleeing.positions[0]
         fleeing.x += 30
 
@@ -416,7 +416,7 @@ class EngagementGeometryTests(unittest.TestCase):
         second = _regiment("b", 0, 40, Side.ENEMY, models=20, ranks=4, speed_per_tick=0.0)
         self.assertTrue(formation.penetrates(first.block(), second.block()))
 
-        Battle._turn_to(second, 256)
+        Battle.turn_to(second, 256)
 
         self.assertTrue(formation.penetrates(first.block(), second.block()))
 
@@ -543,10 +543,10 @@ class FleeBearingTests(unittest.TestCase):
         fleeing = _regiment("f", 500, 500, Side.ENEMY, speed_per_tick=4.0)
         enemy = _regiment("e", 500, 470, Side.PLAYER, speed_per_tick=0.0)
         battle = Battle(1000, 1000, [fleeing, enemy], seed=0)
-        combat._start_rout(fleeing, battle)
+        combat.start_rout(fleeing, battle)
         calls = []
-        original = battle._flee_point
-        battle._flee_point = lambda regiment: calls.append(regiment.identifier) or original(regiment)
+        original = battle.flee_point
+        battle.flee_point = lambda regiment: calls.append(regiment.identifier) or original(regiment)
 
         for _ in range(10):
             battle.tick()
@@ -561,7 +561,7 @@ class FleeBearingTests(unittest.TestCase):
                              attack_target="f")
         battle = Battle(1000, 1000, [fleeing, cavalry, infantry], seed=0)
         fleeing.routing = True
-        fleeing.flee_x, fleeing.flee_y = battle._flee_point(fleeing)
+        fleeing.flee_x, fleeing.flee_y = battle.flee_point(fleeing)
         start_x, start_y = fleeing.x, fleeing.y
 
         for _ in range(30):
@@ -892,6 +892,7 @@ class ContactAndMeleeStateTests(unittest.TestCase):
         self.assertGreater(charger.charge_counter, 0)
 
         # Leave the fight (e.g. it broke off) while `target` is still standing, then re-engage it.
+        assert charger.melee_group is not None
         battle.fights.pop(charger.melee_group, None)
         for regiment in (charger, target):
             regiment.in_melee = False

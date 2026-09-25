@@ -16,12 +16,20 @@ Missing opcodes raise NotImplementedError, which fails gracefully if a mission d
 
 from dataclasses import dataclass, field
 import math
-import struct
+import random
 from collections import deque
+from typing import TYPE_CHECKING, Any
 
 from . import behaviour
 from .battle_events import BattleEvent
+from .battle_log import BattleLogger
 from .rules import Side
+
+if TYPE_CHECKING:
+    from .engine import Battle, Regiment
+
+Words = list[int]  # one behaviour script's instruction words
+Target = tuple[str, int]  # (regiment identifier, unit id)
 
 SCATTER_RADIUS = 40.0  # world units: ScatterModelsToNode's wander distance from a node's exact
 # point; a documented placeholder (see op_ScatterModelsToNode), not a confirmed game value.
@@ -43,7 +51,7 @@ IN_MELEE_FLAG = 0x200
 DEFAULT_ATTACK_SEARCH_RANGE = 300
 
 
-def _octagonal_distance(first, second):
+def _octagonal_distance(first: "Regiment", second: "Regiment") -> float:
     """The game's cheap distance (game_rules.md, threat score): larger axis delta + half the smaller."""
     dx, dy = abs(first.x - second.x), abs(first.y - second.y)
     return max(dx, dy) + min(dx, dy) / 2
@@ -72,11 +80,11 @@ class UnitScriptState:
     script_id: int = 100  # current script (0..37 for mission, 100..170 for library)
     pc: int = 0  # program counter (word index into the script)
     restart_pc: int = 0  # saved by InitUnit/SetRestartPoint, restored by Restart
-    return_stack: list = field(default_factory=list)  # (script_id, pc) pairs for gosub/return
+    return_stack: list[tuple[int, ...]] = field(default_factory=list[tuple[int, ...]])  # (script_id, pc) pairs for gosub/return
 
     # Event handling
     current_event: Event = field(default_factory=Event)  # the event being processed this tick
-    event_queue: deque = field(default_factory=lambda: deque(maxlen=128))  # pending events
+    event_queue: deque[Event] = field(default_factory=lambda: deque[Event](maxlen=128))  # pending events
     interrupt_script: int | None = None  # set by SetInterruptScript; called by CallInterruptScript
     pending_switch: int | None = None  # set by SwitchScript; applied after event handling
 
@@ -88,14 +96,14 @@ class UnitScriptState:
     threat_range: int = 0  # set by SetThreatRange; used by threat scoring
     # The single "remembered event" slot of StoreEventInfo (game_rules.md, scripted target and flight
     # opcodes): (sender regiment identifier, event code) of the event last stored, or None.
-    remembered_event: tuple | None = None
+    remembered_event: tuple[str | None, int] | None = None
 
     # Timing (SetWait, TestWait, Wait)
     wait_remaining: float = 0.0  # ticks left in current Wait
     wait_duration: float = 0.0  # saved duration for TestWait checks
 
     # Current order and target (set by FindTarget*, AttackTarget, etc.)
-    current_target: tuple | None = None  # (regiment_id, unit_id) for attack/movement orders
+    current_target: Target | None = None  # (regiment_id, unit_id) for attack/movement orders
     current_node: int | None = None  # waypoint node for movement orders
     pending_arrival: bool = False  # a MoveToNode/ScatterModelsToNode order is in flight; see
     # ScriptInterpreter._update_arrival_flag, which sets ARRIVED_FLAG on unit_flags once the
@@ -107,24 +115,24 @@ class UnitScriptState:
     parent_id: str | None = None  # set by SetParentByTag; the regiment this unit follows/reports to
 
     # Interrupt handling (SetInterruptScript/CallInterruptScript/ReturnInterrupt)
-    interrupt_return: tuple | None = None  # (script_id, pc) to resume after ReturnInterrupt, set by
+    interrupt_return: tuple[int, int] | None = None  # (script_id, pc) to resume after ReturnInterrupt, set by
     # CallInterruptScript; None when not currently inside an interrupt call
     last_attack_target: str | None = None  # this unit's own attack_target as of the last tick, used
     # by ScriptInterpreter.raise_charge_events to detect a *fresh* charge (event 0x07) rather than
     # re-raising it every tick the same charge continues
 
     # Script metadata (loaded once at init)
-    script_dll = None  # behaviour.ScriptDll instance for script lookup
+    script_dll: behaviour.ScriptDll | None = None  # for script lookup
 
 
 class EventBus:
     """Per-side event routing (self, own-side, enemy-side broadcasts)."""
 
-    def __init__(self, battle):
+    def __init__(self, battle: "Battle") -> None:
         self.battle = battle
-        self.unit_states = {}  # {unit_identifier: UnitScriptState}
+        self.unit_states: dict[str, UnitScriptState] = {}  # {unit_identifier: UnitScriptState}
 
-    def queue_event(self, recipient_id: int, event: Event, route: str = "self"):
+    def queue_event(self, recipient_id: str, event: Event, route: str = "self") -> None:
         """Queue an event to a recipient or broadcast to a side.
 
         route: "self" (single recipient), "side" (own-side broadcast), "enemy" (enemy-side broadcast)
@@ -163,10 +171,10 @@ class LibraryBehaviors:
     Keep the best threat and attack when its score exceeds the unit's worth.
     """
 
-    def __init__(self, interpreter):
+    def __init__(self, interpreter: "ScriptInterpreter") -> None:
         self.interpreter = interpreter
 
-    def track_threat(self, unit_id: str, state: UnitScriptState, tick_count: int, rng):
+    def track_threat(self, unit_id: str, state: UnitScriptState, tick_count: int, rng: random.Random) -> None:
         """Behavior 15: TrackThreat AI - seek and attack best threat.
 
         Threat score = worth × (range − distance) / round(range / 4)
@@ -181,7 +189,7 @@ class LibraryBehaviors:
         # Find best threat (nearest active, different-side regiment): a script that assigns this
         # library behaviour to a neutral unit has already made the targeting decision explicitly, so
         # this is not gated by rules.hostile_sides.
-        best_threat = None
+        best_threat: str | None = None
         best_distance = float('inf')
 
         for other_id, other in battle.regiments.items():
@@ -202,7 +210,7 @@ class LibraryBehaviors:
 # PROVISIONAL: react message text by code (game_rules.md §React N); varies by s_race & 7 (race).
 # Race-specific variants are not yet mapped from the public spec; codes 10-14 (shooting/orders)
 # are noted in the spec but their exact strings are unconfirmed.
-_REACT_MESSAGES = {
+_REACT_MESSAGES: dict[int, str] = {
     1: "Engage!", 2: "CHARGE!", 3: "Destroy them!", 4: "Retreat!",
     5: "My men fear the beast!", 6: "Flee the abomination!",
     7: "We fight to the death!", 8: "No mercy!", 17: "Re-group!", 19: "Hold!",
@@ -220,19 +228,20 @@ class ScriptInterpreter:
     For opcodes that fall through, handlers return pc + instruction_length.
     """
 
-    def __init__(self, battle, event_bus, script_dll, logger=None):
+    def __init__(self, battle: "Battle", event_bus: EventBus, script_dll: behaviour.ScriptDll,
+                 logger: BattleLogger | None = None) -> None:
         self.battle = battle
         self.event_bus = event_bus
         self.script_dll = script_dll
         self.behaviors = LibraryBehaviors(self)
         self.logger = logger  # whshr.battle_log.BattleLogger, or None; see write_opcode
-        self._reported_gaps = set()  # (unit_id, script_id, opcode): a missing/broken opcode already
+        self._reported_gaps: set[tuple[str, int, int]] = set()  # (unit_id, script_id, opcode): a missing/broken opcode already
         # surfaced as a BattleEvent once, so a tight retry loop doesn't spam the same complaint
         # every tick for the rest of the battle.
 
-    def _state_snapshot(self, unit_id, state):
+    def _state_snapshot(self, unit_id: str, state: UnitScriptState) -> dict[str, Any]:
         """A small, JSON-safe snapshot of the fields opcodes actually change, for write_opcode."""
-        regiment = self.battle.regiments.get(unit_id) if self.battle else None
+        regiment = self.battle.regiments.get(unit_id)
         return {
             "pc": state.pc, "script_id": state.script_id, "cond_flags": state.cond_flags,
             "unit_flags": state.unit_flags, "pending_switch": state.pending_switch,
@@ -241,7 +250,7 @@ class ScriptInterpreter:
             "attack_target": regiment.attack_target if regiment else None,
         }
 
-    def _update_arrival_flag(self, unit_id, state):
+    def _update_arrival_flag(self, unit_id: str, state: UnitScriptState) -> None:
         """If a MoveToNode/ScatterModelsToNode order is in flight (state.pending_arrival) and the
         regiment is no longer moving, set ARRIVED_FLAG so a WaitUntilUnitFlags(ARRIVED_FLAG) loop
         can unblock (see the module docstring note on ARRIVED_FLAG -- a well-evidenced hypothesis,
@@ -254,17 +263,17 @@ class ScriptInterpreter:
         rather than adding a separate "was this halted, not arrived" distinction for a case that
         hasn't actually come up yet.
         """
-        if not state.pending_arrival or self.battle is None:
+        if not state.pending_arrival:
             return
         regiment = self.battle.regiments.get(unit_id)
         if regiment is not None and not regiment.moving:
             state.unit_flags |= ARRIVED_FLAG
             state.pending_arrival = False
 
-    def _mirror_engine_flags(self, unit_id, state):
+    def _mirror_engine_flags(self, unit_id: str, state: UnitScriptState) -> None:
         """Copy engine-owned conditions into the script's unit flags, so scripts see what the battle
         knows: IN_MELEE_FLAG follows `Regiment.in_melee` (raised and cleared as the fight starts and ends)."""
-        regiment = self.battle.regiments.get(unit_id) if self.battle is not None else None
+        regiment = self.battle.regiments.get(unit_id)
         if regiment is None:
             return
         if regiment.in_melee:
@@ -272,7 +281,7 @@ class ScriptInterpreter:
         else:
             state.unit_flags &= ~IN_MELEE_FLAG
 
-    def raise_charge_events(self):
+    def raise_charge_events(self) -> None:
         """Queue event 0x07 ("you are being charged") to any regiment an attacker has closed to
         within actual charge reach of (game_rules.md event table: 0x07 = charge start; "Charge":
         a real charge reaches at most `12 * (s_rlmv + 1)` units -- a short final rush, not the whole
@@ -319,7 +328,7 @@ class ScriptInterpreter:
             state.last_attack_target = target_id
 
     @staticmethod
-    def _preempt_for_pending_event(state: UnitScriptState):
+    def _preempt_for_pending_event(state: UnitScriptState) -> None:
         """game_rules.md "Event dispatch is pre-emptive, not polled": before a unit's script runs any
         of its own instructions this tick, force entry into its registered interrupt script if it has
         a queued, unconsumed event -- regardless of what instruction the main script's PC currently
@@ -343,7 +352,7 @@ class ScriptInterpreter:
         state.script_id = state.interrupt_script
         state.pc = 0
 
-    def run(self, unit_id: str, state: UnitScriptState, tick_count: int, rng):
+    def run(self, unit_id: str, state: UnitScriptState, tick_count: int, rng: random.Random) -> UnitScriptState:
         """Execute one unit's script for one tick.
 
         Returns the state after execution. Modifies state in-place.
@@ -441,10 +450,10 @@ class ScriptInterpreter:
 
         return state
 
-    def _report_gap(self, unit_id, script_id, opcode, reason):
+    def _report_gap(self, unit_id: str, script_id: int, opcode: int, reason: str) -> None:
         """Surface a missing/broken opcode as a battle event, once per (unit, script, opcode)."""
         key = (unit_id, script_id, opcode)
-        if key in self._reported_gaps or self.battle is None:
+        if key in self._reported_gaps:
             return
         self._reported_gaps.add(key)
         name = behaviour.opcode_name(opcode)
@@ -452,7 +461,8 @@ class ScriptInterpreter:
             f"{unit_id}: script {script_id} opcode {name} ({opcode:#04x}) {reason}; skipped.",
             "script_gap", unit=unit_id, script_id=script_id, opcode=opcode, opcode_name=name))
 
-    def _dispatch(self, state, opcode, script_words, unit_id, tick_count, rng):
+    def _dispatch(self, state: UnitScriptState, opcode: int, script_words: Words, unit_id: str, tick_count: int,
+                  rng: random.Random) -> int | None:
         """Dispatch an opcode to its handler method.
 
         Handler methods are named op_<OPCODE_NAME> (e.g., op_InitUnit, op_Yield).
@@ -468,7 +478,7 @@ class ScriptInterpreter:
         operand = self._get_operand(state, opcode, script_words)
         return handler(state, operand, script_words, unit_id, tick_count, rng)
 
-    def _get_operand(self, state, opcode, script_words):
+    def _get_operand(self, state: UnitScriptState, opcode: int, script_words: Words) -> int | None:
         """Extract operand(s) for an opcode (if any).
 
         Most opcodes have one operand (next word), some have none, some have multiple.
@@ -482,7 +492,8 @@ class ScriptInterpreter:
             return script_words[operand_pc]
         return None
 
-    def _nearest_enemy_id(self, regiment, n=1, side=None, max_distance=None):
+    def _nearest_enemy_id(self, regiment: "Regiment", n: int = 1, side: Side | None = None,
+                          max_distance: float | None = None) -> str | None:
         """The n-th nearest active regiment identifier to `regiment` (1 = nearest), or None if fewer
         than n candidates remain. Euclidean distance; shared by the Target*/Attack* opcode families
         (TargetNearestEnemy, AttackNearestEnemy, AttackNthNearestEnemy, ...).
@@ -509,13 +520,13 @@ class ScriptInterpreter:
         return enemies[n - 1].identifier if len(enemies) >= n else None
 
     @staticmethod
-    def _unit_worth(regiment):
+    def _unit_worth(regiment: "Regiment") -> int:
         """game_rules.md: unit worth = size x s_pntval x 12 artillery / 8 wizard / 4 monster / 1,
         read by AI target scoring (UnitScore)."""
-        multiplier = {"art": 12, "wiz": 8, "mon": 4}.get(regiment.hud_class, 1)
+        multiplier = {"art": 12, "wiz": 8, "mon": 4}.get(regiment.hud_class or "", 1)
         return regiment.models * regiment.points * multiplier
 
-    def _threat_score(self, regiment, other, threat_range):
+    def _threat_score(self, regiment: "Regiment", other: "Regiment", threat_range: float) -> float:
         """game_rules.md's UnitScore: worth x (range - d) / round(range / 4), octagonal distance
         d = max(|dx|, |dy|) + min(|dx|, |dy|) / 2; 0 for friends, broken (routing), CantMelee, or
         beyond range. The documented x4 ("enemy targets this unit") / x32 ("also charging") score
@@ -540,7 +551,8 @@ class ScriptInterpreter:
 
     # ===== Core control-flow opcodes =====
 
-    def op_InitUnit(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_InitUnit(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """InitUnit N: initialization-size flag, not a script id (128 = full/combat init, 64 =
         minimal/non-combat init; notes/mission_scripts_research.md). Must NOT touch script_id or
         pc: the unit's actual running script is set once at battle construction from its own
@@ -552,30 +564,35 @@ class ScriptInterpreter:
         """
         return state.pc + 1
 
-    def op_Restart(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_Restart(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """Restart: jump to the restart point (set by SetRestartPoint)."""
         state.pc = state.restart_pc
         return state.pc
 
-    def op_SetRestartPoint(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SetRestartPoint(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SetRestartPoint: save current PC as the restart point for Restart."""
         state.restart_pc = state.pc + 1
         return state.pc + 1
 
-    def op_GotoScript(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_GotoScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """GotoScript N: switch to script N and restart."""
         if operand is not None:
             state.script_id = operand
             state.pc = 0
         return 0
 
-    def op_SwitchScript(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SwitchScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SwitchScript N: switch to script N after this tick completes."""
         if operand is not None:
             state.pending_switch = operand
         return state.pc + 1
 
-    def op_IfSwitchScript(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfSwitchScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfSwitchScript N: request switching to script N at end of tick, but only if nothing
         else has already requested a switch this tick (normal priority; game_rules.md documents
         opcodes 0x0D-0x10 together as "switch script at end of tick", 0x0F called out as
@@ -585,14 +602,16 @@ class ScriptInterpreter:
             state.pending_switch = operand
         return state.pc + 1
 
-    def op_IfSwitchScriptHigh(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfSwitchScriptHigh(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfSwitchScriptHigh N: request switching to script N at end of tick, overriding any
         other pending switch this tick (the "high priority" variant per game_rules.md)."""
         if operand is not None:
             state.pending_switch = operand
         return state.pc + 1
 
-    def op_IfNotSwitchScript(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfNotSwitchScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfNotSwitchScript N: request switching to script N at end of tick, unless the unit is
         already running script N. Treated as normal priority (does not override an existing
         pending switch), matching IfSwitchScript -- the exact precedence versus IfSwitchScript is
@@ -602,7 +621,8 @@ class ScriptInterpreter:
             state.pending_switch = operand
         return state.pc + 1
 
-    def op_GosubScript(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_GosubScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """GosubScript N: call script N like a subroutine, return via ReturnGosub."""
         if operand is not None:
             state.return_stack.append((state.script_id, state.pc + 1))
@@ -610,26 +630,29 @@ class ScriptInterpreter:
             state.pc = 0
         return 0
 
-    def op_ReturnGosub(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_ReturnGosub(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """ReturnGosub: return from gosub, restoring script and PC."""
         if state.return_stack:
             state.script_id, state.pc = state.return_stack.pop()
         return state.pc
 
-    def op_PushPC(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_PushPC(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """PushPC: push current PC for Loop to jump back to."""
         state.return_stack.append((state.pc + 1,))  # tag with tuple to distinguish from gosub
         return state.pc + 1
 
     @staticmethod
-    def _leave_loop(state):
+    def _leave_loop(state: UnitScriptState) -> None:
         """A conditional loop that ends drops its `PushPC` entry. Left in place, the next unconditional
         `Loop` of an enclosing cycle jumps back into the *inner* loop instead of its own start (BF001's
         patrols: `PushPC; MoveToNode..; PushPC; ..wait..; LoopIfFalse; ..; Loop` never left the last wait)."""
         if state.return_stack and len(state.return_stack[-1]) == 1:
             state.return_stack.pop()
 
-    def op_Loop(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_Loop(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """Loop: jump back to the PC pushed by PushPC.
 
         Peeks the return stack, it must NOT pop it -- PushPC runs once before the loop body and
@@ -645,32 +668,37 @@ class ScriptInterpreter:
             return state.return_stack[-1][0]
         return state.pc + 1
 
-    def op_Yield(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_Yield(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """Yield: return control to the battle, resume next tick."""
         self._should_yield = True
         return state.pc + 1
 
     # ===== Unit flag and condition opcodes =====
 
-    def op_SetUnitFlags(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SetUnitFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SetUnitFlags N: set bits in unit_flags (+0xB4)."""
         if operand is not None:
             state.unit_flags |= operand
         return state.pc + 1
 
-    def op_ClearUnitFlags(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_ClearUnitFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """ClearUnitFlags N: clear bits in unit_flags."""
         if operand is not None:
             state.unit_flags &= ~operand
         return state.pc + 1
 
-    def op_TestUnitFlags(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_TestUnitFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """TestUnitFlags N: set cond_flags to (unit_flags & N)."""
         if operand is not None:
             state.cond_flags = state.unit_flags & operand
         return state.pc + 1
 
-    def op_WaitUntilUnitFlags(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_WaitUntilUnitFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """WaitUntilUnitFlags N: yield (same PC) until (unit_flags & N) is set, then fall through.
 
         Known limitation: unit_flags is only ever set by SetUnitFlags/ClearUnitFlags in this
@@ -685,19 +713,22 @@ class ScriptInterpreter:
         self._should_yield = True
         return state.pc
 
-    def op_SetCondFlags(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SetCondFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SetCondFlags N: set bits in the persistent condition bit word (not the If/Loop result)."""
         if operand is not None:
             state.cond_bits |= operand
         return state.pc + 1
 
-    def op_ClearCondFlags(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_ClearCondFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """ClearCondFlags N: clear bits in the persistent condition bit word."""
         if operand is not None:
             state.cond_bits &= ~operand
         return state.pc + 1
 
-    def op_TestCondFlags(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_TestCondFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """TestCondFlags N: result = any of the persistent bits N is set."""
         if operand is not None:
             state.cond_flags = (state.cond_bits & operand) != 0
@@ -705,7 +736,8 @@ class ScriptInterpreter:
 
     # ===== Event handling opcodes =====
 
-    def op_GetEvent(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_GetEvent(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """GetEvent: fetch the next event from the queue.
 
         `run()`'s dispatch loop must not pre-pop the queue into `current_event` on its own: this
@@ -722,12 +754,14 @@ class ScriptInterpreter:
             state.cond_flags = 0  # the handler frame's `ConsumeEvent; LoopIfTrue` ends when drained
         return state.pc + 1
 
-    def op_ConsumeEvent(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_ConsumeEvent(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """ConsumeEvent: clear the current event."""
         state.current_event = Event()
         return state.pc + 1
 
-    def op_CaseEvent(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_CaseEvent(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """CaseEvent N: skip to the matching Break if current event.code != N."""
         if operand is not None and state.current_event.code != operand:
             # Scan forward to the matching Break (simplified: just skip to next Break)
@@ -740,7 +774,8 @@ class ScriptInterpreter:
                 pc += behaviour.LENGTHS[opcode] if opcode is not None else 1
         return state.pc + 1
 
-    def op_Break(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_Break(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """Break: jump to the next label word (0x0ABC) after this instruction (behaviour.py: the operand
         0x1ABC with bit 12 cleared is the word it scans forward for).
 
@@ -754,42 +789,48 @@ class ScriptInterpreter:
                 return pc
         return state.pc + 2
 
-    def op_SendEventSelf(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SendEventSelf(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SendEventSelf CODE: queue an event to self."""
         if operand is not None:
             event = Event(code=operand, source=unit_id)
             self.event_bus.queue_event(unit_id, event, route="self")
         return state.pc + 1
 
-    def op_SendEventSelfIfTrue(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SendEventSelfIfTrue(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SendEventSelfIfTrue CODE: queue event to self if cond_flags is true."""
         if state.cond_flags and operand is not None:
             event = Event(code=operand, source=unit_id)
             self.event_bus.queue_event(unit_id, event, route="self")
         return state.pc + 1
 
-    def op_SendEventSelfIfFalse(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SendEventSelfIfFalse(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SendEventSelfIfFalse CODE: queue event to self if cond_flags is false."""
         if not state.cond_flags and operand is not None:
             event = Event(code=operand, source=unit_id)
             self.event_bus.queue_event(unit_id, event, route="self")
         return state.pc + 1
 
-    def op_SendEventToOwnSide(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SendEventToOwnSide(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SendEventToOwnSide CODE: broadcast event to own-side units."""
         if operand is not None:
             event = Event(code=operand, source=unit_id)
             self.event_bus.queue_event(unit_id, event, route="side")
         return state.pc + 1
 
-    def op_SendEventToOwnSideIfTrue(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SendEventToOwnSideIfTrue(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SendEventToOwnSideIfTrue CODE: broadcast event to own-side if cond_flags is true."""
         if state.cond_flags and operand is not None:
             event = Event(code=operand, source=unit_id)
             self.event_bus.queue_event(unit_id, event, route="side")
         return state.pc + 1
 
-    def op_SendEventToEnemySide(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SendEventToEnemySide(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SendEventToEnemySide CODE: broadcast event to enemy-side units."""
         if operand is not None:
             event = Event(code=operand, source=unit_id)
@@ -798,7 +839,8 @@ class ScriptInterpreter:
 
     # ===== Conditional branches =====
 
-    def op_If(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_If(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """If: skip to else/endif if cond_flags is false."""
         if not state.cond_flags:
             pc = state.pc + 1
@@ -817,7 +859,8 @@ class ScriptInterpreter:
                 pc += behaviour.LENGTHS[opcode] if opcode is not None else 1
         return state.pc + 1
 
-    def op_IfNot(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfNot(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfNot: skip to else/endif if cond_flags is true."""
         if state.cond_flags:
             # Same skip logic as If
@@ -837,7 +880,8 @@ class ScriptInterpreter:
                 pc += behaviour.LENGTHS[opcode] if opcode is not None else 1
         return state.pc + 1
 
-    def op_Else(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_Else(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """Else: skip to matching EndIf."""
         pc = state.pc + 1
         depth = 1
@@ -853,13 +897,15 @@ class ScriptInterpreter:
             pc += behaviour.LENGTHS[opcode] if opcode is not None else 1
         return pc
 
-    def op_EndIf(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_EndIf(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """EndIf: end of if/else block."""
         return state.pc + 1
 
     # ===== Timing and wait opcodes =====
 
-    def op_WaitForBattleStart(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_WaitForBattleStart(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """WaitForBattleStart: hold until battle has started (tick_count > 0).
 
         Must yield like Wait/WaitUntilUnitFlags while blocked -- a prior version returned the same
@@ -874,14 +920,16 @@ class ScriptInterpreter:
             return state.pc  # wait (don't advance)
         return state.pc + 1  # resume
 
-    def op_SetWait(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SetWait(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SetWait N: set a timer for N ticks."""
         if operand is not None:
             state.wait_duration = operand
             state.wait_remaining = operand
         return state.pc + 1
 
-    def op_TestWait(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_TestWait(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """TestWait: decrement wait_remaining; set cond_flags if still waiting."""
         if state.wait_remaining > 0:
             state.wait_remaining -= 1.0
@@ -890,7 +938,8 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
-    def op_Wait(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_Wait(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """Wait N: hold for N ticks (yield until timer expires)."""
         if operand is not None:
             if state.wait_remaining == 0:
@@ -901,14 +950,16 @@ class ScriptInterpreter:
             return state.pc
         return state.pc + 1
 
-    def op_LoopIfTrue(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_LoopIfTrue(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """LoopIfTrue: jump back to pushed PC if cond_flags is true."""
         if state.cond_flags and state.return_stack and len(state.return_stack[-1]) == 1:
             return state.return_stack[-1][0]
         self._leave_loop(state)
         return state.pc + 1
 
-    def op_LoopIfFalse(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_LoopIfFalse(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """LoopIfFalse: jump back to pushed PC if cond_flags is false."""
         if not state.cond_flags and state.return_stack and len(state.return_stack[-1]) == 1:
             return state.return_stack[-1][0]
@@ -917,24 +968,28 @@ class ScriptInterpreter:
 
     # ===== Targeting and threat opcodes =====
 
-    def op_FindTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_FindTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """FindTarget: find the nearest valid enemy target."""
         # TODO: implement proper targeting (check visibility, range, etc.)
         # Simplified: set cond_flags to indicate target found
         state.cond_flags = 1  # assume target found
         return state.pc + 1
 
-    def op_FindTargetNear(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_FindTargetNear(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """FindTargetNear: find nearest enemy within threat range."""
         state.cond_flags = 1  # assume target found
         return state.pc + 1
 
-    def op_FindNewTargetNear(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_FindNewTargetNear(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """FindNewTargetNear: find a new target, ignoring current one."""
         state.cond_flags = 1  # assume target found
         return state.pc + 1
 
-    def op_TargetNearestEnemy(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_TargetNearestEnemy(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """TargetNearestEnemy: set current target to nearest enemy."""
         regiment = self.battle.regiments.get(unit_id)
         target_id = self._nearest_enemy_id(regiment) if regiment else None
@@ -945,29 +1000,35 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
-    def op_AttackNearestEnemy(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_AttackNearestEnemy(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """AttackNearestEnemy: find the nearest enemy and attack it (game_rules.md opcode 0xB0)."""
         return self._attack_nearest(state, unit_id, n=1)
 
-    def op_AttackNearestVisibleEnemy(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_AttackNearestVisibleEnemy(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """AttackNearestVisibleEnemy: as AttackNearestEnemy (no visibility model, see
         _nearest_enemy_id)."""
         return self._attack_nearest(state, unit_id, n=1)
 
-    def op_AttackNearestFlag40Unit(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_AttackNearestFlag40Unit(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """AttackNearestFlag40Unit: attack the nearest unit carrying side flag 0x40 (neutral;
         notes/neutral_units.md's 2-bit side code, `rules.Side.NEUTRAL`)."""
         return self._attack_nearest(state, unit_id, n=1, side=Side.NEUTRAL)
 
-    def op_AttackNthNearestEnemy(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_AttackNthNearestEnemy(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """AttackNthNearestEnemy N: find the N-th nearest enemy (1-based) and attack it."""
         return self._attack_nearest(state, unit_id, n=operand or 1)
 
-    def _attack_nearest(self, state, unit_id, n, side=None):
+    def _attack_nearest(self, state: UnitScriptState, unit_id: str, n: int, side: Side | None = None) -> int | None:
         regiment = self.battle.regiments.get(unit_id)
         search_range = state.threat_range if state.threat_range > 0 else DEFAULT_ATTACK_SEARCH_RANGE
-        target_id = (self._nearest_enemy_id(regiment, n, side=side, max_distance=search_range)
-                     if regiment else None)
+        if regiment is None:
+            state.cond_flags = 0
+            return state.pc + 1
+        target_id = self._nearest_enemy_id(regiment, n, side=side, max_distance=search_range)
         if target_id:
             state.current_target = (target_id, 0)
             if not regiment.anchored:
@@ -977,17 +1038,20 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
-    def op_TargetValid(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_TargetValid(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """TargetValid: test if current target is still valid."""
         # Simplified: assume target is valid
         state.cond_flags = 1 if state.current_target else 0
         return state.pc + 1
 
-    def op_KeepThreat(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_KeepThreat(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """KeepThreat: keep current threat (don't search for new one)."""
         return state.pc + 1
 
-    def op_IfThreatOutweighsWorth(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfThreatOutweighsWorth(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfThreatOutweighsWorth: test whether the best-scoring enemy within threat_range outweighs
         this unit's own worth -- the actual decision gate behind library behaviour 15, TrackThreat
         (game_rules.md: "keep the best threat and attack it when its score exceeds the unit's
@@ -1010,25 +1074,29 @@ class ScriptInterpreter:
         state.cond_flags = 1 if best_score > self._unit_worth(regiment) else 0
         return state.pc + 1
 
-    def op_TargetGone(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_TargetGone(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """TargetGone: test if target is no longer visible/alive."""
         # For now, assume target still exists
         state.cond_flags = 0
         return state.pc + 1
 
-    def op_InRange(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_InRange(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """InRange: test if current target is in weapon range."""
         # TODO: check distance to current target against weapon range
         state.cond_flags = 0  # assume out of range for now
         return state.pc + 1
 
-    def op_IfTargetInChargeReach(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfTargetInChargeReach(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfTargetInChargeReach: test if target is close enough to charge."""
         # TODO: check distance to target (within charge reach)
         state.cond_flags = 0
         return state.pc + 1
 
-    def op_TakeEventTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_TakeEventTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """TakeEventTarget: use the source of the current event as target."""
         if state.current_event.source:
             state.current_target = (state.current_event.source, 0)
@@ -1041,7 +1109,8 @@ class ScriptInterpreter:
     # These are high-priority opcodes needed by missions but not yet integrated with the battle engine.
     # Each logs a placeholder message and continues, allowing partial mission execution.
 
-    def op_MoveToNode(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_MoveToNode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """MoveToNode N: order an ordinary move to waypoint node N's coordinates.
 
         Uses Battle.nodes (the battle's own [NODES] table, whshr.script.load_battle) to resolve N
@@ -1063,10 +1132,11 @@ class ScriptInterpreter:
                 state.pending_arrival = True
         return state.pc + 1
 
-    def op_FaceNode(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_FaceNode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """FaceNode N: turn to face waypoint node N (instant turn, not a movement order).
 
-        Reuses Battle._turn_to so facing changes pivot the same way every other turn in the engine
+        Reuses Battle.turn_to so facing changes pivot the same way every other turn in the engine
         does (game_rules.md: "a turn always moves the unit position to keep the pivot still").
         """
         if operand is not None:
@@ -1075,10 +1145,11 @@ class ScriptInterpreter:
             if regiment and coords and (coords[0] != regiment.x or coords[1] != regiment.y):
                 dx, dy = coords[0] - regiment.x, coords[1] - regiment.y
                 direction = round(math.atan2(dx, dy) * 512 / math.tau) % 512
-                self.battle._turn_to(regiment, direction)
+                self.battle.turn_to(regiment, direction)
         return state.pc + 1
 
-    def op_TeleportToNode(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_TeleportToNode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """TeleportToNode N: instantly move to waypoint node N (no travel time).
 
         Completes immediately, so ARRIVED_FLAG is set right away (no pending_arrival needed).
@@ -1094,7 +1165,8 @@ class ScriptInterpreter:
                 state.pending_arrival = False
         return state.pc + 1
 
-    def op_PlaceAtNode(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_PlaceAtNode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """PlaceAtNode N: place unit at node N in formation.
 
         Same positional effect as TeleportToNode -- "in formation" (re-forming ranks in place) is
@@ -1113,7 +1185,8 @@ class ScriptInterpreter:
                 regiment.target_x = regiment.target_y = None
         return state.pc + 1
 
-    def op_ScatterModelsToNode(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_ScatterModelsToNode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """ScatterModelsToNode N: wander to a randomized point near waypoint node N.
 
         This is the actual opcode NPC "patrol" scripts use (confirmed from a real BF003 trace: the
@@ -1139,7 +1212,8 @@ class ScriptInterpreter:
                 state.pending_arrival = True
         return state.pc + 1
 
-    def op_ChargeTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_ChargeTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """ChargeTarget: issue charge order to the current target.
 
         Refused while braced (game_rules.md "Braced": charge orders are ignored for a scripted unit
@@ -1155,7 +1229,8 @@ class ScriptInterpreter:
                 # Battle.tick() handles the actual charging movement
         return state.pc + 1
 
-    def op_FireAtTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_FireAtTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """FireAtTarget: mark the current target for shooting.
 
         Must NOT set regiment.attack_target: that field means "melee charge target" to both
@@ -1169,7 +1244,8 @@ class ScriptInterpreter:
         """
         return state.pc + 1
 
-    def op_KillAllModels(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_KillAllModels(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """KillAllModels: instantly kill all models in this unit.
 
         Used in BF001 for conditional tutorial difficulty scaling (flag 512 check).
@@ -1182,15 +1258,16 @@ class ScriptInterpreter:
             regiment.melee_models = []
         return state.pc + 1
 
-    def op_AttackTagged(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_AttackTagged(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """AttackTagged TAG: attack the unit marked with TAG.
 
         Example: BF001 Unit 2 uses AttackTagged 0xabc0 to hunt the tagged cargo unit.
         """
         if operand is not None:
             # Look up which unit has this tag (simplified: assume only one tagged unit)
-            if hasattr(self.battle, '_unit_tags') and operand in self.battle._unit_tags:
-                target_id = self.battle._unit_tags[operand]
+            if operand in self.battle.unit_tags:
+                target_id = self.battle.unit_tags[operand]
                 state.current_target = (target_id, 0)
                 regiment = self.battle.regiments.get(unit_id)
                 if regiment and not regiment.anchored:
@@ -1200,19 +1277,19 @@ class ScriptInterpreter:
                 state.cond_flags = 0
         return state.pc + 1
 
-    def op_SetTag(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SetTag(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SetTag TAG: mark this unit with a tag.
 
         Tags are used to identify specific units for special behavior
         (e.g., cargo in escort missions, objectives in special scenarios).
         """
         if operand is not None:
-            if not hasattr(self.battle, '_unit_tags'):
-                self.battle._unit_tags = {}
-            self.battle._unit_tags[operand] = unit_id
+            self.battle.unit_tags[operand] = unit_id
         return state.pc + 1
 
-    def op_SetParentByTag(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SetParentByTag(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SetParentByTag TAG: find the unit registered with TAG (SetTag) and set it as this unit's
         parent (state.parent_id), for FollowParent/SendEventToParent.
 
@@ -1222,11 +1299,11 @@ class ScriptInterpreter:
         documented, but recording it is unambiguous and this is what FollowParent already expects.
         """
         if operand is not None:
-            tags = getattr(self.battle, '_unit_tags', {})
-            state.parent_id = tags.get(operand)
+            state.parent_id = self.battle.unit_tags.get(operand)
         return state.pc + 1
 
-    def op_SnapModelsToFormation(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SnapModelsToFormation(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SnapModelsToFormation: re-form scattered models back into tight formation.
 
         A documented no-op here, same reasoning as PlaceAtNode: this engine has no separate
@@ -1237,7 +1314,8 @@ class ScriptInterpreter:
         """
         return state.pc + 1
 
-    def op_SetBehaviour(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SetBehaviour(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SetBehaviour N: record which library AI behavior (e.g. 15 = TrackThreat) governs this
         unit. Does NOT invoke it.
 
@@ -1260,7 +1338,8 @@ class ScriptInterpreter:
         return state.pc + 1
 
 
-    def op_React(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_React(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """React N: display a battle message/voice with leader portrait (game_rules.md §React N).
 
         The actual text varies by s_race & 7; this table covers the code-level semantics only.
@@ -1268,27 +1347,30 @@ class ScriptInterpreter:
         """
         regiment = self.battle.regiments.get(unit_id)
         if regiment is not None:
-            msg = _REACT_MESSAGES.get(operand, f"React {operand}")
+            msg = _REACT_MESSAGES.get(operand or 0, f"React {operand}")
             self.battle.events.append(BattleEvent(
                 f"{regiment.name}: {msg}", "react",
                 regiment=unit_id, code=operand, sender=regiment.name, message=msg))
         return state.pc + 1
 
-    def op_RemoveFromBattle(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_RemoveFromBattle(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """RemoveFromBattle: remove unit from battle without death."""
         regiment = self.battle.regiments.get(unit_id)
         if regiment:
             regiment.fled = True  # mark as removed from play
         return state.pc + 1
 
-    def op_ExcludeFromArmy(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_ExcludeFromArmy(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """ExcludeFromArmy: exclude unit from army roster (remove without death)."""
         regiment = self.battle.regiments.get(unit_id)
         if regiment:
             regiment.fled = True  # same effect as RemoveFromBattle
         return state.pc + 1
 
-    def op_SetThreatRange(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SetThreatRange(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SetThreatRange N: set threat detection range (used by TrackThreat).
 
         Range in world units. Used to limit which enemies a unit considers as threats.
@@ -1298,7 +1380,8 @@ class ScriptInterpreter:
             state.threat_range = operand
         return state.pc + 1
 
-    def op_SetInterruptScript(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SetInterruptScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SetInterruptScript N: set interrupt handler script.
 
         Called when the unit receives an event (e.g., being attacked, enemy spotted).
@@ -1308,7 +1391,8 @@ class ScriptInterpreter:
             state.interrupt_script = operand
         return state.pc + 1
 
-    def op_CallInterruptScript(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_CallInterruptScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """CallInterruptScript: jump into the script registered by SetInterruptScript -- a one-level
         gosub reserved for event-driven reactions (e.g. bracing when charged, game_rules.md event
         0x07 "you are being charged"). Saves (script_id, pc + 1) to interrupt_return so
@@ -1320,7 +1404,8 @@ class ScriptInterpreter:
             return 0
         return state.pc + 1
 
-    def op_ReturnInterrupt(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_ReturnInterrupt(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """ReturnInterrupt: end of an event handler -- return to the script CallInterruptScript
         jumped from, or apply a pending switch immediately instead if the interrupt handler itself
         requested one (game_rules.md: opcode 0x14 "end of an event handler: return to the
@@ -1339,7 +1424,8 @@ class ScriptInterpreter:
             return pc
         return state.pc + 1
 
-    def op_HaltAndReform(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_HaltAndReform(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """HaltAndReform: stop movement and reform in place."""
         regiment = self.battle.regiments.get(unit_id)
         if regiment:
@@ -1348,17 +1434,19 @@ class ScriptInterpreter:
             regiment.attack_target = None
         return state.pc + 1
 
-    def op_ReformBlock(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_ReformBlock(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """ReformBlock: reform unit into a tight block formation."""
         # TODO: adjust regiment.ranks based on available models
         return state.pc + 1
 
-    def op_DropTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_DropTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """DropTarget: forget the current attack target (game_rules.md, scripted target and flight
         opcodes). Only a unit that is not broken and has a target acts: it clears the target and its
         braced state, and the condition is true; otherwise nothing changes and the condition is false.
         It never leaves a melee, changes orders or sends events."""
-        regiment = self.battle.regiments.get(unit_id) if self.battle is not None else None
+        regiment = self.battle.regiments.get(unit_id)
         has_target = regiment is not None and (regiment.attack_target is not None or state.current_target)
         if regiment is None or regiment.routing or not has_target:
             state.cond_flags = 0
@@ -1370,11 +1458,12 @@ class ScriptInterpreter:
         state.cond_flags = 1
         return state.pc + 1
 
-    def op_FleeAhead(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_FleeAhead(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """FleeAhead: start a rout along the unit's current facing (game_rules.md, scripted target and
         flight opcodes). It is the rout itself, so `CantBreak` does not stop it; only an anchored war
         machine refuses. The target is always cleared; the condition is true when a rout started."""
-        regiment = self.battle.regiments.get(unit_id) if self.battle is not None else None
+        regiment = self.battle.regiments.get(unit_id)
         state.cond_flags = 0
         if regiment is None:
             return state.pc + 1
@@ -1384,23 +1473,25 @@ class ScriptInterpreter:
             return state.pc + 1
         from . import combat
         angle = regiment.direction * math.tau / 512
-        combat._start_rout(regiment, self.battle, flee_point=(
+        combat.start_rout(regiment, self.battle, flee_point=(
             regiment.x + math.sin(angle) * 1e4, regiment.y + math.cos(angle) * 1e4))
         state.cond_flags = 1
         return state.pc + 1
 
-    def op_StoreEventInfo(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_StoreEventInfo(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """StoreEventInfo: remember the sender and code of the event being handled, overwriting any
         earlier one (game_rules.md, scripted target and flight opcodes)."""
         state.remembered_event = (state.current_event.source, state.current_event.code)
         return state.pc + 1
 
-    def op_FaceModelsToTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_FaceModelsToTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """FaceModelsToTarget: turn the individual models, not the regiment, to face the target
         (game_rules.md, scripted target and flight opcodes). A model still walking is left alone and
         counts as "not finished"; a model at rest facing elsewhere gets its heading set instantly and
         also counts; the condition is true while any did. No target: nothing happens, condition false."""
-        regiment = self.battle.regiments.get(unit_id) if self.battle is not None else None
+        regiment = self.battle.regiments.get(unit_id)
         target = self.battle.regiments.get(regiment.attack_target) if regiment and regiment.attack_target else None
         state.cond_flags = 0
         if regiment is None or target is None or regiment.anchored:
@@ -1419,23 +1510,25 @@ class ScriptInterpreter:
                 state.cond_flags = 1
         return state.pc + 1
 
-    def op_RunAway(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_RunAway(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """RunAway: cause unit to flee the battlefield.
 
         Similar to rout/panic, unit tries to leave the field.
         """
         regiment = self.battle.regiments.get(unit_id)
         if regiment and not regiment.routing and "CantBreak" not in regiment.psychology:
-            # Trigger routing via combat module (_start_rout takes (regiment, battle), not the reverse)
+            # Trigger routing via combat module (start_rout takes (regiment, battle), not the reverse)
             from . import combat
-            combat._start_rout(regiment, self.battle)
+            combat.start_rout(regiment, self.battle)
         return state.pc + 1
 
-    def op_RoutAllowed(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_RoutAllowed(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """RoutAllowed: test whether this unit may currently rout (game_rules.md opcode 0xC8).
 
         A read-only check: true unless the regiment already routed/fled or carries CantBreak
-        (the same guard whshr.combat._break_test applies before calling _start_rout).
+        (the same guard whshr.combat._break_test applies before calling start_rout).
         """
         regiment = self.battle.regiments.get(unit_id)
         if regiment and regiment.active and not regiment.routing and "CantBreak" not in regiment.psychology:
@@ -1444,10 +1537,11 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
-    def op_FleeFromTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_FleeFromTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """FleeFromTarget: flee from the current target/threat.
 
-        Starts a rout via the same combat._start_rout path as RunAway/RoutAllowed if the unit
+        Starts a rout via the same combat.start_rout path as RunAway/RoutAllowed if the unit
         isn't already routing and is allowed to; once routing, Battle._advance_regiments already
         drives the per-tick flee movement generically for any routing regiment, so this becomes a
         no-op on later ticks rather than needing its own movement logic here.
@@ -1455,10 +1549,11 @@ class ScriptInterpreter:
         regiment = self.battle.regiments.get(unit_id)
         if regiment and not regiment.routing and "CantBreak" not in regiment.psychology:
             from . import combat
-            combat._start_rout(regiment, self.battle)
+            combat.start_rout(regiment, self.battle)
         return state.pc + 1
 
-    def op_FearWhenCharged(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_FearWhenCharged(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """FearWhenCharged: fear/terror test on being charged (game_rules.md opcode 0x42, run on
         event 0x07 "you are being charged"). Sets cond_flags to 1 when the test fails (the unit
         should flee) -- matching event 0x07's documented handling ("fear/terror test op 0x42, then
@@ -1496,27 +1591,31 @@ class ScriptInterpreter:
             if (charger.x != regiment.x or charger.y != regiment.y):
                 dx, dy = charger.x - regiment.x, charger.y - regiment.y
                 direction = round(math.atan2(dx, dy) * 512 / math.tau) % 512
-                self.battle._turn_to(regiment, direction)
+                self.battle.turn_to(regiment, direction)
         return state.pc + 1
 
-    def op_ResetStack(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_ResetStack(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """ResetStack: clear the return stack."""
         state.return_stack = []
         return state.pc + 1
 
-    def op_ExecuteOrder(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_ExecuteOrder(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """ExecuteOrder: apply pending player order (if any)."""
         # TODO: check if player has issued an order and apply it
         # Player orders override script commands
         return state.pc + 1
 
-    def op_RestartAfterOrder(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_RestartAfterOrder(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """RestartAfterOrder: restart script after player order completes."""
         # ExecuteOrder applies a player order, then this restarts at the restart point
         state.pc = state.restart_pc
         return state.pc
 
-    def op_Query(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_Query(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """Query N: ask the AI routine (cases 11-14 for threat detection)."""
         # Simplified: Query is used by FindTarget* opcodes to ask "is there a valid target?"
         # For now, set cond_flags based on operand (TODO: implement real threat scoring)
@@ -1526,7 +1625,8 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
-    def op_IfObjective(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfObjective(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfObjective N: test if objective letter N is defined in the battle."""
         # TODO: check battle's objective letters (from .BTS file)
         # For now, assume objectives A-F always exist (simplified)
@@ -1536,26 +1636,30 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
-    def op_IfClass(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfClass(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfClass N: test if this unit's class matches N."""
         # TODO: check regiment's class from HUD_CLASS_BY_RACE_TYPE
         # For now, simplified: set cond_flags based on class
         state.cond_flags = 1  # assume matches for now
         return state.pc + 1
 
-    def op_IfTag(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfTag(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfTag TAG: test if this unit has the specified tag."""
         # TODO: implement unit tagging system
         state.cond_flags = 0  # no tags implemented yet
         return state.pc + 1
 
-    def op_IfTagExists(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfTagExists(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfTagExists TAG: test if any unit has this tag."""
         # TODO: implement unit tagging system
         state.cond_flags = 0  # no tags implemented yet
         return state.pc + 1
 
-    def op_IfEventSource(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfEventSource(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfEventSource: test if current event came from a specific source.
 
         Known limitation: the operand is a numeric source id from the bytecode, but
@@ -1563,13 +1667,11 @@ class ScriptInterpreter:
         SendEventSelf/etc.) -- there is no numeric-id-to-regiment mapping in this engine, so this
         comparison never matches today. Left as a documented gap rather than a guessed mapping.
         """
-        if operand is not None and state.current_event.source == operand:
-            state.cond_flags = 1
-        else:
-            state.cond_flags = 0
+        state.cond_flags = 0
         return state.pc + 1
 
-    def op_IfGameMode(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfGameMode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfGameMode N: test current game mode (1=deployment, 2=real time)."""
         # TODO: check battle's game mode
         # For now, assume real-time mode (2)
@@ -1579,7 +1681,8 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
-    def op_IfBattleState(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfBattleState(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfBattleState N: test current battle state."""
         # TODO: track battle state (0=initial, 4=in progress, 5=gate reached, etc.)
         # For now, assume state 4 (in progress)
@@ -1589,28 +1692,32 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
-    def op_SetBattleState(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SetBattleState(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SetBattleState N: set current battle state."""
         # TODO: update global battle state
         return state.pc + 1
 
-    def op_EnemyRouted(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_EnemyRouted(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """EnemyRouted: test if any enemy unit is routing/fleeing."""
         battle = self.battle
         regiment = battle.regiments.get(unit_id)
         if regiment:
-            for other_id, other in battle.regiments.items():
+            for other in battle.regiments.values():
                 if other.side != regiment.side and other.active and other.routing:
                     state.cond_flags = 1
                     return state.pc + 1
         state.cond_flags = 0
         return state.pc + 1
 
-    def op_EnemyRoutedStatic(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_EnemyRoutedStatic(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """EnemyRoutedStatic: test if a specific enemy is routing (static check)."""
         return state.pc + 1
 
-    def op_IfBreak(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfBreak(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfBreak: test if this unit is broken/fleeing."""
         regiment = self.battle.regiments.get(unit_id)
         if regiment and regiment.routing:
@@ -1619,7 +1726,8 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
-    def op_IfRouted(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfRouted(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfRouted: test if this unit is routed/fleeing."""
         regiment = self.battle.regiments.get(unit_id)
         if regiment and regiment.routing:
@@ -1628,7 +1736,8 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
-    def op_StartPursuit(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_StartPursuit(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """StartPursuit: chase down a fleeing unit."""
         if state.current_target:
             regiment = self.battle.regiments.get(unit_id)
@@ -1636,7 +1745,8 @@ class ScriptInterpreter:
                 regiment.attack_target = state.current_target[0]
         return state.pc + 1
 
-    def op_ReadyToFire(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_ReadyToFire(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """ReadyToFire: test if unit can shoot (not reloading)."""
         regiment = self.battle.regiments.get(unit_id)
         if regiment and regiment.missile_range and regiment.reload_ticks <= 0:
@@ -1645,14 +1755,16 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
-    def op_StampReload(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_StampReload(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """StampReload: manually reset reload counter (shortcut for rapid fire)."""
         regiment = self.battle.regiments.get(unit_id)
         if regiment:
             regiment.reload_ticks = 0
         return state.pc + 1
 
-    def op_SpawnUnit(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SpawnUnit(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SpawnUnit N: create Night Goblin Fanatics at current position.
 
         Only used in BF004_5, BF015, BF034, BF038 (fanatic battles).
@@ -1662,16 +1774,17 @@ class ScriptInterpreter:
         # Requires creating new models at a position, which is complex
         return state.pc + 1
 
-    def op_FollowParent(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_FollowParent(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """FollowParent: follow a parent unit (for child units in formation)."""
         # TODO: implement parent unit tracking
         return state.pc + 1
 
-    def op_SetClass(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_SetClass(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """SetClass N: change unit class (0=Monster, 1=Infantry, 3=Archer, etc.)."""
         # TODO: modify regiment.hud_class based on unit type
         if operand is not None:
-            from .engine import HUD_CLASS_BY_RACE_TYPE
             # Map class number to HUD class name
             class_names = {0: "mon", 1: "inf", 3: "arch", 15: "art", 19: "wiz"}
             regiment = self.battle.regiments.get(unit_id)
@@ -1679,7 +1792,8 @@ class ScriptInterpreter:
                 regiment.hud_class = class_names[operand]
         return state.pc + 1
 
-    def op_IfMachineDestroyed(self, state, operand, script_words, unit_id, tick_count, rng):
+    def op_IfMachineDestroyed(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
         """IfMachineDestroyed: test if an artillery machine is destroyed."""
         # TODO: check if specific war machine model is destroyed
         state.cond_flags = 0  # simplified: never destroyed

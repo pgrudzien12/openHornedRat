@@ -1,13 +1,20 @@
 """Deterministic battle-state primitives shared by prototype frontends."""
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import math
 import random
+from typing import Any
 
 from . import animation, battle_grid, behaviour, combat, formation, interpreter
 from .battle_events import BattleEvent
-from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, MOUNT_PROFILES, Side, may_engage, side_of_code, stat_fields
-from .script import load_battle, resource_name
+from .battle_log import BattleLogger
+from .rules import (EXPECTED_WEAPON_BONUS, MISSILE_RANGES, MOUNT_PROFILES, Side, may_engage, side_of_code,
+                    stat_fields, stat_int)
+from .script import StrPath, View, load_battle, resource_name
+
+Point = formation.Point
+TurnKey = tuple[Any, ...]  # ('move', x, y), ('charge', id), ('flee',) or ('turn', goal)
 
 TICK_SECONDS = 0.1  # the battle clock ticks every 100 ms (game_rules.md, "Battle clock")
 
@@ -37,7 +44,7 @@ REFORM_STEP_CAP = 1.0
 ARCHER_MISSILE_CODES = {1, 2, 9, 18, 19}
 # Default combat profile for a regiment without a decoded profile (WS/BS/S/T/W/I/A/Ld); an ordinary
 # human infantryman, matching DEFAULT_S_RLMV's M4 I3 example.
-DEFAULT_PROFILE = {"WS": 3, "BS": 3, "S": 3, "T": 3, "W": 1, "I": 3, "A": 1, "Ld": 7}
+DEFAULT_PROFILE: dict[str, int] = {"WS": 3, "BS": 3, "S": 3, "T": 3, "W": 1, "I": 3, "A": 1, "Ld": 7}
 
 # The battle HUD's command panel picks a button layout by one of five unit classes (Inf, Arch,
 # Art, Wiz, Mon; notes/game_rules.md "Battle HUD layout"). The note names the classes but does not
@@ -45,14 +52,14 @@ DEFAULT_PROFILE = {"WS": 3, "BS": 3, "S": 3, "T": 3, "W": 1, "I": 3, "A": 1, "Ld
 # byte, since 0 here is Monster, which the HUD's own table gives buttons to) - PROVISIONAL: derived
 # from the s_side race/type byte (script.RACE_TYPES) as the best available signal, not confirmed
 # against the panel's own class numbering.
-HUD_CLASS_BY_RACE_TYPE = {
+HUD_CLASS_BY_RACE_TYPE: dict[int, str] = {
     0: "mon", 1: "inf", 2: "inf", 3: "arch", 4: "inf", 5: "arch", 6: "inf", 7: "inf", 8: "inf",
     9: "inf", 10: "arch", 11: "inf", 12: "inf", 13: "arch", 14: "inf",
     15: "art", 16: "art", 17: "art", 18: "art", 19: "wiz",
 }
 
 
-def snap_facing_to_view(direction, view_angle):
+def snap_facing_to_view(direction: float, view_angle: float) -> float:
     """Round `direction` to the nearest 45 degree step (64 of 512) of a grid offset by where the
     camera sits inside a 45 degree sector."""
     step = formation.FULL_TURN / 8
@@ -60,7 +67,7 @@ def snap_facing_to_view(direction, view_angle):
     return (round((direction - offset) / step) * step + offset) % formation.FULL_TURN
 
 
-def speed_per_tick(move_stat, initiative_stat, k=MOVING_FREELY_K):
+def speed_per_tick(move_stat: float | None, initiative_stat: float | None, k: float = MOVING_FREELY_K) -> float:
     """World units a regiment covers in one 100 ms tick (game_rules.md, "Real time and movement"):
     ``s_rlmv = trunc(4.8 * M + I) / 2``, then ``s_rlmv * k / 16`` units per tick. ``k`` selects the
     movement mode: 1.8 moving freely, 1.0 closing, 2.5 charging or in melee, 1.5 fleeing.
@@ -84,8 +91,8 @@ class ModelState:
     """
 
     uid: int = 0  # identity within its regiment, stable across casualties (never an index)
-    cell: tuple | None = None  # (row, col) this model holds on the grid, or None when not placed
-    opponent: tuple | None = None  # (regiment identifier, model uid) this model is paired with
+    cell: battle_grid.Cell | None = None  # (row, col) this model holds on the grid, or None when not placed
+    opponent: tuple[str, int] | None = None  # (regiment identifier, model uid) this model is paired with
     arrived: bool = False  # has walked into its cell, so it may strike (model flag 0x10000)
     reserve: bool = False  # found no free cell this tick and waits for one (model flag 0x8000)
     stagger: int = 0  # fixed 16-bit value (29 * n % 65536, n battle-wide) for this model's rank-dependent pace and later charge delay
@@ -100,7 +107,7 @@ class ModelState:
     action_pc: int = 0  # ticks elapsed since the action's program counter was last reset
     action_entry: int = 0  # random entry/choice drawn on that reset, whshr.animation.step
     pending_action: int | None = None  # action queued behind a running one-shot script
-    drawn_facing: int | None = None  # facing (0-511) the sprite direction is drawn from; None until first set
+    drawn_facing: float | None = None  # facing (0-511) the sprite direction is drawn from; None until first set
     fire_event: bool = False  # animation reached its fire point on this tick (whshr.animation)
 
 
@@ -112,7 +119,7 @@ class Regiment:
     name: str
     x: float
     y: float
-    direction: int
+    direction: float
     side: Side  # notes/neutral_units.md: player, neutral/NPC, or enemy
     target_x: float | None = None
     target_y: float | None = None
@@ -122,12 +129,12 @@ class Regiment:
     banner: str | None = None  # script banner resource
     portrait: str | None = None  # leader portrait resource
     speed_per_tick: float = DEFAULT_SPEED_PER_TICK  # BTS world units per 100 ms tick, moving freely
-    positions: list = field(default_factory=list)  # current per-model (x, y); lazily seeded in formation
-    melee_models: list = field(default_factory=list)  # ModelState, index-parallel with `positions`
+    positions: list[Point] = field(default_factory=list[Point])  # current per-model (x, y); lazily seeded in formation
+    melee_models: list[ModelState] = field(default_factory=list[ModelState])  # ModelState, index-parallel with `positions`
     _next_uid: int = 0  # next free model identity (see ModelState.uid)
     # Battle-wide model counter feeding `ModelState.stagger`; `Battle` shares one across all its regiments.
     # A regiment used on its own (tests) keeps a private one, created on first use.
-    stagger_counter: object = None
+    stagger_counter: "StaggerCounter | None" = None
     walking: bool = False  # true while the anchor or any model is still travelling
 
     # Combat profile (game_rules.md section 3, section 5-8), decoded from the script's setstats lines.
@@ -144,7 +151,7 @@ class Regiment:
     strength_bonus: int = 0  # weapon class bonus, rules.EXPECTED_WEAPON_BONUS[s_weap]
     missile_code: int | None = None  # S_BalWeap, only ARCHER_MISSILE_CODES are modelled as shooters
     missile_range: float | None = None  # world units, from rules.MISSILE_RANGES
-    psychology: frozenset = frozenset()  # psy_status flag names, e.g. {"CantBreak", "CantRally"}
+    psychology: frozenset[str] = frozenset()  # psy_status flag names, e.g. {"CantBreak", "CantRally"}
     hud_class: str | None = None  # "inf"/"arch"/"art"/"wiz"/"mon"; see HUD_CLASS_BY_RACE_TYPE
     unit_class: int | None = None  # s_race class; wagons use a four-deep movement layout
     points: int = 0  # s_pntval: experience gained by the killer, and the AI's per-model worth unit
@@ -153,7 +160,7 @@ class Regiment:
     # Combat/order state (whshr.combat).
     attack_target: str | None = None  # identifier of an enemy regiment this regiment is charging
     charge_started_target: str | None = None  # target whose current charge already froze its models
-    turn_order_key: tuple | None = None
+    turn_order_key: TurnKey | None = None
     turn_goal: float | None = None
     turn_remaining: float = 0.0
     turn_sign: int = 0
@@ -170,7 +177,7 @@ class Regiment:
     # its opponent; see `rules.may_engage`. Cleared whenever it leaves its fight.
     melee_camp: Side | None = None
     melee_group: str | None = None  # id of the shared multi-regiment fight (Battle.fights), if any
-    melee_touching: frozenset = field(default_factory=frozenset)  # enemy ids this footprint touches now
+    melee_touching: frozenset[str] = field(default_factory=frozenset[str])  # enemy ids this footprint touches now
     held: bool = False  # reserved for a Tangling-Thorn-style hold; already gates re-forms if ever set
     # game_rules.md "Formation changes": true while models are still walking to their newly assigned
     # slots after a re-form; `reform_slots` holds each model's assigned local (side, forward) offset,
@@ -178,12 +185,12 @@ class Regiment:
     # `formation.place` so it tracks a moving or turning anchor.
     reforming: bool = False
     anchor_cleared: bool = False  # set by `clear_anchor` (artillery misfire); see `anchored`
-    reform_slots: list = field(default_factory=list)
+    reform_slots: list[Point] = field(default_factory=list[Point])
     routing: bool = False  # fleeing the field; ignores orders, moves away from the nearest enemy
     # game_rules.md "Flight and catching fleeing units": the flight bearing is fixed once, "directly
-    # away from its opponent", when the rout starts (combat._start_rout) - not re-aimed every tick
+    # away from its opponent", when the rout starts (combat.start_rout) - not re-aimed every tick
     # at whichever enemy happens to be nearest at that instant. A far point along that bearing
-    # (Battle._flee_point's own convention); None only before the first rout tick sets it.
+    # (Battle.flee_point's own convention); None only before the first rout tick sets it.
     flee_x: float | None = None
     flee_y: float | None = None
     fled: bool = False  # a routing regiment that has left the battlefield (removed from play)
@@ -191,18 +198,18 @@ class Regiment:
     volley_countdown: int | None = None  # remaining fire-event decrements expected in the current volley
     volley_age: int = 0  # ticks elapsed since the current volley was ordered; drives the resolve window
     reload_ticks: float = 0.0  # ticks remaining before a missile regiment may shoot again
-    dying: list = field(default_factory=list)  # animation.DyingModel entries awaiting their collapse tick
-    corpses: list = field(default_factory=list)  # (x, y, direction) of models that have died, for the view
-    burning: list = field(default_factory=list)  # animation.BurningModel: burn sequences in progress (fire/warpfire kills)
-    charred: list = field(default_factory=list)  # (x, y, direction, body class) of models that finished burning
+    dying: list[animation.DyingModel] = field(default_factory=list[animation.DyingModel])  # animation.DyingModel entries awaiting their collapse tick
+    corpses: list[tuple[float, float, int]] = field(default_factory=list[tuple[float, float, int]])  # (x, y, direction) of models that have died, for the view
+    burning: list[animation.BurningModel] = field(default_factory=list[animation.BurningModel])  # animation.BurningModel: burn sequences in progress (fire/warpfire kills)
+    charred: list[tuple[float, float, int, str]] = field(default_factory=list[tuple[float, float, int, str]])  # (x, y, direction, body class) of models that finished burning
 
     # Traced close-combat/rally timing (game_rules.md 5.5, 6.1-6.2, 7.4), see whshr.combat.
     # The fight's own-side tally, breakdown and next break-test turn (6.1-6.2) live on
     # `Battle.fights[regiment.melee_group]`, shared by every regiment in that fight.
-    original_models: int | None = None  # starting model count, for rally's casualties modifier
+    original_models: int = -1  # starting model count, for rally's casualties modifier; negative = the `models` given
     # game_rules.md 6.1: the formed frontage, which casualties never reduce (only a re-form would).
     # The rank bonus divides the live model count by this, so it decays as the unit is worn down.
-    frontage: int | None = None
+    frontage: int = -1  # negative = derived from `models`/`ranks` in __post_init__
     # game_rules.md 5.5: floor(1.5 x frontage), set when the regiment charges into a fight and spent
     # one attacking model at a time, so only the first models to strike get the +1 S.
     charge_counter: int = 0
@@ -212,21 +219,21 @@ class Regiment:
     last_fought_opponent: str | None = None
     rally_next_segment: int | None = None  # absolute segment index of the next scheduled rally attempt (7.4)
 
-    def __post_init__(self):
-        if self.original_models is None:
+    def __post_init__(self) -> None:
+        if self.original_models < 0:
             self.original_models = self.models
-        if self.frontage is None:
+        if self.frontage < 0:
             sizes = formation.rank_sizes(self.models, self.ranks)
             self.frontage = sizes[0] if sizes else 0
 
     @property
-    def camp(self):
+    def camp(self) -> Side:
         """Who this regiment fights for in a melee: its side, unless a scripted same-side engagement
         put it on its own `Side.DUEL` camp."""
         return self.melee_camp or self.side
 
     @property
-    def anchored(self):
+    def anchored(self) -> bool:
         """War machines are anchored by rule, not by AI or mission choice (game_rules.md "Turning,
         wheeling and reversing"): the artillery class always carries the anchor flag, until an
         artillery misfire explosion clears it (`clear_anchor`; there is no limbering).
@@ -237,56 +244,56 @@ class Regiment:
         rank changes, flight movement or the Independent/rally toggles."""
         return self.hud_class == "art" and not self.anchor_cleared
 
-    def clear_anchor(self):
+    def clear_anchor(self) -> None:
         """Hook for an artillery misfire explosion, the only thing that frees an anchored war machine.
         The engine has no misfire mechanic yet, so nothing calls this."""
         self.anchor_cleared = True
 
     @property
-    def animation_family(self):
+    def animation_family(self) -> str:
         return animation.family_for(self.sprite, self.unit_class)
 
     @property
-    def body_class(self):
+    def body_class(self) -> str:
         return animation.body_class(self.unit_class, self.sprite)
 
-    def burns_on(self, death_kind):
+    def burns_on(self, death_kind: int) -> bool:
         return animation.burns_on_death(death_kind, self.unit_class, self.sprite)
 
     @property
-    def is_wagon(self):
+    def is_wagon(self) -> bool:
         return self.unit_class == 7 and self.models == 2
 
     @property
-    def turns_on_the_spot(self):
+    def turns_on_the_spot(self) -> bool:
         """Single-model units and units mid-re-form skip the pivot, slot-shift and speed-penalty
         machinery of a gradual turn (game_rules.md, same section); their turn rate is unchanged."""
         return self.models <= 1 or self.reforming
 
     @property
-    def moving(self):
+    def moving(self) -> bool:
         return self.target_x is not None
 
     @property
-    def mount_profile(self):
-        return MOUNT_PROFILES.get(self.mount) if 8 <= self.armour <= 13 else None
+    def mount_profile(self) -> dict[str, int] | None:
+        return MOUNT_PROFILES.get(self.mount) if self.mount is not None and 8 <= self.armour <= 13 else None
 
     @property
-    def destroyed(self):
+    def destroyed(self) -> bool:
         return self.models <= 0
 
     @property
-    def active(self):
+    def active(self) -> bool:
         """False once a regiment is out of the fight (all models dead, or routed off the field)."""
         return not self.destroyed and not self.fled
 
-    def speed_for_mode(self, k):
+    def speed_for_mode(self, k: float) -> float:
         """Per-tick speed at movement factor ``k`` (game_rules.md k factors), scaled from the regiment's
         own free-movement speed rather than carrying a second raw ``s_rlmv`` field."""
         return self.speed_per_tick * k / MOVING_FREELY_K
 
     @property
-    def charge_reach(self):
+    def charge_reach(self) -> float:
         """game_rules.md "Charge": a real charge reaches at most ``12 * (s_rlmv + 1)`` world units
         (about 6" for infantry, 9.5" for cavalry) -- a short final rush, not the whole approach.
         Recovers ``s_rlmv`` from the stored free-movement `speed_per_tick` (``s_rlmv * 1.8 / 16``)
@@ -294,7 +301,7 @@ class Regiment:
         s_rlmv = self.speed_per_tick * 16 / MOVING_FREELY_K
         return 12 * (s_rlmv + 1)
 
-    def model_positions(self, spacing=formation.MODEL_SPACING):
+    def model_positions(self, spacing: float = formation.MODEL_SPACING) -> list[Point]:
         """Current per-model positions (BTS world units): seeded in formation, then advanced by `Battle.tick`."""
         if len(self.positions) != self.models:
             self.positions = formation.place(self.x, self.y, self.direction,
@@ -316,22 +323,22 @@ class Regiment:
             self.reform_slots = []
         return self.positions
 
-    def index_of(self, uid):
+    def index_of(self, uid: int) -> int | None:
         """Position of the model with this identity, or None once it has been killed."""
         for index, model in enumerate(self.melee_models):
             if model.uid == uid:
                 return index
         return None
 
-    def front_rank_models(self):
+    def front_rank_models(self) -> int:
         """Model count of the front rank, the attackers/shooters counted in a combat or volley round."""
         sizes = formation.rank_sizes(self.models, self.ranks)
         return sizes[0] if sizes else 0
 
-    def _footprint(self):
+    def _footprint(self) -> formation.Frame:
         return formation.footprint_frame(self.x, self.y, self.direction, self.models, self.ranks)
 
-    def contains(self, x, y):
+    def contains(self, x: float, y: float) -> bool:
         """True when a ground point lies inside the regiment's oriented block footprint."""
         cx, cy, half_side, half_forward, cos, sin = self._footprint()
         dx, dy = x - cx, y - cy
@@ -339,35 +346,47 @@ class Regiment:
         local_forward = dx * sin + dy * cos
         return abs(local_side) <= half_side and abs(local_forward) <= half_forward
 
-    def bounding_radius(self):
+    def bounding_radius(self) -> float:
         return formation.bounding_radius(self.models, self.ranks)
 
-    def block(self):
+    def block(self) -> formation.Block:
         """`(x, y, direction, models, ranks)`, the block description `whshr.formation` works from."""
         return (self.x, self.y, self.direction, self.models, self.ranks)
 
-    def footprint_corners(self):
+    def footprint_corners(self) -> list[Point]:
         """The four world-space corners of this regiment's oriented block footprint, for
         `formation.footprint_gap` (close-combat contact, `whshr.combat.resolve_contacts`)."""
         return formation.footprint_corners(self.x, self.y, self.direction, self.models, self.ranks)
 
 
-def _decode_combat_profile(unit):
+def _slot_offsets(assignment: Sequence[Point | None]) -> list[Point]:
+    """`formation.reform_assignment`'s result with every model given a slot (always so when the block's
+    slot count matches its model count)."""
+    slots = [slot for slot in assignment if slot is not None]
+    if len(slots) != len(assignment):
+        raise ValueError("re-form left a model without a slot")
+    return slots
+
+
+def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
     """Decode a regiment's speed, WS/BS/S/T/W/I/A/Ld, armour, weapon and missile stats from its raw script
     setstats lines (game_rules.md section 3), stdlib-only (no GAMEF.DLL access needed at battle time:
     the tables it would supply are already verified constants in whshr.rules)."""
     fields, _conflicts = stat_fields(unit.get("stats") or {})
-    profile = unit.get("profile") or {}
-    armour = fields.get("s_armr") or 0
-    mount = MOUNT_PROFILES.get(fields.get("s_mount")) if 8 <= armour <= 13 else None
+    profile: Mapping[str, Any] = unit.get("profile") or {}
+    armour = stat_int(fields, "s_armr") or 0
+    mount_code = stat_int(fields, "s_mount")
+    mount = MOUNT_PROFILES.get(mount_code) if mount_code is not None and 8 <= armour <= 13 else None
     move_stat = mount["M"] if mount is not None else profile.get("M")
-    weapon_class = fields.get("s_weap")
-    missile_code = fields.get("S_BalWeap")
-    missile_range = MISSILE_RANGES.get(missile_code) if missile_code in ARCHER_MISSILE_CODES else None
+    weapon_class = stat_int(fields, "s_weap")
+    missile_code = stat_int(fields, "S_BalWeap")
+    missile_range = (MISSILE_RANGES.get(missile_code)
+                     if missile_code is not None and missile_code in ARCHER_MISSILE_CODES else None)
     psy_status = unit.get("set", {}).get("psy_status")
     psychology = frozenset(f for f in str(psy_status or "").split("|") if f)
-    side = fields.get("s_side")
+    side = stat_int(fields, "s_side")
     hud_class = HUD_CLASS_BY_RACE_TYPE.get(side & 0x3F) if side is not None else None
+    race = stat_int(fields, "s_race")
     return {
         "speed_per_tick": speed_per_tick(move_stat, profile.get("I", DEFAULT_PROFILE["I"])),
         "ws": int(profile.get("WS", DEFAULT_PROFILE["WS"])),
@@ -379,14 +398,14 @@ def _decode_combat_profile(unit):
         "attacks": int(profile.get("A", DEFAULT_PROFILE["A"])),
         "leadership": int(profile.get("Ld", DEFAULT_PROFILE["Ld"])),
         "armour": armour,
-        "mount": fields.get("s_mount"),
-        "strength_bonus": EXPECTED_WEAPON_BONUS.get(weapon_class, 0) if isinstance(weapon_class, int) else 0,
+        "mount": mount_code,
+        "strength_bonus": EXPECTED_WEAPON_BONUS.get(weapon_class, 0) if weapon_class is not None else 0,
         "missile_code": missile_code if missile_range else None,
         "missile_range": missile_range,
         "psychology": psychology,
         "hud_class": hud_class,
-        "unit_class": fields["s_race"] >> 3 if "s_race" in fields else None,
-        "points": int(fields.get("s_pntval") or 0),
+        "unit_class": race >> 3 if race is not None else None,
+        "points": stat_int(fields, "s_pntval") or 0,
     }
 
 
@@ -394,10 +413,10 @@ class StaggerCounter:
     """Battle-wide count of models created; the n-th model gets stagger ``29 * n % 65536``
     (game_rules.md, model stagger). Never reset per regiment."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.count = 0
 
-    def next_value(self):
+    def next_value(self) -> int:
         value = 29 * self.count % 65536
         self.count += 1
         return value
@@ -406,13 +425,14 @@ class StaggerCounter:
 class Battle:
     """Authoritative fixed-tick state: movement, and (whshr.combat) close combat, shooting, morale."""
 
-    def __init__(self, width, height, regiments, seed=DEFAULT_SEED, script_dll=None, script_ids=None,
-                 script_logger=None, nodes=None):
+    def __init__(self, width: float, height: float, regiments: Sequence[Regiment], seed: int = DEFAULT_SEED,
+                 script_dll: behaviour.ScriptDll | None = None, script_ids: Mapping[str, int] | None = None,
+                 script_logger: BattleLogger | None = None, nodes: Mapping[int, Point] | None = None) -> None:
         if width <= 0 or height <= 0:
             raise ValueError("battle dimensions must be positive")
         self.width = width
         self.height = height
-        self.regiments = {regiment.identifier: regiment for regiment in regiments}
+        self.regiments: dict[str, Regiment] = {regiment.identifier: regiment for regiment in regiments}
         if len(self.regiments) != len(regiments):
             raise ValueError("regiment identifiers must be unique")
         self.stagger_counter = StaggerCounter()
@@ -420,17 +440,17 @@ class Battle:
             regiment.stagger_counter = self.stagger_counter
         self.tick_count = 0
         # Camera rotation in 1/512 turns, set by the frontend; wagons snap to it (see set_view_angle).
-        self.view_angle = None
-        self._snapped_view_angle = None
+        self.view_angle: float | None = None
+        self._snapped_view_angle: float | None = None
         self.rng = random.Random(seed)
-        self.events = []  # battle events emitted by the most recent tick (plain strings)
+        self.events: list[BattleEvent] = []  # battle events emitted by the most recent tick
         # {node id: (x, y)} from the battle's own [NODES] section (whshr.script.load_battle),
         # BTS world coordinates; read by the interpreter's MoveToNode/FaceNode/TeleportToNode/
         # PlaceAtNode opcodes (issue #3/#46). Empty for a synthetic/nodeless battle.
-        self.nodes = nodes or {}
-        self.fights = {}  # group id -> {"next_test_turn", "tally": {True/False}, "breakdown": {...}}
-        self._fight_seq = 0  # counter for fresh whshr.combat fight group ids
-        self.result = None  # None while the battle is ongoing, else "victory" or "defeat"
+        self.nodes: dict[int, Point] = dict(nodes or {})
+        self.fights: dict[str, combat.Fight] = {}  # group id -> {"next_test_turn", "tally": {True/False}, "breakdown": {...}}
+        self.fight_seq = 0  # counter for fresh whshr.combat fight group ids
+        self.result: str | None = None  # None while the battle is ongoing, else "victory" or "defeat"
         # A battle only has a win/lose condition once it actually has both sides (movement-only tests
         # and synthetic battles commonly field only one side, which must never auto-resolve). Neutral
         # regiments never decide it either way (notes/neutral_units.md: their combat-credit rules are
@@ -446,6 +466,7 @@ class Battle:
         # set:script= value; a regiment absent from it starts on the shared library script
         # (behaviour.PLAYER_SCRIPT), matching the original's own default for units with no explicit
         # set:script= line.
+        self.unit_tags: dict[int, str] = {}  # tag -> regiment identifier, filled by the SetTag opcode
         self.script_dll = script_dll
         self.event_bus = interpreter.EventBus(self)
         script_ids = script_ids or {}
@@ -454,15 +475,17 @@ class Battle:
             self.event_bus.unit_states[regiment_id] = interpreter.UnitScriptState(script_id=initial_script)
         # `script_logger` (whshr.battle_log.BattleLogger) optionally records every dispatched opcode
         # when its own trace_scripts flag is on -- see ScriptInterpreter.run/write_opcode.
-        self.interpreter = (interpreter.ScriptInterpreter(self, self.event_bus, script_dll, logger=script_logger)
+        self.interpreter: interpreter.ScriptInterpreter | None = (interpreter.ScriptInterpreter(self, self.event_bus, script_dll, logger=script_logger)
                              if script_dll else None)
 
     @classmethod
-    def from_battle_file(cls, path, seed=DEFAULT_SEED, script_dll=None, script_logger=None):
+    def from_battle_file(cls, path: StrPath, seed: int = DEFAULT_SEED, script_dll: behaviour.ScriptDll | None = None,
+                         script_logger: BattleLogger | None = None) -> "Battle":
         return cls.from_script(load_battle(path), seed=seed, script_dll=script_dll, script_logger=script_logger)
 
     @classmethod
-    def from_script(cls, source, seed=DEFAULT_SEED, script_dll=None, script_logger=None):
+    def from_script(cls, source: View, seed: int = DEFAULT_SEED, script_dll: behaviour.ScriptDll | None = None,
+                    script_logger: BattleLogger | None = None) -> "Battle":
         """Build the battle from a loaded BTS/MRC script; repeated unit ids get ``#2``, ``#3``... suffixes.
 
         ``script_dll``, when given, is threaded through to `Battle.__init__` (issue #3/#46) so its
@@ -482,13 +505,16 @@ class Battle:
         nodes = {index: (float(node["x"]), float(node["y"]))
                  for index, node in enumerate(source.get("nodes") or ())
                  if node.get("x") is not None and node.get("y") is not None}
-        regiments, script_ids, used = [], {}, set()
+        regiments: list[Regiment] = []
+        script_ids: dict[str, int] = {}
+        used: set[str] = set()
         # `source["armies"]` are the .BTS file's own [UNITS] sections (both the "Enemy Army" and "NPC
         # units" ones, notes/neutral_units.md section 2): each unit's own s_side byte says whether it
         # is enemy or neutral. `source["merc"]` is the player's own roster from the loaded .MRC, always
         # Side.PLAYER regardless of any s_side value it happens to carry.
-        armies = [(army, None) for army in source["armies"]]
-        armies.extend((army, Side.PLAYER) for army in (source["merc"] or {}).get("armies", []))
+        armies: list[tuple[View, Side | None]] = [(army, None) for army in source["armies"]]
+        merc: View = source["merc"] or {}
+        armies.extend((army, Side.PLAYER) for army in merc.get("armies", []))
         for army, forced_side in armies:
             for unit in army["units"]:
                 position = unit["set"]
@@ -499,17 +525,18 @@ class Battle:
                     identifier, suffix = f"{unit['id']}#{suffix}", suffix + 1
                 used.add(identifier)
                 models, ranks = formation.unit_size(unit)
+                leader: View = unit.get("leader") or {}
                 if forced_side is not None:
                     side = forced_side
                 else:
                     fields, _conflicts = stat_fields(unit.get("stats") or {})
-                    side = side_of_code(fields.get("s_side"))
+                    side = side_of_code(stat_int(fields, "s_side"))
                 regiments.append(Regiment(
                     identifier, unit["name"], float(position["x"]), float(position["y"]),
                     int(position.get("dir") or 0) % 512, side, models=models, ranks=ranks,
                     sprite=resource_name(unit.get("sprites")),
                     banner=resource_name(unit.get("banner")),
-                    portrait=resource_name((unit.get("leader") or {}).get("portrait")),
+                    portrait=resource_name(leader.get("portrait")),
                     **_decode_combat_profile(unit),
                 ))
                 script_value = position.get("script")
@@ -520,7 +547,7 @@ class Battle:
         return cls(field_data["width"], field_data["height"], regiments, seed=seed,
                    script_dll=script_dll, script_ids=script_ids, script_logger=script_logger, nodes=nodes)
 
-    def order_move(self, identifier, x, y):
+    def order_move(self, identifier: str, x: float, y: float) -> None:
         regiment = self.regiments[identifier]
         if regiment.side != Side.PLAYER:
             raise ValueError(f"{identifier} is not player-controlled")
@@ -537,7 +564,7 @@ class Battle:
         regiment.turn_order_key = None
         regiment.target_x, regiment.target_y = float(x), float(y)
 
-    def order_attack(self, identifier, target_id):
+    def order_attack(self, identifier: str, target_id: str) -> None:
         """Order a player regiment to charge a non-player regiment into contact (game_rules.md,
         "Charge"): the target may be an enemy or a neutral regiment (notes/neutral_units.md documents
         neutral units as ordinary battle units, not automatically off-limits to a deliberate order)."""
@@ -559,7 +586,7 @@ class Battle:
         regiment.attack_target = target_id
         regiment.turn_order_key = None
 
-    def order_halt(self, identifier):
+    def order_halt(self, identifier: str) -> None:
         """Cancel the selected regiment's current movement or charge order in place."""
         regiment = self.regiments[identifier]
         if regiment.side != Side.PLAYER:
@@ -576,7 +603,7 @@ class Battle:
         regiment.braced = False
         regiment.braced_target = None
 
-    def resolve_no_battle(self):
+    def resolve_no_battle(self) -> None:
         """No-battle mode (a campaign-progression shortcut, not a game rule): skip this fight and
         settle it as an immediate, lossless win -- every enemy regiment destroyed, no player
         regiment touched -- so the campaign flow past it (debrief, roster, map) can be walked
@@ -587,7 +614,7 @@ class Battle:
                 regiment.models = 0
         self._update_result()
 
-    def order_reform(self, identifier, ranks):
+    def order_reform(self, identifier: str, ranks: int) -> None:
         """Change a player regiment's rank count (game_rules.md, "Formation changes: how the figures
         re-sort themselves"): refused while fleeing, held or charging (including once in melee, since
         a charge's `attack_target` is never cleared on contact); the request is clamped into
@@ -605,7 +632,7 @@ class Battle:
             raise ValueError(f"{identifier} is charging or in melee and cannot be ordered")
         self._begin_reform(regiment, formation.clamp_ranks(regiment.models, ranks))
 
-    def _check_turn_order(self, identifier):
+    def _check_turn_order(self, identifier: str) -> Regiment:
         """Shared guard for all standalone turn orders (game_rules.md "Turning, wheeling and reversing")."""
         regiment = self.regiments[identifier]
         if regiment.side != Side.PLAYER:
@@ -616,7 +643,7 @@ class Battle:
             raise ValueError(f"{identifier} is in melee and cannot be ordered")
         return regiment
 
-    def order_turn_left(self, identifier):
+    def order_turn_left(self, identifier: str) -> None:
         """Rotate a player regiment 90° counter-clockwise in place (game_rules.md, opcodes 0x0C)."""
         regiment = self._check_turn_order(identifier)
         goal = (regiment.direction - 128) % 512
@@ -625,7 +652,7 @@ class Battle:
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
 
-    def order_turn_right(self, identifier):
+    def order_turn_right(self, identifier: str) -> None:
         """Rotate a player regiment 90° clockwise in place (game_rules.md, opcodes 0x0D)."""
         regiment = self._check_turn_order(identifier)
         goal = (regiment.direction + 128) % 512
@@ -634,7 +661,7 @@ class Battle:
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
 
-    def order_about_face(self, identifier):
+    def order_about_face(self, identifier: str) -> None:
         """Rotate a player regiment 180° in place (game_rules.md, opcodes 0x0E)."""
         regiment = self._check_turn_order(identifier)
         goal = (regiment.direction + 256) % 512
@@ -643,7 +670,7 @@ class Battle:
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
 
-    def order_face_point(self, identifier, x, y):
+    def order_face_point(self, identifier: str, x: float, y: float) -> None:
         """Turn a player regiment to face world coordinates (x, y) in place."""
         regiment = self._check_turn_order(identifier)
         dx, dy = x - regiment.x, y - regiment.y
@@ -656,7 +683,7 @@ class Battle:
         regiment.turn_order_key = ("turn", goal)
 
     @staticmethod
-    def _plan_turn_order(regiment, goal):
+    def _plan_turn_order(regiment: Regiment, goal: float) -> None:
         """Plan a standalone turn order: always halted (shift 8, zero speed) regardless of angle."""
         delta = Battle._turn_delta(regiment.direction, goal)
         magnitude = abs(delta)
@@ -670,7 +697,7 @@ class Battle:
         regiment.turn_mode, regiment.turn_shift = "halted", 8
 
     @staticmethod
-    def _begin_reform(regiment, ranks):
+    def _begin_reform(regiment: Regiment, ranks: int) -> None:
         """Recompute the shape for `ranks` and re-slot every model into it (game_rules.md, "Formation
         changes"). `leader_index` is left unset: this engine has no persistent leader-model identity
         to hand the front-rank-centre slot to directly, so `formation.reform_assignment` falls back to
@@ -688,9 +715,9 @@ class Battle:
             # re-slotting is applied as a permutation into raster order. War machine crew always
             # take the FARTHEST unplaced model per slot; the machine's own front-rank centre slot is
             # filled directly (nearest fallback here); wagons use the ordinary nearest search.
-            assignment = formation.reform_assignment(
+            assignment = _slot_offsets(formation.reform_assignment(
                 regiment.x, regiment.y, regiment.direction, regiment.models, ranks, positions,
-                farthest=regiment.hud_class == "art")
+                farthest=regiment.hud_class == "art"))
             raster_index = {offset: index for index, offset in
                             enumerate(formation.block_slots(regiment.models, ranks))}
             order = sorted(range(len(assignment)), key=lambda i: raster_index[assignment[i]])
@@ -699,11 +726,11 @@ class Battle:
             regiment.reform_slots = []
             regiment.reforming = False
             return
-        regiment.reform_slots = formation.reform_assignment(
-            regiment.x, regiment.y, regiment.direction, regiment.models, ranks, positions)
+        regiment.reform_slots = _slot_offsets(formation.reform_assignment(
+            regiment.x, regiment.y, regiment.direction, regiment.models, ranks, positions))
         regiment.reforming = bool(regiment.reform_slots)
 
-    def snapshot(self):
+    def snapshot(self) -> dict[str, dict[str, Any]]:
         """Per-regiment state for `whshr.battle_log` (a segment snapshot or the final battle state):
         position, facing, models, corpse count, and every order/engagement flag needed to trace a
         regiment's behaviour without re-deriving it from the tick-by-tick event log."""
@@ -727,9 +754,10 @@ class Battle:
             for identifier, regiment in self.regiments.items()
         }
 
-    def regiment_at(self, x, y, player_only=True):
+    def regiment_at(self, x: float, y: float, player_only: bool = True) -> str | None:
         """Identifier of the regiment whose footprint contains (x, y), or None; the closest one if several."""
-        best_id, best_distance = None, None
+        best_id: str | None = None
+        best_distance: float | None = None
         for regiment in self.regiments.values():
             if not regiment.active:
                 continue
@@ -742,7 +770,7 @@ class Battle:
                 best_id, best_distance = regiment.identifier, distance
         return best_id
 
-    def set_view_angle(self, angle):
+    def set_view_angle(self, angle: float) -> None:
         """Record the camera rotation (1/512 turns). Wagons re-snap their facing to the nearest 45 degree
         step of a grid offset by the camera's position in its 45 degree sector, only when it changed
         (game_rules.md "Turning, wheeling and reversing")."""
@@ -755,7 +783,7 @@ class Battle:
             if regiment.is_wagon:
                 regiment.direction = snap_facing_to_view(regiment.direction, angle)
 
-    def tick(self, seconds=TICK_SECONDS):
+    def tick(self, seconds: float = TICK_SECONDS) -> None:
         if seconds <= 0:
             raise ValueError("tick duration must be positive")
         self.events = []
@@ -782,7 +810,7 @@ class Battle:
         self._update_result()
         self.tick_count += 1
 
-    def _advance_regiments(self, scale, seconds):
+    def _advance_regiments(self, scale: float, seconds: float) -> None:
         for regiment in self.regiments.values():
             self._step_burning(regiment)
             self._step_dying(regiment)
@@ -804,8 +832,8 @@ class Battle:
                 regiment.turn_order_key = regiment.turn_mode = None
                 pass  # frozen in place while fighting; the view shows the attack animation instead
             elif regiment.routing:
-                if regiment.flee_x is None:  # self-heal: should only happen for pre-existing state
-                    regiment.flee_x, regiment.flee_y = self._flee_point(regiment)
+                if regiment.flee_x is None or regiment.flee_y is None:  # self-heal: should only happen for pre-existing state
+                    regiment.flee_x, regiment.flee_y = self.flee_point(regiment)
                 moved = self._advance_toward(regiment, (regiment.flee_x, regiment.flee_y),
                                              regiment.speed_for_mode(FLEEING_K) * move_scale, arrive=False,
                                              order_key=("flee",), scale=scale)
@@ -831,7 +859,7 @@ class Battle:
                     moved = self._advance_toward(regiment, (target.x, target.y),
                                                  regiment.speed_for_mode(CHARGING_K) * move_scale, arrive=False,
                                                  order_key=("charge", target.identifier), scale=scale)
-            elif regiment.moving:
+            elif regiment.target_x is not None and regiment.target_y is not None:
                 moved = self._advance_toward(regiment, (regiment.target_x, regiment.target_y),
                                              regiment.speed_per_tick * move_scale, arrive=True,
                                              order_key=("move", regiment.target_x, regiment.target_y), scale=scale)
@@ -854,7 +882,7 @@ class Battle:
             self._step_animations(regiment)
 
     @staticmethod
-    def _turn_to(regiment, direction):
+    def turn_to(regiment: Regiment, direction: float) -> None:
         """Change a regiment's facing, moving its anchor so the turn pivots about the block centre.
 
         game_rules.md, "A turn always moves the unit position to keep the pivot still": the original
@@ -871,12 +899,12 @@ class Battle:
         regiment.y += shift_y
 
     @staticmethod
-    def _turn_delta(direction, goal):
+    def _turn_delta(direction: float, goal: float) -> float:
         """Signed shortest turn in 1/512-turn units."""
         return (goal - direction + 256) % 512 - 256
 
     @staticmethod
-    def _snap_order_turn(regiment, goal):
+    def _snap_order_turn(regiment: Regiment, goal: float) -> None:
         """Apply the one-time 90/180-degree snap on a new movement order."""
         if regiment.turns_on_the_spot:
             return
@@ -899,7 +927,7 @@ class Battle:
         regiment.direction = new_direction
 
     @staticmethod
-    def _plan_turn(regiment, goal, charge=False):
+    def _plan_turn(regiment: Regiment, goal: float, charge: bool = False) -> None:
         """Choose the gradual turn mode once from the angle still owed."""
         delta = Battle._turn_delta(regiment.direction, goal)
         magnitude = abs(delta)
@@ -919,7 +947,7 @@ class Battle:
             regiment.turn_mode, regiment.turn_shift = "wheel", 7
 
     @staticmethod
-    def _step_turn(regiment, scale):
+    def _step_turn(regiment: Regiment, scale: float) -> str | None:
         """Advance one active gradual turn, shifting the anchor around the inner corner."""
         if regiment.turn_mode is None:
             return None
@@ -945,7 +973,8 @@ class Battle:
             regiment.turn_mode = None
         return mode
 
-    def _advance_toward(self, regiment, target, step, arrive, order_key, scale):
+    def _advance_toward(self, regiment: Regiment, target: Point, step: float, arrive: bool, order_key: TurnKey,
+                        scale: float) -> bool:
         """Turn toward a target over time, then advance along the current facing.
 
         With `arrive=True` (an ordinary move order) reaching the target clears it, matching the
@@ -988,7 +1017,7 @@ class Battle:
         regiment.y += math.cos(angle) * min(step, distance)
         return True
 
-    def _nearest_enemy(self, regiment):
+    def nearest_enemy(self, regiment: Regiment) -> Regiment | None:
         """The nearest active regiment of a *different* side, whatever it is (used for a rout's flee
         bearing and rally's "enemy nearby" check): the opponent to flee from is whoever `regiment` is
         actually engaged with, not restricted to `rules.hostile_sides`' default hostility, which only
@@ -998,10 +1027,10 @@ class Battle:
             return None
         return min(enemies, key=lambda e: math.hypot(e.x - regiment.x, e.y - regiment.y))
 
-    def _flee_point(self, regiment):
+    def flee_point(self, regiment: Regiment) -> Point:
         """A point far away on the bearing directly away from the nearest enemy (game_rules.md, "Flight":
         "starts the flight directly away from its opponent"), or along the current facing if none remain."""
-        enemy = self._nearest_enemy(regiment)
+        enemy = self.nearest_enemy(regiment)
         if enemy is not None:
             dx, dy = regiment.x - enemy.x, regiment.y - enemy.y
             distance = math.hypot(dx, dy)
@@ -1010,7 +1039,7 @@ class Battle:
         angle = regiment.direction * math.tau / formation.FULL_TURN
         return regiment.x + math.sin(angle) * 1e4, regiment.y + math.cos(angle) * 1e4
 
-    def _advance_models(self, regiment, scale):
+    def _advance_models(self, regiment: Regiment, scale: float) -> bool:
         """Walk each model toward its target with its own ramping, rank-dependent pace.
 
         The target is normally the model's formation slot, but a model that holds a cell on a battle
@@ -1028,7 +1057,8 @@ class Battle:
             # four-deep movement layout, giving F=36/28 before their stagger terms.
             ranks, rank_indices = 4, [0, 1]
         s_rlmv = regiment.speed_per_tick * 16 / MOVING_FREELY_K
-        updated, still_moving = [], False
+        updated: list[Point] = []
+        still_moving = False
         for index, ((px, py), slot) in enumerate(zip(regiment.positions, targets)):
             model = regiment.melee_models[index]
             if model.rout_pause_ticks > 0:
@@ -1076,7 +1106,8 @@ class Battle:
         return still_moving
 
     @staticmethod
-    def _swap_partner(positions, targets, index, nx, ny, ux, uy):
+    def _swap_partner(positions: Sequence[Point], targets: Sequence[Point], index: int, nx: float, ny: float,
+                      ux: float, uy: float) -> int | None:
         """Index of an at-rest comrade (within its arrival distance of its own target) that the model
         stepping to (nx, ny) along unit direction (ux, uy) would land on -- about half a model spacing
         away -- while heading into it; None if there is none."""
@@ -1090,7 +1121,7 @@ class Battle:
                 return other
         return None
 
-    def _advance_reforming_models(self, regiment, scale):
+    def _advance_reforming_models(self, regiment: Regiment, scale: float) -> bool:
         """Drive a re-forming unit's models with the flat re-form mover instead of the ordinary
         rank-dependent catch-up walk (game_rules.md, "Formation changes: how the figures re-sort
         themselves"): a flat `s_rlmv / 8` world units/tick, no ramp-up, decelerating in the last
@@ -1155,7 +1186,7 @@ class Battle:
                 regiment=regiment.identifier))
         return not all_settled
 
-    def _step_dying(self, regiment):
+    def _step_dying(self, regiment: Regiment) -> None:
         """Count down each dying model's collapse delay, then lay it down as a corpse with a random
         facing (game_rules.md "Figure animation", mechanism 5)."""
         for dying in list(regiment.dying):
@@ -1172,7 +1203,7 @@ class Battle:
             animation.step(dying.model, animation.DEAD, self.rng, regiment.animation_family)
             regiment.corpses.append((dying.x, dying.y, self.rng.randrange(animation.FULL_TURN)))
 
-    def _step_burning(self, regiment):
+    def _step_burning(self, regiment: Regiment) -> None:
         """Age each burning model; when its burn ends it becomes a charred corpse with a random facing,
         held forever (game_rules.md "Figure animation", burn sequences)."""
         for burning in list(regiment.burning):
@@ -1182,7 +1213,7 @@ class Battle:
                 regiment.charred.append((burning.x, burning.y, self.rng.randrange(animation.FULL_TURN),
                                          burning.body))
 
-    def _drawn_facing_target(self, regiment, model):
+    def _drawn_facing_target(self, regiment: Regiment, model: ModelState) -> float:
         """Facing a model's drawn direction turns toward: the unit's for stand/weapon-ready/shoot, its own
         heading (or its opponent) for walk/fight."""
         if animation.facing_follows_unit(model.action):
@@ -1191,7 +1222,7 @@ class Battle:
             other = self.regiments.get(model.opponent[0])
             index = other.index_of(model.opponent[1]) if other is not None else None
             index_self = regiment.index_of(model.uid)
-            if index is not None and index_self is not None and index < len(other.positions):
+            if other is not None and index is not None and index_self is not None and index < len(other.positions):
                 dx = other.positions[index][0] - regiment.positions[index_self][0]
                 dy = other.positions[index][1] - regiment.positions[index_self][1]
                 if dx or dy:
@@ -1201,7 +1232,7 @@ class Battle:
                          * formation.FULL_TURN / math.tau) % formation.FULL_TURN
         return regiment.direction
 
-    def _step_animations(self, regiment):
+    def _step_animations(self, regiment: Regiment) -> None:
         """Step every model's action program one battle tick (whshr.animation, game_rules.md "Figure
         animation"). The requested action mirrors what the model is currently doing: fighting or
         weapon-ready in melee (paired with an opponent or not), the shoot pose while the regiment
@@ -1246,16 +1277,16 @@ class Battle:
                 if regiment.volley_countdown == 0:
                     regiment.volley_countdown = None
 
-    def _slew_drawn_facing(self, regiment, model, wagon=False):
+    def _slew_drawn_facing(self, regiment: Regiment, model: ModelState, wagon: bool = False) -> None:
         if animation.family_table(regiment.animation_family)[model.action].locks_facing:
             return
         target = self._drawn_facing_target(regiment, model)
         model.drawn_facing = target if wagon else animation.slew_facing(model.drawn_facing, target)
 
-    def side_counts(self):
+    def side_counts(self) -> dict[str, dict[str, int]]:
         """Per-side active/routing/fled/destroyed regiment counts (whshr.battle_log snapshots, and the
         diagnosis for "defeat never triggered": every result check's inputs are visible here)."""
-        counts = {}
+        counts: dict[str, dict[str, int]] = {}
         for side in Side:
             if side is Side.DUEL:
                 continue  # a melee camp, not a side (rules.Side.DUEL)
@@ -1269,7 +1300,7 @@ class Battle:
             }
         return counts
 
-    def _update_result(self):
+    def _update_result(self) -> None:
         if not (self._has_enemy and self._has_player):
             return
         alive_enemy = any(r.active for r in self.regiments.values() if r.side == Side.ENEMY)
@@ -1285,7 +1316,7 @@ class Battle:
                 "Defeat! Your army is destroyed.", "result",
                 result="defeat", counts=self.side_counts()))
 
-    def _resolve_collisions(self):
+    def _resolve_collisions(self) -> None:
         """Push regiments under orders out of the regiments they overlap (a simplified push-apart;
         game_rules.md, "Routes, collisions and visibility"), not the polygon obstruction routing (`Nav*`).
 

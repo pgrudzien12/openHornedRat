@@ -163,8 +163,7 @@ class UnitTaggingTests(unittest.TestCase):
         interp.op_SetTag(state, tag, [], "cargo_1", 0, None)
 
         # Verify tag registry exists and contains the mapping
-        self.assertTrue(hasattr(self.battle, '_unit_tags'))
-        self.assertEqual(self.battle._unit_tags[tag], "cargo_1")
+        self.assertEqual(self.battle.unit_tags[tag], "cargo_1")
 
     def test_attack_tagged_finds_and_targets_unit(self):
         """Test that AttackTagged finds a tagged unit and sets it as target."""
@@ -271,11 +270,11 @@ class MoraleRoutingTests(unittest.TestCase):
         self.assertEqual(state.cond_flags, 1)
 
     def test_run_away_actually_starts_routing(self):
-        """Test that RunAway calls combat._start_rout with the correct argument order.
+        """Test that RunAway calls combat.start_rout with the correct argument order.
 
-        Regression test: an earlier draft called combat._start_rout(battle, regiment) instead of
-        combat._start_rout(regiment, battle), which would raise AttributeError the moment
-        _start_rout touched regiment.player on what was actually the Battle object.
+        Regression test: an earlier draft called combat.start_rout(battle, regiment) instead of
+        combat.start_rout(regiment, battle), which would raise AttributeError the moment
+        start_rout touched regiment.player on what was actually the Battle object.
         """
         interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
         state = self.battle.event_bus.unit_states["test_1"]

@@ -30,6 +30,11 @@
     "whshr/script.py",
     "whshr/formation.py",
     "whshr/rules.py",
-    "whshr/animation.py"
+    "whshr/animation.py",
+    "whshr/engine.py",
+    "whshr/combat.py",
+    "whshr/interpreter.py",
+    "whshr/battle_grid.py",
+    "whshr/battle_log.py"
   ]
 }
