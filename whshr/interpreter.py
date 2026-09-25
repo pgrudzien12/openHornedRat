@@ -31,6 +31,8 @@ SCATTER_RADIUS = 40.0  # world units: ScatterModelsToNode's wander distance from
 # WaitUntilUnitFlags 16 idiom seen throughout real mission scripts. No other candidate meaning for
 # that specific bit, immediately after a MoveToNode call, was found in the public notes.
 ARRIVED_FLAG = 0x10
+
+WAIT_OPCODE = 0x1C  # Wait: blocking ticks are not traced (see ScriptInterpreter.run)
 # game_rules.md, unit flags: 0x200 is "in melee" -- Otto Hiln's script tests it (`TestUnitFlags 512`) and
 # the wizard casting scripts refuse to cast while it is set. Mirrored from `Regiment.in_melee`.
 IN_MELEE_FLAG = 0x200
@@ -401,7 +403,11 @@ class ScriptInterpreter:
                 state.pc += behaviour.LENGTHS[opcode]
                 self._report_gap(unit_id, script_before, opcode, f"raised {error!r}")
 
-            if self.logger is not None and self.logger.trace_scripts:
+            # A Wait that is still counting down is the default state of an idle unit: one identical
+            # record per tick per unit buried the interesting lines. The record where the wait ends
+            # (pc advances) is still written.
+            still_waiting = opcode == WAIT_OPCODE and state.pc == pc_before and state.script_id == script_before
+            if self.logger is not None and self.logger.trace_scripts and not still_waiting:
                 self.logger.write_opcode(
                     tick_count, unit_id=unit_id, script_id=script_before, pc=pc_before,
                     opcode=opcode, opcode_name=behaviour.opcode_name(opcode), operand=operand_before,

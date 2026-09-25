@@ -106,7 +106,9 @@ whshr/             - unified package and CLI: python3 -m whshr check|extract|cat
                      config.py (persists the recognized path), validate.py (quick + full `whshr check`
                      reuse), battles.py (lists playable battles), engine_launch.py (locates the engine's
                      own .venv interpreter and starts `whshr engine` as a subprocess), gui.py (tkinter UI)
-tests/             - BDD-style unittest scenarios (docs/testing.md): python3 -m unittest discover -s tests -t .
+tests/             - BDD-style unittest scenarios (docs/testing.md): run them with `./test.sh` (optionally a module,
+                     e.g. `./test.sh tests.test_combat`). **Always use the project's `.venv`** (test.sh does): pygame-ce/zengl
+                     are only installed there, and the system `python3` reports spurious import errors
 docs/              - asset_pipeline.md (lazy loading, scene lifecycle), testing.md (BDD rules)
 tools/ghidra/      - OPTIONAL analysis-only Ghidra headless scripts (Java) + setup notes; not stdlib Python,
                      their decompiled output must never be committed

@@ -120,6 +120,32 @@ class ScatterPatrolLoopEndToEndTests(unittest.TestCase):
         self.assertLess(state.pc, 7)
 
 
+class BlockedWaitIsNotTracedTests(unittest.TestCase):
+    """A Wait that is still counting down is an idle unit's default state and is not written to the
+    opcode trace (one identical record per tick per unit buried the interesting lines); the tick
+    where the wait finishes is."""
+
+    def test_only_the_wait_that_ends_is_traced(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.jsonl"
+            logger = battle_log.BattleLogger(path, trace_scripts=True)
+            regiment = Regiment("t", "T", 0, 0, 0, Side.ENEMY, models=5, ranks=1)
+            battle = Battle(500, 500, [regiment], seed=1995)
+            words = [_word(0x1A), 3, _word(0x1C), _word(0x17), behaviour.END]  # SetWait 3, Wait, Yield
+            interp = interpreter.ScriptInterpreter(battle, battle.event_bus, _FakeScriptDll({0: words}),
+                                                   logger=logger)
+            state = battle.event_bus.unit_states["t"]
+            state.script_id = 0
+            for tick in range(6):
+                interp.run("t", state, tick, battle.rng)
+            logger.close()
+            names = [json.loads(line)["opcode_name"] for line in path.read_text().splitlines()]
+
+        self.assertEqual(names.count("Wait"), 1)  # the one where it finishes, not 3 blocked ticks
+        self.assertIn("SetWait", names)
+
+
 class BattleLoggerOpcodeRecordTests(unittest.TestCase):
     """write_opcode's record shape and its trace_scripts/enabled gating."""
 

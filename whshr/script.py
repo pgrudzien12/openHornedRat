@@ -66,7 +66,8 @@ def parse(path):
     label (first comment of the section, e.g. 'Enemy Army'), set {key: text},
     stats {key: [int]}, cmds [(command, argument)], children [nodes].
     """
-    text = open(path, 'rb').read().decode('latin-1')
+    with open(path, 'rb') as handle:
+        text = handle.read().decode('latin-1')
     root, stack = None, []
     for no, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
