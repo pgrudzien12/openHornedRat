@@ -311,7 +311,7 @@ def _fight_has_enemy(battle: "Battle", regiment: "Regiment") -> bool:
                for other in battle.regiments.values())
 
 
-def _segment_state(tick_count: int) -> tuple[int, int, int]:
+def segment_state(tick_count: int) -> tuple[int, int, int]:
     """(absolute_segment, turn, segment_number): segment_number counts down 10..1 within each 10-segment
     turn (game_rules.md 5.1); `absolute_segment` is a global segment counter used for rally scheduling."""
     absolute_segment = tick_count // SEGMENT_TICKS
@@ -379,7 +379,7 @@ def resolve_contacts(battle: "Battle") -> None:
     Two different sides may still not fight on contact: `rules.can_fight` excludes Player-Neutral
     specifically (NPCs never fight the player, even by bumping into them), while still allowing
     Enemy-Neutral so a mission's own scripted threat against neutrals plays out physically."""
-    _, turn, segment = _segment_state(battle.tick_count)
+    _, turn, segment = segment_state(battle.tick_count)
     active = [r for r in battle.regiments.values() if r.active and not r.routing]
     by_id = {r.identifier: r for r in active}
     touching: dict[str, set[str]] = {r.identifier: set() for r in active}
@@ -501,7 +501,7 @@ def resolve_melee(battle: "Battle") -> None:
     the unit's rank and direction bonus accumulate into its fight's own-side tally (6.1). At each turn's
     last segment, every fight's losing side (by tally difference) takes a break test, timed by that
     fight's `next_test_turn` (6.2, simplified: every turn once due, instead of varying with Initiative)."""
-    _, turn, segment_number = _segment_state(battle.tick_count)
+    _, turn, segment_number = segment_state(battle.tick_count)
     groups: dict[str, list["Regiment"]] = {}
     for regiment in battle.regiments.values():
         # A regiment that was destroyed or fled mid-fight is dropped from `resolve_contacts`' active
@@ -691,7 +691,7 @@ def start_rout(regiment: "Regiment", battle: "Battle", flee_point: formation.Poi
     regiment.target_x = regiment.target_y = None
     # game_rules.md 7.4: the first rally attempt comes one full turn (SEGMENTS_PER_TURN segments) after
     # the rout, then every 3 segments.
-    absolute_segment, _, _ = _segment_state(battle.tick_count)
+    absolute_segment, _, _ = segment_state(battle.tick_count)
     regiment.rally_next_segment = absolute_segment + SEGMENTS_PER_TURN
     battle.events.append(BattleEvent(
         f"{regiment.name} routs!", "rout_start",
@@ -819,7 +819,7 @@ def resolve_rally(battle: "Battle") -> None:
     FLEE_SAFE_DISTANCE (game_rules.md 7.4). Logs every due rally check, including why it was skipped
     (CantRally, too many casualties, enemy too close); a regiment whose segment has not come yet, or
     that has "CantRally", makes no attempt at all."""
-    absolute_segment, _, _ = _segment_state(battle.tick_count)
+    absolute_segment, _, _ = segment_state(battle.tick_count)
     for regiment in battle.regiments.values():
         # A regiment that has fled off the field is permanently out (game_rules.md, "Flight"): once
         # `fled`, `active` is false forever, so it must never be offered another rally attempt.

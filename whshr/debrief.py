@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Minimal debrief completion for the `debrief:` / `debriefwithsummary:` glue commands.
 
 There is no debrief screen yet (the full screen is a separate item). The completion handler of these
@@ -6,11 +7,20 @@ lets the script resume. This module applies what the engine can compute and repo
 skipped effect is visible in the campaign log instead of silently vanishing.
 """
 
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
+
 from . import payments
 from .payments import settle
 
+if TYPE_CHECKING:
+    from .campaign_log import CampaignLogger
+    from .campaign_state import CampaignState
+    from .glue_runtime import StartDebrief
 
-def complete_debrief(campaign, effect, log=None, flawless=False):
+
+def complete_debrief(campaign: "CampaignState | None", effect: "StartDebrief", log: "CampaignLogger | None" = None,
+                     flawless: bool = False) -> tuple[list[str], list[str]]:
     """Apply the completion of a debrief request; returns ``(applied, skipped)`` lists of short strings.
 
     With ``flawless`` (no-battle mode) a mission without any battle result counts as a flawless win.
@@ -21,7 +31,8 @@ def complete_debrief(campaign, effect, log=None, flawless=False):
     given a ``payment`` row records the amount and the line items applied and skipped. Armour rewards, doubled
     experience, promotions and army merges are not part of this handler (notes/activity_results.md section 5).
     """
-    applied, skipped = [], []
+    applied: list[str] = []
+    skipped: list[str] = []
     if campaign is None:
         return applied, ["final payment: no campaign state"]
     terms = getattr(campaign, "mission_cash", None)
@@ -52,7 +63,8 @@ def complete_debrief(campaign, effect, log=None, flawless=False):
     return applied, skipped
 
 
-def _log_payment(log, kind, amount, campaign, lines, skipped):
+def _log_payment(log: "CampaignLogger", kind: str, amount: int, campaign: "CampaignState",
+                 lines: Sequence[Sequence[Any]], skipped: Sequence[str]) -> None:
     try:
         log.write("payment", kind=kind, amount=amount, coffers=campaign.coffers,
                   lines=[list(line) for line in lines], skipped=list(skipped))

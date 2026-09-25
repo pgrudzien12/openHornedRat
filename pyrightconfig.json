@@ -70,6 +70,17 @@
     "whshr/portraits.py",
     "whshr/campaign_log.py",
     "whshr/campaign_state.py",
-    "whshr/troop_selection.py"
+    "whshr/troop_selection.py",
+    "whshr/glue_runtime.py",
+    "whshr/glue_render.py",
+    "whshr/glue_scene.py",
+    "whshr/scenes.py",
+    "whshr/campaign_scenes.py",
+    "whshr/battle_scene.py",
+    "whshr/result_scene.py",
+    "whshr/skirmish_log.py",
+    "whshr/game.py",
+    "whshr/debrief.py",
+    "whshr/briefing.py"
   ]
 }

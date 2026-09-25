@@ -238,7 +238,7 @@ class GlueContent:
             return False
         return int(position) in PORTRAIT_SPRITES
 
-    def resolve_speaker_position(self, speaker: str | None) -> int | None:
+    def resolve_speaker_position(self, speaker: str | None) -> int:
         """List position an ``index=-1`` block behaves as for ``speaker`` (notes/glue_portraits.md §1.4)."""
         from .portraits import speaker_position
         return speaker_position(speaker, self.portrait_available)

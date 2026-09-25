@@ -1,13 +1,14 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Battle result scene: shown once a battle resolves to victory or defeat (engine step 5).
 
 Kept separate from `whshr.campaign_scenes` (which this module would otherwise create an import
 cycle with, since it imports `whshr.battle_scene.BattleScene`) by importing `MainMenuScene` lazily,
 inside `handle`, rather than at module load time.
 """
-from .glue_runtime import ActivityResult
-from .scenes import Scene, Transition
+from .glue_scene import GlueScene
+from .scenes import Quit, Scene, SceneAssets, SceneEvent, Transition
 
-DISMISS_EVENTS = ("continue", "dismiss")
+DISMISS_EVENTS: tuple[str, ...] = ("continue", "dismiss")
 
 
 class ResultScene(Scene):
@@ -18,16 +19,17 @@ class ResultScene(Scene):
     §2.1: the flow decides what a win or a loss means); a standalone battle returns to the main menu.
     """
 
-    def __init__(self, result, summary, glue_scene=None, request_id=None):
+    def __init__(self, result: str, summary: list[str], glue_scene: GlueScene | None = None,
+                 request_id: int | None = None) -> None:
         self.result = result  # "victory" or "defeat" (whshr.engine.Battle.result)
         self.summary = summary  # list of short strings, e.g. "Grudgebringer Infantry: 12/16 models"
         self.glue_scene = glue_scene
         self.request_id = request_id
 
-    def handle(self, event, context):
+    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         if event in DISMISS_EVENTS:
             if self.glue_scene is not None:
-                self.glue_scene.finish_battle(self.request_id)
+                self.glue_scene.finish_battle(self.request_id or 0)
                 return Transition(self.glue_scene, "glue battle resolved")
             from .campaign_scenes import MainMenuScene
             return Transition(MainMenuScene(), "battle result acknowledged")

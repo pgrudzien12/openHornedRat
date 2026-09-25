@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Headless presentation projection for typed glue windows.
 
 The model intentionally contains names, indexed-resource references and native
@@ -5,10 +6,14 @@ coordinates only.  A pygame/OpenGL view may consume it, but importing this
 module never creates a surface or opens an original-game file.
 """
 
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from .glue import (AnimRecord, BitmapRecord, HotspotRecord, IncludeRecord, MidiRecord, MissionRecord,
-                   MissionRef, MissionWindowRecord, PositionRecord, TextRecord)
+                   MissionRef, MissionWindowRecord, PositionRecord, TextRecord, WindowRecord)
+from .glue_content import GlueContent
+from .glue_runtime import WindowInstance
 
 
 @dataclass(frozen=True)
@@ -85,7 +90,7 @@ class GlueRenderModel:
     mission_lists: tuple[RenderMissionList, ...] = ()
 
 
-def _integer(value, default=0):
+def _integer(value: Any, default: Any = 0) -> Any:
     # A ``set:res=<id>`` argument may carry a whitespace-separated human-readable label after the id
     # (e.g. ``691\t\t"The Final Battle"``), kept in the source as a comment; only the id is data.
     token = value.split(None, 1)[0] if isinstance(value, str) else value
@@ -95,8 +100,8 @@ def _integer(value, default=0):
         return default
 
 
-def _fields(record):
-    values = {}
+def _fields(record: WindowRecord) -> dict[str, Any]:
+    values: dict[str, Any] = {}
     for field in record.fields:
         if field.command == "set" and "=" in field.argument:
             key, value = field.argument.split("=", 1)
@@ -106,7 +111,7 @@ def _fields(record):
     return values
 
 
-def _included_records(content, name, seen=()):
+def _included_records(content: GlueContent, name: str, seen: Sequence[str] = ()) -> Iterator[WindowRecord]:
     key = str(name).upper()
     if key in seen:
         raise ValueError(f"cyclic glue include: {' -> '.join((*seen, key))}")
@@ -120,7 +125,8 @@ def _included_records(content, name, seen=()):
             yield record
 
 
-def build_render_model(content, window, positions=None):
+def build_render_model(content: GlueContent, window: WindowInstance,
+                       positions: Mapping[tuple[str, str | None], tuple[Any, Any]] | None = None) -> GlueRenderModel:
     """Project one runtime ``WindowInstance`` into ordered, native UI primitives.
 
     ``positions`` overrides an object's (x, y) by ``(window.name, object_name)`` — used for
@@ -128,10 +134,17 @@ def build_render_model(content, window, positions=None):
     lives outside the window's own static ``[BITMAP]`` record (notes/campaign_tent.md §3).
     """
     positions = positions or {}
-    records = [(None, record) for record in _included_records(content, window.name)]
+    records: list[tuple[str | None, WindowRecord]] = [(None, record) for record in _included_records(content, window.name)]
     for object_name in window.objects:
         records.extend((object_name, record) for record in _included_records(content, object_name))
-    position, bitmaps, texts, hotspots, animations, music, mission_lists, missions = {}, [], [], [], [], [], [], []
+    position: dict[str, Any] = {}
+    bitmaps: list[RenderBitmap] = []
+    texts: list[RenderText] = []
+    hotspots: list[RenderHotspot] = []
+    animations: list[RenderAnimation] = []
+    music: list[str] = []
+    mission_lists: list[RenderMissionList] = []
+    missions: list[MissionRef] = []
     for object_name, record in records:
         values = _fields(record)
         if isinstance(record, PositionRecord):

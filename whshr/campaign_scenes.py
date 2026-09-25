@@ -1,8 +1,13 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Initial campaign scenes backed by the original-install asset catalog."""
+from collections.abc import Mapping
+from typing import Any
 
 from .assets import AssetId
-from .battle_scene import BattleScene, FIRST_BATTLE
+from .battle_scene import BattleScene
 from .campaign_state import CampaignState
+from .glue_content import GlueContent
+from .paths import Installation
 from .campaign import parse_window_ui
 from .engine import DEFAULT_SEED
 from .glue_runtime import ActivityResult
@@ -10,7 +15,9 @@ from .glue_scene import GlueScene
 from .glue_fonts import glue_font_asset
 from . import payments
 from .legacy import module
-from .scenes import Quit, Scene, SceneManifest, Transition
+from .cache import Loader
+from .glue import MissionRecord, MissionRef
+from .scenes import Quit, Scene, SceneAssets, SceneEvent, SceneManifest, Transition
 from .si import load_si, walk_objects
 from .troop_selection import TroopSelection
 
@@ -25,7 +32,7 @@ BRIEFING_FONT = glue_font_asset(4)
 OPENING_TEXT_IDS = (1100, 1101, 1102)
 
 
-def omni_duration_seconds(container):
+def omni_duration_seconds(container: Mapping[str, Any]) -> float:
     """Return the final scheduled Omni object end in seconds."""
     if "root" not in container:
         raise ValueError("Omni container has no root object")
@@ -36,7 +43,7 @@ def omni_duration_seconds(container):
     return end_ms / 1000
 
 
-def briefing_asset_for(mission):
+def briefing_asset_for(mission: Mapping[str, Any]) -> AssetId:
     """Return the briefing asset for one exact campaign mission record."""
     mission_ref = mission.get("mission_ref")
     return AssetId("vanilla", "briefing", mission_ref.key if mission_ref is not None
@@ -49,22 +56,25 @@ class OpeningNarrationScene(Scene):
     manifest = SceneManifest(immediate=(ANIMATION_TEXT, SUBTITLE_FONT),
                              prefetch=(INTRO_CUTSCENE, INTRO_MEDIA))
 
-    def __init__(self, successor=None, log_dir=None, seed=DEFAULT_SEED):
-        self.successor = successor or MovieScene("a1", successor=MainMenuScene(log_dir=log_dir, seed=seed))
-        self.texts = None
-        self.subtitle_font = None
-        self.text = None
+    def __init__(self, successor: "MovieScene | None" = None, log_dir: Any = None, seed: int = DEFAULT_SEED) -> None:
+        self.successor: MovieScene = successor or MovieScene("a1", successor=MainMenuScene(log_dir=log_dir, seed=seed))
+        self.texts: Any = None
+        self.subtitle_font: Any = None
+        self.text: str | None = None
 
-    def enter(self, context):
+    def enter(self, context: SceneAssets) -> None:
         self.texts = context.load(ANIMATION_TEXT)
         self.subtitle_font = context.load(SUBTITLE_FONT)
         self.text = "".join(self.texts[text_id] for text_id in OPENING_TEXT_IDS)
 
-    def handle(self, event, context):
+    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         if event == "continue":
             return Transition(self.successor, "opening narration dismissed")
         if event == "skip":
-            return Transition(self.successor.successor, "intro skipped")
+            after_intro = self.successor.successor
+            if after_intro is None:
+                return None
+            return Transition(after_intro, "intro skipped")
         return None
 
 
@@ -77,7 +87,8 @@ class MovieScene(Scene):
     original effect (notes/glue_interpreter.md §8.3: fade variants unused by shipped scripts).
     """
 
-    def __init__(self, movie, successor=None, glue_scene=None, request_id=None, fade=False):
+    def __init__(self, movie: str, successor: Scene | None = None, glue_scene: GlueScene | None = None,
+                 request_id: int | None = None, fade: bool = False) -> None:
         if (successor is None) == (glue_scene is None):
             raise ValueError("MovieScene needs exactly one successor or glue_scene")
         self.movie = str(movie)
@@ -90,34 +101,36 @@ class MovieScene(Scene):
         self.manifest = SceneManifest(immediate=(self.cutscene_id, self.media_id, ANIMATION_TEXT, SUBTITLE_FONT),
                                       prefetch=(MAIN_MENU,) if glue_scene is None else ())
         self.elapsed_seconds = 0.0
-        self.duration_seconds = None
-        self.container = None
-        self.media = None
-        self.texts = None
-        self.subtitle_font = None
+        self.duration_seconds: float | None = None
+        self.container: Any = None
+        self.media: Any = None
+        self.texts: Any = None
+        self.subtitle_font: Any = None
 
-    def enter(self, context):
+    def enter(self, context: SceneAssets) -> None:
         self.container = context.load(self.cutscene_id)
         self.duration_seconds = omni_duration_seconds(self.container)
         self.media = context.load(self.media_id)
         self.texts = context.load(ANIMATION_TEXT)
         self.subtitle_font = context.load(SUBTITLE_FONT)
 
-    def _finish(self, reason):
+    def _finish(self, reason: str) -> Transition:
         if self.glue_scene is not None:
-            self.glue_scene.complete_activity(ActivityResult(self.request_id, "movie"))
+            self.glue_scene.complete_activity(ActivityResult(self.request_id or 0, "movie"))
             return Transition(self.glue_scene, reason)
+        if self.successor is None:
+            raise RuntimeError("MovieScene has neither a glue scene nor a successor")
         return Transition(self.successor, reason)
 
-    def handle(self, event, context):
+    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         if event == "skip":
             return self._finish("movie skipped")
         return None
 
-    def update(self, seconds, context):
+    def update(self, seconds: float, context: SceneAssets) -> Transition | Quit | None:
         super().update(seconds, context)
         self.elapsed_seconds += seconds
-        if self.elapsed_seconds >= self.duration_seconds:
+        if self.duration_seconds is not None and self.elapsed_seconds >= self.duration_seconds:
             return self._finish("movie completed")
         return None
 
@@ -127,14 +140,16 @@ class MainMenuScene(Scene):
 
     manifest = SceneManifest(immediate=(MAIN_MENU,))
 
-    def __init__(self, briefing=None, log_dir=None, seed=DEFAULT_SEED, campaign=None):
+    def __init__(self, briefing: Any = None, log_dir: Any = None, seed: int = DEFAULT_SEED,
+                 campaign: CampaignState | None = None) -> None:
         self.briefing = briefing
         self.log_dir, self.seed = log_dir, seed
         self.campaign = campaign
-        self.menu_ui = None
-        self.content = None
+        self.menu_ui: dict[str, Any] | None = None
+        self.content: GlueContent | None = None
+        self.installation: Installation | None = None
 
-    def enter(self, context):
+    def enter(self, context: SceneAssets | None) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         if context is None:
             return
         self.installation = context.locator.installation
@@ -148,7 +163,7 @@ class MainMenuScene(Scene):
             # Focused scene tests can supply a minimal placeholder WND.DLL.
             self.menu_ui = None
 
-    def handle(self, event, context):
+    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         if event == "new_campaign":
             if self.campaign is None:
                 # Tests and development callers may still inject one focused
@@ -177,16 +192,16 @@ class MissionMapScene(Scene):
     # select glue font 2, PCTEXT.FON (not the briefing's PCTEXTA.FON).
     manifest = SceneManifest(immediate=(PCTEXT_FONT,))
 
-    def __init__(self, campaign):
+    def __init__(self, campaign: CampaignState) -> None:
         self.campaign = campaign
-        self.speaker_portrait = None
+        self.speaker_portrait: Any = None
         self.portrait_window = campaign.map_portrait_window
-        self.selected_index = None
-        self.installation = None
-        self.content = None
-        self.font = None
+        self.selected_index: int | None = None
+        self.installation: Installation | None = None
+        self.content: GlueContent | None = None
+        self.font: Any = None
 
-    def enter(self, context):
+    def enter(self, context: SceneAssets) -> None:
         self.installation = context.locator.installation
         self.content = self.campaign.content or context.glue_content()
         self.campaign.content = self.content
@@ -203,16 +218,16 @@ class MissionMapScene(Scene):
             self.speaker_portrait = None
 
     @property
-    def missions(self):
+    def missions(self) -> tuple[dict[str, Any], ...]:
         return self.campaign.missions
 
     @property
-    def selected_mission(self):
+    def selected_mission(self) -> dict[str, Any] | None:
         if self.selected_index is None or self.selected_index >= len(self.missions):
             return None
         return self.missions[self.selected_index]
 
-    def handle(self, event, context):
+    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         if event == "return_to_caravan":
             return Transition(GlueScene(campaign=self.campaign, window="STARTCARAVAN"),
                               "campaign map dismissed")
@@ -243,7 +258,7 @@ class MissionMapScene(Scene):
 class TroopSelectScene(Scene):
     """Built-in troop-selection window placeholder, reached by the map's Accept control."""
 
-    def __init__(self, campaign, mission):
+    def __init__(self, campaign: CampaignState | None, mission: Any) -> None:
         self.campaign = campaign
         self.mission = mission
 
@@ -251,28 +266,29 @@ class TroopSelectScene(Scene):
 class BriefingScene(Scene):
     """Run the selected mission's data-defined map briefing before troop selection."""
 
-    def __init__(self, mission, log_dir=None, seed=DEFAULT_SEED, campaign=None):
+    def __init__(self, mission: dict[str, Any], log_dir: Any = None, seed: int = DEFAULT_SEED,
+                 campaign: CampaignState | None = None) -> None:
         self.mission = mission
         self.campaign = campaign
         self.battle_id = AssetId("vanilla", "battle", mission["battle"].casefold())
         self.briefing_id = briefing_asset_for(mission)
         self.manifest = SceneManifest(immediate=(self.briefing_id, BRIEFING_FONT, PCTEXT_FONT),
                                       prefetch=(self.battle_id,))
-        self.briefing = None
-        self.font = None
-        self.ui_font = None
-        self.installation = None
-        self.content = None
+        self.briefing: dict[str, Any] = {}
+        self.font: Any = None
+        self.ui_font: Any = None
+        self.installation: Installation | None = None
+        self.content: GlueContent | None = None
         self.turn_index = 0
         self.characters_visible = 0
         self.dialogue_elapsed = 0.0
         self.dialogue_finished = False
         self.paused = False
-        self.portraits = ()
+        self.portraits: tuple[Any, ...] = ()
         self.log_dir = log_dir
         self.seed = seed
 
-    def enter(self, context):
+    def enter(self, context: SceneAssets) -> None:
         self.installation = context.locator.installation
         self.content = ((self.campaign.content if self.campaign is not None else None)
                         or context.glue_content())
@@ -285,7 +301,7 @@ class BriefingScene(Scene):
         # real loader supplies the full glue-derived layout.
         self.portraits = tuple(self.briefing.get("portraits", ()))
 
-    def handle(self, event, context):
+    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         if event in ("continue_briefing", "fast_forward_dialogue"):
             turns = self.briefing.get("turns", ())
             if not self.dialogue_finished and turns:
@@ -306,7 +322,7 @@ class BriefingScene(Scene):
                               "briefing accepted")
         return None
 
-    def update(self, seconds, context):
+    def update(self, seconds: float, context: SceneAssets) -> Transition | Quit | None:
         if self.paused or self.dialogue_finished:
             return None
         turns = self.briefing.get("turns", ())
@@ -333,20 +349,22 @@ class TroopSelectionScene(Scene):
     beneath :class:`ArmyRecordsScene` (notes/troop_selection.md §8).
     """
 
-    def __init__(self, campaign, mission_ref, battle, glue_scene):
+    def __init__(self, campaign: CampaignState | None, mission_ref: MissionRef | None, battle: str,
+                 glue_scene: GlueScene) -> None:
         self.campaign = campaign
         self.mission_ref = mission_ref
         self.battle = battle
         self.glue_scene = glue_scene
-        self.model = None
+        self.model: TroopSelection | None = None
         self.phase = "select"
         self.page = 0
         self.march_offset = 0
-        self.picked_whoami = None
-        self.record = None
-        self.destination = glue_scene  # where Done/skip lands: the scene running the mission
+        self.picked_whoami: int | None = None
+        self.record: MissionRecord | None = None
+        self.context: SceneAssets | None = None
+        self.destination: Scene = glue_scene  # where Done/skip lands: the scene running the mission
 
-    def enter(self, context):
+    def enter(self, context: SceneAssets) -> None:
         # Army Records returns to this exact scene instance.  It must not rebuild the
         # selection model or lose P0/P1 page state on that return.
         self.context = context
@@ -359,7 +377,9 @@ class TroopSelectionScene(Scene):
             self._start_mission()
             self.phase = "skip"
             return
-        self.record = self.glue_scene.runtime.content.mission(self.mission_ref)
+        if self.mission_ref is None:
+            raise ValueError("troop selection needs a mission reference")
+        self.record = self.glue_scene.require_runtime().content.mission(self.mission_ref)
         self.campaign.begin_mission(payments.mission_terms(self.record))
         forced = _unit_ids(self.record, "forceunits")
         excluded = _unit_ids(self.record, "excludeunits")
@@ -368,13 +388,15 @@ class TroopSelectionScene(Scene):
         if self.model.bankrupt:
             self.phase = "bankrupt"
 
-    def _payment_terms(self):
+    def _payment_terms(self) -> payments.CashTerms | None:
         try:
-            return payments.mission_terms(self.glue_scene.runtime.content.mission(self.mission_ref))
-        except (KeyError, TypeError, AttributeError):
+            if self.mission_ref is None:
+                return None
+            return payments.mission_terms(self.glue_scene.require_runtime().content.mission(self.mission_ref))
+        except (KeyError, TypeError, AttributeError, RuntimeError):
             return None
 
-    def _start_mission(self):
+    def _start_mission(self) -> None:
         """Done: run the mission's own script when its record names one (it starts the battle and
         carries the flow on afterwards); a record with only a battle starts that battle directly
         (notes/troop_selection.md §6).
@@ -383,11 +405,11 @@ class TroopSelectionScene(Scene):
         that map, exactly like one started from a briefing: the map's release wait stays open until the
         mission ends, and the mission's release then completes it and advances the flow."""
         script = ""
-        values = {}
+        values: dict[str, int | str] = {}
         if self.mission_ref is not None:
             try:
-                values = self.glue_scene.runtime.content.mission(self.mission_ref).values
-                script = values.get("setmissionscript", "")
+                values = self.glue_scene.require_runtime().content.mission(self.mission_ref).values
+                script = str(values.get("setmissionscript", ""))
             except (KeyError, TypeError):
                 script = ""
         host = self.glue_scene
@@ -406,7 +428,7 @@ class TroopSelectionScene(Scene):
         else:
             self.glue_scene.start_battle(self.battle)
 
-    def handle(self, event, context):
+    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         if self.phase == "skip":
             return Transition(self.destination, "troop selection skipped (no company)")
         if self.phase == "bankrupt":
@@ -416,6 +438,8 @@ class TroopSelectionScene(Scene):
             if event == "done":
                 return Transition(self.glue_scene, "troop selection bankrupt")
             return None
+        model = self.selection_model()
+        campaign = self.campaign
         if event == "abort":
             return Transition(self.glue_scene, "troop selection aborted")
         if event == "page:next" and self.phase == "select":
@@ -430,22 +454,22 @@ class TroopSelectionScene(Scene):
                 self.picked_whoami = None
             return None
         if isinstance(event, str) and event.startswith("toggle:"):
-            self.model.toggle(int(event.split(":", 1)[1]))
+            model.toggle(int(event.split(":", 1)[1]))
             return None
         if isinstance(event, str) and event.startswith("book:"):
             whoami = int(event.split(":", 1)[1])
-            if whoami in self.model.company:
+            if whoami in model.company:
                 return Transition(ArmyRecordsScene(self, whoami), "army records opened")
             return None
         if isinstance(event, str) and event.startswith("pickup:") and self.phase == "march_order":
             index = int(event.split(":", 1)[1])
-            if 0 <= index < len(self.model.selection):
-                self.picked_whoami = self.model.selection[index]
+            if 0 <= index < len(model.selection):
+                self.picked_whoami = model.selection[index]
             return None
         if isinstance(event, str) and event.startswith("drop:") and self.phase == "march_order":
             index = int(event.split(":", 1)[1])
             if self.picked_whoami is not None:
-                self.model.move(self.picked_whoami, index)
+                model.move(self.picked_whoami, index)
                 self.picked_whoami = None
             return None
         if event in ("scroll:up", "scroll:down") and self.phase == "march_order":
@@ -454,38 +478,47 @@ class TroopSelectionScene(Scene):
             return None
         if isinstance(event, str) and event.startswith("move:"):
             whoami, index = event.split(":", 1)[1].split(",")
-            self.model.move(int(whoami), int(index))
+            model.move(int(whoami), int(index))
             return None
         if event == "done":
             if self.phase == "select":
-                if self.model.selection:
+                if model.selection:
                     self.phase = "march_order"
                 return None
-            deployment = self.model.confirm()
-            self.campaign.commit_troop_selection(deployment)
+            if campaign is None:
+                return None
+            deployment = model.confirm()
+            campaign.commit_troop_selection(deployment)
             log = getattr(getattr(self, "context", None), "campaign_log", None)
             if log is not None:
                 try:
-                    log.write("payment", kind="initial", amount=self.model.prepaid, mission_fee=self.model.total_cost,
-                              coffers=self.campaign.coffers)
+                    log.write("payment", kind="initial", amount=model.prepaid, mission_fee=model.total_cost,
+                              coffers=campaign.coffers)
                 except Exception:
                     pass
-            self.campaign.mark_mission_taken(self.mission_ref)
+            if self.mission_ref is not None:
+                campaign.mark_mission_taken(self.mission_ref)
             self._start_mission()
             return Transition(self.destination, "troop selection done")
         return None
 
     @property
-    def page_count(self):
+    def page_count(self) -> int:
         """P0 pages include every company file record; notes/troop_selection.md §3.1."""
-        return max(1, (len(self.model.company) + 5) // 6)
+        return max(1, (len(self.selection_model().company) + 5) // 6)
 
     @property
-    def max_march_offset(self):
+    def max_march_offset(self) -> int:
         """Keep P1's final seven-row viewport full where possible (§5.1)."""
-        return max(0, len(self.model.selection) - 7)
+        return max(0, len(self.selection_model().selection) - 7)
 
-    def update(self, seconds, context):
+    def selection_model(self) -> TroopSelection:
+        """The P0/P1 model; only absent while the screen is skipped (no company)."""
+        if self.model is None:
+            raise RuntimeError("troop selection has no model")
+        return self.model
+
+    def update(self, seconds: float, context: SceneAssets) -> Transition | Quit | None:
         super().update(seconds, context)
         if self.phase == "skip":
             return Transition(self.destination, "troop selection skipped (no company)")
@@ -499,24 +532,24 @@ class ArmyRecordsScene(Scene):
     selection continue to belong to the parked :class:`TroopSelectionScene` model.
     """
 
-    def __init__(self, selection_scene, whoami):
+    def __init__(self, selection_scene: TroopSelectionScene, whoami: int) -> None:
         self.selection_scene = selection_scene
         self.whoami = whoami
-        self.hired_at_open = dict(selection_scene.model.hired)
+        self.hired_at_open = dict(selection_scene.selection_model().hired)
 
     @property
-    def model(self):
-        return self.selection_scene.model
+    def model(self) -> TroopSelection:
+        return self.selection_scene.selection_model()
 
     @property
-    def company_ids(self):
+    def company_ids(self) -> tuple[int, ...]:
         return tuple(self.model.company)
 
     @property
-    def index(self):
+    def index(self) -> int:
         return self.company_ids.index(self.whoami)
 
-    def handle(self, event, context):
+    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         if event == "book:done":
             return Transition(self.selection_scene, "army records closed")
         if event == "book:abort":
@@ -536,19 +569,19 @@ class ArmyRecordsScene(Scene):
         return None
 
 
-def _unit_ids(mission_record, command):
+def _unit_ids(mission_record: MissionRecord, command: str) -> tuple[int, ...]:
     """The whoami ids of a mission record's ``forceunits``/``excludeunits`` lines; an argument may list several ids."""
     return tuple(int(part) for field in mission_record.fields if field.command == command
                  for part in field.argument.split(",") if part.strip())
 
 
-def _prepaid_payment(mission_record):
+def _prepaid_payment(mission_record: MissionRecord) -> int:
     """The initial cash payment, credited at troop-selection Done; notes/campaign.md §2.2-2.3."""
     terms = payments.mission_terms(mission_record)
     return terms.initial if terms else 0
 
 
-def default_scene_loaders():
+def default_scene_loaders() -> dict[str, Loader]:
     """Return loaders currently needed by the implemented campaign scenes."""
     return {
         "omni-si": lambda _record, path: load_si(path),

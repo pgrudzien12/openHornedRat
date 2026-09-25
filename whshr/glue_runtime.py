@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Pure, deterministic interpreter for typed ``[RUN]`` glue programs.
 
 This module deliberately has no frontend imports.  It implements the shared
@@ -8,11 +9,13 @@ calls :meth:`GlueRuntime.resume`.
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import Any
 
 from .campaign_runtime import CampaignRuntime
 from .campaign_state import caravan_window
 from .glue_animation import GlueBitmapAnimator
 from .glue import AnimRecord, BitmapRecord, GlueInstruction, MissionRecord, MissionRef
+from .glue_content import GlueContent
 from .portraits import PORTRAIT_SPRITES, SPEAKER_INDEX, PortraitAnimator
 
 # notes/briefing_dialogue.md §3.5, "no speech / no audio device" fallback path (§7 point 9): the
@@ -22,7 +25,7 @@ DIALOGUE_CHAR_MILLISECONDS = 50  # 1 character / 2 ticks at the nominal 25 ms ti
 DIALOGUE_HOLD_MILLISECONDS = 750  # 30 ticks held after typing completes, no speech
 
 # Glue's gettentpos position table; notes/campaign_tent.md §3.
-TENT_POSITIONS = ((405, 332), (405, 332), (405, 332), (452, 316), (405, 332), (410, 346), (415, 349),
+TENT_POSITIONS: tuple[tuple[int, int], ...] = ((405, 332), (405, 332), (405, 332), (452, 316), (405, 332), (410, 346), (415, 349),
                   (367, 288), (367, 288), (508, 215), (351, 309), (416, 243), (462, 209), (493, 194),
                   (505, 195), (285, 187), (261, 159), (285, 187), (276, 238), (192, 214), (244, 269))
 
@@ -219,18 +222,18 @@ class GlueRuntimeState:
     next_request_id: int = 1
     trace: list[InstructionTrace] = field(default_factory=list)
     dialogue_window_name: str = ""
-    dialogue_lines: tuple = ()  # (text, colour) pairs, oldest first; notes/briefing_dialogue.md §3.3
+    dialogue_lines: tuple[tuple[str, str], ...] = ()  # (text, colour) pairs, oldest first; notes/briefing_dialogue.md §3.3
     dialogue_text: str = ""
     dialogue_line_colour: str = "black"  # colour the current line was queued under
     dialogue_typed: int = 0
-    dialogue_ms: int = 0
+    dialogue_ms: float = 0
     dialogue_colour: str = "black"  # live settextcolor value, applies to the *next* queued line
-    speech_lines: tuple = ()  # string ids still to speak after the current hotspot speech line
+    speech_lines: tuple[int, ...] = ()  # string ids still to speak after the current hotspot speech line
     speech_active: bool = False  # a hotspot click speech is typing or holding its current line
-    object_positions: dict = field(default_factory=dict)
-    portrait_animators: dict = field(default_factory=dict)
+    object_positions: dict[tuple[str, str], tuple[int, int]] = field(default_factory=dict[tuple[str, str], tuple[int, int]])
+    portrait_animators: dict[str, PortraitAnimator] = field(default_factory=dict[str, PortraitAnimator])
     # window name -> (resident-list position, set name) chosen for an `index=-1` block when it was built
-    portrait_speakers: dict = field(default_factory=dict)
+    portrait_speakers: dict[str, tuple[int, str]] = field(default_factory=dict[str, tuple[int, str]])
     paused: bool = False
     waits_passed: int = 0  # waitforrelease commands reached so far, to resume a flow at the saved step
 
@@ -242,18 +245,19 @@ class GlueRuntime:
     MAX_WINDOWS = 8
     MAX_CONTEXT_DEPTH = 16
 
-    def __init__(self, content, campaign: CampaignRuntime | None = None, speech_enabled=True):
+    def __init__(self, content: GlueContent, campaign: CampaignRuntime | None = None,
+                 speech_enabled: bool = True) -> None:
         self.content = content
         self.campaign = campaign
         self.speech_enabled = speech_enabled
         self.state = GlueRuntimeState()
 
-    def start(self, program):
+    def start(self, program: str) -> tuple[GlueEffect, ...]:
         """Start a fresh named program and run until it blocks or ends."""
         self.state = GlueRuntimeState(current=ScriptFrame(str(program).upper()))
         return self.step_until_blocked()
 
-    def continue_with(self, program):
+    def continue_with(self, program: str) -> tuple[GlueEffect, ...]:
         """Run a replacement flow inside the windows the current one built (the parked frame is dropped)."""
         self.state.current = ScriptFrame(str(program).upper())
         self.state.call_stack.clear()
@@ -261,14 +265,14 @@ class GlueRuntime:
         self.state.waits_passed = 0
         return self.step_until_blocked()
 
-    def start_window(self, window):
+    def start_window(self, window: str) -> tuple[GlueEffect, ...]:
         self.state = GlueRuntimeState()
-        effects = []
+        effects: list[GlueEffect] = []
         self._open_window(f"res={str(window).upper()}", False, effects)
         return tuple(effects)
 
-    def step_until_blocked(self):
-        effects = []
+    def step_until_blocked(self) -> tuple[GlueEffect, ...]:
+        effects: list[GlueEffect] = []
         while self.state.current is not None and self.state.pending is None and self.state.wait_reason is None:
             frame = self.state.current
             try:
@@ -288,13 +292,13 @@ class GlueRuntime:
             self._execute(instruction, effects)
         return tuple(effects)
 
-    def tick(self, milliseconds):
+    def tick(self, milliseconds: float) -> tuple[GlueEffect, ...]:
         if milliseconds < 0:
             raise ValueError("tick duration must not be negative")
         if self.state.paused:
             # §3.2/§3.6.4: the timer handler does nothing while paused - no typing, no animation.
             return ()
-        effects = []
+        effects: list[GlueEffect] = []
         completed = False
         for animator in self.state.portrait_animators.values():
             animator.advance(milliseconds)
@@ -320,7 +324,7 @@ class GlueRuntime:
             self._advance_speech(milliseconds)
         return tuple(effects)
 
-    def _advance_speech(self, milliseconds):
+    def _advance_speech(self, milliseconds: float) -> None:
         """Type and hold the current hotspot speech line, then the next one, then clear the box."""
         text = self.state.dialogue_text
         self.state.dialogue_ms += milliseconds
@@ -341,7 +345,7 @@ class GlueRuntime:
             self.state.speech_active = False
             self._clear_dialogue()
 
-    def _hotspot_speech(self, argument):
+    def _hotspot_speech(self, argument: str | None) -> tuple[GlueEffect, ...]:
         """Speak a clicked hotspot's ``clickres`` lines (``"<first id>:<count>"``); ignored while a
         script dialogue or an earlier click speech is still on screen."""
         if self.state.speech_active or (self.state.pending is not None and self.state.pending.kind == "dialogue"):
@@ -357,7 +361,7 @@ class GlueRuntime:
         self._queue_dialogue_line(first)
         return (HotspotSpeech(first, count),)
 
-    def _advance_dialogue(self, milliseconds):
+    def _advance_dialogue(self, milliseconds: float) -> tuple[GlueEffect, ...]:
         """Type the pending line, hold it, then resolve the dialogue and resume (§3.5)."""
         text = self.state.dialogue_text
         self.state.dialogue_ms += milliseconds
@@ -374,9 +378,9 @@ class GlueRuntime:
         self.state.pending = None
         return (StopSpeech(), *self.step_until_blocked())
 
-    def handle(self, input_):
+    def handle(self, input_: GlueInput) -> tuple[GlueEffect, ...]:
         """Resume a parked script when its explicit wait event arrives."""
-        if not isinstance(input_, GlueInput):
+        if not isinstance(input_, GlueInput):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("handle expects GlueInput")
         if input_.kind == "mission-select":
             selected = self._visible_mission(input_.target)
@@ -402,7 +406,7 @@ class GlueRuntime:
             self.state.current.parked = False
         return self.step_until_blocked()
 
-    def start_battle(self, battle, debrief=None):
+    def start_battle(self, battle: str, debrief: int | str | None = None) -> tuple[GlueEffect, ...]:
         """Start ``battle`` outside any script: the play-game step of a mission record that names no mission
         script.  With a ``debrief`` number it is a *withdebrief* battle, so the debrief (and its payment)
         follows it exactly as after a scripted one; afterwards the caravan opens (``gocaravan:select``)."""
@@ -410,7 +414,7 @@ class GlueRuntime:
         if not battle or self.state.pending is not None and self.state.pending.kind == "battle":
             return ()
         self.state.paused = False
-        effects = []
+        effects: list[GlueEffect] = []
         if self.state.pending is not None and self.state.pending.kind == "dialogue":
             self.state.pending = None
             self._clear_dialogue()
@@ -423,7 +427,7 @@ class GlueRuntime:
         self.state.caravan_after_battle = True
         return tuple(effects)
 
-    def _visible_mission(self, key):
+    def _visible_mission(self, key: str | None) -> MissionRef | None:
         """Find a mission advertised by an active window without reparsing glue."""
         if key is None:
             return None
@@ -440,7 +444,7 @@ class GlueRuntime:
                             return record.mission_ref
         return None
 
-    def _test_unit_membership(self, command, argument, effects):
+    def _test_unit_membership(self, command: str, argument: str, effects: list[GlueEffect]) -> None:
         unit_id = self._parse_int(argument, None)
         if unit_id is None:
             effects.append(Diagnostic(command, f"invalid unit id {argument!r}"))
@@ -455,27 +459,29 @@ class GlueRuntime:
         else:
             self.state.status_bits &= ~self.state.status_mask
 
-    def _add_unit(self, argument, effects):
+    def _add_unit(self, argument: str, effects: list[GlueEffect]) -> None:
         unit_id = self._parse_int(argument.split(";")[0].strip(), None)
         if unit_id is None:
             effects.append(Diagnostic("addunit", f"invalid unit id {argument!r}"))
-        elif not hasattr(self.campaign, "mark_pending_join"):
+        elif self.campaign is None or not hasattr(self.campaign, "mark_pending_join"):
             effects.append(Diagnostic("addunit", "campaign runtime is unavailable"))
         else:
             self.campaign.mark_pending_join(unit_id)
 
-    def _set_status(self, value):
+    def _set_status(self, value: bool) -> None:
         if value:
             self.state.status_bits |= self.state.status_mask
         else:
             self.state.status_bits &= ~self.state.status_mask
 
-    def _test_result(self, command, argument, effects):
+    def _test_result(self, command: str, argument: str, effects: list[GlueEffect]) -> None:
         """``testobjective:<L>`` / ``testmission:`` (notes/debrief_evaluation.md section 5): a letter is met only
         when the latest battle result has it; a missing result counts as false, as a missing debrief file does."""
         if command == "testobjective":
             letter = argument.strip()[:1]
-            record = self.campaign.objective(letter) if letter and hasattr(self.campaign, "objective") else None
+            campaign = self.campaign
+            record = (campaign.objective(letter)
+                      if letter and campaign is not None and hasattr(campaign, "objective") else None)
             met = bool(record and record[0])
             if record is None:
                 effects.append(Diagnostic(command, f"no battle result for objective {letter!r}: treated as not met"))
@@ -491,7 +497,7 @@ class GlueRuntime:
                 self.campaign.autosave(self.snapshot())
             effects.append(Autosave())
 
-    def _bonus(self, command, argument, effects):
+    def _bonus(self, command: str, argument: str, effects: list[GlueEffect]) -> None:
         """``bonusadd:<n>,<L>`` adds value ``n`` (1-4) of objective ``L`` to the bonus counter;
         ``bonussubtract`` subtracts it (notes/campaign.md section 2.5)."""
         number, _, letter = argument.partition(",")
@@ -499,17 +505,18 @@ class GlueRuntime:
         if not 1 <= number <= 4 or not letter:
             effects.append(Diagnostic(command, f"invalid bonus argument {argument!r}"))
             return
-        if not hasattr(self.campaign, "bonus_adjust"):
+        campaign = self.campaign
+        if campaign is None or not hasattr(campaign, "bonus_adjust"):
             effects.append(Diagnostic(command, "campaign runtime is unavailable"))
             return
-        record = self.campaign.objective(letter)
+        record = campaign.objective(letter)
         if record is None:
             effects.append(Diagnostic(command, f"no battle result for objective {letter!r}: the counter is unchanged"))
             return
         sign = -1 if command == "bonussubtract" else 1
-        self.campaign.bonus_adjust(sign * record[1][number - 1])
+        campaign.bonus_adjust(sign * record[1][number - 1])
 
-    def _enable_book(self, argument, effects):
+    def _enable_book(self, argument: str, effects: list[GlueEffect]) -> None:
         book, index = self._parse_assignment(argument)
         if book is None or index is None:
             effects.append(Diagnostic("enablebook", f"invalid book entry {argument!r}"))
@@ -518,7 +525,7 @@ class GlueRuntime:
         else:
             self.campaign.enable_book(book, index)
 
-    def _add_cash(self, argument, effects):
+    def _add_cash(self, argument: str, effects: list[GlueEffect]) -> None:
         amount = self._parse_int(argument, None)
         if amount is None:
             effects.append(Diagnostic("addcash", f"invalid amount {argument!r}"))
@@ -527,7 +534,7 @@ class GlueRuntime:
         else:
             self.campaign.add_cash(amount)
 
-    def _add_reinforcements(self, argument, effects):
+    def _add_reinforcements(self, argument: str, effects: list[GlueEffect]) -> None:
         unit_id, count = self._parse_assignment(argument)
         if unit_id is None or count is None:
             effects.append(Diagnostic("addtroop", f"invalid reinforcement {argument!r}"))
@@ -536,7 +543,7 @@ class GlueRuntime:
         else:
             self.campaign.add_reinforcements(unit_id, count)
 
-    def _change_mission_unit(self, argument, joins, effects):
+    def _change_mission_unit(self, argument: str, joins: bool, effects: list[GlueEffect]) -> None:
         command = "unitjoinmission" if joins else "unitleavemission"
         unit_id = self._parse_int(argument, None)
         if unit_id is None:
@@ -548,9 +555,9 @@ class GlueRuntime:
         else:
             self.campaign.leave_mission(unit_id)
 
-    def resume(self, result):
+    def resume(self, result: ActivityResult) -> tuple[GlueEffect, ...]:
         """Complete one host activity; values never implicitly set glue status."""
-        if not isinstance(result, ActivityResult):
+        if not isinstance(result, ActivityResult):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("resume expects ActivityResult")
         pending = self.state.pending
         if pending is None:
@@ -565,20 +572,27 @@ class GlueRuntime:
             return (EndGame(),)
         if result.kind == "battle" and self.state.caravan_after_battle and not pending.restore_context:
             self.state.caravan_after_battle = False
-            effects = []
+            effects: list[GlueEffect] = []
             self._request("caravan", effects, restore_context=True, mode="select")
             return tuple(effects)
         return self.step_until_blocked()
 
-    def snapshot(self):
+    def open_caravan(self, mode: str) -> tuple[GlueEffect, ...]:
+        """Park the finished script again and open the caravan window of ``mode`` on top of it
+        (notes/activity_results.md section 6.2); empty when the request could not be made."""
+        effects: list[GlueEffect] = []
+        self._request("caravan", effects, restore_context=True, mode=mode)
+        return tuple(effects)
+
+    def snapshot(self) -> GlueRuntimeState:
         return deepcopy(self.state)
 
-    def restore(self, snapshot):
-        if not isinstance(snapshot, GlueRuntimeState):
+    def restore(self, snapshot: GlueRuntimeState) -> None:
+        if not isinstance(snapshot, GlueRuntimeState):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("snapshot must be GlueRuntimeState")
         self.state = deepcopy(snapshot)
 
-    def push_context(self, *, hide=False):
+    def push_context(self, *, hide: bool = False) -> bool:
         """Save the current RUN state for an activity or built-in widget.
 
         The snapshot deliberately includes windows and the script frame, but is
@@ -595,7 +609,7 @@ class GlueRuntime:
             self.state.windows.clear()
         return True
 
-    def pop_context(self, *, show=True):
+    def pop_context(self, *, show: bool = True) -> str | None:
         """Restore the most recent RUN context, returning its kind or ``None``."""
         if not self.state.context_stack:
             return None
@@ -609,11 +623,11 @@ class GlueRuntime:
         self.state.palette_id = snapshot.palette_id
         return snapshot.kind
 
-    def drop_context(self):
+    def drop_context(self) -> str | None:
         """Discard one saved context without restoring it (the autosave rule)."""
         return self.state.context_stack.pop().kind if self.state.context_stack else None
 
-    def unwind_to_run(self):
+    def unwind_to_run(self) -> str | None:
         """Restore contexts until a RUN context is found, as mission release does."""
         while self.state.context_stack:
             kind = self.pop_context()
@@ -621,7 +635,7 @@ class GlueRuntime:
                 return kind
         return None
 
-    def _execute(self, instruction, effects):
+    def _execute(self, instruction: GlueInstruction, effects: list[GlueEffect]) -> None:
         command, argument = instruction.command, instruction.argument
         if command == "set":
             self._set_variable(instruction)
@@ -639,7 +653,8 @@ class GlueRuntime:
             if command == "waitforrelease":
                 self.state.waits_passed += 1
             self.state.wait_reason = "mission-release" if command == "waitforrelease" else "panel-resume"
-            self.state.current.parked = True
+            if self.state.current is not None:
+                self.state.current.parked = True
         elif command in ("gosub", "iftruegosub", "iffalsegosub"):
             if self._conditional(command):
                 self._gosub(argument, effects)
@@ -697,7 +712,7 @@ class GlueRuntime:
         elif command in ("testobjective", "testmission"):
             self._test_result(command, argument, effects)
         elif command == "bonusinit":
-            if hasattr(self.campaign, "bonus_init"):
+            if self.campaign is not None and hasattr(self.campaign, "bonus_init"):
                 self.campaign.bonus_init()
             else:
                 effects.append(Diagnostic("bonusinit", "campaign runtime is unavailable"))
@@ -739,25 +754,26 @@ class GlueRuntime:
         else:
             effects.append(Diagnostic(self._location(instruction), f"unsupported command {command!r}"))
 
-    def _finish_frame(self, effects):
+    def _finish_frame(self, effects: list[GlueEffect]) -> None:
         self.state.current = None
 
-    def _return(self, effects):
+    def _return(self, effects: list[GlueEffect]) -> None:
         if self.state.call_stack:
             self.state.current = self.state.call_stack.pop()
         else:
             self.state.current = None
             effects.append(Diagnostic("return", "script-frame stack underflow"))
 
-    def _gosub(self, argument, effects):
+    def _gosub(self, argument: str, effects: list[GlueEffect]) -> None:
         if len(self.state.call_stack) >= self.MAX_CALL_DEPTH:
             effects.append(Diagnostic("gosub", "script-frame stack overflow"))
             return
         target = self._resource_argument(argument)
-        self.state.call_stack.append(deepcopy(self.state.current))
+        if self.state.current is not None:
+            self.state.call_stack.append(deepcopy(self.state.current))
         self.state.current = ScriptFrame(target.upper())
 
-    def _open_window(self, argument, child, effects):
+    def _open_window(self, argument: str, child: bool, effects: list[GlueEffect]) -> None:
         name = self._resource_argument(argument)
         if not name or len(self.state.windows) >= self.MAX_WINDOWS:
             return
@@ -776,12 +792,12 @@ class GlueRuntime:
         self._select_first_mission()
         anim = next((record for record in definition.records if isinstance(record, AnimRecord)), None)
         if anim is not None:
-            self.state.portrait_animators[name] = PortraitAnimator(anim.values.get("sequence", 1))
+            self.state.portrait_animators[name] = PortraitAnimator(int(anim.values.get("sequence", 1)))
             self.state.portrait_speakers.pop(name, None)
             self.portrait_index(name, anim.values.get("index"))
         effects.append(OpenWindow(name, parent, palette))
 
-    def portrait_index(self, window_name, index):
+    def portrait_index(self, window_name: str, index: Any) -> Any:
         """Resident-list position a window's portrait block shows.
 
         ``index=-1`` is the current commander (notes/glue_portraits.md §1.4): resolved once when the
@@ -800,7 +816,7 @@ class GlueRuntime:
             chosen = self.state.portrait_speakers[window_name] = (position, PORTRAIT_SPRITES[position])
         return chosen[0]
 
-    def _close_window(self, argument, effects):
+    def _close_window(self, argument: str, effects: list[GlueEffect]) -> None:
         name = self._resource_argument(argument)
         self.state.windows = [window for window in self.state.windows if window.name != name]
         # the text of a window that is gone, or of a scene with no window left, is not shown any more
@@ -811,7 +827,7 @@ class GlueRuntime:
         self.state.portrait_speakers.pop(name, None)
         effects.append(CloseWindow(name))
 
-    def _add_object(self, argument, animated, effects):
+    def _add_object(self, argument: str, animated: bool, effects: list[GlueEffect]) -> None:
         name = self._resource_argument(argument)
         target = next((window for window in self.state.windows if window.name == self.state.current_window_name), None)
         if target is None or not name:
@@ -836,9 +852,10 @@ class GlueRuntime:
                                                           self._parse_int(stop_frame, -1) >= 0, name))
         if animated and self._parse_int(stop_frame, -1) >= 0:
             self.state.wait_reason = "animation-finished"
-            self.state.current.parked = True
+            if self.state.current is not None:
+                self.state.current.parked = True
 
-    def _remove_object(self, argument, effects):
+    def _remove_object(self, argument: str, effects: list[GlueEffect]) -> None:
         target = next((window for window in self.state.windows if window.name == self.state.current_window_name), None)
         if target is None:
             return
@@ -854,22 +871,22 @@ class GlueRuntime:
                 self.state.selected_mission = None
         effects.append(UpdateWindow(target.name))
 
-    def _wait_already_released(self):
+    def _wait_already_released(self) -> bool:
         check = getattr(self.campaign, "wait_already_released", None)
         frame = self.state.current
         return bool(check and frame is not None and not self.state.call_stack
                     and check(frame.program, self.state.waits_passed))
 
-    def _has_mission_list(self, name):
+    def _has_mission_list(self, name: str) -> bool:
         try:
             return any(isinstance(record, MissionRecord) for record in self.content.window(name).records)
         except (KeyError, TypeError):
             return False
 
-    def _selection_offered(self):
+    def _selection_offered(self) -> bool:
         """Is the selected mission still in a mission list on screen and not yet taken?"""
         ref = self.state.selected_mission
-        if not self._mission_offered(ref):
+        if ref is None or not self._mission_offered(ref):
             return False
         for window in self.state.windows:
             for name in (window.name, *window.objects):
@@ -881,7 +898,7 @@ class GlueRuntime:
                     return True
         return False
 
-    def _mission_offered(self, ref):
+    def _mission_offered(self, ref: MissionRef) -> bool:
         """Is ``ref`` on offer in its window under the campaign's taken set and its depend gates?"""
         offered = getattr(self.campaign, "offered_missions", None)
         if offered is None:
@@ -892,12 +909,12 @@ class GlueRuntime:
             return True
         return ref in offered([record for record in records if isinstance(record, MissionRecord)])
 
-    def refresh_selection(self):
+    def refresh_selection(self) -> None:
         """Rebuild the selection after the offered list changed: a mission that is no longer on
         offer is dropped and the first offered row on screen is selected instead."""
         self._select_first_mission()
 
-    def _select_first_mission(self):
+    def _select_first_mission(self) -> None:
         if self.state.selected_mission is not None:
             if self._selection_offered():
                 return
@@ -916,7 +933,7 @@ class GlueRuntime:
                             self.campaign.select_mission(record.mission_ref)
                         return
 
-    def _dialogue(self, argument, queued, effects):
+    def _dialogue(self, argument: str, queued: bool, effects: list[GlueEffect]) -> None:
         string_id = self._parse_resource_id(argument)
         if string_id is None:
             return
@@ -925,7 +942,7 @@ class GlueRuntime:
         self._queue_dialogue_line(string_id)
         self._request("dialogue", effects, string_id=string_id, queued=queued)
 
-    def _queue_dialogue_line(self, string_id):
+    def _queue_dialogue_line(self, string_id: int) -> None:
         """Scroll the previous line into history and start typing the next one (§3.3 ring buffer).
 
         A colour change means a new speaker (briefings set a distinct settextcolor per speaker,
@@ -951,10 +968,10 @@ class GlueRuntime:
         self.state.dialogue_typed = 0
         self.state.dialogue_ms = 0
 
-    def _request_movie(self, argument, fade, effects):
+    def _request_movie(self, argument: str, fade: bool, effects: list[GlueEffect]) -> None:
         self._request("movie", effects, restore_context=True, movie=argument, fade=fade)
 
-    def _request_battle(self, command, argument, effects):
+    def _request_battle(self, command: str, argument: str, effects: list[GlueEffect]) -> None:
         parts = [part.strip() for part in argument.split(",")]
         battle = parts[0].upper() if parts else ""
         if len(parts) > 1 and self._parse_int(parts[1], 0):
@@ -966,19 +983,19 @@ class GlueRuntime:
                       debrief_index=self.state.debrief_index,
                       with_debrief=command.endswith("withdebrief"), encounter=encounter)
 
-    def _request_debrief(self, command, argument, effects):
+    def _request_debrief(self, command: str, argument: str, effects: list[GlueEffect]) -> None:
         self._set_debrief(argument)
         summary = command.endswith("withsummary")
         self._request("debrief", effects, restore_context=True,
                       mode=7 if summary else 4, summary=summary,
                       debrief_index=self.state.debrief_index)
 
-    def _set_debrief(self, value):
+    def _set_debrief(self, value: str) -> None:
         number = self._parse_int(value, 0)
         if number:
             self.state.debrief_index = number - 1
 
-    def _request(self, kind, effects, restore_context=False, **details):
+    def _request(self, kind: str, effects: list[GlueEffect], restore_context: bool = False, **details: Any) -> None:
         if restore_context and not self.push_context(hide=True):
             effects.append(Diagnostic(kind, "context stack overflow"))
             return
@@ -1004,20 +1021,20 @@ class GlueRuntime:
         elif kind == "debrief":
             effects.append(StartDebrief(request_id, details["mode"], details["debrief_index"], details["summary"]))
 
-    def _set_variable(self, instruction):
+    def _set_variable(self, instruction: GlueInstruction) -> None:
         if "=" not in instruction.argument:
             return
         key, value = instruction.argument.split("=", 1)
         if key.casefold() in {"animseq", "textlines", "tentpos", "x", "y", "step", "timecnt"}:
             self.state.variables[key.casefold()] = self._parse_int(value, 0)
 
-    def _conditional(self, command):
+    def _conditional(self, command: str) -> bool:
         if not command.startswith(("iftrue", "iffalse")):
             return True
         condition = self._condition()
         return condition if command.startswith("iftrue") else not condition
 
-    def _condition(self):
+    def _condition(self) -> bool:
         if self.state.status_mode == 1:
             return (self.state.status_bits & self.state.status_mask) == self.state.status_mask
         if self.state.status_mode == 2:
@@ -1025,11 +1042,11 @@ class GlueRuntime:
         return bool(self.state.status_mode)
 
     @staticmethod
-    def _resource_argument(argument):
+    def _resource_argument(argument: str) -> str:
         return argument.split("=", 1)[1].strip() if argument.casefold().startswith("res=") else argument.strip()
 
     @staticmethod
-    def _parse_resource_id(argument):
+    def _parse_resource_id(argument: str) -> int | None:
         value = GlueRuntime._resource_argument(argument)
         try:
             return int(value)
@@ -1037,21 +1054,21 @@ class GlueRuntime:
             return None
 
     @staticmethod
-    def _parse_int(value, default):
+    def _parse_int(value: Any, default: int | None) -> Any:
         try:
             return int(str(value), 10)
         except ValueError:
             return default
 
     @staticmethod
-    def _parse_assignment(value):
+    def _parse_assignment(value: str) -> tuple[int | None, int | None]:
         if "=" not in value:
             return None, None
         unit_id, count = value.split("=", 1)
         return GlueRuntime._parse_int(unit_id.strip(), None), GlueRuntime._parse_int(count.strip(), None)
 
     @staticmethod
-    def _parse_hex(value):
+    def _parse_hex(value: str) -> int:
         digits = ""
         for char in value.strip():
             if char.casefold() in "0123456789abcdef":
@@ -1061,10 +1078,10 @@ class GlueRuntime:
         return int(digits, 16) if digits else 0
 
     @staticmethod
-    def _location(instruction):
+    def _location(instruction: GlueInstruction) -> str:
         return f"{instruction.location.resource}:{instruction.location.line}"
 
-    def _clear_for_endgame(self):
+    def _clear_for_endgame(self) -> None:
         self.state.current = None
         self.state.call_stack.clear()
         self.state.windows.clear()
@@ -1075,7 +1092,7 @@ class GlueRuntime:
         self.state.portrait_speakers.clear()
         self._clear_dialogue()
 
-    def _clear_dialogue(self):
+    def _clear_dialogue(self) -> None:
         self.state.speech_lines = ()
         self.state.speech_active = False
         self.state.dialogue_lines = ()
@@ -1083,7 +1100,7 @@ class GlueRuntime:
         self.state.dialogue_typed = 0
         self.state.dialogue_ms = 0
 
-    def _panel_action(self, action):
+    def _panel_action(self, action: str | None) -> tuple[GlueEffect, ...]:
         """Dispatch a control-panel button by the action name whshr.controlpanel assigns its slot.
 
         Only "toggle_pause" and "abort_briefing" (panel 1's Pause and Abort) map onto behaviour
@@ -1099,7 +1116,7 @@ class GlueRuntime:
         if action in ENCOUNTER_ACTIONS:
             return self._encounter_action(action)
         self.state.paused = False
-        effects = []
+        effects: list[GlueEffect] = []
         if self.state.pending is not None and self.state.pending.kind == "dialogue":
             self.state.dialogue_typed = len(self.state.dialogue_text)
             self.state.dialogue_ms = 0
@@ -1110,17 +1127,17 @@ class GlueRuntime:
             effects.extend(self.step_until_blocked())
         return tuple(effects)
 
-    def _selected_battle_name(self):
+    def _selected_battle_name(self) -> str:
         """The battle of the selected mission record: the fallback when no setbattlescript ran."""
         mission = self.state.selected_mission or getattr(self.campaign, "selected_mission", None)
         if mission is None:
             return ""
         try:
-            return self.content.mission(mission).values.get("setbattlescript", "").strip().upper()
+            return str(self.content.mission(mission).values.get("setbattlescript", "")).strip().upper()
         except (KeyError, TypeError, AttributeError):
             return ""
 
-    def _encounter_action(self, action):
+    def _encounter_action(self, action: str) -> tuple[GlueEffect, ...]:
         """Encounter-window buttons (notes/activity_results.md section 3).
 
         Evade/Decline resume the parked script. Attack! (panel 4) sets the status bits under the
@@ -1131,7 +1148,7 @@ class GlueRuntime:
         if pending is not None and pending.kind != "dialogue":
             return ()
         self.state.paused = False
-        effects = []
+        effects: list[GlueEffect] = []
         if pending is not None:
             self.state.dialogue_typed = len(self.state.dialogue_text)
             self.state.dialogue_ms = 0
@@ -1155,7 +1172,7 @@ class GlueRuntime:
         self._request_battle("encounterplaygame", battle, effects)
         return tuple(effects)
 
-    def _panel_abort(self):
+    def _panel_abort(self) -> tuple[GlueEffect, ...]:
         """Panel slot 0 for controlpanel 1/5/6/7 (notes/mission_selection.md §4.2): Abort.
 
         Unpause, stop audio, end the running script, destroy its windows, and restore the parked
@@ -1172,7 +1189,7 @@ class GlueRuntime:
         self.state.portrait_speakers.clear()
         self._clear_dialogue()
         popped = self.pop_context()
-        effects = [StopSpeech(), StopMusic()]
+        effects: list[GlueEffect] = [StopSpeech(), StopMusic()]
         if popped is None:
             effects.append(EndGame())
         return tuple(effects)

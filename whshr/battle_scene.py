@@ -1,15 +1,17 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Battle scene: owns one loaded battlefield and advances its deterministic simulation."""
 
 import os
-
+from pathlib import Path
 from . import battle_log, behaviour, combat, payments, skirmish_log
 from .assets import AssetId
-from .battlefield import sprite_files
+from .battlefield import Battlefield, sprite_files
 from .clock import FixedStepClock
 from .engine import Battle, DEFAULT_SEED
-from .glue_runtime import ActivityResult
+from .skirmish_log import SkirmishLogger
 from .result_scene import ResultScene
-from .scenes import Scene, SceneManifest, Transition
+from .glue_scene import GlueScene
+from .scenes import Quit, Scene, SceneAssets, SceneEvent, SceneManifest, Transition
 
 BATTLE_TICK_SECONDS = 0.1  # the original battle clock ticks every 100 ms
 FIRST_BATTLE = AssetId("vanilla", "battle", "bf001")
@@ -24,23 +26,27 @@ class BattleScene(Scene):
     from the same deterministic state (notes/engine_architecture.md, "Battle logs and replay").
     """
 
-    def __init__(self, battle=FIRST_BATTLE, log_dir=None, seed=DEFAULT_SEED, glue_scene=None, request_id=None):
+    # Set by `enter`; a scene is only used after it has been entered.
+    field: Battlefield
+    battle: Battle
+    initial_models: dict[str, int]
+
+    def __init__(self, battle: AssetId = FIRST_BATTLE, log_dir: str | Path | None = None, seed: int = DEFAULT_SEED,
+                 glue_scene: GlueScene | None = None, request_id: int | None = None) -> None:
         self.battle_id = battle
         self.manifest = SceneManifest(immediate=(battle,))
-        self.field = None
-        self.battle = None
         self.clock = FixedStepClock(BATTLE_TICK_SECONDS)
-        self.selected_id = None  # identifier of the player regiment currently selected, if any
+        self.selected_id: str | None = None  # identifier of the player regiment currently selected, if any
         self.log_dir = log_dir
         self.seed = seed
-        self.logger = None
-        self.skirmishes = None  # whshr.skirmish_log.SkirmishLogger, one file per close combat
+        self.logger: battle_log.BattleLogger | None = None
+        self.skirmishes: SkirmishLogger | None = None  # whshr.skirmish_log.SkirmishLogger, one file per close combat
         self._log_closed = True
         self.glue_scene = glue_scene
         self.request_id = request_id
         self.no_battle = False
 
-    def enter(self, context):
+    def enter(self, context: SceneAssets) -> None:
         self.field = context.load(self.battle_id)
         script_dll = self._load_script_dll(context)
         # The logger must exist before Battle.from_script so ScriptInterpreter can be handed it
@@ -67,7 +73,7 @@ class BattleScene(Scene):
                 width=self.battle.width, height=self.battle.height,
                 regiments=battle_log.regiment_header_rows(self.battle, sprite_bases))
 
-    def _load_script_dll(self, context):
+    def _load_script_dll(self, context: SceneAssets) -> behaviour.ScriptDll | None:
         """Load this battle's SCRIPT/BFxxx.DLL (its `loadScript` name) for the bytecode interpreter
         (issue #3/#46); None if the field has no loadScript name or the DLL can't be found or loaded,
         in which case `Battle` drives no regiment automatically. A missing/broken script DLL must
@@ -81,21 +87,21 @@ class BattleScene(Scene):
         except Exception:
             return None
 
-    def exit(self, context):
+    def exit(self, context: SceneAssets) -> None:
         # Terrain, scenery and sprites are battle-scoped: leaving the battle releases them.
         self.close_log("scene left")
         context.cache.release(self.battle_id)
 
-    def close_log(self, reason):
+    def close_log(self, reason: str) -> None:
         """Write the `end` record and close the log file; idempotent, so both a normal transition and
         an early frontend shutdown (the player closing the window mid-battle) can safely call it."""
         if self.logger is not None and not self._log_closed:
-            self.logger.write_end(self.battle.tick_count if self.battle is not None else 0, reason)
+            self.logger.write_end(self.battle.tick_count, reason)
             if self.skirmishes is not None:
                 self.skirmishes.close(self.battle)
             self._log_closed = True
 
-    def handle(self, event, context):
+    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         """Player intent from the view: select, move, attack, halt or deselect."""
         if self.logger is not None and self.logger.enabled:
             self.logger.write_order(self.battle.tick_count, event)
@@ -170,7 +176,7 @@ class BattleScene(Scene):
                     pass
         return None
 
-    def update(self, seconds, context):
+    def update(self, seconds: float, context: SceneAssets) -> Transition | Quit | None:
         super().update(seconds, context)
         for _ in range(self.clock.advance(seconds)):
             tick_number = self.battle.tick_count
@@ -192,14 +198,14 @@ class BattleScene(Scene):
             if self.glue_scene is not None and self.no_battle:
                 # No-battle mode: the completion handler runs at once, without a result screen.
                 self._store_flawless_results()
-                self.glue_scene.finish_battle(self.request_id)
+                self.glue_scene.finish_battle(self.request_id or 0)
                 return Transition(self.glue_scene, "glue battle resolved")
             return Transition(ResultScene(self.battle.result, self._casualty_summary(),
                                           glue_scene=self.glue_scene, request_id=self.request_id),
                               "battle resolved")
         return None
 
-    def _store_flawless_results(self):
+    def _store_flawless_results(self) -> None:
         """No-battle mode counts every mission as a flawless win: every objective met with its full values, no
         casualties (whshr.payments.flawless_results), so the debrief pays in full."""
         campaign = getattr(self.glue_scene, "campaign", None)
@@ -207,6 +213,6 @@ class BattleScene(Scene):
             return
         payments.store_flawless(campaign, (self.field.script.get("mission") or {}).get("objectives", ()))
 
-    def _casualty_summary(self):
+    def _casualty_summary(self) -> list[str]:
         return [f"{regiment.name}: {regiment.models}/{self.initial_models[identifier]} models"
                 for identifier, regiment in sorted(self.battle.regiments.items())]

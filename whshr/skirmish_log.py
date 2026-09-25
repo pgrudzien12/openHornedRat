@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """One detailed, human-readable log per skirmish (per battle grid), stdlib-only.
 
 `whshr.battle_log` records the whole battle as JSON Lines for replay. This module is for the other
@@ -19,18 +20,27 @@ The log also records the git branch and commit it was produced by, so a log can 
 to the code that wrote it.
 """
 import math
+from collections.abc import Mapping, Sequence
 from datetime import datetime
+from os import PathLike
 from pathlib import Path
+from typing import TYPE_CHECKING, TextIO
 
 from . import battle_grid, combat
+from .battle_events import BattleEvent
 from .rules import Side
+
+if TYPE_CHECKING:
+    from .engine import Battle, Regiment
+
+Letters = dict[str, str]  # regiment identifier -> letter
 
 MAX_ATTACKERS_PER_MODEL = 4  # four orthogonal cells (game_rules.md 5.2)
 DRIFT_LIMIT = battle_grid.CELL  # a model further than this from its own cell has drifted off it
 STALE_RESERVE_SEGMENTS = 4  # a reserve still unplaced after this many segments is worth reporting
 
 
-def build_stamp(root=None):
+def build_stamp(root: str | PathLike[str] | None = None) -> str:
     """`branch @ commit` for the checkout this code lives in, read straight from `.git` (no subprocess)."""
     root = Path(root) if root is not None else Path(__file__).resolve().parents[1]
     git = root / ".git"
@@ -47,16 +57,16 @@ def build_stamp(root=None):
         return "(unknown build)"
 
 
-def check_grid(battle, grid, members):
+def check_grid(battle: "Battle", grid: battle_grid.BattleGrid, members: Sequence["Regiment"]) -> list[str]:
     """Every way the grid's invariants can be violated, as a list of human-readable strings.
 
     An empty list means the grid is internally consistent: cells hold at most one live model each,
     every pairing is mutual where it should be, paired models are orthogonally adjacent, no enemy
     model has more attackers than it has sides, and no model has drifted off the cell it holds.
     """
-    problems = []
-    seen_cells = {}
-    attackers_per_target = {}
+    problems: list[str] = []
+    seen_cells: dict[battle_grid.Cell, str] = {}
+    attackers_per_target: dict[tuple[str, int], list[str]] = {}
     for regiment in members:
         positions = regiment.model_positions()
         if len(regiment.melee_models) != regiment.models:
@@ -121,7 +131,7 @@ def check_grid(battle, grid, members):
     return problems
 
 
-def assign_letters(members, letters=None):
+def assign_letters(members: Sequence["Regiment"], letters: Mapping[str, str] | None = None) -> Letters:
     """One letter per regiment, kept stable as more units join the fight: a regiment kept in `letters`
     never changes letter, and newcomers take the next free one."""
     letters = dict(letters or {})
@@ -132,15 +142,16 @@ def assign_letters(members, letters=None):
     return letters
 
 
-def render_grid(battle, grid, members, letters=None):
+def render_grid(battle: "Battle", grid: battle_grid.BattleGrid, members: Sequence["Regiment"],
+                letters: Mapping[str, str] | None = None) -> str:
     """The cell map as ASCII: one letter per regiment, in its own case when the model is fighting and
     in the other case while it is still walking into its cell."""
     letters = assign_letters(members, letters)
-    rows = []
+    rows: list[str] = []
     header = "    " + "".join(f"{col % 10}" for col in range(battle_grid.GRID_SIZE))
     rows.append(header)
     for row in range(battle_grid.GRID_SIZE):
-        line = []
+        line: list[str] = []
         for col in range(battle_grid.GRID_SIZE):
             occupant = grid.cells.get((row, col))
             if occupant is None:
@@ -152,7 +163,7 @@ def render_grid(battle, grid, members, letters=None):
             is_player = regiment is not None and regiment.side == Side.PLAYER
             letter = base if is_player else base.lower()
             index = regiment.index_of(uid) if regiment is not None else None
-            if index is None:
+            if regiment is None or index is None:
                 line.append("?")  # a cell still held by a model that no longer exists
                 continue
             model = regiment.melee_models[index]
@@ -172,18 +183,19 @@ def render_grid(battle, grid, members, letters=None):
 class SkirmishLogger:
     """Opens one text file per fight under `log_dir`; a no-op when `log_dir` is None."""
 
-    def __init__(self, log_dir=None, battle_asset="battle", when=None):
+    def __init__(self, log_dir: str | PathLike[str] | None = None, battle_asset: str = "battle",
+                 when: datetime | None = None) -> None:
         self.log_dir = Path(log_dir) if log_dir is not None else None
         self.battle_asset = battle_asset
         self.stamp = (when or datetime.now()).strftime("%Y%m%d-%H%M%S")
-        self.files = {}  # fight id -> open text file
-        self.opened_tick = {}
-        self.reserve_since = {}  # (fight id, regiment id) -> segment its reserves were first stuck
-        self.letters = {}  # fight id -> {regiment id: letter}, stable for the life of the fight
+        self.files: dict[str, TextIO] = {}  # fight id -> open text file
+        self.opened_tick: dict[str, int] = {}
+        self.reserve_since: dict[tuple[str, str], tuple[int, bool]] = {}  # (fight id, regiment id) -> segment its reserves were first stuck
+        self.letters: dict[str, Letters] = {}  # fight id -> {regiment id: letter}, stable for the life of the fight
         self.anomalies = 0
-        self.paths = {}
+        self.paths: dict[str, Path] = {}
 
-    def _open(self, battle, group_id, members):
+    def _open(self, battle: "Battle", group_id: str, members: Sequence["Regiment"]) -> TextIO | None:
         if self.log_dir is None:
             return None
         safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in self.battle_asset.lower())
@@ -197,7 +209,7 @@ class SkirmishLogger:
         self.paths[group_id] = path
         return handle
 
-    def _write(self, group_id, text):
+    def _write(self, group_id: str, text: str) -> None:
         handle = self.files.get(group_id)
         if handle is None:
             return
@@ -207,14 +219,15 @@ class SkirmishLogger:
         except OSError:
             self.files.pop(group_id, None)
 
-    def observe(self, battle):
+    def observe(self, battle: "Battle") -> None:
         """Call once per tick, after `Battle.tick`: opens, updates and closes skirmish files."""
         if self.log_dir is None:
             return
-        absolute_segment, turn, segment = combat._segment_state(battle.tick_count)
-        live = {}
+        absolute_segment, turn, segment = combat.segment_state(battle.tick_count)
+        live: dict[str, list["Regiment"]] = {}
         for regiment in battle.regiments.values():
-            if regiment.in_melee and regiment.melee_group in battle.fights and regiment.active:
+            if (regiment.in_melee and regiment.melee_group is not None and regiment.melee_group in battle.fights
+                    and regiment.active):
                 live.setdefault(regiment.melee_group, []).append(regiment)
         for group_id in sorted(live):
             members = sorted(live[group_id], key=lambda r: r.identifier)
@@ -230,7 +243,8 @@ class SkirmishLogger:
             if group_id not in live:
                 self._close(battle, group_id)
 
-    def _write_opening(self, battle, group_id, grid, members):
+    def _write_opening(self, battle: "Battle", group_id: str, grid: battle_grid.BattleGrid,
+                       members: Sequence["Regiment"]) -> None:
         self._write(group_id, f"skirmish {group_id} of battle {self.battle_asset}")
         self._write(group_id, f"build: {build_stamp()}")
         self._write(group_id, f"grid owner: {grid.owner_id} "
@@ -246,7 +260,8 @@ class SkirmishLogger:
                         f"armour {regiment.armour}")
         self._write(group_id, "")
 
-    def _observe_fight(self, battle, group_id, grid, members, turn, segment, absolute_segment):
+    def _observe_fight(self, battle: "Battle", group_id: str, grid: battle_grid.BattleGrid,
+                       members: Sequence["Regiment"], turn: int, segment: int, absolute_segment: int) -> None:
         strikes = [e for e in battle.events
                    if e.kind == "melee_strike" and e.data.get("fight") == group_id]
         tests = [e for e in battle.events
@@ -268,8 +283,8 @@ class SkirmishLogger:
         self._check(battle, group_id, grid, members, turn, segment, absolute_segment)
 
     @staticmethod
-    def _occupancy_line(battle, members):
-        parts = []
+    def _occupancy_line(battle: "Battle", members: Sequence["Regiment"]) -> str:
+        parts: list[str] = []
         for regiment in members:
             placed = sum(1 for m in regiment.melee_models if m.cell is not None)
             fighting = len(battle_grid.fighting_models(battle, regiment))
@@ -278,7 +293,7 @@ class SkirmishLogger:
                          f"{fighting} fighting, {reserves} reserve")
         return "    " + " | ".join(parts)
 
-    def _write_strike(self, battle, group_id, event, turn, segment):
+    def _write_strike(self, battle: "Battle", group_id: str, event: BattleEvent, turn: int, segment: int) -> None:
         data = event.data
         self._write(group_id,
                     f"[tick {battle.tick_count:5d} turn {turn} seg {segment}] "
@@ -293,7 +308,7 @@ class SkirmishLogger:
                 + (f"/{r['save']}" if r["save"] is not None else "")
                 + f" {r['result']}"
                 for r in model["rolls"])
-            bonuses = []
+            bonuses: list[str] = []
             if model.get("gang_bonus"):
                 bonuses.append("+1 WS gang")
             if model.get("charge_bonus"):
@@ -304,14 +319,16 @@ class SkirmishLogger:
                         f"need {model['hit_need']}+/{model['wound_need']}+/save {model['save_need']}+"
                         f"{suffix} -> {rolls}")
 
-    def _check(self, battle, group_id, grid, members, turn, segment, absolute_segment):
+    def _check(self, battle: "Battle", group_id: str, grid: battle_grid.BattleGrid, members: Sequence["Regiment"],
+               turn: int, segment: int, absolute_segment: int) -> None:
         for problem in check_grid(battle, grid, members):
             self.anomalies += 1
             self._write(group_id, f"!! ANOMALY [tick {battle.tick_count} turn {turn} "
                                   f"seg {segment}] {problem}")
         self._note_saturation(battle, group_id, members, turn, segment, absolute_segment)
 
-    def _note_saturation(self, battle, group_id, members, turn, segment, absolute_segment):
+    def _note_saturation(self, battle: "Battle", group_id: str, members: Sequence["Regiment"], turn: int,
+                         segment: int, absolute_segment: int) -> None:
         """Models stuck as reserves are normal once the grid saturates (there are only about
         2 x (width + depth) cells next to an enemy), so this is a note, never an anomaly. It is still
         worth seeing: it is the difference between "the unit is losing" and "most of it never fought"."""
@@ -332,7 +349,7 @@ class SkirmishLogger:
                         f"{regiment.identifier}: {stuck} of {regiment.models} models have had no "
                         f"free cell for {STALE_RESERVE_SEGMENTS} segments (grid saturated)")
 
-    def _close(self, battle, group_id):
+    def _close(self, battle: "Battle", group_id: str) -> None:
         opened = self.opened_tick.get(group_id)
         duration = battle.tick_count - opened if opened is not None else 0
         self._write(group_id, f"skirmish {group_id} ended at tick {battle.tick_count} "
@@ -344,7 +361,7 @@ class SkirmishLogger:
             except OSError:
                 pass
 
-    def close(self, battle=None):
+    def close(self, battle: "Battle | None" = None) -> None:
         for group_id in list(self.files):
             if battle is not None:
                 self._close(battle, group_id)

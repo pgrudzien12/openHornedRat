@@ -95,7 +95,7 @@ class BattleLogger:
             self.enabled = False
             self.close()
 
-    def write_header(self, *, battle_asset: str, bts_path: str | None, seed: int, width: int, height: int,
+    def write_header(self, *, battle_asset: str, bts_path: str | None, seed: int, width: float, height: float,
                      regiments: list[Record]) -> None:
         self._write({
             "type": "header", "tick": 0, "format_version": FORMAT_VERSION,

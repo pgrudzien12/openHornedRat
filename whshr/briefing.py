@@ -1,16 +1,23 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Mission briefing projection from the shared typed glue-content repository.
 
 Stdlib-only; the briefing scene presents this data without opening original files.
 """
 
-from .campaign import build_campaign_graph, parse_window_portrait, parse_window_ui
-from .glue import GlueProgram, MissionRef, parse_glue_resource, parse_glue_resources
+from collections.abc import Mapping
+from os import PathLike
+from typing import Any
+
+from .campaign import (Graph, Mission, Strings, build_campaign_graph, parse_window_portrait,
+                       parse_window_ui)
+from .glue import GlueProgram, GlueResource, MissionRef, parse_glue_resource, parse_glue_resources
+from .glue_content import GlueContent
 from .paths import Installation
 
 TEXT_COMMANDS = ("playtext", "queuetoplaytext")
 
 
-def _find_mission(campaign_graph, mission_ref):
+def _find_mission(campaign_graph: Graph, mission_ref: MissionRef | str) -> Mission:
     """Return the exact mission record named by its stable campaign-record key."""
     briefing_key = mission_ref.key if isinstance(mission_ref, MissionRef) else mission_ref
     for mission_list in campaign_graph["mission_windows"].values():
@@ -20,7 +27,7 @@ def _find_mission(campaign_graph, mission_ref):
     raise ValueError(f"no campaign mission record has briefing key {briefing_key!r}")
 
 
-def _briefing_layout(wnd, glue_text, strings):
+def _briefing_layout(wnd: Mapping[str, Any], glue_text: GlueResource | str, strings: Strings) -> dict[str, Any]:
     """Interpret the display-only part of one briefing glue program.
 
     This is intentionally a small, explicit subset of the glue interpreter:
@@ -29,10 +36,18 @@ def _briefing_layout(wnd, glue_text, strings):
     """
     resources = (wnd if all(not isinstance(value, str) for value in wnd.values())
                  else parse_glue_resources(wnd))
-    program = glue_text if isinstance(glue_text, GlueProgram) else parse_glue_resource("<briefing>", glue_text)
-    map_ui, portraits, objects, turns = None, [], [], []
-    color, speaker, queued = None, None, []
-    text_lines, midi, tentpos, animseq = 1, [], None, 1
+    program = glue_text if not isinstance(glue_text, str) else parse_glue_resource("<briefing>", glue_text)
+    map_ui: dict[str, Any] | None = None
+    portraits: list[dict[str, Any]] = []
+    objects: list[dict[str, Any]] = []
+    turns: list[dict[str, Any]] = []
+    color: str | None = None
+    speaker: str | None = None
+    queued: list[tuple[int, str]] = []
+    text_lines, tentpos, animseq = 1, None, 1
+    midi: list[str] = []
+    if not isinstance(program, GlueProgram):
+        raise ValueError("a briefing must be a glue program, not a window")
     for instruction in program.instructions:
         command, argument = instruction.command, instruction.argument
         if command == "openwindow" and argument.lower().startswith("res="):
@@ -82,7 +97,8 @@ def _briefing_layout(wnd, glue_text, strings):
             "strings": strings}
 
 
-def load_briefing(installation, briefing_key, content=None):
+def load_briefing(installation: Installation | str | PathLike[str], briefing_key: MissionRef | str,
+                  content: GlueContent | None = None) -> dict[str, Any]:
     """Build a briefing from the exact mission record that opened it."""
     game = installation if isinstance(installation, Installation) else Installation(installation)
     if content is None:
