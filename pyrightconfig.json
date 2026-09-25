@@ -21,5 +21,6 @@
   "reportCallIssue": "error",
   "reportIndexIssue": "error",
   "reportMissingImports": "error",
-  "reportOptionalMemberAccess": "none"
+  "reportOptionalMemberAccess": "none",
+  "disableTaggedHints": true
 }
