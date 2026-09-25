@@ -7,17 +7,22 @@ also carrying a machine-readable `kind` and a `data` mapping of structured field
 `whshr.battle_log.BattleLogger` uses to write a diagnosable JSON Lines record instead of re-parsing text.
 """
 
+from typing import Any, Self
+
 
 class BattleEvent(str):
     """A human-readable event string plus a `kind` and structured `data` for logging."""
 
-    def __new__(cls, text, kind, **data):
+    kind: str
+    data: dict[str, Any]
+
+    def __new__(cls, text: str, kind: str, **data: Any) -> Self:
         self = super().__new__(cls, text)
         self.kind = kind
         self.data = data
         return self
 
-    def as_record(self, tick):
+    def as_record(self, tick: int) -> dict[str, Any]:
         """This event as a JSON-serializable `battle_log` record."""
         record = {"type": "event", "tick": tick, "kind": self.kind, "text": str(self)}
         record.update(self.data)

@@ -11,7 +11,7 @@ class FixedStepClock:
     of the backlog is dropped instead of making the following frames even slower.
     """
 
-    def __init__(self, step, max_steps=25):
+    def __init__(self, step: float, max_steps: int = 25) -> None:
         if step <= 0:
             raise ValueError("clock step must be positive")
         if max_steps < 1:
@@ -25,16 +25,16 @@ class FixedStepClock:
         self.dropped_steps = 0
 
     @property
-    def step(self):
+    def step(self) -> float:
         """The fixed step duration in seconds."""
         return self._step / NANOSECONDS
 
     @property
-    def alpha(self):
+    def alpha(self) -> float:
         """Fraction of the next step already accumulated, for render interpolation."""
         return self._accumulated / self._step
 
-    def advance(self, seconds):
+    def advance(self, seconds: float) -> int:
         """Add elapsed time and return how many fixed steps to run now."""
         if seconds < 0:
             raise ValueError("elapsed time must not be negative")

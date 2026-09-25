@@ -4,6 +4,12 @@ Rank sizes and slot offsets follow notes/game_rules.md, "Formations". War machin
 """
 
 import math
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+Point = tuple[float, float]
+Block = tuple[float, float, float, int, int]  # (x, y, direction, models, ranks)
+Frame = tuple[float, float, float, float, float, float]  # centre x/y, half side/forward, cos, sin
 
 MODEL_SPACING = 12.0  # BTS world units between models, sideways and front to back
 FULL_TURN = 512
@@ -12,7 +18,7 @@ FULL_TURN = 512
 SPRITE_PIXEL_WORLD_UNITS = 0.45
 
 
-def rank_sizes(models, ranks):
+def rank_sizes(models: int, ranks: int) -> list[int]:
     """Return the model count of each rank, front first; leftover models widen the front ranks."""
     if models <= 0:
         return []
@@ -21,20 +27,20 @@ def rank_sizes(models, ranks):
     return [base + (rank < leftover) for rank in range(ranks)]
 
 
-def block_slots(models, ranks, spacing=MODEL_SPACING):
+def block_slots(models: int, ranks: int, spacing: float = MODEL_SPACING) -> list[Point]:
     """Return (side, forward) slot offsets: the front-rank centre is (0, 0) and later ranks stand behind it."""
     return [((column - (width - 1) / 2) * spacing, -rank * spacing)
             for rank, width in enumerate(rank_sizes(models, ranks)) for column in range(width)]
 
 
-def place(x, y, direction, slots):
+def place(x: float, y: float, direction: float | None, slots: Sequence[Point]) -> list[Point]:
     """Rotate slot offsets by a script facing (0 = +Y, clockwise, 512 per turn) around the unit position."""
     angle = (direction or 0) * math.tau / FULL_TURN
     cos, sin = math.cos(angle), math.sin(angle)
     return [(x + side * cos + forward * sin, y - side * sin + forward * cos) for side, forward in slots]
 
 
-def footprint(models, ranks, spacing=MODEL_SPACING):
+def footprint(models: int, ranks: int, spacing: float = MODEL_SPACING) -> tuple[float, float, float]:
     """Local block half-extents (side, forward) and the footprint centre's forward offset behind the unit
     position: a box of half-extents ``frontage x 6`` and ``ranks x 6``, centred ``(ranks - 1) x 6`` units
     behind the unit position (game_rules.md, "Formations").
@@ -46,13 +52,14 @@ def footprint(models, ranks, spacing=MODEL_SPACING):
     return max(sizes) * half, len(sizes) * half, (len(sizes) - 1) * half
 
 
-def bounding_radius(models, ranks, spacing=MODEL_SPACING):
+def bounding_radius(models: int, ranks: int, spacing: float = MODEL_SPACING) -> float:
     """A circle covering the whole footprint; used for regiment picking and simple collisions."""
     half_side, half_forward, _ = footprint(models, ranks, spacing)
     return math.hypot(half_side, half_forward)
 
 
-def footprint_frame(x, y, direction, models, ranks, spacing=MODEL_SPACING):
+def footprint_frame(x: float, y: float, direction: float | None, models: int, ranks: int,
+                    spacing: float = MODEL_SPACING) -> Frame:
     """World-space centre and half-extents of the oriented block footprint (`footprint`), plus the
     frame's rotation cos/sin; shared by `footprint_corners`, `engine.Regiment._footprint` and
     `engine.Regiment.contains`."""
@@ -62,7 +69,8 @@ def footprint_frame(x, y, direction, models, ranks, spacing=MODEL_SPACING):
     return x - centre * sin, y - centre * cos, half_side, half_forward, cos, sin
 
 
-def footprint_corners(x, y, direction, models, ranks, spacing=MODEL_SPACING):
+def footprint_corners(x: float, y: float, direction: float | None, models: int, ranks: int,
+                      spacing: float = MODEL_SPACING) -> list[Point]:
     """The four world-space corners of the oriented block footprint, in order around the rectangle
     (for `footprint_gap`'s edge walk)."""
     cx, cy, half_side, half_forward, cos, sin = footprint_frame(x, y, direction, models, ranks, spacing)
@@ -72,7 +80,7 @@ def footprint_corners(x, y, direction, models, ranks, spacing=MODEL_SPACING):
     return corners
 
 
-def penetrates(a, b, spacing=MODEL_SPACING):
+def penetrates(a: Block, b: Block, spacing: float = MODEL_SPACING) -> bool:
     """True when two blocks are in contact (game_rules.md, "What triggers engagement").
 
     Each argument is a ``(x, y, direction, models, ranks)`` tuple. The point of this test, and the
@@ -96,7 +104,8 @@ def penetrates(a, b, spacing=MODEL_SPACING):
     return _polygons_overlap(footprint_corners(*a, spacing), footprint_corners(*b, spacing))
 
 
-def turn_pivot_shift(direction, new_direction, models, ranks, spacing=MODEL_SPACING):
+def turn_pivot_shift(direction: float | None, new_direction: float | None, models: int, ranks: int,
+                     spacing: float = MODEL_SPACING) -> Point:
     """The offset a block's anchor must move by so that an in-place turn pivots about the **block
     centre**, not about the anchor (game_rules.md, "A turn always moves the unit position to keep the
     pivot still").
@@ -112,7 +121,8 @@ def turn_pivot_shift(direction, new_direction, models, ranks, spacing=MODEL_SPAC
     return (offset * (math.sin(new) - math.sin(old)), offset * (math.cos(new) - math.cos(old)))
 
 
-def turn_corner_shift(direction, new_direction, frontage, turn_sign, spacing=MODEL_SPACING):
+def turn_corner_shift(direction: float, new_direction: float, frontage: int, turn_sign: int,
+                      spacing: float = MODEL_SPACING) -> Point:
     """Move the anchor while a block turns gradually around its inner front corner.
 
     `turn_sign` is +1 for clockwise and -1 for counterclockwise. The corner is half a
@@ -125,7 +135,7 @@ def turn_corner_shift(direction, new_direction, frontage, turn_sign, spacing=MOD
             turn_sign * half_frontage * (math.sin(new) - math.sin(old)))
 
 
-def _point_segment_distance(px, py, ax, ay, bx, by):
+def _point_segment_distance(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
     dx, dy = bx - ax, by - ay
     length2 = dx * dx + dy * dy
     if length2 < 1e-9:
@@ -134,7 +144,7 @@ def _point_segment_distance(px, py, ax, ay, bx, by):
     return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
 
 
-def _polygons_overlap(a, b):
+def _polygons_overlap(a: Sequence[Point], b: Sequence[Point]) -> bool:
     """SAT overlap test for two convex polygons (a separating axis exists along some edge's normal)."""
     for poly in (a, b):
         for i in range(len(poly)):
@@ -147,26 +157,25 @@ def _polygons_overlap(a, b):
     return True
 
 
-def footprint_gap(a_corners, b_corners):
+def footprint_gap(a_corners: Sequence[Point], b_corners: Sequence[Point]) -> float:
     """Minimum world-unit distance between two oriented block footprints (0 once they overlap):
     the least corner-to-edge distance, checked both ways, which is exact for two convex polygons
     since the closest pair of features between disjoint convex polygons is always a vertex and an
     edge (game_rules.md, "Engagement": close combat requires the footprints to actually touch)."""
     if _polygons_overlap(a_corners, b_corners):
         return 0.0
-    best = None
+    best = math.inf
     for corners, other in ((a_corners, b_corners), (b_corners, a_corners)):
         for px, py in corners:
             for i in range(len(other)):
                 ax, ay = other[i]
                 bx, by = other[(i + 1) % len(other)]
                 distance = _point_segment_distance(px, py, ax, ay, bx, by)
-                if best is None or distance < best:
-                    best = distance
+                best = min(best, distance)
     return best
 
 
-def rank_range(models):
+def rank_range(models: int) -> tuple[int, int]:
     """Allowed rank-count range for a re-form request (game_rules.md, "Formation changes: how the
     figures re-sort themselves"): clamped to ``[min, models // min]`` with
     ``min = max(1, trunc(0.75 * sqrt(models)))``. Matches the documented examples: 8 models -> 2-4
@@ -177,16 +186,16 @@ def rank_range(models):
     return minimum, max(minimum, models // minimum)
 
 
-def clamp_ranks(models, ranks):
+def clamp_ranks(models: int, ranks: int) -> int:
     """Clamp a requested rank count into `rank_range`'s allowed span."""
     minimum, maximum = rank_range(models)
     return max(minimum, min(maximum, ranks))
 
 
-def reform_slot_order(models, ranks, spacing=MODEL_SPACING):
+def reform_slot_order(models: int, ranks: int, spacing: float = MODEL_SPACING) -> list[Point]:
     """Slot offsets in re-slotting search order: front rank first, each rank's columns centre
     outward (game_rules.md, "Formation changes"). Same offsets as `block_slots`, reordered."""
-    order = []
+    order: list[Point] = []
     for rank, width in enumerate(rank_sizes(models, ranks)):
         centre = (width - 1) / 2
         columns = sorted(range(width), key=lambda column: abs(column - centre))
@@ -194,7 +203,7 @@ def reform_slot_order(models, ranks, spacing=MODEL_SPACING):
     return order
 
 
-def _octagonal_distance(ax, ay, bx, by):
+def _octagonal_distance(ax: float, ay: float, bx: float, by: float) -> float:
     """The re-slotting search's distance metric: `larger + smaller / 2` of the two axis deltas
     (game_rules.md, "Formation changes"), not true Euclidean distance."""
     dx, dy = abs(ax - bx), abs(ay - by)
@@ -202,8 +211,9 @@ def _octagonal_distance(ax, ay, bx, by):
     return larger + smaller / 2
 
 
-def reform_assignment(x, y, direction, models, ranks, positions, leader_index=None, spacing=MODEL_SPACING,
-                    farthest=False):
+def reform_assignment(x: float, y: float, direction: float | None, models: int, ranks: int,
+                      positions: Sequence[Point], leader_index: int | None = None,
+                      spacing: float = MODEL_SPACING, farthest: bool = False) -> list[Point | None]:
     """Re-slot every model of a re-forming unit (game_rules.md, "Formation changes"): process the new
     shape's slots front rank first, centre outward; each slot after the first takes the not-yet-placed
     model nearest to it by `_octagonal_distance`, scanning every remaining model and stopping early on
@@ -221,11 +231,12 @@ def reform_assignment(x, y, direction, models, ranks, positions, leader_index=No
     """
     slot_offsets = reform_slot_order(models, ranks, spacing)
     slot_targets = place(x, y, direction, slot_offsets)
-    assigned = [None] * len(positions)
+    assigned: list[Point | None] = [None] * len(positions)
     remaining = list(range(len(positions)))
 
-    def _take_nearest(target, far=False):
-        best_index, best_distance = None, None
+    def _take_nearest(target: Point, far: bool = False) -> int:
+        best_index: int | None = None
+        best_distance: float | None = None
         for index in remaining:
             px, py = positions[index]
             distance = _octagonal_distance(px, py, target[0], target[1])
@@ -233,6 +244,8 @@ def reform_assignment(x, y, direction, models, ranks, positions, leader_index=No
                 best_index, best_distance = index, distance
                 if distance == 0 and not far:
                     break
+        if best_index is None:
+            raise ValueError("no unplaced model left to take")
         remaining.remove(best_index)
         return best_index
 
@@ -253,7 +266,7 @@ def reform_assignment(x, y, direction, models, ranks, positions, leader_index=No
     return assigned
 
 
-def unit_size(unit):
+def unit_size(unit: Mapping[str, Any]) -> tuple[int, int]:
     """Return a script unit's (models, ranks); s_side is [side, orgsize, size, ranks] and the current size counts."""
     stats = unit["stats"].get("s_side", [])
     models = int(stats[2] if len(stats) > 2 else stats[1] if len(stats) > 1 else 1)
@@ -261,7 +274,7 @@ def unit_size(unit):
     return models, ranks
 
 
-def unit_layout(unit, spacing=MODEL_SPACING):
+def unit_layout(unit: Mapping[str, Any], spacing: float = MODEL_SPACING) -> tuple[list[Point], int, int]:
     """Return a script unit's model positions in BTS world units, its model count and its rank count."""
     position = unit["set"]
     models, ranks = unit_size(unit)

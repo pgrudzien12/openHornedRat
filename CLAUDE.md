@@ -109,6 +109,10 @@ whshr/             - unified package and CLI: python3 -m whshr check|extract|cat
 tests/             - BDD-style unittest scenarios (docs/testing.md): run them with `./test.sh` (optionally a module,
                      e.g. `./test.sh tests.test_combat`). **Always use the project's `.venv`** (test.sh does): pygame-ce/zengl
                      are only installed there, and the system `python3` reports spurious import errors
+typecheck.sh / pyrightconfig.json - static typing (issue #149). New and changed code in `whshr/` must be fully
+                     type-annotated; run `./typecheck.sh` before committing. Modules listed under `"strict"` in
+                     pyrightconfig.json are fully annotated and held to pyright's strict mode -- when you finish
+                     annotating a module, add it to that list so it cannot regress
 docs/              - asset_pipeline.md (lazy loading, scene lifecycle), testing.md (BDD rules)
 tools/ghidra/      - OPTIONAL analysis-only Ghidra headless scripts (Java) + setup notes; not stdlib Python,
                      their decompiled output must never be committed

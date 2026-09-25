@@ -11,6 +11,25 @@ Layers:
   load_army()    -> typed view of a .MRC (list of armies with their units)
 """
 import json, os, re, sys
+from os import PathLike
+from typing import Any, TypedDict
+
+StrPath = str | PathLike[str]
+Scalar = int | float | str  # what _num() makes of a script value
+View = dict[str, Any]  # a typed-view dict (unit, army, battle, ...); its keys are documented in FORMATS.md
+
+
+class Node(TypedDict):
+    """One parse() tree node: a section ([X]...[END]) or a block (addX:...endX:)."""
+    kind: str
+    name: str
+    line: int
+    label: str | None
+    set: dict[str, str]
+    stats: dict[str, list[Scalar]]
+    cmds: list[tuple[str, str]]
+    children: list["Node"]
+
 
 # block opener -> closer (compared case-insensitively)
 BLOCKS = {
@@ -29,14 +48,14 @@ RACE_TYPES = {
 }
 
 
-def side_info(s_side):
+def side_info(s_side: list[Scalar] | None) -> View | None:
     """Splits setstats:s_side = [type, size, initial size, ?].
 
     type: bit 7 = enemy side, bit 6 = NPC/neutral (hypothesis), bits 0-5 = unit type.
     """
     if not s_side:
         return None
-    code = s_side[0]
+    code = int(s_side[0])
     return {
         'code': code, 'enemy': bool(code & 0x80), 'npc': bool(code & 0x40),
         'type': RACE_TYPES.get(code & 0x3F, f'type {code & 0x3F}'),
@@ -54,12 +73,12 @@ class ParseError(Exception):
     pass
 
 
-def _node(kind, name, line):
+def _node(kind: str, name: str, line: int) -> Node:
     return {'kind': kind, 'name': name, 'line': line, 'label': None,
             'set': {}, 'stats': {}, 'cmds': [], 'children': []}
 
 
-def parse(path):
+def parse(path: StrPath) -> Node:
     """Returns the root of the tree (the top-level section, e.g. BATTLESCRIPT or MERCARMY).
 
     Node: kind ('section' or a block name, e.g. 'addunit'), name, line,
@@ -68,7 +87,8 @@ def parse(path):
     """
     with open(path, 'rb') as handle:
         text = handle.read().decode('latin-1')
-    root, stack = None, []
+    root: Node | None = None
+    stack: list[Node] = []
     for no, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
         if not line:
@@ -127,7 +147,7 @@ def parse(path):
     return root
 
 
-def write(node):
+def write(node: Node) -> str:
     """Serialize a parse() node tree back to .BTS/.MRC text; the inverse of parse().
 
     Round-trips semantically, not byte-for-byte: field order is normalised (label, set,
@@ -135,12 +155,12 @@ def write(node):
     matching what parse() itself already discards. A written-then-parsed tree carries the
     same set/stats/cmds/children data as the original.
     """
-    lines = []
+    lines: list[str] = []
     _write_node(node, lines)
     return "\n".join(lines) + "\n"
 
 
-def _write_node(node, lines):
+def _write_node(node: Node, lines: list[str]) -> None:
     # A label comment is the first line *inside* a section (parse() attaches it to
     # whichever section is already open when the comment line is read), never before a block.
     if node['kind'] == 'section':
@@ -162,7 +182,7 @@ def _write_node(node, lines):
 
 # ---------------------------------------------------------------- helpers
 
-def _num(s):
+def _num(s: str) -> Scalar:
     s = s.strip()
     try:
         return int(s)
@@ -173,50 +193,50 @@ def _num(s):
             return s
 
 
-def _nums(s):
+def _nums(s: str) -> list[Scalar]:
     return [_num(x) for x in s.split(',')] if s.strip() else []
 
 
-def _cmd(node, key, default=None):
+def _cmd(node: Node, key: str, default: str | None = None) -> str | None:
     return next((v for k, v in node['cmds'] if k.lower() == key.lower()), default)
 
 
-def resource_name(value):
+def resource_name(value: str | None) -> str | None:
     """Return the resource token before the script's optional ``,N`` variant suffix."""
     return (value or "").split(",", 1)[0].strip() or None
 
 
-def _cmds(node, key):
+def _cmds(node: Node, key: str) -> list[str]:
     return [v for k, v in node['cmds'] if k.lower() == key.lower()]
 
 
-def _has(node, key):
+def _has(node: Node, key: str) -> bool:
     return any(k.lower() == key.lower() for k, _ in node['cmds'])
 
 
-def _sets(node):
+def _sets(node: Node) -> dict[str, Scalar]:
     return {k: _num(v) for k, v in node['set'].items()}
 
 
-def _flags(v):
+def _flags(v: object) -> list[str]:
     return [f for f in str(v).split('|') if f] if v not in (None, '') else []
 
 
-def _sections(node, name):
+def _sections(node: Node, name: str) -> list[Node]:
     return [c for c in node['children'] if c['kind'] == 'section' and c['name'] == name]
 
 
-def _section(node, name):
+def _section(node: Node, name: str) -> Node | None:
     found = _sections(node, name)
     return found[0] if found else None
 
 
-def display_name(s):
+def display_name(s: str) -> str:
     """Names in the scripts use '<' or '_' instead of spaces (Grudgebringer<Cavalry)."""
     return s.replace('<', ' ').replace('_', ' ')
 
 
-def find_ci(directory, name):
+def find_ci(directory: str, name: str) -> str | None:
     """Looks up a file case-insensitively (the scripts were written on Windows)."""
     name = name.replace('\\', '/').lstrip('/')
     want = os.path.join(directory, name).lower()
@@ -228,9 +248,9 @@ def find_ci(directory, name):
 
 # ---------------------------------------------------------------- typed view
 
-def unit_view(n):
+def unit_view(n: Node) -> View:
     leader = next((c for c in n['children'] if c['kind'] == 'addleader'), None)
-    u = {
+    u: View = {
         'id': n['name'], 'name': display_name(n['name']),
         'hidden': _has(n, 'hidden'),
         'sprites': _cmd(n, 'troopsprites'), 'banner': _cmd(n, 'banner'),
@@ -250,63 +270,66 @@ def unit_view(n):
     return u
 
 
-def army_view(sec):
+def army_view(sec: Node) -> View:
     return {'label': sec['label'], 'count': _num(sec['set'].get('count', '0')),
             'units': [unit_view(c) for c in sec['children'] if c['kind'] == 'addunit']}
 
 
-def mission_view(sec):
+def mission_view(sec: Node | None) -> View | None:
     if sec is None:
         return None
     return {'deploy_troops': _has(sec, 'DeployTroops'),
             'objectives': [_nums(v) for v in _cmds(sec, 'Objective')]}
 
 
-def load_army(path):
+def load_army(path: StrPath) -> View:
     root = parse(path)
     return {'file': os.path.basename(path), 'type': root['name'],
             'mission': mission_view(_section(root, 'MISSIONINFO')),
             'armies': [army_view(s) for s in _sections(root, 'UNITS')]}
 
 
-def units_of(root):
+def units_of(root: Node) -> list[Node]:
     """Raw ``addunit`` nodes of every ``[UNITS]`` section, for callers that need the full node
     (e.g. to round-trip it through :func:`write`) rather than :func:`unit_view`'s trimmed view."""
     return [child for section in _sections(root, 'UNITS') for child in section['children']
             if child['kind'] == 'addunit']
 
 
-def load_battle(path, with_merc=True):
+def load_battle(path: StrPath, with_merc: bool = True) -> View:
     root = parse(path)
     field = _section(root, 'FIELD')
+    if field is None:
+        raise ParseError(f"{os.path.basename(path)}: no [FIELD] section")
     fs = _sets(field)
-    f = {
+    f: View = {
         'width': fs.get('x'), 'height': fs.get('y'), 'map': fs.get('map'),
         'merc': _cmd(field, 'loadmerc'), 'mesh': _cmd(field, 'loadmesh'),
         'palette': _cmd(field, 'loadpal'), 'script': _cmd(field, 'loadScript'),
         'planmap': _cmd(field, 'loadplanmap'), 'portrait_bg': _cmd(field, 'loadportbg'),
-        'ambient_light': _nums(_cmd(field, 'Ambient light color', '')),
-        'position': _nums(_cmd(field, 'Position', '')),
-        'bank_angle': _nums(_cmd(field, 'Bank angle', '')),
-        'camera': _num(_cmd(field, 'Camera', '')) if _has(field, 'Camera') else None,
+        'ambient_light': _nums(_cmd(field, 'Ambient light color') or ''),
+        'position': _nums(_cmd(field, 'Position') or ''),
+        'bank_angle': _nums(_cmd(field, 'Bank angle') or ''),
+        'camera': _num(_cmd(field, 'Camera') or '') if _has(field, 'Camera') else None,
         'view': {k: fs[k] for k in ('vx', 'vy', 'zoom') if k in fs},
     }
     dyn = _section(root, 'DYNAMIC_LOAD')
-    load = {}
+    load: dict[str, Any] = {}
     for k, v in (dyn['cmds'] if dyn else []):
         load.setdefault(k.lower(), []).append(v)
     if dyn and _has(dyn, 'NoBirds'):
         load['nobirds'] = True
 
-    objects = []
-    for o in (_section(root, 'OBJECTS') or {'children': []})['children']:
+    objects: list[View] = []
+    objects_section = _section(root, 'OBJECTS')
+    for o in (objects_section['children'] if objects_section else []):
         s = _sets(o)
         rects = [_nums(v) for c in o['children'] if c['kind'] == 'addrectangles' for v in _cmds(c, 'rect')]
         objects.append({**{k: s.get(k) for k in ('x', 'y', 'z', 'radius', 'dir')},
                         'status': _flags(s.get('status')), 'rects': rects})
 
     scen = _section(root, 'SCENERY')
-    scenery = []
+    scenery: list[View] = []
     for v in _cmds(scen, 'placefurniture') if scen else []:
         name, *xyd = v.split(',')
         x, y, d = (_num(t) for t in xyd)
@@ -316,13 +339,14 @@ def load_battle(path, with_merc=True):
     boundaries = [{'name': b['name'], 'lines': [_nums(v) for v in _cmds(b, 'AddLine')]}
                   for b in (bnd['children'] if bnd else []) if b['kind'] == 'addboundary']
 
-    nodes = []
-    for n in (_section(root, 'NODES') or {'children': []})['children']:
+    nodes: list[View] = []
+    nodes_section = _section(root, 'NODES')
+    for n in (nodes_section['children'] if nodes_section else []):
         s = _sets(n)
         nodes.append({**{k: s.get(k) for k in ('x', 'y', 'radius', 'dir', 'id')},
                       'status': _flags(s.get('status'))})
 
-    battle = {
+    battle: View = {
         'file': os.path.basename(path), 'field': f,
         'mission': mission_view(_section(root, 'MISSIONINFO')),
         'load': load, 'objects': objects, 'scenery': scenery,
@@ -337,16 +361,18 @@ def load_battle(path, with_merc=True):
 
 # ---------------------------------------------------------------- validation
 
-def check(root):
+def check(root: Node) -> list[str]:
     """Returns a list of mismatches between the counters stored in the file and its actual contents."""
-    issues = []
+    issues: list[str] = []
 
-    def expect(sec, what, actual):
+    def expect(sec: Node, what: str, actual: int) -> None:
         if 'count' in sec['set'] and _num(sec['set']['count']) != actual:
             issues.append(f"[{sec['name']}] line {sec['line']}: count={sec['set']['count']}, found {actual} {what}")
 
-    def walk(sec):
-        blocks = lambda kind: sum(1 for c in sec['children'] if c['kind'] == kind)
+    def walk(sec: Node) -> None:
+        def blocks(kind: str) -> int:
+            return sum(1 for c in sec['children'] if c['kind'] == kind)
+
         # [OBJECTS] set:count is deliberately skipped: it never equals the number of addobject blocks
         # (in 25/54 files = objects + units, in the rest it deviates by -8..+9), see FORMATS.md
         if sec['name'] == 'NODES':
@@ -367,7 +393,7 @@ def check(root):
     return issues
 
 
-def check_dir(directory):
+def check_dir(directory: str) -> None:
     files = sorted(f for f in os.listdir(directory) if f.upper().endswith(('.BTS', '.MRC')))
     ok = 0
     for f in files:
@@ -385,11 +411,11 @@ def check_dir(directory):
     print(f"{ok}/{len(files)} files without issues")
 
 
-def summary(path):
+def summary(path: str) -> None:
     if path.upper().endswith('.MRC'):
         a = load_army(path)
         print(f"{a['file']}: [{a['type']}]")
-        armies = a['armies']
+        armies: list[View] = a['armies']
     else:
         b = load_battle(path)
         f = b['field']
@@ -399,7 +425,8 @@ def summary(path):
             print(f"  objectives: {b['mission']['objectives']}")
         print(f"  collision objects: {len(b['objects'])}, scenery: {len(b['scenery'])}, "
               f"nodes: {len(b['nodes'])}, boundaries: {[x['name'] for x in b['boundaries']]}")
-        armies = b['armies'] + ((b['merc'] or {}).get('armies') or [])
+        merc: View = b['merc'] or {}
+        armies = b['armies'] + (merc.get('armies') or [])
     for army in armies:
         print(f"  army '{army['label']}': {len(army['units'])} units")
         for u in army['units']:
@@ -411,7 +438,7 @@ def summary(path):
     print("  counters: OK" if not issues else "  counters: " + "; ".join(issues))
 
 
-def main(args=None):
+def main(args: list[str] | None = None) -> None:
     """Run the legacy command-line interface."""
     args = sys.argv[1:] if args is None else args
     if not args:

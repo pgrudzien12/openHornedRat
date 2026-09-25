@@ -11,24 +11,34 @@ writing the file (a missing/unwritable log directory, disk full, ...) disables i
 raising (docs/testing.md, "the log directory is not writable or disabled ... the battle still runs").
 """
 import json
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
+from os import PathLike
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, TextIO
+
+from .battle_events import BattleEvent
+
+if TYPE_CHECKING:
+    from .engine import Battle
+
+Record = dict[str, Any]  # one JSON Lines record
 
 FORMAT_VERSION = 1
 
 
-def default_log_path(log_dir, battle_asset_name, when=None):
+def default_log_path(log_dir: str | PathLike[str], battle_asset_name: str, when: datetime | None = None) -> Path:
     """`<log_dir>/battle-YYYYmmdd-HHMMSS-<battle_asset_name>.jsonl`."""
     when = when or datetime.now()
     safe_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in battle_asset_name.lower())
     return Path(log_dir) / f"battle-{when:%Y%m%d-%H%M%S}-{safe_name}.jsonl"
 
 
-def regiment_header_rows(battle, sprite_bases):
+def regiment_header_rows(battle: "Battle", sprite_bases: Mapping[str, str]) -> list[Record]:
     """One header row per regiment (notes/engine_architecture.md, "Battle logs and replay"): identity,
     resolved sprite mapping (to check a suspected wrong sprite mapping), formation and decoded combat
     profile/psychology -- everything needed to read the rest of the log without re-decoding the script."""
-    rows = []
+    rows: list[Record] = []
     for identifier in sorted(battle.regiments):
         regiment = battle.regiments[identifier]
         rows.append({
@@ -60,9 +70,9 @@ class BattleLogger:
     environment variable.
     """
 
-    def __init__(self, path=None, trace_scripts=False):
+    def __init__(self, path: str | PathLike[str] | None = None, trace_scripts: bool = False) -> None:
         self.path = Path(path) if path is not None else None
-        self._file = None
+        self._file: TextIO | None = None
         self.enabled = False
         self.trace_scripts = trace_scripts
         if self.path is not None:
@@ -74,8 +84,8 @@ class BattleLogger:
                 self._file = None
                 self.enabled = False
 
-    def _write(self, record):
-        if not self.enabled:
+    def _write(self, record: Record) -> None:
+        if not self.enabled or self._file is None:
             return
         try:
             self._file.write(json.dumps(record, ensure_ascii=False, sort_keys=True))
@@ -85,7 +95,8 @@ class BattleLogger:
             self.enabled = False
             self.close()
 
-    def write_header(self, *, battle_asset, bts_path, seed, width, height, regiments):
+    def write_header(self, *, battle_asset: str, bts_path: str | None, seed: int, width: int, height: int,
+                     regiments: list[Record]) -> None:
         self._write({
             "type": "header", "tick": 0, "format_version": FORMAT_VERSION,
             "battle_asset": battle_asset, "bts_path": bts_path, "seed": seed,
@@ -94,13 +105,14 @@ class BattleLogger:
             "regiments": regiments,
         })
 
-    def write_order(self, tick, event):
+    def write_order(self, tick: int, event: Iterable[Any]) -> None:
         self._write({"type": "order", "tick": tick, "event": list(event)})
 
-    def write_event(self, tick, battle_event):
+    def write_event(self, tick: int, battle_event: BattleEvent) -> None:
         self._write(battle_event.as_record(tick))
 
-    def write_opcode(self, tick, *, unit_id, script_id, pc, opcode, opcode_name, operand, outcome, state):
+    def write_opcode(self, tick: int, *, unit_id: str, script_id: int, pc: int, opcode: int, opcode_name: str,
+                     operand: int | None, outcome: str, state: Record) -> None:
         """One dispatched bytecode instruction (only when `trace_scripts` is on).
 
         `outcome` is "ok", "unimplemented" (no handler -- PC advanced past it anyway) or "error" (the
@@ -115,21 +127,21 @@ class BattleLogger:
             "state": state,
         })
 
-    def write_snapshot(self, tick, battle):
+    def write_snapshot(self, tick: int, battle: "Battle") -> None:
         self._write({
             "type": "snapshot", "tick": tick, "result": battle.result,
             "side_counts": battle.side_counts(), "regiments": battle.snapshot(),
         })
 
-    def write_result(self, tick, battle):
+    def write_result(self, tick: int, battle: "Battle") -> None:
         self._write({"type": "result", "tick": tick, "result": battle.result,
                       "side_counts": battle.side_counts()})
 
-    def write_end(self, tick, reason):
+    def write_end(self, tick: int, reason: str) -> None:
         self._write({"type": "end", "tick": tick, "reason": reason})
         self.close()
 
-    def close(self):
+    def close(self) -> None:
         if self._file is not None:
             try:
                 self._file.close()

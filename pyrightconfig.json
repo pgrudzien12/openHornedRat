@@ -22,5 +22,12 @@
   "reportIndexIssue": "error",
   "reportMissingImports": "error",
   "reportOptionalMemberAccess": "none",
-  "disableTaggedHints": true
+  "disableTaggedHints": true,
+  "strict": [
+    "whshr/paths.py",
+    "whshr/battle_events.py",
+    "whshr/clock.py",
+    "whshr/script.py",
+    "whshr/formation.py"
+  ]
 }
