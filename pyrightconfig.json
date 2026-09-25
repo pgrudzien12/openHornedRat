@@ -29,6 +29,7 @@
     "whshr/clock.py",
     "whshr/script.py",
     "whshr/formation.py",
-    "whshr/rules.py"
+    "whshr/rules.py",
+    "whshr/animation.py"
   ]
 }

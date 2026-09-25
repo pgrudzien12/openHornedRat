@@ -11,7 +11,12 @@ here. Any other family falls back to it (see `family_table`) until its own scrip
 `FAMILY_TABLES`, not a change to the stepper below.
 """
 
+import random
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .engine import ModelState
 
 STAND, IDLE, WALK, FIGHT, WEAPON_READY, DEAD, SHOOT = range(1, 8)
 
@@ -26,7 +31,7 @@ class DyingModel:
 
     x: float
     y: float
-    model: object  # whshr.engine.ModelState
+    model: "ModelState"
     ticks_left: int
     death_kind: int = 0  # DEATH_* of the killing wound; fire/warpfire kinds burn instead of leaving a corpse
     body: str = "infantry"  # BURN_SEQUENCES key, fixed by the regiment when the model dies
@@ -56,14 +61,14 @@ class ActionScript:
     """
 
     group: str  # matches whshr.battlefield.ACTION_GROUPS
-    sequence: tuple = ()
+    sequence: tuple[int, ...] = ()
     loop: bool = True
     random_entry: int = 0
-    random_choice: tuple | None = None
+    random_choice: tuple[int, ...] | None = None
     run_ticks: int = 0
     hold_ticks: int = 0
     next_action: int | None = None
-    variant_groups: tuple = ()
+    variant_groups: tuple[int, ...] = ()
     variant_rule: str | None = None
     locks_facing: bool = False
     fire_at: int | None = None  # script step (counting the random entry skip) that posts the fire event
@@ -72,7 +77,9 @@ class ActionScript:
 
 # Standard infantry (notes/game_rules.md "Figure animation" table). Sprite groups per
 # notes/animations.md's standard `32+8+32+32+8` unit sets: move, dead, attack, stand, shoot.
-STANDARD_INFANTRY = {
+ActionTable = dict[int, ActionScript]
+
+STANDARD_INFANTRY: ActionTable = {
     STAND: ActionScript("stand", sequence=(1,)),
     IDLE: ActionScript("stand", sequence=(0, 0, 0, 1, 1, 2, 2, 2, 3, 3)),
     WALK: ActionScript("move", sequence=(0, 0, 1, 1, 2, 2, 3, 3), random_entry=8),
@@ -91,14 +98,14 @@ STANDARD_INFANTRY = {
 # group 96 + 8V. Wagons: two looks B (group 32B; which model bit picks B is not documented, so bit 1 of
 # the stagger value is used -- PROVISIONAL), one held frame that never animates except idle, an 8-tick
 # loop 0,0,1,1,2,2,3,3 with no random entry; dead is one no-variant wreck group 64.
-_MOD3 = dict(variant_rule="mod3")
+_MOD3: dict[str, Any] = dict(variant_rule="mod3")
 
 
-def _peasant_group(base, step):
+def _peasant_group(base: int, step: int) -> tuple[int, ...]:
     return tuple(base + step * v for v in range(3))
 
 
-PEASANTS = {
+PEASANTS: ActionTable = {
     STAND: ActionScript("stand", sequence=(1,), variant_groups=_peasant_group(120, 32), **_MOD3),
     IDLE: ActionScript("stand", sequence=(0, 0, 0, 1, 1, 2, 2, 2, 3, 3),
                        variant_groups=_peasant_group(120, 32), **_MOD3),
@@ -112,9 +119,9 @@ PEASANTS = {
     SHOOT: ActionScript("stand", sequence=(0,), variant_groups=_peasant_group(120, 32), **_MOD3),
 }
 
-_SLAVE_HELD = dict(sequence=(0,), variant_groups=_peasant_group(216, 32), **_MOD3)
-_SLAVE_LOOP = dict(sequence=(0, 0, 0, 1, 1, 2, 2, 2, 3, 3), variant_groups=_peasant_group(216, 32), **_MOD3)
-SLAVES = {
+_SLAVE_HELD: dict[str, Any] = dict(sequence=(0,), variant_groups=_peasant_group(216, 32), **_MOD3)
+_SLAVE_LOOP: dict[str, Any] = dict(sequence=(0, 0, 0, 1, 1, 2, 2, 2, 3, 3), variant_groups=_peasant_group(216, 32), **_MOD3)
+SLAVES: ActionTable = {
     STAND: ActionScript("stand", **_SLAVE_HELD),
     IDLE: ActionScript("stand", **_SLAVE_LOOP),
     WALK: ActionScript("move", **_SLAVE_LOOP),
@@ -125,8 +132,8 @@ SLAVES = {
     SHOOT: ActionScript("stand", **_SLAVE_HELD),
 }
 
-_WAGON_HELD = dict(sequence=(0,), variant_groups=(0, 32), variant_rule="bit1")
-WAGONS = {
+_WAGON_HELD: dict[str, Any] = dict(sequence=(0,), variant_groups=(0, 32), variant_rule="bit1")
+WAGONS: ActionTable = {
     STAND: ActionScript("stand", **_WAGON_HELD),
     IDLE: ActionScript("stand", sequence=(0, 0, 1, 1, 2, 2, 3, 3), variant_groups=(0, 32), variant_rule="bit1"),
     WALK: ActionScript("move", **_WAGON_HELD),
@@ -137,7 +144,7 @@ WAGONS = {
     SHOOT: ActionScript("stand", **_WAGON_HELD),
 }
 
-FAMILY_TABLES = {"standard_infantry": STANDARD_INFANTRY, "peasants": PEASANTS, "slaves": SLAVES,
+FAMILY_TABLES: dict[str, ActionTable] = {"standard_infantry": STANDARD_INFANTRY, "peasants": PEASANTS, "slaves": SLAVES,
                  "wagons": WAGONS}
 # Script sprite resource names (casefolded) that select a decoded family; anything else is standard.
 SPRITE_FAMILIES = {"peasant": "peasants", "peasants": "peasants", "ratslave": "slaves", "slave": "slaves",
@@ -146,12 +153,12 @@ WAGON_CLASS = 7  # s_race class RollingStock
 DEFAULT_FAMILY = "standard_infantry"
 
 
-def family_table(family):
+def family_table(family: str | None) -> ActionTable:
     """The 8-slot action table for `family`, or standard infantry's when `family` has none decoded yet."""
-    return FAMILY_TABLES.get(family, FAMILY_TABLES[DEFAULT_FAMILY])
+    return FAMILY_TABLES.get(family or DEFAULT_FAMILY, FAMILY_TABLES[DEFAULT_FAMILY])
 
 
-def family_for(sprite, unit_class=None):
+def family_for(sprite: str | None, unit_class: int | None = None) -> str:
     """The creature family a regiment's models animate with: chosen by its script sprite resource
     (peasants, slaves, wagons), RollingStock class as a wagon fallback, else standard infantry."""
     family = SPRITE_FAMILIES.get((sprite or "").casefold())
@@ -160,7 +167,7 @@ def family_for(sprite, unit_class=None):
     return family or DEFAULT_FAMILY
 
 
-def script_group(script, stagger):
+def script_group(script: ActionScript, stagger: int) -> str | int:
     """The sprite group `script` shows for a model with fixed stagger value `stagger` (mechanism 4)."""
     if script.variant_rule == "mod3":
         return script.variant_groups[stagger % 3]
@@ -169,12 +176,12 @@ def script_group(script, stagger):
     return script.group
 
 
-def death_cry_index(stagger):
+def death_cry_index(stagger: int) -> int:
     """Which of the three death cries a model plays: chosen by the same stagger value, ``stagger % 3``."""
     return stagger % 3
 
 
-def collapse_delay_ticks(stagger, in_melee, death_kind=0):
+def collapse_delay_ticks(stagger: int, in_melee: bool, death_kind: int = 0) -> int:
     """Ticks a dying model keeps playing its current animation before falling (mechanism 5).
 
     ``((stagger & 3) + 1) * 18`` (18/36/54/72 ticks) when the model's unit is in close combat;
@@ -205,7 +212,7 @@ class BurnSequence:
 # game_rules.md burn table: infantry and everything else / cavalry (and sheep) / monster. The burn always
 # runs `lead_in - r + 40` ticks for a random start offset r in [0, lead_in): five laps of 8 phases or
 # ten laps of 4 after the lead-in.
-BURN_SEQUENCES = {
+BURN_SEQUENCES: dict[str, BurnSequence] = {
     "infantry": BurnSequence(orange=0, green=16, phases=8, lead_in=16, corpse=32),
     "cavalry": BurnSequence(orange=8, green=24, phases=4, lead_in=8, corpse=40),
     "monster": BurnSequence(orange=12, green=28, phases=4, lead_in=8, corpse=48),
@@ -224,7 +231,7 @@ NEVER_BURN_SPRITES = frozenset({  # PROVISIONAL names: wagons, pack ponies, fana
 BURN_EXCEPTION_SPRITES = frozenset({"warpfire", "doomdivr", "doomdiver"})  # war machines that do burn
 
 
-def body_class(unit_class, sprite=None):
+def body_class(unit_class: int | None, sprite: str | None = None) -> str:
     """The burn body class of a regiment: "monster" (class Monster), "cavalry" (class Cavalry, sheep) or
     "infantry" (everything else)."""
     if unit_class == MONSTER_CLASS:
@@ -234,7 +241,7 @@ def body_class(unit_class, sprite=None):
     return "infantry"
 
 
-def burns_on_death(death_kind, unit_class, sprite=None):
+def burns_on_death(death_kind: int, unit_class: int | None, sprite: str | None = None) -> bool:
     """True when a model killed with `death_kind` plays a burn sequence: only kinds 1 and 3, and never
     for wagons, pack ponies, fanatics, mortars, war machines (except the Warpfire Thrower and Doom
     Diver), Wyvern, Dragon, Giant, Gyrocopter or Doomwheel, whose dead script ignores the kind."""
@@ -260,18 +267,18 @@ class BurningModel:
     age: int = 0  # ticks burned so far
 
 
-def burn_start(body, rng):
+def burn_start(body: str, rng: random.Random) -> int:
     """Draw the random start offset r in [0, lead_in) into the lead-in."""
     return rng.randrange(BURN_SEQUENCES[body].lead_in)
 
 
-def burn_length(body, start):
+def burn_length(body: str, start: int) -> int:
     """Total ticks of a burn that starts `start` ticks into its lead-in: ``lead_in - r + 40``
     (41-56 ticks for infantry, 41-48 for cavalry and monsters)."""
     return BURN_SEQUENCES[body].lead_in - start + BURN_LAP_TICKS
 
 
-def burning_frame(burning):
+def burning_frame(burning: BurningModel) -> int:
     """Battle-effects frame number a burning model shows now: the orange (kind 1) or green (kind 3)
     group's first frame plus the cycling phase ``(r + age) % phases``."""
     sequence = BURN_SEQUENCES[burning.body]
@@ -279,11 +286,11 @@ def burning_frame(burning):
     return base + (burning.start + burning.age) % sequence.phases
 
 
-def burn_finished(burning):
+def burn_finished(burning: BurningModel) -> bool:
     return burning.age >= burn_length(burning.body, burning.start)
 
 
-def charred_frame(body, direction):
+def charred_frame(body: str, direction: int) -> int:
     """Battle-effects frame of a charred corpse facing sprite direction `direction` (0-7)."""
     return BURN_SEQUENCES[body].corpse + direction % 8
 
@@ -292,7 +299,7 @@ FULL_TURN = 512
 MAX_SLEW = 32  # drawn facing turns at most 32/512 of a turn (one sprite direction) per tick
 
 
-def slew_facing(current, target):
+def slew_facing(current: int | None, target: int) -> int:
     """Turn the drawn facing `current` toward `target` (both 0-511) by at most `MAX_SLEW`."""
     if current is None:
         return target % FULL_TURN
@@ -303,13 +310,13 @@ def slew_facing(current, target):
     return (current + delta) % FULL_TURN
 
 
-def facing_follows_unit(action):
+def facing_follows_unit(action: int) -> bool:
     """True when the drawn facing turns toward the unit's facing (stand, idle, weapon ready, shoot);
     otherwise (walk, fight) it turns toward the model's own heading or opponent."""
     return action in (STAND, IDLE, WEAPON_READY, SHOOT)
 
 
-def _draw_entry(script, rng):
+def _draw_entry(script: ActionScript, rng: random.Random) -> int:
     if script.random_choice is not None:
         return rng.choice(script.random_choice)
     if script.random_entry:
@@ -317,7 +324,7 @@ def _draw_entry(script, rng):
     return 0
 
 
-def _phase_at(script, pc, entry):
+def _phase_at(script: ActionScript, pc: int, entry: int) -> int:
     """The phase shown `pc` ticks into a run that started at random offset `entry`.
 
     `entry` only rotates which phase is shown first; it does not shorten a finite run (`pc` counts
@@ -344,13 +351,13 @@ def _phase_at(script, pc, entry):
     return script.sequence[index]
 
 
-def current(model, family=DEFAULT_FAMILY):
+def current(model: "ModelState", family: str = DEFAULT_FAMILY) -> tuple[str | int, int]:
     """The sprite group and phase a model's already-stepped `action`/`action_pc` currently show."""
     script = family_table(family)[model.action]
     return script_group(script, model.stagger), _phase_at(script, model.action_pc, model.action_entry)
 
 
-def one_shot_running(model, family=DEFAULT_FAMILY):
+def one_shot_running(model: "ModelState", family: str = DEFAULT_FAMILY) -> bool:
     """True while the model plays a one-shot script (one with a `next_action`) that has not finished."""
     script = family_table(family)[model.action]
     if script.next_action is None:
@@ -363,13 +370,14 @@ def one_shot_running(model, family=DEFAULT_FAMILY):
     return model.action_pc < total
 
 
-def _enter(model, table, action, rng):
+def _enter(model: "ModelState", table: ActionTable, action: int, rng: random.Random) -> None:
     model.action = action
     model.action_entry = _draw_entry(table[action], rng)
     model.action_pc = 0
 
 
-def step(model, requested_action, rng, family=DEFAULT_FAMILY):
+def step(model: "ModelState", requested_action: int, rng: random.Random,
+         family: str = DEFAULT_FAMILY) -> tuple[str | int, int]:
     """Advance one model's action program by one battle tick; returns `current(model, family)`.
 
     `model` carries `action`/`action_pc`/`action_entry`/`pending_action` (whshr.engine.ModelState).
