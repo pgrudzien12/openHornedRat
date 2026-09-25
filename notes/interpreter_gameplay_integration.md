@@ -29,8 +29,8 @@ Landed against this document's "Proposed" section:
   computed it as `int(unit_id) if unit_id.isdigit() else 0` — always `0` for real regiment
   identifiers (e.g. `"Goblin_Stickers"`), silently breaking `TakeEventTarget` and `IfEventSource`
   for any real mission. Now `source` holds the sender's regiment identifier directly.
-  `RunAway` also had `combat._start_rout(battle, regiment)` (swapped argument order against the
-  real `_start_rout(regiment, battle)` signature) — would have raised `AttributeError` the moment
+  `RunAway` also had `combat.start_rout(battle, regiment)` (swapped argument order against the
+  real `start_rout(regiment, battle)` signature) — would have raised `AttributeError` the moment
   it ran against real event data. Both fixed with regression tests.
 - **Item 3, "Connect script outputs to engine state"**: partially done — `AttackNearestEnemy` and
   friends set `regiment.attack_target` directly now (same approach `ChargeTarget`/`FireAtTarget`
@@ -46,7 +46,7 @@ Landed against this document's "Proposed" section:
   `Battle.from_script` silently discarded it -- `Battle.nodes` (`{id: (x, y)}`) now carries it
   through. `MoveToNode` issues an ordinary move order toward the node's coordinates,
   `TeleportToNode`/`PlaceAtNode` reposition instantly, and `FaceNode` turns toward it using the same
-  pivot-preserving `Battle._turn_to` every other turn in the engine uses. All four fail-safe (no-op,
+  pivot-preserving `Battle.turn_to` every other turn in the engine uses. All four fail-safe (no-op,
   never raise) for an id the battle has no node for.
 
   Arrival feedback is now also built: `MoveToNode`/`ScatterModelsToNode` arm `pending_arrival` and

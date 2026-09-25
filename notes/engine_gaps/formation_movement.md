@@ -7,7 +7,7 @@ formations should turn much slower than deep ones and this has no effect at all 
 ## Known facts
 
 Fully specified, no research task needed — `notes/game_rules.md`, "Real time and movement" and
-"Turning, wheeling and reversing" (marked ✅). The current engine (`whshr/engine.py: Battle._turn_to`/
+"Turning, wheeling and reversing" (marked ✅). The current engine (`whshr/engine.py: Battle.turn_to`/
 `_advance_toward`) doesn't implement any of the gradual-turn mechanism yet — facing is set straight to
 the bearing to the target every tick.
 
@@ -47,7 +47,7 @@ shift = 9 pursuit re-aim · 8 halted turn / turn order · 7 wheel · 6 charge
   anchor) — uniformly, for every kind of gradual turn, not only wheels. A frontage of 1 inverts the
   side. (In-place halted turns pivot about the **block centre** instead — an about-face shifts the
   anchor by `(ranks − 1) × 12` backwards along the old facing; a 90° order-issue snap moves it to the
-  new front-rank centre and swaps ranks/frontage. `whshr/engine.py: Battle._turn_to` already calls
+  new front-rank centre and swaps ranks/frontage. `whshr/engine.py: Battle.turn_to` already calls
   `formation.turn_pivot_shift` for this — the pivot math exists.)
 - Translation speed for that tick: a wheel keeps moving at **half speed**; a halted turn, turn order and
   pursuit re-aim have **zero** translation; a **charge keeps full speed** (it moves, then turns).
@@ -132,7 +132,7 @@ Three GitHub tasks (one already existed, #17, now rewritten to the corrected/exp
    rule, not an AI/mission choice) but use the same small-`s` fast-turn formula as anyone else on the
    rare occasions they do turn — cross-reference `notes/engine_gaps/model_movement.md`'s scope
    boundary on war-machine/monster pseudo-formation layouts not existing in `whshr/formation.py` yet.
-3. **Break-and-turn stagger pause**: on `combat._start_rout`, give every currently-at-rest model of the
+3. **Break-and-turn stagger pause**: on `combat.start_rout`, give every currently-at-rest model of the
    breaking unit (and, if it was in melee, every model of its opponent) a pause of
    `(stagger & 7) × 3 + 6` ticks before it may turn/move, plus a small scatter from its current
    position. Depends on epic #49/#50's per-model stagger value existing.

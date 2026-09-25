@@ -421,7 +421,7 @@ byte-faithful port; every simplification is called out in each module's docstrin
   movement"): 1.8 free (unchanged from engine step 3), 2.5 for a charge/attack order (`Battle.order_attack`,
   chased every tick at the target's current position, never "arriving" on its own — contact ends it), and
   1.5 fleeing (`Regiment.routing`, moving directly away from the nearest active enemy at the moment the
-  rout starts — `Battle._flee_point`, called once from `combat._start_rout` and frozen onto
+  rout starts — `Battle.flee_point`, called once from `combat.start_rout` and frozen onto
   `Regiment.flee_x`/`flee_y`, not re-derived every tick: game_rules.md "Flight and catching fleeing
   units" documents the bearing as fixed at rout start, and a live per-tick re-derivation let two
   pursuers converging from different sides flip which counted as "nearest" every tick, stalling the
@@ -447,7 +447,7 @@ byte-faithful port; every simplification is called out in each module's docstrin
   an existing fight (a third regiment closing in) does not reset that fight's tally. `Regiment.
   melee_touching` is the live set of enemy ids this regiment's footprint currently touches.
 - **Melee resolution** (`combat.resolve_melee`, game_rules.md 5.1/5.2/5.5/6.1): a unit strikes once per
-  turn, in the segment equal to its own Initiative (`combat._segment_state`, segments count down 10..1
+  turn, in the segment equal to its own Initiative (`combat.segment_state`, segments count down 10..1
   within a `SEGMENTS_PER_TURN = 10`-segment turn), against the nearest enemy it is currently touching
   (`combat._pick_melee_target`); the moving side with an active charge order is flagged as the charger
   (`Regiment.melee_charging`) and gets +1 S on its first strike after joining a fight (game_rules.md 5.5,
@@ -476,7 +476,7 @@ byte-faithful port; every simplification is called out in each module's docstrin
   — simplified from the original, which varies the interval with the units' Initiatives. `CantBreak`
   never routs.
 - **Rally** (game_rules.md 7.4, timing and casualties modifier traced): a routing regiment
-  (`combat._start_rout`) schedules its first rally attempt one full turn later
+  (`combat.start_rout`) schedules its first rally attempt one full turn later
   (`Regiment.rally_next_segment`), then every 3 segments regardless of outcome; it flees directly away
   from its nearest active enemy at fleeing speed and is removed (`fled = True`) once it leaves the field.
   When its scheduled segment comes, a non-`CantRally` regiment with casualties below 3x its current size
