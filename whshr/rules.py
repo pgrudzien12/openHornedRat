@@ -6,11 +6,19 @@ from the local installation at run time; no game data is stored in this module.
 
 import re
 import struct
+from collections.abc import Iterator, Mapping, Sequence
 from enum import Enum
+from os import PathLike
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from . import script
 from .paths import Installation
+
+if TYPE_CHECKING:
+    from .engine import Regiment
+
+StrPath = str | PathLike[str]
 
 
 class Side(str, Enum):
@@ -33,11 +41,11 @@ _SIDE_BITS = {0: Side.PLAYER, 1: Side.NEUTRAL, 2: Side.ENEMY}
 # Default hostility, absent an explicit script order (notes/neutral_units.md, "Implementation
 # Requirements": behaviour is script-driven, not flag-driven). Player and enemy are each other's
 # default opponents; neutral has none -- "no offensive orders unless provoked".
-_HOSTILE = {Side.PLAYER: frozenset({Side.ENEMY}), Side.ENEMY: frozenset({Side.PLAYER}),
+_HOSTILE: dict[Side, frozenset[Side]] = {Side.PLAYER: frozenset({Side.ENEMY}), Side.ENEMY: frozenset({Side.PLAYER}),
             Side.NEUTRAL: frozenset(), Side.DUEL: frozenset()}
 
 
-def side_of_code(code):
+def side_of_code(code: int | None) -> Side:
     """The `Side` of a raw `s_side[0]` byte, or `Side.ENEMY` if `code` is `None` or the bit pattern
     11 (notes/neutral_units.md: unused, no units found with it in the 54-battle survey) -- matching
     this engine's previous default for any `.BTS` army unit with no better information."""
@@ -46,7 +54,7 @@ def side_of_code(code):
     return _SIDE_BITS.get((code >> 6) & 0x3, Side.ENEMY)
 
 
-def hostile_sides(side):
+def hostile_sides(side: Side) -> frozenset[Side]:
     """The sides `side` is hostile to by default (see `Side`'s docstring): used by generic,
     script-independent targeting (`whshr.combat`'s shooting target search) so a neutral
     regiment is never auto-targeted or auto-targeting. A script that explicitly names a target
@@ -57,7 +65,7 @@ def hostile_sides(side):
 _NEVER_FIGHT = frozenset({frozenset({Side.PLAYER, Side.NEUTRAL})})
 
 
-def can_fight(side_a, side_b):
+def can_fight(side_a: Side, side_b: Side) -> bool:
     """Whether two regiments of different sides may engage in close combat *on physical contact*
     (`whshr.combat.resolve_contacts`) or must instead push apart like same-side regiments do
     (`whshr.engine.Battle._resolve_collisions`).
@@ -72,7 +80,7 @@ def can_fight(side_a, side_b):
     return side_a != side_b and frozenset({side_a, side_b}) not in _NEVER_FIGHT
 
 
-def is_scripted_opponent(first, second):
+def is_scripted_opponent(first: "Regiment", second: "Regiment") -> bool:
     """Two regiments of the *same* side where one has the other as its explicit attack target.
 
     The original refuses same-side engagement "when the target is not the current opponent"
@@ -82,7 +90,7 @@ def is_scripted_opponent(first, second):
             and (first.attack_target == second.identifier or second.attack_target == first.identifier))
 
 
-def may_engage(first, second):
+def may_engage(first: "Regiment", second: "Regiment") -> bool:
     """Whether two regiments fight on physical contact: different camps (`can_fight`), or a scripted
     same-side opponent pair (`is_scripted_opponent`). Takes regiments, not sides, for that reason."""
     return can_fight(first.camp, second.camp) or is_scripted_opponent(first, second)
@@ -136,7 +144,7 @@ MISSILE_RANGES = {1: 576, 2: 720, 5: 1440, 6: 768, 7: 576, 8: 1440, 9: 576, 11: 
 class PeImage:
     """Minimal PE32 reader: maps virtual addresses of initialised sections to file bytes."""
 
-    def __init__(self, path):
+    def __init__(self, path: StrPath) -> None:
         self.path = Path(path)
         self.data = self.path.read_bytes()
         pe = struct.unpack_from('<I', self.data, 0x3C)[0]
@@ -145,9 +153,12 @@ class PeImage:
         _, count, self.timestamp, _, _, optional_size, _ = struct.unpack_from('<HHIIIHH', self.data, pe + 4)
         self.image_base = struct.unpack_from('<I', self.data, pe + 24 + 28)[0]
         table = pe + 24 + optional_size
-        self.sections = [struct.unpack_from('<8xIIII', self.data, table + 40 * i) for i in range(count)]
+        self.sections: list[tuple[int, int, int, int]] = []
+        for i in range(count):
+            vsize, vaddr, raw_size, raw_ptr = struct.unpack_from('<8xIIII', self.data, table + 40 * i)
+            self.sections.append((vsize, vaddr, raw_size, raw_ptr))
 
-    def read(self, va, size):
+    def read(self, va: int, size: int) -> bytes:
         rva = va - self.image_base
         for vsize, vaddr, raw_size, raw_ptr in self.sections:
             if vaddr <= rva < vaddr + max(vsize, raw_size):
@@ -157,13 +168,13 @@ class PeImage:
                 return self.data[raw_ptr + offset:raw_ptr + offset + size]
         raise ValueError(f'{va:#x} is not mapped')
 
-    def u32(self, va, count=1):
+    def u32(self, va: int, count: int = 1) -> tuple[int, ...]:
         return struct.unpack(f'<{count}I', self.read(va, 4 * count))
 
-    def cstring(self, va, limit=64):
+    def cstring(self, va: int, limit: int = 64) -> str:
         return self.read(va, limit).split(b'\0', 1)[0].decode('latin-1')
 
-    def maps(self, va):
+    def maps(self, va: int) -> bool:
         try:
             self.read(va, 1)
             return True
@@ -171,9 +182,9 @@ class PeImage:
             return False
 
 
-def _token_table(image, va, limit=128):
+def _token_table(image: PeImage, va: int, limit: int = 128) -> dict[int, str]:
     """Reads {name, token} pairs up to the entry with an empty name that ends each keyword table."""
-    tokens = {}
+    tokens: dict[int, str] = {}
     for i in range(limit):
         pointer, token = image.u32(va + 8 * i, 2)
         if not image.maps(pointer) or not image.cstring(pointer):
@@ -182,14 +193,39 @@ def _token_table(image, va, limit=128):
     return tokens
 
 
-def load_tables(installation):
+class Mount(TypedDict):
+    name: str
+    flag: int
+    charge_strength: int
+    profile: dict[str, int]
+
+
+class Tables(TypedDict):
+    """The rule tables read from GAMEF.DLL by load_tables()."""
+    image: PeImage
+    stats: list[str | None]
+    psy: list[str | None]
+    races: list[str]
+    classes: list[str]
+    to_hit: list[list[int]]
+    to_wound: list[list[int]]
+    weapon_strength: list[int]
+    save_modifier: list[int]
+    armour_save: list[int]
+    mounts: list[Mount]
+
+
+def load_tables(installation: StrPath) -> Tables:
     """Reads the rule tables from GAMEF.DLL of an installation."""
     game = Installation(installation)
     image = PeImage(game.require('GAMEF.DLL'))
-    grid = lambda va: [list(image.read(va + 11 * row, 11)) for row in range(11)]
+
+    def grid(va: int) -> list[list[int]]:
+        return [list(image.read(va + 11 * row, 11)) for row in range(11)]
+
     tokens = _token_table(image, VA_STAT_TOKENS)
     psy = _token_table(image, VA_PSY_TOKENS, 16)
-    mounts = []
+    mounts: list[Mount] = []
     for index in range(5):
         record = image.read(VA_MOUNTS + 32 * index, 32)
         mounts.append({'name': image.cstring(struct.unpack_from('<I', record)[0]), 'flag': record[4],
@@ -210,14 +246,26 @@ def load_tables(installation):
 
 # ---------------------------------------------------------------- unit decoding
 
-def stat_fields(stats, order=EXPECTED_STATS):
+StatFields = dict[str, script.Scalar]
+Conflict = tuple[str, str, script.Scalar, script.Scalar]
+
+
+def stat_int(fields: Mapping[str, script.Scalar], name: str) -> int | None:
+    """One stat field as an int, or None when it is absent or not an integer in the script."""
+    value = fields.get(name)
+    return value if isinstance(value, int) else None
+
+
+def stat_fields(stats: Mapping[str, Sequence[script.Scalar]],
+                order: Sequence[str] = EXPECTED_STATS) -> tuple[StatFields, list[Conflict]]:
     """Applies setstats lines to the stat block: each line fills consecutive fields from its key.
 
     Returns (fields, conflicts); a conflict is a later line overwriting a field with another value.
     Keys outside the byte block (s_calualties ...) are ignored.
     """
     index = {name.lower(): i for i, name in enumerate(order)}
-    fields, conflicts = {}, []
+    fields: StatFields = {}
+    conflicts: list[Conflict] = []
     for key, values in stats.items():
         start = index.get(key.lower())
         if start is None:
@@ -232,7 +280,7 @@ def stat_fields(stats, order=EXPECTED_STATS):
     return fields, conflicts
 
 
-def armour_description(code, tables=None):
+def armour_description(code: int, tables: Tables | None = None) -> str:
     if code == 6:
         text = 'regenerates'
     elif code == 7:
@@ -247,45 +295,51 @@ def armour_description(code, tables=None):
     return text
 
 
-def decode_unit(node, tables):
+def decode_unit(node: script.Node, tables: Tables) -> dict[str, Any]:
     """Named view of one addunit/addleader node from whshr.script.parse()."""
     fields, conflicts = stat_fields(node['stats'])
-    race = fields.get('s_race')
-    view = {
+    race = stat_int(fields, 's_race')
+    mount = stat_int(fields, 's_mount')
+    armour = stat_int(fields, 's_armr')
+    weapon = stat_int(fields, 's_weap')
+    weapon_name = stat_int(fields, 's_weponame')
+    missile = stat_int(fields, 'S_BalWeap')
+    view: dict[str, Any] = {
         'name': script.display_name(node['name']),
         'profile': {FIELD_ALIASES[k]: fields[k] for k in FIELD_ALIASES if k in fields},
         'side': fields.get('s_side'), 'size': fields.get('s_size'), 'orgsize': fields.get('s_orgsize'),
         'ranks': fields.get('s_rnks'),
         'race': None if race is None else f"{tables['races'][race & 7]} {tables['classes'][race >> 3]}",
-        'mount': None if fields.get('s_mount') is None else tables['mounts'][fields['s_mount']]['name'],
-        'armour': None if fields.get('s_armr') is None else armour_description(fields['s_armr'], tables),
-        'weapon_class': fields.get('s_weap'),
-        'strength_bonus': None if fields.get('s_weap') is None else tables['weapon_strength'][fields['s_weap']],
-        'missile': MISSILE_WEAPONS.get(fields.get('S_BalWeap'), fields.get('S_BalWeap')),
-        'weapon_name_id': None if fields.get('s_weponame') is None else 200 + fields['s_weponame'],
+        'mount': None if mount is None else tables['mounts'][mount]['name'],
+        'armour': None if armour is None else armour_description(armour, tables),
+        'weapon_class': weapon,
+        'strength_bonus': None if weapon is None else tables['weapon_strength'][weapon],
+        'missile': MISSILE_WEAPONS.get(missile, missile) if missile is not None else None,
+        'weapon_name_id': None if weapon_name is None else 200 + weapon_name,
         'points': fields.get('s_pntval'),
-        'psychology': script._flags(node['set'].get('psy_status')),
+        'psychology': script.flag_names(node['set'].get('psy_status')),
         'conflicts': conflicts,
     }
     return view
 
 
-def _units(node):
+def _units(node: script.Node) -> Iterator[script.Node]:
     for child in node['children']:
         if child['kind'] in ('addunit', 'addleader'):
             yield child
         yield from _units(child)
 
 
-def script_files(installation):
+def script_files(installation: StrPath) -> list[Path]:
     game = Installation(installation)
-    dirs = [game.file_dir('SCRIPT')] + ([game.find('SAVE')] if game.find('SAVE') else [])
+    save = game.find('SAVE')
+    dirs = [game.file_dir('SCRIPT')] + ([save] if save else [])
     return sorted(p for d in dirs for p in d.iterdir() if p.suffix.upper() in ('.BTS', '.MRC'))
 
 
 # ---------------------------------------------------------------- checks
 
-def wfb_to_hit(attacker, defender):
+def wfb_to_hit(attacker: int, defender: int) -> int:
     """Warhammer Fantasy Battle 4th edition close combat chart (WS 1-10)."""
     if attacker > defender:
         return 3
@@ -294,7 +348,7 @@ def wfb_to_hit(attacker, defender):
     return 4
 
 
-def wfb_to_wound(strength, toughness):
+def wfb_to_wound(strength: int, toughness: int) -> int:
     """Warhammer Fantasy Battle 4th edition wound chart (S, T 1-10); 7 = cannot wound."""
     difference = strength - toughness
     if difference >= 2:
@@ -319,8 +373,8 @@ MOUNT_PROFILES = {
 }
 
 
-def check_tables(tables):
-    failures = []
+def check_tables(tables: Tables) -> list[str]:
+    failures: list[str] = []
     if tables['stats'] != list(EXPECTED_STATS):
         failures.append(f"stat token order {tables['stats']}")
     if tables['psy'] != list(EXPECTED_PSY):
@@ -346,9 +400,10 @@ def check_tables(tables):
 S_RACE_COMMENT = re.compile(r';S_RACE is (.*?)\.\.\.')
 
 
-def check_scripts(installation, tables):
+def check_scripts(installation: StrPath, tables: Tables) -> tuple[list[str], dict[str, Any]]:
     """Decodes every unit and leader; returns (failures, statistics)."""
-    failures, units, fields_checked, race_pairs, race_matches = [], 0, 0, 0, 0
+    failures: list[str] = []
+    units = fields_checked = race_pairs = race_matches = 0
     for path in script_files(installation):
         for node in _units(script.parse(str(path))):
             units += 1
@@ -360,10 +415,10 @@ def check_scripts(installation, tables):
             fields_checked += sum(len(v) for k, v in node['stats'].items() if k.lower() in
                                   {n.lower() for n in EXPECTED_STATS})
             failures += [f'{path.name} {node["name"]}: {c}' for c in conflicts]
-            if fields.get('s_armr', 0) > 13 or fields.get('s_mount', 0) >= len(EXPECTED_MOUNTS):
+            if (stat_int(fields, 's_armr') or 0) > 13 or (stat_int(fields, 's_mount') or 0) >= len(EXPECTED_MOUNTS):
                 failures.append(f'{path.name} {node["name"]}: armour/mount code out of range {fields}')
         # the editor's ';S_RACE is <race> <class>' comment, computed from s_race when the file was saved
-        race = None
+        race: int | None = None
         for line in path.read_bytes().decode('latin-1').splitlines():
             line = line.strip()
             if line.lower().startswith('addunit:'):
@@ -371,16 +426,16 @@ def check_scripts(installation, tables):
             elif line.startswith('setstats:s_mount=') and race is None:
                 values = [int(v) for v in line.split('=', 1)[1].split(',')]
                 race = values[3] if len(values) == 6 else None
-            elif race is not None and S_RACE_COMMENT.match(line):
+            elif race is not None and (comment := S_RACE_COMMENT.match(line)):
                 race_pairs += 1
-                label = S_RACE_COMMENT.match(line).group(1).strip()
+                label = comment.group(1).strip()
                 race_matches += label == f"{tables['races'][race & 7]} {tables['classes'][race >> 3]}"
     if race_pairs == 0 or race_matches < 0.98 * race_pairs:
         failures.append(f'S_RACE comments agree with s_race in only {race_matches}/{race_pairs} units')
     return failures, {'units': units, 'values': fields_checked, 'race_comments': (race_matches, race_pairs)}
 
 
-def check(installation):
+def check(installation: StrPath) -> bool:
     tables = load_tables(installation)
     failures = check_tables(tables)
     script_failures, stats = check_scripts(installation, tables)
@@ -395,14 +450,14 @@ def check(installation):
 
 # ---------------------------------------------------------------- command line
 
-def _grid(title, rows, row_label, column_label):
+def _grid(title: str, rows: Sequence[Sequence[int]], row_label: str, column_label: str) -> str:
     lines = [title, f"{row_label}\\{column_label} " + ' '.join(f'{c:2d}' for c in range(11))]
     lines += [f'{r:>{len(row_label) + len(column_label) + 1}d} ' + ' '.join(f'{v:2d}' for v in row)
               for r, row in enumerate(rows)]
     return '\n'.join(lines)
 
 
-def main(installation, battle=None):
+def main(installation: StrPath, battle: str | None = None) -> int:
     tables = load_tables(installation)
     if battle is None:
         print(_grid('To hit (lowest D6)', tables['to_hit'], 'WS', 'WS'))
@@ -414,7 +469,7 @@ def main(installation, battle=None):
         for index, mount in enumerate(tables['mounts']):
             print(f"  s_mount {index}: {mount['name']}, charge S {mount['charge_strength']}, {mount['profile']}")
         return 0
-    path = Path(battle)
+    path: Path | None = Path(battle)
     if not path.exists():
         path = next((p for p in script_files(installation) if p.name.casefold() == battle.casefold()), None)
         if path is None:

@@ -28,6 +28,7 @@
     "whshr/battle_events.py",
     "whshr/clock.py",
     "whshr/script.py",
-    "whshr/formation.py"
+    "whshr/formation.py",
+    "whshr/rules.py"
   ]
 }

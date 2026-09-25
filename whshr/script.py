@@ -218,7 +218,7 @@ def _sets(node: Node) -> dict[str, Scalar]:
     return {k: _num(v) for k, v in node['set'].items()}
 
 
-def _flags(v: object) -> list[str]:
+def flag_names(v: object) -> list[str]:
     return [f for f in str(v).split('|') if f] if v not in (None, '') else []
 
 
@@ -326,7 +326,7 @@ def load_battle(path: StrPath, with_merc: bool = True) -> View:
         s = _sets(o)
         rects = [_nums(v) for c in o['children'] if c['kind'] == 'addrectangles' for v in _cmds(c, 'rect')]
         objects.append({**{k: s.get(k) for k in ('x', 'y', 'z', 'radius', 'dir')},
-                        'status': _flags(s.get('status')), 'rects': rects})
+                        'status': flag_names(s.get('status')), 'rects': rects})
 
     scen = _section(root, 'SCENERY')
     scenery: list[View] = []
@@ -344,7 +344,7 @@ def load_battle(path: StrPath, with_merc: bool = True) -> View:
     for n in (nodes_section['children'] if nodes_section else []):
         s = _sets(n)
         nodes.append({**{k: s.get(k) for k in ('x', 'y', 'radius', 'dir', 'id')},
-                      'status': _flags(s.get('status'))})
+                      'status': flag_names(s.get('status'))})
 
     battle: View = {
         'file': os.path.basename(path), 'field': f,

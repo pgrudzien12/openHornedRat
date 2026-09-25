@@ -21,7 +21,10 @@ No game data is stored in this module; the scripts are read from the installatio
 
 import json
 import struct
-from collections import Counter, namedtuple
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
+from os import PathLike
+from typing import Any, NamedTuple, cast
 from pathlib import Path
 
 from . import script
@@ -135,44 +138,51 @@ OPCODE_NAMES = {
 }
 
 
-Instruction = namedtuple('Instruction', 'offset opcode name operands')
+class Instruction(NamedTuple):
+    offset: int
+    opcode: int | None
+    name: str
+    operands: tuple[int, ...]
+
+
 # opcode is None for pseudo instructions: name 'Label' (0x0ABC), 'End' (0x80E8) or 'Data' (any other
 # word where an instruction was expected; operands = (word,)).
 
 
-def load_names(paths, names=None):
+def load_names(paths: Iterable[str | PathLike[str]] | None, names: Mapping[int, str] | None = None) -> dict[int, str]:
     """Returns a copy of the name table updated from JSON catalogues {"<op>": {"name": ...}}."""
     table = dict(OPCODE_NAMES if names is None else names)
     for path in paths or ():
-        for key, entry in json.loads(Path(path).read_text(encoding='utf-8')).items():
-            name = entry.get('name') if isinstance(entry, dict) else entry
+        catalogue: dict[str, Any] = json.loads(Path(path).read_text(encoding='utf-8'))
+        for key, entry in catalogue.items():
+            name = cast(dict[str, Any], entry).get('name') if isinstance(entry, dict) else entry
             if name:
                 table[int(key, 0)] = name
     return table
 
 
-def opcode_name(opcode, names=None):
+def opcode_name(opcode: int, names: Mapping[int, str] | None = None) -> str:
     return (OPCODE_NAMES if names is None else names).get(opcode) or f'Op{opcode:02X}'
 
 
-def opcode_of(word):
+def opcode_of(word: int) -> int | None:
     """The opcode of an instruction word, or None."""
     return word & 0x7FFF if OPCODE_FLAG <= word < 0x10000 and (word & 0x7FFF) < OPCODE_COUNT else None
 
 
 # ---------------------------------------------------------------- mission DLLs
 
-def exports(image):
+def exports(image: PeImage) -> dict[str, int]:
     """{name: VA} of the export directory of a PE image."""
     pe = struct.unpack_from('<I', image.data, 0x3C)[0]
     optional = pe + 24
-    rva, size = struct.unpack_from('<II', image.data, optional + 96)
+    rva: int = struct.unpack_from('<II', image.data, optional + 96)[0]
     if not rva:
         return {}
     base = image.image_base
-    _, _, _, _, _, _, count, name_count, functions, names, ordinals = struct.unpack(
+    _, _, _, _, _, _, _, name_count, functions, names, ordinals = struct.unpack(
         '<IIHHIIIIIII', image.read(base + rva, 40))
-    table = {}
+    table: dict[str, int] = {}
     for i in range(name_count):
         name = image.cstring(base + image.u32(base + names + 4 * i)[0])
         ordinal = struct.unpack('<H', image.read(base + ordinals + 2 * i, 2))[0]
@@ -180,23 +190,31 @@ def exports(image):
     return table
 
 
-def _run_lookup(image, va, argument, limit=64):
+def _defined(register: int | None) -> int:
+    if register is None:
+        raise ValueError('lookup reads a register before loading it')
+    return register
+
+
+def _run_lookup(image: PeImage, va: int, argument: int, limit: int = 64) -> tuple[str, int]:
     """Executes the tiny x86 subset used by DLLGetScriptPointer/DLLReturnInstCount for one argument.
 
     Returns ('table', VA) for ``mov eax, [eax*4 + VA]; ret``, ('value', n) for a constant return.
     """
-    eax, flags = None, None
+    eax: int | None = None
+    flags: int | None = None
     for _ in range(limit):
         code = image.read(va, 8)
         if code[:4] == b'\x8b\x44\x24\x04':                     # mov eax, [esp+4]
             eax, va = argument, va + 4
         elif code[:2] == b'\x83\xf8':                           # cmp eax, imm8
-            flags, va = eax - struct.unpack_from('<b', code, 2)[0], va + 3
+            flags, va = _defined(eax) - struct.unpack_from('<b', code, 2)[0], va + 3
         elif code[0] == 0x3D:                                   # cmp eax, imm32
-            flags, va = eax - struct.unpack_from('<i', code, 1)[0], va + 5
+            flags, va = _defined(eax) - struct.unpack_from('<i', code, 1)[0], va + 5
         elif code[0] in (0x7C, 0x7D, 0x7E, 0x7F, 0x74, 0x75):   # jl jge jle jg je jne rel8
-            taken = {0x7C: flags < 0, 0x7D: flags >= 0, 0x7E: flags <= 0, 0x7F: flags > 0,
-                     0x74: flags == 0, 0x75: flags != 0}[code[0]]
+            compared = _defined(flags)
+            taken = {0x7C: compared < 0, 0x7D: compared >= 0, 0x7E: compared <= 0, 0x7F: compared > 0,
+                     0x74: compared == 0, 0x75: compared != 0}[code[0]]
             va += 2 + (struct.unpack_from('<b', code, 1)[0] if taken else 0)
         elif code[:3] == b'\x8b\x04\x85' and code[7] == 0xC3:   # mov eax, [eax*4+disp32]; ret
             return 'table', struct.unpack_from('<I', code, 3)[0]
@@ -209,9 +227,9 @@ def _run_lookup(image, va, argument, limit=64):
     raise ValueError(f'{image.path.name}: lookup at {va:#x} does not return')
 
 
-def _compare_constants(image, va, limit=64):
+def _compare_constants(image: PeImage, va: int, limit: int = 64) -> set[int]:
     """Immediate operands of the comparisons in a lookup function (the id range boundaries)."""
-    constants = set()
+    constants: set[int] = set()
     for offset in range(limit):
         code = image.read(va + offset, 5)
         if code[:2] == b'\x83\xf8':
@@ -223,10 +241,10 @@ def _compare_constants(image, va, limit=64):
     return constants
 
 
-def script_ranges(image, va):
+def script_ranges(image: PeImage, va: int) -> list[tuple[int, int, int]]:
     """Decodes DLLGetScriptPointer: [(first id, end id, table VA)] with pointer = [table + 4*id]."""
     bounds = sorted({0, 0x8000} | {c for c in _compare_constants(image, va) if 0 <= c <= 0x8000})
-    ranges = []
+    ranges: list[tuple[int, int, int]] = []
     for first, end in zip(bounds, bounds[1:]):
         low, high = _run_lookup(image, va, first), _run_lookup(image, va, end - 1)
         if low != high:
@@ -238,25 +256,26 @@ def script_ranges(image, va):
     return ranges
 
 
-def _instruction_length(words, pc):
+def _instruction_length(words: Sequence[int], pc: int) -> int:
     opcode = opcode_of(words[pc])
     return 1 if opcode is None else LENGTHS[opcode]
 
 
-def _read_words(image, va, count):
+def _read_words(image: PeImage, va: int, count: int) -> tuple[int, ...]:
     try:
         return image.u32(va, count)
     except ValueError:              # near the end of the section
         return image.u32(va, 1)
 
 
-def read_script(image, va, stop=None, limit=0x4000):
+def read_script(image: PeImage, va: int, stop: int | None = None, limit: int = 0x4000) -> list[int]:
     """Reads one script: up to and including its END word, or up to ``stop`` (the start of the next script).
 
     Scripts are stored one after another; a few library scripts (152-156, ending in ReturnGosub) have no
     END word and are followed directly by the next script, sometimes after a 0 word.
     """
-    words, pc = [], 0
+    words: list[int] = []
+    pc = 0
     while pc < limit:
         if stop is not None and va + 4 * pc >= stop:
             if va + 4 * pc > stop:
@@ -273,26 +292,26 @@ def read_script(image, va, stop=None, limit=0x4000):
 class ScriptDll:
     """One SCRIPT/BFxxx.DLL: the script tables and DLLReturnInstCount."""
 
-    def __init__(self, path):
+    def __init__(self, path: str | PathLike[str]) -> None:
         self.path = Path(path)
         self.image = PeImage(path)
         table = exports(self.image)
         self.lookup_va = table['DLLGetScriptPointer']
         self.inst_count = _run_lookup(self.image, table['DLLReturnInstCount'], 0)[1]
         self.ranges = script_ranges(self.image, self.lookup_va)
-        self.pointers = {}
+        self.pointers: dict[int, int] = {}
         for first, end, table_va in self.ranges:
             for script_id in range(first, end):
                 self.pointers[script_id] = self.image.u32(table_va + 4 * script_id)[0]
 
     @property
-    def mission_ids(self):
+    def mission_ids(self) -> list[int]:
         return sorted(i for i in self.pointers if i not in LIBRARY_IDS)
 
-    def scripts(self, ids=None):
+    def scripts(self, ids: Iterable[int] | None = None) -> dict[int, list[int]]:
         """{script id: [words]}: each list ends with the END word or where the next script starts."""
         starts = sorted(set(self.pointers.values()))
-        result = {}
+        result: dict[int, list[int]] = {}
         for script_id in (sorted(self.pointers) if ids is None else ids):
             va = self.pointers[script_id]
             stop = next((s for s in starts if s > va), None)
@@ -300,16 +319,17 @@ class ScriptDll:
         return result
 
 
-def script_dlls(installation):
+def script_dlls(installation: str | PathLike[str]) -> list[Path]:
     directory = Installation(installation).file_dir('SCRIPT')
     return sorted(p for p in directory.iterdir() if p.suffix.upper() == '.DLL')
 
 
 # ---------------------------------------------------------------- disassembly
 
-def disassemble(words, names=None):
+def disassemble(words: Sequence[int], names: Mapping[int, str] | None = None) -> list[Instruction]:
     """Linear disassembly: [Instruction(offset, opcode, name, operands)]."""
-    out, pc = [], 0
+    out: list[Instruction] = []
+    pc = 0
     while pc < len(words):
         word = words[pc]
         opcode = opcode_of(word)
@@ -329,9 +349,10 @@ def disassemble(words, names=None):
     return out
 
 
-def stray_words(instructions):
+def stray_words(instructions: Iterable[Instruction]) -> list[Instruction]:
     """Data words that are not dead padding right after an unconditional transfer (or other padding)."""
-    stray, dead = [], False
+    stray: list[Instruction] = []
+    dead = False
     for instruction in instructions:
         if instruction.name == 'Data':
             if not dead:
@@ -341,17 +362,17 @@ def stray_words(instructions):
     return stray
 
 
-def _operand(value):
+def _operand(value: int) -> str:
     signed = value - (1 << 32) if value & 0x80000000 else value
     return str(signed) if -4096 < signed < 4096 else f'{value:#x}'
 
 
-def format_script(words, names=None, script_id=None):
+def format_script(words: Sequence[int], names: Mapping[int, str] | None = None, script_id: int | None = None) -> str:
     """Text listing with label targets and If/Else nesting."""
     instructions = disassemble(words, names)
     lines = [] if script_id is None else [f'script {script_id}:']
     depth = 0
-    for index, ins in enumerate(instructions):
+    for ins in instructions:
         if ins.name in ('EndIf', 'Else'):
             depth = max(0, depth - 1)
         indent = '  ' * depth
