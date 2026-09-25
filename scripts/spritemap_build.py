@@ -327,7 +327,10 @@ def main(argv):
         del args[i:i + 2]
     root = args[0]
     out = args[1] if len(args) > 1 else 'map.json'
-    exe = open(whscript.find_ci(root, 'WHSHR.EXE'), 'rb').read()
+    exe_path = whscript.find_ci(root, 'WHSHR.EXE')
+    if exe_path is None:
+        raise SystemExit('WHSHR.EXE not found under %s' % root)
+    exe = open(exe_path, 'rb').read()
     sprites, furniture, info = read_tables(exe)
     gamef = whscript.find_ci(root, 'GAMEF.DLL')
     if gamef:

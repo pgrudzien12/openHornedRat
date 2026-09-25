@@ -173,6 +173,8 @@ def main(game, mode=None, out=None):
         m['brief_text_ids'] = script_battles(wnd.get(m.get('brief', ''), ''))[1]['playtext']
         missions.append(m)
     if mode == '--json':
+        if out is None:
+            raise SystemExit('--json needs an output path')
         json.dump({'missions': missions, 'battles': rows}, open(out, 'w'), indent=1, ensure_ascii=False)
         print(f"written {out}")
         return

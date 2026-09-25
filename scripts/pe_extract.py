@@ -136,7 +136,7 @@ def _sz_or_ord(d, p):
     return d[p:e].decode('utf-16-le'), e + 2
 
 
-CTRL_CLASS = {0x80: 'BUTTON', 0x81: 'EDIT', 0x82: 'STATIC', 0x83: 'LISTBOX', 0x84: 'SCROLLBAR', 0x85: 'COMBOBOX'}
+CTRL_CLASS: dict[int | str, int | str] = {0x80: 'BUTTON', 0x81: 'EDIT', 0x82: 'STATIC', 0x83: 'LISTBOX', 0x84: 'SCROLLBAR', 0x85: 'COMBOBOX'}
 
 
 def parse_dialog(d):

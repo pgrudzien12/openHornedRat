@@ -183,8 +183,8 @@ def main(argv):
     args = [a for a in argv if not a.startswith('--')]
     bindirs = find_bindirs(args[0])
     names = [n.upper() for n in args[1:]] or list_sprites(bindirs)
-    root = opts.get('out', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                        'extracted', 'animations'))
+    root = str(opts.get('out', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                        'extracted', 'animations')))
     scale, delay = int(opts.get('scale', 2)), int(opts.get('delay', 15))
     done = 0
     for name in names:

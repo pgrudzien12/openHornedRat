@@ -56,7 +56,7 @@ def _value(instruction):
     return instruction.command, instruction.argument
 
 
-_ACCEPTED = {
+_ACCEPTED: dict[str, tuple[set[str], set[str]]] = {
     "POSITION": ({"x", "y", "vx", "vy", "palindex", "book"}, set()),
     "BITMAP": ({"x", "y", "timecnt", "looptimecnt", "animstartframe",
                 "animrestartframe", "animstopframe", "bkindex", "depend"},
@@ -378,7 +378,7 @@ def coverage_report(resources: Mapping[str, GlueResource]):
         for key, count in sorted(counter.items()):
             if are_fields:
                 accepted = (key in {"animseq", "tentpos", "textlines"} if block in {"RUN", "START"}
-                            else key in _ACCEPTED.get(block, (set(), set()))[0])
+                            else key in _ACCEPTED.get(block or "", (set(), set()))[0])
                 status = "implemented" if accepted else "unknown"
             elif block in _ACCEPTED:
                 if block == "INCLUDE" and key == "addobject":

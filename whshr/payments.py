@@ -56,7 +56,7 @@ class CashTerms:
     completion: int = 0
     rate_a: int = 0
     rate_b: int = 0
-    letters: tuple = ()
+    letters: tuple[str, ...] = ()
 
 
 def _number(text):
@@ -77,7 +77,8 @@ def parse_cash(argument):
     except ValueError:
         return None
     letters = tuple(part.upper() for part in parts[5:7] if len(part) == 1 and part.isalpha())
-    return CashTerms(kind, *(_number(parts[i]) if i < len(parts) else 0 for i in range(1, 5)), letters)
+    initial, completion, rate_a, rate_b = (_number(parts[i]) if i < len(parts) else 0 for i in range(1, 5))
+    return CashTerms(kind, initial, completion, rate_a, rate_b, letters)
 
 
 def mission_terms(mission_record):

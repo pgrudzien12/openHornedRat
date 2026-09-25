@@ -46,12 +46,12 @@ def find_ci(base, parts):
 
 
 def game_file(install, *parts):
-    """UPDATE/<parts> takes priority over FILE/<parts>."""
+    """UPDATE/<parts> takes priority over FILE/<parts>; raises FileNotFoundError when neither exists."""
     for top in ('UPDATE', 'FILE'):
         p = find_ci(install, (top,) + parts)
         if p and os.path.exists(p):
             return p
-    return None
+    raise FileNotFoundError(os.path.join(*parts))
 
 
 def song_path(install, song):

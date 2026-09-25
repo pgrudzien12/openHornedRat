@@ -380,7 +380,7 @@ def _decode_combat_profile(unit):
         "leadership": int(profile.get("Ld", DEFAULT_PROFILE["Ld"])),
         "armour": armour,
         "mount": fields.get("s_mount"),
-        "strength_bonus": EXPECTED_WEAPON_BONUS.get(weapon_class, 0),
+        "strength_bonus": EXPECTED_WEAPON_BONUS.get(weapon_class, 0) if isinstance(weapon_class, int) else 0,
         "missile_code": missile_code if missile_range else None,
         "missile_range": missile_range,
         "psychology": psychology,

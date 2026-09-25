@@ -52,6 +52,14 @@ def find_file(bindirs, name):
     return None
 
 
+def require_file(bindirs, name):
+    """Like `find_file`, but raises FileNotFoundError instead of returning None."""
+    path = find_file(bindirs, name)
+    if path is None:
+        raise FileNotFoundError(name)
+    return path
+
+
 def list_sprites(bindirs):
     """Names (without extension) of all .FOL/.BOP pairs, union over directories."""
     names = set()
@@ -66,12 +74,12 @@ class Sprite:
 
     def __init__(self, bindirs, name):
         self.name = name.upper()
-        self.fol = open(find_file(bindirs, self.name + '.FOL'), 'rb').read()
-        self.bop = open(find_file(bindirs, self.name + '.BOP'), 'rb').read()
+        self.fol = open(require_file(bindirs, self.name + '.FOL'), 'rb').read()
+        self.bop = open(require_file(bindirs, self.name + '.BOP'), 'rb').read()
         pal = find_file(bindirs, self.name + '.PAL')
         pd = open(pal, 'rb').read() if pal else b''
         self.cmaps = [pd[i:i + 512] for i in range(0, len(pd), 512)] if pd and len(pd) % 512 == 0 else []
-        self.rgb = load_rgb_palette(find_file(bindirs, 'STANDARD.PAL'))
+        self.rgb = load_rgb_palette(require_file(bindirs, 'STANDARD.PAL'))
         # record: hx, hy (int16), w, h, bop_offset, bytes 12..15
         self.recs = [struct.unpack_from('<hhhhIBBBB', self.fol, i * 16) for i in range(len(self.fol) // 16)]
         self.raw = [self.fol[i * 16:i * 16 + 16] for i in range(len(self.recs))]

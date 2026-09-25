@@ -666,9 +666,16 @@ def resolve(root, relpath):
     return None
 
 
+def _require(path: str | None, what: str) -> str:
+    """`path`, or FileNotFoundError naming what is missing from the installation."""
+    if path is None:
+        raise FileNotFoundError(what)
+    return path
+
+
 def packet_table(root):
     """Reads the loadsfx name -> directory table from GAMEF.DLL (84-byte entries: name[9], path[71], int32)."""
-    gamef = find_ci(root, 'GAMEF.DLL')
+    gamef = _require(find_ci(root, 'GAMEF.DLL'), 'GAMEF.DLL')
     d = open(gamef, 'rb').read()
     start = d.find(b'buttonfx\0binary\\sound\\')
     if start < 0:
@@ -689,7 +696,7 @@ def loadsfx_usage(root):
     """Map lower-case packet name -> list of .BTS files that load it (via whscript.load_battle)."""
     from .script import load_battle
     usage, unknown = {}, []
-    script = find_ci(find_ci(root, 'FILE'), 'SCRIPT')
+    script = _require(find_ci(_require(find_ci(root, 'FILE'), 'FILE'), 'SCRIPT'), 'FILE/SCRIPT')
     for p in sorted(glob.glob(os.path.join(script, '*'))):
         if not p.upper().endswith('.BTS'):
             continue
@@ -701,7 +708,7 @@ def loadsfx_usage(root):
 def analyse_install(root):
     table = packet_table(root)
     usage = loadsfx_usage(root)
-    sound = resolve(root, 'binary\\sound')
+    sound = _require(resolve(root, 'binary\\sound'), 'binary/sound')
     all_sfx = sorted(p for p in glob.glob(os.path.join(sound, '**', '*'), recursive=True)
                      if p.upper().endswith('.SFX'))
     all_wav = sorted(p for p in glob.glob(os.path.join(sound, '**', '*'), recursive=True)

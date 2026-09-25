@@ -8,9 +8,9 @@ def load_rgb_palette(path):
     """Read the game's four-byte indexed RGB palette."""
     with open(path, 'rb') as source:
         data = source.read()
-    palette = [(255, 0, 255)] * 256
+    palette: list[tuple[int, int, int]] = [(255, 0, 255)] * 256
     for i in range(0, len(data) - 3, 4):
-        palette[data[i]] = tuple(data[i + 1:i + 4])
+        palette[data[i]] = (data[i + 1], data[i + 2], data[i + 3])
     return palette
 
 

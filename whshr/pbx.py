@@ -9,6 +9,7 @@ Output per PBX: files/ (embedded .bop/.fol/.pal, byte-exact), textures/*.png, me
 sprites/<NAME>.png). Container layout: see notes/pbx_rnc.md.
 """
 import glob, json, os, struct, sys
+from typing import Any
 
 from . import rnc as pbx_rnc
 from .image import load_rgb_palette, write_png
@@ -54,10 +55,10 @@ def parse_mesh(d, o, version):
                 offset=o, end=p)
 
 
-def parse_container(d):
+def parse_container(d: bytes) -> dict[str, Any]:
     if d[:4] != MAGIC:
         raise PbxError('bad container magic %s' % d[:4].hex())
-    res = dict(files=[], textures=[], meshes=[], mesh_raw=b'')
+    res: dict[str, Any] = dict(files=[], textures=[], meshes=[], mesh_raw=b'')
     if u32s(d, 4)[0] == 207:
         version = 2
         ver, zero, nmesh, nfile, ntex, pix_total, pal_total = u32s(d, 4, 7)
@@ -254,7 +255,7 @@ def mtl_ident(name, i):
 
 # ---------------------------------------------------------------- extraction
 
-def find_ci(root, *parts):
+def find_ci(root: str, *parts: str) -> str | None:
     """Case-insensitive path lookup."""
     cur = root
     for part in parts:
@@ -302,10 +303,11 @@ def decode_sprite_sets(files, rgb_pal, outdir=None, max_frames=16, scale=2):
     return sets, ok, err
 
 
-def extract_pbx(path, outdir, rgb_pal, write=True):
+def extract_pbx(path: str, outdir: str | None, rgb_pal: Any, write: bool = True) -> dict[str, Any]:
+    outdir = outdir or ''  # only used when `write` is set
     data, rh = pbx_rnc.unpack_pbx(path)
     c = parse_container(data)
-    st = dict(rnc_ok=1, version=c['version'], files=len(c['files']), textures=len(c['textures']),
+    st: dict[str, Any] = dict(rnc_ok=1, version=c['version'], files=len(c['files']), textures=len(c['textures']),
               meshes=len(c['meshes']), faces=sum(len(m['faces']) for m in c['meshes']),
               ext={}, png=0, dir_sorted=c.get('dir_sorted'), mesh_raw=len(c['mesh_raw']))
     for n, _ in c['files']:
@@ -373,11 +375,13 @@ def main(argv):
     if check:
         argv = argv[1:]
     warfb = argv[0]
-    out = None if check else argv[1]
+    out = '' if check else argv[1]
     only = set(a.upper() for a in argv[1 if check else 2:])
     pal_path = find_ci(warfb, 'UPDATE', 'BINARY', 'STANDARD.PAL') or find_ci(warfb, 'FILE', 'BINARY', 'STANDARD.PAL')
     rgb_pal = load_rgb_palette(pal_path)
     mesh_dir = find_ci(warfb, 'FILE', 'MESH')
+    if mesh_dir is None:
+        raise SystemExit('no FILE/MESH directory under %s' % warfb)
     files = sorted(glob.glob(os.path.join(mesh_dir, '*', '*.[Pp][Bb][Xx]')))
     tot = {}
     for f in files:
