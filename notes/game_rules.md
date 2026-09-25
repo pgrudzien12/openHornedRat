@@ -2110,6 +2110,87 @@ still not modelled - the frozen bearing here is exactly straight, an existing, s
 simplification of the pathing itself (`notes/engine_architecture.md`'s "Collisions": a simplified
 `PushApart`, not the original's polygon obstruction routing).
 
+### Scripted target and flight opcodes: `DropTarget`, `FleeAhead`, `StoreEventInfo`, `FaceModelsToTarget` ✅
+
+Behaviour of four opcodes used by the shared library scripts (in every mission) and by mission scripts such as
+BF001's scripted flight.
+
+**`DropTarget` (0x3B)** — forget the current attack target.
+- It acts only on a unit that is **not broken** and **has a target**. It then clears the target and cancels the
+  "braced against a charge" state, and its condition is **true**. In any other case (broken, or no target) it does
+  nothing and its condition is **false**, so a script can also use it to ask "did I have a target?".
+- It does **not** end a melee engagement or leave the battle grid, change the unit's orders, movement or ranks,
+  clear the remembered event (`StoreEventInfo`) or the event's source, or send any event — to the old target or
+  to anyone else. Everything else comes from the surrounding script.
+- Its shipped use is the library's handler for event 0x19, "opponent gone" (sent when the unit's opponent dies or
+  leaves and it has no other enemy on the grid, `notes/game_rules.md` section 5): `DropTarget`, then, if the unit
+  was pursuing, a bark and a switch to the rally script; a unit that was not pursuing just carries on with no
+  target and its ordinary script picks a new one.
+
+**`FleeAhead` (0x51)** — start a rout along the unit's current facing.
+- It starts an ordinary **rout**, not a plain move: the unit becomes broken, leaves the combat grid, loses Frenzy,
+  every enemy unit receives event 0x0F ("enemy routed", so the AI chases it), its models pause and scatter as on
+  any break (6–27 ticks, see "Turning, wheeling and reversing"), and rally attempts are scheduled exactly as in
+  "Flight and catching fleeing units". It also clears the unit's target, and its condition is **true**.
+- **Direction: straight ahead.** The heading is the unit's facing at the instant it runs; there is no node or target
+  in the opcode. To flee towards a node a script first does `FaceNode n`, which turns the unit to the bearing to
+  that node **instantly** (no wheel), so face-then-flee is a straight run along that bearing. The unit does not
+  stop at the node: it keeps going and only the obstacle deflection of the flight movement (±0x20 of 512 around
+  obstacles) bends the line.
+- **Distance: unlimited.** The flight runs until the unit is outside the battle area, where it sends event 0x0E and
+  is **removed alive** — every model counts in `s_routed`, and for the "eliminate the enemy" objective (letter A) a
+  unit that has run off counts as gone, the same as one routed off by morale. Flight speed is the ordinary rout
+  speed (`k` = 1.5).
+- Because `FleeAhead` is the rout itself, it does **not** consult `CantBreak` or the "may this unit rout" test —
+  those live in the event-0x0C/0x0D handlers, not in the opcode — so a scripted flee always happens. It is refused
+  only for an **anchored war machine**, which does not move (its target is still cleared).
+- It is the fall-back half of the library's ordinary rout script: `FleeFromTarget` (start a rout directly away
+  from the target, bearing + 180°) and, when there is no target, `FleeAhead`.
+- A scripted flee is the same as any other for rallying: it only rallies if the unit carries the automatic-rally
+  flag or is ordered to rally, and never with an enemy within 160 units. 🟡 The shipped scripted fleers are not
+  expected to rally.
+- Example (BF001): the unit whose opponent has just died runs the script `wait until re-forming is finished`,
+  `FaceNode 5`, `FleeAhead`: it turns instantly to face node 5, becomes broken, sends "enemy routed" to the
+  player's regiments, runs off in a straight line at 1.5 × its move speed and is removed when it crosses the edge
+  of the battlefield. Test: facing 100/512 before `FleeAhead`, facing 100/512 after, target empty, broken set,
+  position advancing along facing 100 each tick until off-field.
+
+**`StoreEventInfo` (0x61)** — remember who sent the event being handled.
+- It copies the current event's **sender (a unit) and event code** into the unit's single "remembered event" slot,
+  overwriting any earlier one. It must run inside an event handler. The slot outlives the event, so it survives the
+  script switch that follows.
+- The shipped use is the "being charged" (event 0x07) handler in library scripts 151 and 153–156:
+  `StoreEventInfo`, then the fear-when-charged test (a failure queues flight), then, if the unit is not itself
+  charging, on the grid or broken, a switch to the **brace script** (161).
+- The only reader is the brace query at the top of script 161. It acts only if the unit is not broken and the
+  remembered code is **0x07**: it clears the remembered code (so one stored event braces at most once), makes the
+  remembered sender — the charger — the unit's target, sets the braced state and stops the models' walking. No
+  other opcode reads the slot.
+
+**`FaceModelsToTarget` (0xE1)** — turn the *individual models* to face the target, not the regiment.
+- With no target it does nothing (condition false). With a target it computes the bearing from the unit to the
+  target and looks at every model: a model that is **still walking** is left alone and makes the condition true (not
+  finished); a model **at rest** whose own heading differs from the bearing gets that heading set **instantly**
+  and makes the condition true; a model already facing the bearing changes nothing. War-machine models are
+  skipped. The regiment's own facing, its formation slots and its footprint do **not** change.
+- The condition is therefore true while any model was walking or had to be turned, and false once every model is at
+  rest and facing the target. Script 161 (`brace when charged`) runs `Query 7`, halts and re-forms, then repeats
+  `Yield; FaceModelsToTarget` until the condition is false, after which it idles in 20-tick waits and does not
+  call it again — so the models face the charger as it stood on the last call.
+- **How fast it looks.** The heading change is instant, but a figure's *drawn* direction slews at most one of the
+  eight sprite directions (22.5°) per tick, so a figure needs up to 8 ticks (0.8 s) to swing through 180°. Only
+  figures whose current animation faces their own heading turn visibly; a figure whose animation faces the
+  regiment's facing (the stand pose in some families) does not. The braced regiment keeps its formation and
+  facing while the individual figures turn towards the charger.
+- Test: a halted regiment with a target 90° off, all models at rest: the first call sets every model's heading to
+  the bearing and returns true; the second call changes nothing and returns false.
+
+🟡 **Uncertain.** Which BF001 unit runs which script was taken from the mission script numbering (`FleeAhead`
+sits in mission script 3, reached from the event-0x19 handler of the interrupt script). Whether a scripted fleer
+that was fighting a same-side unit (BF001's assassin killing his own side's leader) is subject to any extra
+objective bookkeeping is not settled; "Capture Hiln" (objective S) itself checks nothing. The rally test for a
+scripted flee has not been observed in play.
+
 ### Charge into the flank or rear ✅
 
 the game is opcode 0x5B, run by the default event handler on **event 0x08**, which `EngageCharging`
