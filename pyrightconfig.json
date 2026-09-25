@@ -87,6 +87,7 @@
     "whshr/battle3d.py",
     "whshr/battle2d.py",
     "whshr/camera.py",
-    "whshr/viewer_web.py"
+    "whshr/viewer_web.py",
+    "whshr/__main__.py"
   ]
 }

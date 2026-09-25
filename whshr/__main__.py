@@ -1,9 +1,12 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Unified command-line interface for the reverse-engineering tools."""
 
 import argparse
 import json
 import os
 import sys
+from collections.abc import Callable, Sequence
+from os import PathLike
 from pathlib import Path
 
 from . import legacy
@@ -17,17 +20,14 @@ from .paths import Installation
 # A frozen install (packaging/windows) has no checkout to default into, and its own install
 # directory is read-only bundled data that the uninstaller removes - user saves must live
 # outside it. Use the same per-user app-data folder epic #88 plans for its config file.
-if getattr(sys, "frozen", False):
-    _USER_DATA = (Path(os.environ["APPDATA"]) / "ohr" if sys.platform == "win32"
-                  else Path.home() / ".ohr")
-    REPOSITORY_LOGS = _USER_DATA / "logs"
-    REPOSITORY_SAVES = _USER_DATA / "saves"
-else:
-    REPOSITORY_LOGS = Path(__file__).resolve().parents[1] / "logs"
-    REPOSITORY_SAVES = Path(__file__).resolve().parents[1] / "saves"
+_FROZEN = getattr(sys, "frozen", False)
+_USER_DATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "ohr" if sys.platform == "win32" else Path.home() / ".ohr"
+_STATE_ROOT = _USER_DATA if _FROZEN else Path(__file__).resolve().parents[1]
+REPOSITORY_LOGS = _STATE_ROOT / "logs"
+REPOSITORY_SAVES = _STATE_ROOT / "saves"
 
 
-def _check(name, callback):
+def _check(name: str, callback: Callable[[], object]) -> bool:
     try:
         result = callback()
     except Exception as error:  # A combined regression report must continue after one failed domain.
@@ -40,7 +40,7 @@ def _check(name, callback):
     return True
 
 
-def check(installation):
+def check(installation: str | PathLike[str]) -> bool:
     """Run all established structural checks against an installation."""
     game = Installation(installation)
     checks = (
@@ -67,7 +67,7 @@ def check(installation):
     return failed == 0
 
 
-def extract(installation, cache):
+def extract(installation: str | PathLike[str], cache: str | PathLike[str]) -> None:
     """Run the established extractors into one cache directory."""
     game = Installation(installation)
     cache = Path(cache)
@@ -92,7 +92,7 @@ def extract(installation, cache):
         f.write(campaign.export_campaign_markdown(camp_data))
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="whshr",
         description="Tools for a locally installed copy of Warhammer: Shadow of the Horned Rat.",
