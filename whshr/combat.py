@@ -266,7 +266,7 @@ def refresh_melee_state(battle: "Battle") -> None:
 
 def refresh_braced_state(battle: "Battle") -> None:
     """Clear a regiment's Braced status (game_rules.md "Braced") once the charger it braced against
-    is gone -- inactive, fled, or routing (routing units are never engaged in melee, so they are no
+    is gone -- inactive, fled, no longer charging it, or routing (routing units are never engaged in melee, so they are no
     longer a threat this unit needs to brace against) -- or once it has itself joined melee, where
     `in_melee` already suppresses orders more completely. `interpreter.op_FearWhenCharged` sets
     Braced; `Battle.order_halt` also clears it as the one order still accepted while braced.
@@ -279,7 +279,11 @@ def refresh_braced_state(battle: "Battle") -> None:
             regiment.braced_target = None
             continue
         charger = battle.regiments.get(regiment.braced_target) if regiment.braced_target is not None else None
-        if charger is None or not charger.active or charger.routing:
+        # A charger that has itself stopped charging this regiment (it braced against someone else, was halted,
+        # or lost its target) is no threat either. Without this two regiments that charged each other braced
+        # against one another for good -- neither can be ordered out of it.
+        if (charger is None or not charger.active or charger.routing
+                or charger.attack_target != regiment.identifier):
             regiment.braced = False
             regiment.braced_target = None
 

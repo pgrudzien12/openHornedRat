@@ -1016,6 +1016,7 @@ class BracedStateTests(unittest.TestCase):
     def test_given_a_braced_regiment_still_facing_an_active_charger_then_it_stays_braced(self):
         target = _regiment("target", 0, 0, Side.PLAYER, speed_per_tick=0.0)
         charger = _regiment("charger", 500, 500, Side.ENEMY, speed_per_tick=0.0)
+        charger.attack_target = "target"
         battle = Battle(2000, 2000, [target, charger], seed=0)
         target.braced, target.braced_target = True, "charger"
 
@@ -1023,6 +1024,16 @@ class BracedStateTests(unittest.TestCase):
 
         self.assertTrue(target.braced)
         self.assertEqual(target.braced_target, "charger")
+
+    def test_given_a_braced_regiment_whose_charger_stopped_charging_then_it_is_unbraced(self):
+        target = _regiment("target", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        charger = _regiment("charger", 500, 500, Side.ENEMY, speed_per_tick=0.0)
+        battle = Battle(2000, 2000, [target, charger], seed=0)
+        target.braced, target.braced_target = True, "charger"
+
+        combat.refresh_braced_state(battle)
+
+        self.assertFalse(target.braced)
 
     def test_given_a_braced_regiment_that_has_joined_melee_then_it_is_unbraced(self):
         target = _regiment("target", 0, 0, Side.PLAYER, speed_per_tick=0.0)
