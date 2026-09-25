@@ -140,6 +140,8 @@ scripts/           - parsers/renderers/extractors (Python 3 stdlib only); most h
   si_*.py          - Omni .SI container extraction; si_smacker.py is a CLI over whshr/smacker.py
   scene_dump.py    - .SN/.SM/.SR scene side files, speech/text links
   rle_v2.py        - OBSOLETE: old, wrong RLE decoder attempts (triples/two layers)
+  hooks/, install_hooks.sh - optional pre-commit/commit-msg hooks; they call a maintainer-local label scanner (path in
+                     git config `whshr.labelScan`, not part of this repository) and do nothing without it
 extracted/         - [local only, not in git] output of the extractors, one directory per topic (~250 MB)
 battles/           - [local only, not in git] generated atlas of 20 battles (battle_atlas.py, seed 1995);
                      contains maps from the game files, DO NOT distribute
