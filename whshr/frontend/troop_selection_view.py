@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Native P0/P1/P5 troop-book presentation (``notes/troop_selection.md`` §§2--5, §7).
 
 The screen is deliberately a renderer: selection, affordability and marching order remain in
@@ -5,57 +6,76 @@ The screen is deliberately a renderer: selection, affordability and marching ord
 because this is a front-end-owned window rather than a WND.DLL-defined one.
 """
 
+from collections.abc import Sequence
+from typing import Any
+
 import pygame
 
+from ..campaign_scenes import TroopSelectionScene
 from ..glue_palette import AppPalette
+from ..scenes import SceneEvent
 from ..script import resource_name
-from ..troop_selection import STATUS_AVAILABLE, STATUS_DESTROYED, STATUS_EXCLUDED, STATUS_NOT_HIRED
+from ..troop_selection import TroopRow, TroopSelection, STATUS_AVAILABLE, STATUS_DESTROYED, STATUS_EXCLUDED, STATUS_NOT_HIRED
 from .bitmap_font import BitmapFont
 from .cursors import GameCursors
 from .glue_bitmap import load_optional_bitmap
-from .gpu import ScreenQuad
+from .gpu import Gpu, ScreenQuad, TextLabel
 from .scene_view import NativeScreenView
 
 
 # notes/troop_selection.md §§2--5, §7.  Coordinates are native 640x480 pixels.
+Rgb = tuple[int, int, int]
+Point = tuple[int, int]
 BLACK, BLUE, GREY, RED, YELLOW = (0, 0, 0), (0, 0, 180), (127, 127, 127), (255, 0, 0), (255, 255, 0)
-BUTTONS = (
+BUTTONS: tuple[tuple[str, int, str, int], ...] = (
     ("abort", 225, "BrownATab", 307), ("done", 325, "GreenATab", 304),
     ("page:back", 425, "BlueATab", 301), ("page:next", 525, "RedATab", 300),
 )
 BUTTON_Y, BUTTON_SIZE = 448, (84, 32)
 P0_ROWS, P1_ROWS = 6, 7
-STATUS_TEXT = {STATUS_NOT_HIRED: 415, STATUS_EXCLUDED: 416, STATUS_DESTROYED: 417}
+STATUS_TEXT: dict[str, int] = {STATUS_NOT_HIRED: 415, STATUS_EXCLUDED: 416, STATUS_DESTROYED: 417}
 
 
-class TroopSelectionView(NativeScreenView):
+class TroopSelectionView(NativeScreenView[TroopSelectionScene]):
     """Draw troop-book pages and translate their documented mouse input."""
 
-    def __init__(self, gpu, scene, options=None):
+    def __init__(self, gpu: Gpu, scene: TroopSelectionScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
-        self.quads, self.labels, self.buttons, self.rows = [], [], [], []
-        self.carried_quads, self.carried_labels = [], []
-        self.banner_surfaces = {}
-        self.state = None
-        self.hover_march_index = None
-        self.pointer = None
-        self.scroll_direction = None
+        self.quads: list[tuple[ScreenQuad, Point]] = []
+        self.labels: list[tuple[TextLabel, Point]] = []
+        self.buttons: list[tuple[pygame.Rect, str]] = []
+        self.rows: list[tuple[pygame.Rect, int]] = []
+        self.carried_quads: list[tuple[ScreenQuad, Point]] = []
+        self.carried_labels: list[tuple[TextLabel, Point]] = []
+        self.banner_surfaces: dict[str, pygame.Surface | None] = {}
+        self.state: tuple[Any, ...] | None = None
+        self.hover_march_index: int | None = None
+        self.pointer: tuple[float, float] | None = None
+        self.scroll_direction: str | None = None
         self.scroll_elapsed = 0.0
-        self.pressed_button = None
+        self.pressed_button: str | None = None
         # Mode 0 without a company immediately transitions on the next scene tick (§1.1).
         # Do not require render-only fonts/resources during that one-frame handoff.
         if scene.phase == "skip":
             return
-        self.content = scene.glue_scene.runtime.content
+        self.content = scene.glue_scene.require_runtime().content
         self.body_font = BitmapFont(scene.glue_scene.font(2))
         self.heading_font = BitmapFont(scene.glue_scene.font(4))
         self.palette = AppPalette.select(1, self.content.palette_tables())
-        self.banner_files = None
+        self.banner_files: dict[str, str] | None = None
+        if self.content.installation is None:
+            raise RuntimeError("troop selection needs an installation")
         self.cursors = GameCursors(self.content.installation)
         self._set_cursor("SWORDCURSOR")
         self.refresh()
 
-    def refresh(self):
+    def _model(self) -> TroopSelection:
+        model = self.scene.model
+        if model is None:
+            raise RuntimeError("troop selection has no model")
+        return model
+
+    def refresh(self) -> None:
         if self.scene.phase == "skip":
             return
         model = self.scene.model
@@ -78,8 +98,8 @@ class TroopSelectionView(NativeScreenView):
         else:
             return
 
-    def _p0(self):
-        model, height = self.scene.model, self.body_font.font.height
+    def _p0(self) -> None:
+        model, height = self._model(), self.body_font.font.height
         self._heading(self._title(400), 25)
         for x, text_id in ((345, 409), (425, 410), (505, 413)):
             self._label(self._string("BKTXT", text_id), x, 50, BLACK)
@@ -96,12 +116,13 @@ class TroopSelectionView(NativeScreenView):
         self._label(f"{model.total_cost} {self._string('BKTXT', 414)}", 505, total_y, total_colour)
         if model.roster_full:
             self._label(self._string("BKTXT", 613), 45, 400 - 2 * height, BLACK)
-        self._center(self._string("BKTXT", 5006, self.scene.campaign.coffers + model.prepaid), 400 - 2 * height, BLACK)
+        coffers = self.scene.campaign.coffers if self.scene.campaign is not None else 0
+        self._center(self._string("BKTXT", 5006, coffers + model.prepaid), 400 - 2 * height, BLACK)
         self._center(self._string("BRTXT", 314), 400, BLUE)
         self._center(self._string("BRTXT", 316), 400 + height, BLUE)
 
-    def _p1(self):
-        model, height = self.scene.model, self.body_font.font.height
+    def _p1(self) -> None:
+        model, height = self._model(), self.body_font.font.height
         self._heading(self._title(401), 25)
         for visible, whoami in enumerate(model.selection[self.scene.march_offset:self.scene.march_offset + P1_ROWS]):
             index = self.scene.march_offset + visible
@@ -125,33 +146,34 @@ class TroopSelectionView(NativeScreenView):
         self._center(self._string("BRTXT", 315), 400, BLUE)
         self._center(self._string("BRTXT", 316), 400 + height, BLUE)
 
-    def _build_carried_regiment(self, whoami):
+    def _build_carried_regiment(self, whoami: int) -> None:
         """Draw ``whoami``'s row at y=0 into ``self.carried_quads``/``carried_labels``, so their
         stored position *is* an offset from the row's own origin (85, 157) for draw() to add the
         live pointer-derived y to, every frame, without rebuilding GPU textures."""
         saved_quads, saved_labels = self.quads, self.labels
         self.quads, self.labels = [], []
         self._bitmap("BookScroll0", (145, -10))
-        self._regiment(self.scene.model.row(whoami), 0, 157, p1=True)
+        self._regiment(self._model().row(whoami), 0, 157, p1=True)
         self.carried_quads, self.carried_labels = self.quads, self.labels
         self.quads, self.labels = saved_quads, saved_labels
 
-    def _p5(self):
+    def _p5(self) -> None:
         """Draw the bankruptcy page; notes/troop_selection.md §7.
 
         The availability test and its displayed coffer amount both include the already
         evaluated initial payment, as on P0's coffer line (§3.5).
         """
         height = self.body_font.font.height
+        model = self._model()
         heading_y = 50 + 8 * height
         self._center(self._string("BKTXT", 601), heading_y, BLACK, font=self.heading_font)
-        self._center(self._string("BKTXT", 602, self.scene.model.coffers + self.scene.model.prepaid),
+        self._center(self._string("BKTXT", 602, model.coffers + model.prepaid),
                      heading_y + self.heading_font.font.height, BLACK)
-        self._center(self._string("BKTXT", 603, self.scene.model.forced_cost),
+        self._center(self._string("BKTXT", 603, model.forced_cost),
                      heading_y + self.heading_font.font.height + height, BLACK)
         self._button("done", 325, "GreenATab", 304, True)
 
-    def _regiment(self, row, y, x, *, p1):
+    def _regiment(self, row: TroopRow, y: int, x: int, *, p1: bool) -> None:
         regiment, height = row.regiment, self.body_font.font.height
         name_colour = GREY if row.status == STATUS_NOT_HIRED else RED if row.status == STATUS_DESTROYED else BLACK
         skull = min(4, (regiment.points & 31) * 4 // 31)
@@ -172,7 +194,7 @@ class TroopSelectionView(NativeScreenView):
             self._bitmap("RingMark", (x, y - height))
 
     @staticmethod
-    def _status_text(row):
+    def _status_text(row: TroopRow) -> int:
         """The three documented special excluded-regiment labels (§3.4)."""
         if row.status != STATUS_EXCLUDED:
             return STATUS_TEXT[row.status]
@@ -182,12 +204,12 @@ class TroopSelectionView(NativeScreenView):
             return 420
         return 416
 
-    def _buttons(self):
+    def _buttons(self) -> None:
         for action, x, art, text_id in BUTTONS:
             enabled = self._enabled(action)
             self._button(action, x, art, text_id, enabled)
 
-    def _button(self, action, x, art, text_id, enabled):
+    def _button(self, action: str, x: int, art: str, text_id: int, enabled: bool) -> None:
         pressed = enabled and action == self.pressed_button
         self._bitmap(f"{art}Dn0" if pressed else f"{art}Up", (x, BUTTON_Y))
         # The pressed label moves button left, matching the tab art's inset.
@@ -198,8 +220,8 @@ class TroopSelectionView(NativeScreenView):
         if enabled:
             self.buttons.append((pygame.Rect(x, BUTTON_Y, *BUTTON_SIZE), action))
 
-    def _enabled(self, action):
-        model = self.scene.model
+    def _enabled(self, action: str) -> bool:
+        model = self._model()
         if action == "abort":
             return True
         if action == "done":
@@ -208,12 +230,12 @@ class TroopSelectionView(NativeScreenView):
             return self.scene.phase == "select" and self.scene.page < self.scene.page_count - 1
         return self.scene.phase == "select" and self.scene.page > 0 or self.scene.phase == "march_order"
 
-    def _title(self, text_id):
+    def _title(self, text_id: int) -> str:
         mission_id = self._mission_title_id()
         mission = self._string("BRTXT", mission_id) if mission_id is not None else ""
         return self._string("BKTXT", text_id, mission)
 
-    def _mission_title_id(self):
+    def _mission_title_id(self) -> int | None:
         """Read ``set:res`` rather than the later ``res:`` launch target (§1.1)."""
         for field in self.scene.record.fields if self.scene.record is not None else ():
             if field.command != "set" or "=" not in field.argument:
@@ -227,7 +249,7 @@ class TroopSelectionView(NativeScreenView):
                 return None
         return None
 
-    def _string(self, table, text_id, *args):
+    def _string(self, table: str, text_id: int, *args: Any) -> str:
         try:
             value = self.content.string(table, int(text_id))
         except (KeyError, TypeError, ValueError):
@@ -237,7 +259,7 @@ class TroopSelectionView(NativeScreenView):
         except (TypeError, ValueError):
             return value
 
-    def _bitmap(self, name, position):
+    def _bitmap(self, name: str, position: Point) -> None:
         surface = load_optional_bitmap(self.content, name, app_palette=self.palette)
         if surface is None:
             return
@@ -245,7 +267,7 @@ class TroopSelectionView(NativeScreenView):
         quad.write(pygame.image.tobytes(surface, "RGBA"))
         self.quads.append((quad, position))
 
-    def _bitmap_centered(self, name, center):
+    def _bitmap_centered(self, name: str, center: Point) -> None:
         surface = load_optional_bitmap(self.content, name, app_palette=self.palette)
         if surface is None:
             return
@@ -253,7 +275,7 @@ class TroopSelectionView(NativeScreenView):
         quad.write(pygame.image.tobytes(surface, "RGBA"))
         self.quads.append((quad, (center[0] - quad.size[0] // 2, center[1] - quad.size[1] // 2)))
 
-    def _banner(self, name, position):
+    def _banner(self, name: str | None, position: Point) -> None:
         """Draw frame 1, the documented 16x24 row marker, from a resident banner set (§3.3)."""
         if not name or self.content.installation is None:
             return
@@ -266,8 +288,8 @@ class TroopSelectionView(NativeScreenView):
         base = self.banner_files.get(resource.casefold())
         if base is None:
             return
-        surface = self.banner_surfaces.get(base)
-        if surface is None:
+        if base not in self.banner_surfaces:
+            surface: pygame.Surface | None
             try:
                 from ..portraits import load_sprite_sheet
                 sheet = load_sprite_sheet(self.content.installation, base)
@@ -275,41 +297,43 @@ class TroopSelectionView(NativeScreenView):
                 rgba = self.palette.rgba(frame.pixels)
                 surface = pygame.image.frombuffer(rgba, (frame.width, frame.height), "RGBA").copy()
             except (FileNotFoundError, IndexError, OSError, ValueError):
-                surface = False
+                surface = None
             self.banner_surfaces[base] = surface
-        if surface is False:
+        loaded = self.banner_surfaces[base]
+        if loaded is None:
             return
-        quad = ScreenQuad(self.gpu, surface.get_size())
-        quad.write(pygame.image.tobytes(surface, "RGBA"))
+        quad = ScreenQuad(self.gpu, loaded.get_size())
+        quad.write(pygame.image.tobytes(loaded, "RGBA"))
         self.quads.append((quad, position))
 
-    def _heading(self, value, y):
+    def _heading(self, value: str, y: int) -> None:
         # P0/P1 titles use the same body slot as their rows (§2); P5 passes slot 4 explicitly.
         self._center(value, y, BLACK)
 
-    def _label(self, value, x, y, colour, *, align="left", width=640):
+    def _label(self, value: str, x: int, y: int, colour: Rgb, *, align: str = "left", width: int = 640) -> None:
         label = self.gpu.text((width, self.body_font.font.height), self.body_font, color=colour, background=None,
                               padding=0, align=align, fixed_width=True)
         label.set_lines((value,))
         self.labels.append((label, (x, y)))
 
-    def _label_right(self, value, right, y, colour):
+    def _label_right(self, value: str, right: int, y: int, colour: Rgb) -> None:
         """Right-anchor text using the GPU label's supported left alignment."""
         width, _ = self.body_font.size(value)
         self._label(value, right - width, y, colour)
 
-    def _center(self, value, y, colour, *, x=0, width=640, font=None):
+    def _center(self, value: str, y: int, colour: Rgb, *, x: int = 0, width: int = 640,
+                font: BitmapFont | None = None) -> None:
         font = font or self.body_font
         label = self.gpu.text((width, font.font.height), font, color=colour, background=None,
                               padding=0, align="center", fixed_width=True)
         label.set_lines((value,))
         self.labels.append((label, (x, y)))
 
-    def _native_point(self, position):
+    def _native_point(self, position: Sequence[float]) -> tuple[float, float]:
         left, top, scale = self._layout()
         return (position[0] - left) / scale, (position[1] - top) / scale
 
-    def events(self, event):
+    def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
         if event.type == pygame.MOUSEMOTION:
             point = self._native_point(event.pos)
             self._update_march_hover(point)
@@ -351,21 +375,21 @@ class TroopSelectionView(NativeScreenView):
         for rect, value in self.rows:
             if rect.collidepoint(point):
                 if pygame.key.get_mods() & pygame.KMOD_CTRL:
-                    whoami = value if self.scene.phase == "select" else self.scene.model.selection[value]
+                    whoami = value if self.scene.phase == "select" else self._model().selection[value]
                     return (f"book:{whoami}",)
                 if self.scene.phase == "select":
                     return (f"toggle:{value}",)
                 # march_order rows pick up/drop on MOUSEBUTTONDOWN, above.
         return ()
 
-    def _set_cursor_at(self, point):
+    def _set_cursor_at(self, point: tuple[float, float]) -> None:
         if pygame.key.get_mods() & pygame.KMOD_CTRL:
             self._set_cursor("HELPCURSOR")
             return
         if self.scene.phase == "select":
             whoami = next((whoami for rect, whoami in self.rows if rect.collidepoint(point)), None)
             if whoami is not None:
-                self._set_cursor("PENCILCURSOR" if self.scene.model.toggleable(whoami) else "NOPENCILCURSOR")
+                self._set_cursor("PENCILCURSOR" if self._model().toggleable(whoami) else "NOPENCILCURSOR")
                 return
         elif self.scene.phase == "march_order":
             direction = self._scroll_direction_at(point)
@@ -377,10 +401,10 @@ class TroopSelectionView(NativeScreenView):
                 return
         self._set_cursor("SWORDCURSOR")
 
-    def _set_cursor(self, name):
+    def _set_cursor(self, name: str) -> None:
         self.cursors.set(name)
 
-    def _update_march_hover(self, point):
+    def _update_march_hover(self, point: tuple[float, float]) -> None:
         self.scroll_direction = self._scroll_direction_at(point)
         self.pointer = point  # cheap; draw() alone consumes this to move the carried strip
         carrying = self.scene.phase == "march_order" and self.scene.picked_whoami is not None
@@ -389,8 +413,8 @@ class TroopSelectionView(NativeScreenView):
             self.hover_march_index = next_hover
             self.refresh()
 
-    def _scroll_direction_at(self, point):
-        if self.scene.phase != "march_order" or len(self.scene.model.selection) <= P1_ROWS:
+    def _scroll_direction_at(self, point: tuple[float, float]) -> str | None:
+        if self.scene.phase != "march_order" or len(self._model().selection) <= P1_ROWS:
             return None
         x, y = point
         if not 95 <= x <= 565:
@@ -401,7 +425,7 @@ class TroopSelectionView(NativeScreenView):
             return "down"
         return None
 
-    def animate(self, seconds):
+    def animate(self, seconds: float) -> None:
         if self.scroll_direction is None:
             return
         self.scroll_elapsed += seconds
@@ -410,7 +434,7 @@ class TroopSelectionView(NativeScreenView):
             self.scene.handle(f"scroll:{self.scroll_direction}", None)
             self.refresh()
 
-    def draw(self):
+    def draw(self) -> None:
         super().draw()
         left, top, scale = self._layout()
         for quad, (x, y) in self.quads:
@@ -419,7 +443,7 @@ class TroopSelectionView(NativeScreenView):
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
         self._draw_carried(left, top, scale)
 
-    def _draw_carried(self, left, top, scale):
+    def _draw_carried(self, left: float, top: float, scale: float) -> None:
         if not self.carried_quads and not self.carried_labels:
             return
         height = self.body_font.font.height
@@ -430,7 +454,7 @@ class TroopSelectionView(NativeScreenView):
         for label, (ox, oy) in self.carried_labels:
             label.draw(left + ox * scale, top + (carried_y + oy) * scale, label.size[0] * scale, label.size[1] * scale)
 
-    def _release_contents(self):
+    def _release_contents(self) -> None:
         for quad, _ in self.quads:
             quad.release()
         for label, _ in self.labels:
@@ -442,7 +466,7 @@ class TroopSelectionView(NativeScreenView):
         self.quads, self.labels, self.buttons, self.rows = [], [], [], []
         self.carried_quads, self.carried_labels = [], []
 
-    def release(self):
+    def release(self) -> None:
         self._release_contents()
         if hasattr(self, "cursors"):
             try:

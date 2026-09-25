@@ -37,8 +37,8 @@ class RenderText:
     y: int = 0
     width: int = 0
     height: int = 0
-    font: str | None = None
-    format: str | None = None
+    font: int | None = None
+    format: int | None = None
     colour: str | None = None
 
 
@@ -126,7 +126,7 @@ def _included_records(content: GlueContent, name: str, seen: Sequence[str] = ())
 
 
 def build_render_model(content: GlueContent, window: WindowInstance,
-                       positions: Mapping[tuple[str, str | None], tuple[Any, Any]] | None = None) -> GlueRenderModel:
+                       positions: Mapping[tuple[str, str], tuple[Any, Any]] | None = None) -> GlueRenderModel:
     """Project one runtime ``WindowInstance`` into ordered, native UI primitives.
 
     ``positions`` overrides an object's (x, y) by ``(window.name, object_name)`` — used for
@@ -152,7 +152,7 @@ def build_render_model(content: GlueContent, window: WindowInstance,
         elif isinstance(record, BitmapRecord) and values.get("setbitmap"):
             animation = tuple((key, value) for key, value in values.items()
                               if key not in {"setbitmap", "setmask", "x", "y"})
-            x, y = positions.get((window.name, object_name), (values.get("x"), values.get("y")))
+            x, y = positions.get((window.name, object_name or ""), (values.get("x"), values.get("y")))
             bitmaps.append(RenderBitmap(values["setbitmap"], _integer(x), _integer(y),
                                         values.get("setmask") or None, animation, object_name))
         elif isinstance(record, TextRecord):

@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """First generic pygame adapter for static ``GlueScene`` windows.
 
 This is intentionally narrow: bitmap composition and hotspot hit-testing are
@@ -6,20 +7,31 @@ adapters until their renderer rules are moved out of compatibility views.
 """
 
 import sys
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 import pygame
 
-from ..campaign_state import CARAVAN_MODE_WINDOWS, offered_refs
-from ..glue import MissionRecord
+from ..campaign_state import CARAVAN_MODE_WINDOWS, CampaignState, offered_refs
+from ..glue import MissionRecord, MissionRef
+from ..glue_content import GlueContent
+from ..glue_scene import GlueScene
+from ..scenes import SceneEvent
 from ..controlpanel import button_y, control_panel
 from ..glue_animation import GlueBitmapAnimator
-from ..glue_render import build_render_model
-from ..glue_runtime import Diagnostic, GlueInput, PlayMusic, StopMusic
+from ..glue_render import GlueRenderModel, RenderBitmap, RenderHotspot, RenderText, build_render_model
+from ..glue_runtime import Diagnostic, GlueInput, GlueRuntimeState, PlayMusic, StopMusic
 from ..glue_palette import AppPalette
 from .bitmap_font import BitmapFont
 from .glue_bitmap import load_optional_bitmap
-from .gpu import ScreenQuad
+from .gpu import Gpu, ScreenQuad, TextLabel
 from .scene_view import NativeScreenView
+
+Point = tuple[int, int]
+Rgb = tuple[int, int, int]
+Models = tuple[GlueRenderModel, ...]
+Frames = dict[tuple[str, str | int | None], str]  # (window, object name or bitmap index) -> current frame name
+MissionRow = tuple[MissionRef, str, str, int, int, bool]  # reference, title, payment, x, y, selected
 
 MIXER_CHANNELS = 8  # matches movie_view's cutscene mixer; music runs on pygame's separate music channel
 MUSIC_VOLUME = 1  # engine-level mix setting, not game data: setmidivolume/setwavvolume are unused by any
@@ -29,7 +41,7 @@ MISSION_TEXT_INSET = 12
 HINT_BOTTOM_MARGIN = 10
 
 
-def _ensure_mixer():
+def _ensure_mixer() -> bool:
     """Best-effort mixer setup; audio stays silently unavailable without a usable audio device."""
     try:
         if pygame.mixer.get_init() is None:
@@ -41,33 +53,43 @@ def _ensure_mixer():
         return False
 
 
-class GlueView(NativeScreenView):
+class GlueView(NativeScreenView[GlueScene]):
     """Draw static runtime windows and translate click/release hotspots."""
 
-    def __init__(self, gpu, scene, options=None):
+    def __init__(self, gpu: Gpu, scene: GlueScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
-        self.models = ()
-        self.quads = []
-        self.portrait_quads = []
-        self.text_labels = []
-        self.dialogue_labels = []
-        self.dialogue_state = None
-        self.panel_quads = []
-        self.panel_labels = []
-        self.panel_buttons = []
-        self.mission_quads = []
-        self.mission_labels = []
-        self.mission_rows = []
-        self.hint_label = None
-        self.hover_hint = None
-        self.bitmap_animators = {}
-        self.music_name = None
+        self.models: Models = ()
+        self.quads: list[tuple[ScreenQuad, Point]] = []
+        self.portrait_quads: list[tuple[ScreenQuad, Point]] = []
+        self.text_labels: list[tuple[TextLabel, Point]] = []
+        self.dialogue_labels: list[tuple[TextLabel, Point]] = []
+        self.dialogue_state: tuple[str, tuple[Any, ...]] | None = None
+        self.panel_quads: list[tuple[ScreenQuad, Point]] = []
+        self.panel_labels: list[tuple[TextLabel, Point]] = []
+        self.panel_buttons: list[tuple[str, pygame.Rect, str]] = []
+        self.mission_quads: list[tuple[ScreenQuad, Point]] = []
+        self.mission_labels: list[tuple[TextLabel, Point]] = []
+        self.mission_rows: list[tuple[pygame.Rect, MissionRef]] = []
+        self.hint_label: TextLabel | None = None
+        self.hover_hint: str | None = None
+        self.bitmap_animators: dict[tuple[str, int], GlueBitmapAnimator] = {}
+        self.music_name: str | None = None
         self._music_ok = _ensure_mixer()
-        self.pressed = None
-        self._pressed_button = None
+        self.pressed: RenderHotspot | None = None
+        self._pressed_button: str | None = None
+        # Change fingerprints of the refresh groups (see `refresh`).
+        self._bitmap_models: Models = ()
+        self.frames: Frames = {}
+        self.palette: AppPalette | None = None
+        self._portrait_animations: tuple[Any, ...] = ()
+        self._portrait_palette: AppPalette | None = None
+        self.portraits: tuple[Any, ...] = ()
+        self._panel_state: tuple[Any, ...] | None = None
+        self._mission_state: tuple[Any, ...] | None = None
+        self._drawn_hint: str | None = None
         self.refresh()
 
-    def refresh(self):
+    def refresh(self) -> None:
         """Rebuild GPU quads after the runtime changes its active windows.
 
         Split into independent groups so a portrait's mouth/eye frame or a typing dialogue line -
@@ -76,10 +98,11 @@ class GlueView(NativeScreenView):
         behind a briefing running at a few FPS.
         """
         self._process_music()
-        models = tuple(build_render_model(self.scene.runtime.content, window, self.scene.runtime.state.object_positions)
-                       for window in self.scene.runtime.state.windows)
-        frames = {(animation.window_name, animation.object_name): animation.animator.display_name
-                  for animation in self.scene.runtime.state.animations}
+        runtime = self.scene.require_runtime()
+        models = tuple(build_render_model(runtime.content, window, runtime.state.object_positions)
+                       for window in runtime.state.windows)
+        frames: Frames = {(animation.window_name, animation.object_name): animation.animator.display_name
+                          for animation in runtime.state.animations}
         frames.update(self._static_animation_frames(models, frames))
         palette = self._palette(models)
         self.models = models
@@ -87,11 +110,11 @@ class GlueView(NativeScreenView):
         self._refresh_portraits(models, palette)
         self._refresh_panel(models, palette)
         self._refresh_missions(models, palette)
-        self._refresh_dialogue(_dialogue_state(self.scene.runtime.state))
+        self._refresh_dialogue(_dialogue_state(runtime.state))
 
-    def _static_animation_frames(self, models, runtime_frames):
-        active = {}
-        frames = {}
+    def _static_animation_frames(self, models: Models, runtime_frames: Frames) -> Frames:
+        active: dict[tuple[str, int], GlueBitmapAnimator] = {}
+        frames: Frames = {}
         for model in models:
             for index, bitmap in enumerate(model.bitmaps):
                 key = (model.name, index)
@@ -109,7 +132,7 @@ class GlueView(NativeScreenView):
         self.bitmap_animators = active
         return frames
 
-    def _process_music(self):
+    def _process_music(self) -> None:
         """Drain playmidi/stopmidi/diagnostic effects (notes/briefing_dialogue.md §2.1: replace abruptly, loop forever)."""
         for effect in self.scene.take_effects():
             if isinstance(effect, Diagnostic):
@@ -119,7 +142,10 @@ class GlueView(NativeScreenView):
                 if not self._music_ok:
                     continue
                 try:
-                    path = self.scene.runtime.content.installation.binary_file("MUSIC", f"{effect.name}.MID")
+                    installation = self.scene.require_runtime().content.installation
+                    if installation is None:
+                        continue
+                    path = installation.binary_file("MUSIC", f"{effect.name}.MID")
                     pygame.mixer.music.load(str(path))
                     pygame.mixer.music.set_volume(MUSIC_VOLUME)
                     pygame.mixer.music.play(loops=-1)
@@ -133,10 +159,10 @@ class GlueView(NativeScreenView):
                     except pygame.error:
                         pass
 
-    def _refresh_bitmaps(self, models, frames, palette):
-        if (models, frames, palette) == (getattr(self, "_bitmap_models", ()), getattr(self, "frames", {}),
-                                          getattr(self, "palette", None)):
+    def _refresh_bitmaps(self, models: Models, frames: Frames, palette: AppPalette) -> None:
+        if (models, frames, palette) == (self._bitmap_models, self.frames, self.palette):
             return
+        content = self.scene.require_runtime().content
         for quad, _ in self.quads:
             quad.release()
         for label, _ in self.text_labels:
@@ -148,14 +174,14 @@ class GlueView(NativeScreenView):
                 if not _bitmap_visible(bitmap, self.scene.campaign):
                     continue
                 name = frames.get((model.name, bitmap.object_name), frames.get((model.name, index), bitmap.name))
-                surface = load_optional_bitmap(self.scene.runtime.content, name, app_palette=palette)
+                surface = load_optional_bitmap(content, name, app_palette=palette)
                 if surface is None:
                     continue
                 quad = ScreenQuad(self.gpu, surface.get_size())
                 quad.write(pygame.image.tobytes(surface, "RGBA"))
                 self.quads.append((quad, (model.x + bitmap.x, model.y + bitmap.y)))
             for text in model.texts:
-                value = resolve_text(self.scene.runtime.content, text)
+                value = resolve_text(content, text)
                 if value is None:
                     continue
                 try:
@@ -164,15 +190,13 @@ class GlueView(NativeScreenView):
                     continue
                 self.text_labels.append(_place_text(self.gpu, font, value, text, model))
 
-    def _refresh_portraits(self, models, palette):
+    def _refresh_portraits(self, models: Models, palette: AppPalette) -> None:
+        runtime = self.scene.require_runtime()
         portraits = tuple(sorted((name, animator.mouth_frame, animator.eye_frame)
-                                 for name, animator in self.scene.runtime.state.portrait_animators.items()))
+                                 for name, animator in runtime.state.portrait_animators.items()))
         animations = tuple((model.name, animation) for model in models for animation in model.animations
                            if animation.index is not None)
-        if (animations, palette, portraits) == (
-            getattr(self, "_portrait_animations", ()), getattr(self, "_portrait_palette", None),
-            getattr(self, "portraits", ())
-        ):
+        if (animations, palette, portraits) == (self._portrait_animations, self._portrait_palette, self.portraits):
             return
         for quad, _ in self.portrait_quads:
             quad.release()
@@ -180,15 +204,15 @@ class GlueView(NativeScreenView):
         self.portrait_quads = []
         for model_name, animation in animations:
             model = next(model for model in models if model.name == model_name)
-            animator = self.scene.runtime.state.portrait_animators.get(model_name)
-            index = self.scene.runtime.portrait_index(model_name, animation.index)
+            animator = runtime.state.portrait_animators.get(model_name)
+            index = runtime.portrait_index(model_name, animation.index)
             try:
                 if animator is not None:
-                    width, height, rgba = self.scene.runtime.content.portrait_frame(
+                    width, height, rgba = runtime.content.portrait_frame(
                         index, animation.bkindex or 0, animator.mouth_frame, animator.eye_frame,
                         rgb_palette=palette.colours)
                 else:
-                    width, height, rgba = self.scene.runtime.content.portrait_data(
+                    width, height, rgba = runtime.content.portrait_data(
                         index, animation.bkindex or 0, rgb_palette=palette.colours)
             except (ValueError, FileNotFoundError, KeyError):
                 continue
@@ -198,7 +222,7 @@ class GlueView(NativeScreenView):
             # x/y (always 0,0 in the data); notes/mission_selection.md §9.3.
             self.portrait_quads.append((quad, (model.x + 12, model.y + 12)))
 
-    def _refresh_panel(self, models, palette):
+    def _refresh_panel(self, models: Models, palette: AppPalette) -> None:
         """Draw the speaker frame and its control-panel buttons (notes/mission_selection.md §9.3-9.4).
 
         Button geometry, panel bitmaps and BRTXT label ids come from ``whshr.controlpanel`` (also
@@ -208,9 +232,10 @@ class GlueView(NativeScreenView):
         """
         animations = tuple((model.name, animation) for model in models for animation in model.animations
                            if animation.index is not None)
-        paused = self.scene.runtime.state.paused
+        runtime = self.scene.require_runtime()
+        paused = runtime.state.paused
         state = (animations, palette, paused)
-        if state == getattr(self, "_panel_state", None):
+        if state == self._panel_state:
             return
         for quad, _ in self.panel_quads:
             quad.release()
@@ -218,11 +243,12 @@ class GlueView(NativeScreenView):
             label.release()
         self._panel_state = state
         self.panel_quads, self.panel_labels, self.panel_buttons = [], [], []
+        font: BitmapFont | None
         try:
             font = BitmapFont(self.scene.font(2))
         except (KeyError, ValueError):
             font = None
-        content = self.scene.runtime.content
+        content = runtime.content
         for model_name, animation in animations:
             model = next(model for model in models if model.name == model_name)
             origin = (model.x, model.y)
@@ -254,11 +280,12 @@ class GlueView(NativeScreenView):
                     rect = pygame.Rect(origin[0] + 9, origin[1] + y, 119, 20)
                     self.panel_buttons.append((model.name, rect, action))
 
-    def _refresh_missions(self, models, palette):
-        rows = _mission_rows(self.scene.runtime.content, models, self.scene.runtime.state.selected_mission,
+    def _refresh_missions(self, models: Models, palette: AppPalette) -> None:
+        runtime = self.scene.require_runtime()
+        rows = _mission_rows(runtime.content, models, runtime.state.selected_mission,
                              getattr(self.scene.campaign, "taken_missions", None))
         state = (rows, palette)
-        if state == getattr(self, "_mission_state", None):
+        if state == self._mission_state:
             return
         for quad, _ in self.mission_quads:
             quad.release()
@@ -270,7 +297,7 @@ class GlueView(NativeScreenView):
             font = BitmapFont(self.scene.font(2))
         except (KeyError, ValueError):
             return
-        content = self.scene.runtime.content
+        content = runtime.content
         for reference, title, payment, x, y, selected in rows:
             surface = load_optional_bitmap(content, "Scroll0" if selected else "Scroll1", app_palette=palette)
             if surface is not None:
@@ -289,9 +316,9 @@ class GlueView(NativeScreenView):
             self.mission_labels.append((text, (x + MISSION_TEXT_INSET, y + 4 + font.font.height // 2)))
             self.mission_rows.append((pygame.Rect(x, y, width, height), reference))
 
-    def _refresh_hint(self):
+    def _refresh_hint(self) -> None:
         hint = self.hover_hint
-        if hint == getattr(self, "_drawn_hint", None):
+        if hint == self._drawn_hint:
             return
         if self.hint_label is not None:
             self.hint_label.release()
@@ -307,7 +334,7 @@ class GlueView(NativeScreenView):
                                         padding=0, align="center", fixed_width=True)
         self.hint_label.set_lines((hint,))
 
-    def _add_panel_bitmap(self, content, name, position, palette):
+    def _add_panel_bitmap(self, content: GlueContent, name: str, position: Point, palette: AppPalette) -> None:
         surface = load_optional_bitmap(content, name, app_palette=palette)
         if surface is None:
             return
@@ -315,7 +342,7 @@ class GlueView(NativeScreenView):
         quad.write(pygame.image.tobytes(surface, "RGBA"))
         self.panel_quads.append((quad, position))
 
-    def _refresh_dialogue(self, dialogue_state):
+    def _refresh_dialogue(self, dialogue_state: tuple[str, tuple[Any, ...]]) -> None:
         """Rebuild the bottom-anchored briefing dialogue block (notes/briefing_dialogue.md §3.3).
 
         Each logical line keeps the settextcolor it was queued under (one label per line) so an
@@ -349,16 +376,17 @@ class GlueView(NativeScreenView):
             self.dialogue_labels.append((label, (left, top)))
             top += line_height
 
-    def _palette(self, models):
+    def _palette(self, models: Models) -> AppPalette:
         """Select the one application palette active for the runtime windows."""
-        palette_id = self.scene.runtime.state.palette_id
+        runtime = self.scene.require_runtime()
+        palette_id = runtime.state.palette_id
         embedded = None
         if palette_id < 0 and models and models[0].bitmaps:
-            embedded = self.scene.runtime.content.bitmap_data(models[0].bitmaps[0].name).palette
-        return AppPalette.select(palette_id, self.scene.runtime.content.palette_tables(), embedded=embedded)
+            embedded = runtime.content.bitmap_data(models[0].bitmaps[0].name).palette
+        return AppPalette.select(palette_id, runtime.content.palette_tables(), embedded=embedded)
 
     @staticmethod
-    def hotspot_at(models, point):
+    def hotspot_at(models: Sequence[GlueRenderModel], point: tuple[float, float]) -> RenderHotspot | None:
         """Return the last-painted hotspot at native coordinates, if any."""
         for model in reversed(models):
             for hotspot in reversed(model.hotspots):
@@ -367,23 +395,23 @@ class GlueView(NativeScreenView):
                     return hotspot
         return None
 
-    def _native_point(self, pos):
+    def _native_point(self, pos: Sequence[float]) -> tuple[float, float]:
         left, top, scale = self._layout()
         return (pos[0] - left) / scale, (pos[1] - top) / scale
 
-    def _panel_button_at(self, point):
-        for name, rect, action in reversed(self.panel_buttons):
+    def _panel_button_at(self, point: tuple[float, float]) -> str | None:
+        for _, rect, action in reversed(self.panel_buttons):
             if rect.collidepoint(point):
                 return action
         return None
 
-    def _mission_at(self, point):
+    def _mission_at(self, point: tuple[float, float]) -> MissionRef | None:
         for rect, reference in reversed(self.mission_rows):
             if rect.collidepoint(point):
                 return reference
         return None
 
-    def events(self, event):
+    def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
         if event.type == pygame.MOUSEMOTION:
             hotspot = self.hotspot_at(self.models, self._native_point(event.pos))
             self.hover_hint = _caravan_hint(self.scene.campaign, self.models, hotspot)
@@ -413,12 +441,12 @@ class GlueView(NativeScreenView):
                 return (GlueInput("dialogue-drain"),)
         return ()
 
-    def animate(self, seconds):
+    def animate(self, seconds: float) -> None:
         changed = any(animator.tick(round(seconds * 1000)).redrawn for animator in self.bitmap_animators.values())
         if changed:
             self.refresh()
 
-    def draw(self):
+    def draw(self) -> None:
         super().draw()
         left, top, scale = self._layout()
         for quad, (x, y) in self.quads:
@@ -442,7 +470,7 @@ class GlueView(NativeScreenView):
             self.hint_label.draw(left, top + (self.NATIVE_SIZE[1] - hint_height - HINT_BOTTOM_MARGIN) * scale,
                                  self.hint_label.size[0] * scale, self.hint_label.size[1] * scale)
 
-    def release(self):
+    def release(self) -> None:
         for quad, _ in self.quads:
             quad.release()
         for quad, _ in self.portrait_quads:
@@ -474,7 +502,7 @@ class GlueView(NativeScreenView):
 
 
 # notes/briefing_dialogue.md §3.4, the front-end's settextcolor name -> RGB table.
-_TEXT_COLOURS = {
+_TEXT_COLOURS: dict[str, Rgb] = {
     "black": (0, 0, 0), "white": (255, 255, 255), "red": (255, 0, 0), "green": (0, 255, 0),
     "blue": (0, 0, 255), "yellow": (255, 255, 0), "magenta": (255, 0, 255), "cyan": (0, 255, 255),
     "gray": (127, 127, 127), "lgray": (192, 192, 192), "dkred": (127, 0, 0), "dkgreen": (0, 127, 0),
@@ -482,7 +510,8 @@ _TEXT_COLOURS = {
 }
 
 
-def _place_text(gpu, font, value, text, model):
+def _place_text(gpu: Gpu, font: BitmapFont, value: str, text: RenderText,
+                model: GlueRenderModel) -> tuple[TextLabel, Point]:
     """Build and position one glue text label per its ``format`` (notes/glue_keywords.md §3.4).
 
     ``vx``/``vy`` change meaning by format: for 1 (map titles) ``vy`` is a *y offset*, not a box
@@ -495,7 +524,7 @@ def _place_text(gpu, font, value, text, model):
     origin_x, origin_y = model.x + text.x, model.y + text.y
     if fmt == 1:
         width = max(1, text.width)
-        label = gpu.text((width, line_height), font, color=_TEXT_COLOURS.get(text.colour, (0, 0, 0)),
+        label = gpu.text((width, line_height), font, color=_TEXT_COLOURS.get(text.colour or "", (0, 0, 0)),
                          background=None, padding=0, align="center", fixed_width=True)
         label.set_lines((value,))
         return label, (origin_x, origin_y + text.height)
@@ -504,7 +533,7 @@ def _place_text(gpu, font, value, text, model):
     # label's vx=10) must not clip the canvas, or only the first letter or two survives.
     canvas_width = max(1, text.width) if fmt == 7 else 640
     label = gpu.text((canvas_width, line_height), font,
-                     color=_TEXT_COLOURS.get(text.colour, (0, 0, 0)), background=None, padding=0,
+                     color=_TEXT_COLOURS.get(text.colour or "", (0, 0, 0)), background=None, padding=0,
                      outline=fmt == 6)
     label.set_lines((value,))
     content_width, content_height = label.text_size
@@ -517,10 +546,11 @@ def _place_text(gpu, font, value, text, model):
     return label, (origin_x, origin_y)  # format 3 (and unused 0/2/4): plain (x, y)
 
 
-def _wrap(font, text, width):
+def _wrap(font: BitmapFont, text: str, width: int) -> list[str]:
     """Greedy word-wrap: a new word joins the current line unless it would exceed ``width`` (§3.3)."""
     words = text.split(" ")
-    lines, current = [], words[0] if words else ""
+    lines: list[str] = []
+    current = words[0] if words else ""
     for word in words[1:]:
         candidate = f"{current} {word}"
         if font.size(candidate)[0] <= width:
@@ -532,7 +562,7 @@ def _wrap(font, text, width):
     return lines
 
 
-def _dialogue_state(state):
+def _dialogue_state(state: GlueRuntimeState) -> tuple[str, tuple[Any, ...]]:
     """The (window, (text, colour) lines) fingerprint refresh() diffs against, §3.3's ring buffer."""
     if not state.windows:
         return "", ()  # nothing is open (a request parked the windows): no stale text
@@ -542,7 +572,7 @@ def _dialogue_state(state):
     return state.dialogue_window_name, lines
 
 
-def _bitmap_visible(bitmap, campaign):
+def _bitmap_visible(bitmap: RenderBitmap, campaign: CampaignState | None) -> bool:
     """Apply a bitmap's campaign-count dependency when a campaign is active."""
     if not bitmap.name.casefold().startswith("carscroll"):
         return True
@@ -555,7 +585,8 @@ def _bitmap_visible(bitmap, campaign):
         return True
 
 
-def _caravan_hint(campaign, models, hotspot):
+def _caravan_hint(campaign: CampaignState | None, models: Iterable[GlueRenderModel],
+                  hotspot: RenderHotspot | None) -> str | None:
     """Resolve a caravan hotspot hint, including the coffer value placeholder."""
     if campaign is None or hotspot is None or not any(model.name in CARAVAN_MODE_WINDOWS.values() for model in models):
         return None
@@ -565,14 +596,15 @@ def _caravan_hint(campaign, models, hotspot):
     return campaign.hint(hint_id, campaign.coffers) if hint_id == 402 else campaign.hint(hint_id)
 
 
-def _mission_rows(content, models, selected, taken=None):
+def _mission_rows(content: GlueContent, models: Iterable[GlueRenderModel], selected: MissionRef | None,
+                  taken: Iterable[MissionRef] | None = None) -> tuple[MissionRow, ...]:
     """Rows on offer; ``taken=None`` (no campaign) shows every record ungated."""
-    rows = []
+    rows: list[MissionRow] = []
     for model in models:
         for mission_list in model.mission_lists:
             y = model.y + mission_list.y
             windows = {reference.window for reference in mission_list.missions}
-            offered = set()
+            offered: set[Any] = set()
             for window in windows:
                 records = [record for record in content.window(window).records if isinstance(record, MissionRecord)]
                 offered.update(offered_refs(records, taken or ()))
@@ -593,7 +625,7 @@ def _mission_rows(content, models, selected, taken=None):
     return tuple(rows)
 
 
-def _mission_payment(record):
+def _mission_payment(record: MissionRecord) -> str:
     cash = next((field.argument for field in record.fields if field.command == "cash"), "")
     parts = [part.strip() for part in cash.split(",")]
     if len(parts) < 3:
@@ -604,12 +636,12 @@ def _mission_payment(record):
         return ""
 
 
-def format_diagnostic(diagnostic):
+def format_diagnostic(diagnostic: Diagnostic) -> str:
     """Render one interpreter ``Diagnostic`` as a single log line."""
     return f"glue: {diagnostic.location}: {diagnostic.message}"
 
 
-def resolve_text(content, text):
+def resolve_text(content: GlueContent, text: RenderText) -> str | None:
     """Resolve one glue text record without importing pygame or a scene context."""
     if text.string_id is None:
         return None

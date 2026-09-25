@@ -428,7 +428,7 @@ class TroopSelectionScene(Scene):
         else:
             self.glue_scene.start_battle(self.battle)
 
-    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
+    def handle(self, event: SceneEvent, context: SceneAssets | None) -> Transition | Quit | None:
         if self.phase == "skip":
             return Transition(self.destination, "troop selection skipped (no company)")
         if self.phase == "bankrupt":

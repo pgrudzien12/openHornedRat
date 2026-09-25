@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Battle view: terrain, scenery and troop sprite billboards on the GPU, with a free battle camera.
 
 Controls: arrow keys or WASD pan, Q/E rotate, Page Up/Page Down tilt, mouse wheel zooms, middle-drag
@@ -11,9 +12,11 @@ current selection, bypassing the HUD buttons. Escape deselects.
 """
 
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import replace
 import math
 import struct
+from typing import Any
 
 import pygame
 import zengl
@@ -23,10 +26,16 @@ from ..battle3d import SPRITE_DEPTH_BIAS
 from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, sprite_direction, view_angle
 from ..camera import BattleCamera
 from ..formation import SPRITE_PIXEL_WORLD_UNITS
+from ..battle_scene import BattleScene
+from ..battle3d import Projection
+from ..battlefield import SpriteSheet
+from ..scenes import SceneEvent
 from .cursors import GameCursors
+from .gpu import Gpu
 from .scene_view import SceneView
 from .hud import Hud
 
+Point = tuple[int, int]
 SKY = (112, 150, 196)
 NEAR, FAR = 0.5, 4000.0  # mesh units
 PAN_SPEED = 0.8  # camera distances per second
@@ -43,7 +52,7 @@ CLICK_DRAG_THRESHOLD = 4  # pixels; a right button press/release closer than thi
 # where the hand/default shape was expected) - this table needs the real ids. Get them with
 # `python3 scripts/pe_extract.py "$WARFB/FILE/DLL/GMCUR.DLL" extracted/pe_resources/GMCUR` (repo
 # root), then check extracted/pe_resources/GMCUR/cursor/*.png against groups.json's id lists.
-BATTLE_CURSOR_GROUPS = {"default": 100, "attack": 101, "fire": 102, "magic": 103}
+BATTLE_CURSOR_GROUPS: dict[str, int] = {"default": 100, "attack": 101, "fire": 102, "magic": 103}
 BANNER_MARKER_RAISE = 4.0  # mesh units: above a 64-pixel troop sprite, below the camera's horizon
 SPRITE_MID_HEIGHT = BANNER_MARKER_RAISE / 2  # mesh units: halfway up that ~64px sprite, for picking
 EVENT_LOG_LINES = 3  # battle events shown in the debug overlay (whshr.engine.Battle.events, per tick)
@@ -162,10 +171,18 @@ void main() {
 """
 
 
-class BattleView(SceneView):
+def _atlas_rect(sheet: SpriteSheet, index: int) -> tuple[int, int, int, int]:
+    """The atlas rectangle of one packed frame (every sheet drawn here went through `build_atlas`)."""
+    rect = sheet.rects[index]
+    if rect is None:
+        raise ValueError(f"frame {index} of {sheet.name} has no atlas rectangle")
+    return rect
+
+
+class BattleView(SceneView[BattleScene]):
     background = SKY
 
-    def __init__(self, gpu, scene, options=None):
+    def __init__(self, gpu: Gpu, scene: BattleScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
         field, ctx, target = scene.field, gpu.ctx, gpu.target
         self.initial_camera = BattleCamera.for_battle(field.script)
@@ -174,11 +191,11 @@ class BattleView(SceneView):
             self.initial_camera = replace(self.initial_camera, yaw=yaw % 360, pitch=pitch, distance=distance)
         self.camera = replace(self.initial_camera)
         self.soldiers = 0
-        self._right_down = None  # screen position of an unreleased right-button press, for click detection
-        self.order_mode = None  # a HUD Move/Attack click changes how the next battlefield click is interpreted
-        self.event_log = deque(maxlen=EVENT_LOG_LINES)  # recent whshr.engine.Battle.events, newest last
-        self._banner_order = []  # promoted selection order; persists after deselect like the original battle view
-        self.battle_log = deque(maxlen=100)  # full react-message history for the HUD log panel
+        self._right_down: Point | None = None  # screen position of an unreleased right-button press, for click detection
+        self.order_mode: str | None = None  # a HUD Move/Attack click changes how the next battlefield click is interpreted
+        self.event_log: deque[str] = deque(maxlen=EVENT_LOG_LINES)  # recent whshr.engine.Battle.events, newest last
+        self._banner_order: list[str] = []  # promoted selection order; persists after deselect like the original battle view
+        self.battle_log: deque[tuple[str, str]] = deque(maxlen=100)  # full react-message history for the HUD log panel
         self.log_scroll = 0  # lines scrolled back from the newest entry (0 = show latest)
 
         ctx.includes["camera"] = CAMERA_BLOCK
@@ -192,26 +209,28 @@ class BattleView(SceneView):
                             + len(scene.battle.regiments))
         self.instance_buffer = ctx.buffer(size=self.capacity * INSTANCE.size)
 
-        camera_layout = {"name": "Camera", "binding": 0}
-        camera_resource = {"type": "uniform_buffer", "binding": 0, "buffer": self.camera_buffer}
-        nearest = {"min_filter": "nearest", "mag_filter": "nearest"}
-        depth = {"func": "less", "write": True}
+        camera_layout: Any = {"name": "Camera", "binding": 0}
+        camera_resource: Any = {"type": "uniform_buffer", "binding": 0, "buffer": self.camera_buffer}
+        nearest: Any = {"min_filter": "nearest", "mag_filter": "nearest"}
+        depth: Any = {"func": "less", "write": True}
+        mesh_resources: list[Any] = [camera_resource, {"type": "sampler", "binding": 0, "image": self.textures,
+                                                        **nearest, "wrap_x": "repeat", "wrap_y": "repeat"}]
         self.mesh = ctx.pipeline(
             vertex_shader=MESH_VERTEX_SHADER, fragment_shader=MESH_FRAGMENT_SHADER,
             layout=[camera_layout, {"name": "textures", "binding": 0}],
-            resources=[camera_resource, {"type": "sampler", "binding": 0, "image": self.textures, **nearest,
-                                         "wrap_x": "repeat", "wrap_y": "repeat"}],
+            resources=mesh_resources,
             depth=depth, framebuffer=[target.color, target.depth],
             vertex_buffers=zengl.bind(self.vertex_buffer, VERTEX_FORMAT, 0, 1, 2, 3),
             vertex_count=len(field.vertices) // VERTEX_FLOATS,
         )
-        clamp = {**nearest, "wrap_x": "clamp_to_edge", "wrap_y": "clamp_to_edge"}
+        clamp: Any = {**nearest, "wrap_x": "clamp_to_edge", "wrap_y": "clamp_to_edge"}
+        sprite_resources: list[Any] = [camera_resource,
+                                       {"type": "sampler", "binding": 0, "image": self.atlas, **clamp},
+                                       {"type": "sampler", "binding": 1, "image": self.palette, **clamp}]
         self.sprites = ctx.pipeline(
             vertex_shader=SPRITE_VERTEX_SHADER, fragment_shader=SPRITE_FRAGMENT_SHADER,
             layout=[camera_layout, {"name": "atlas", "binding": 0}, {"name": "palette", "binding": 1}],
-            resources=[camera_resource,
-                       {"type": "sampler", "binding": 0, "image": self.atlas, **clamp},
-                       {"type": "sampler", "binding": 1, "image": self.palette, **clamp}],
+            resources=sprite_resources,
             depth=depth, framebuffer=[target.color, target.depth],
             vertex_buffers=zengl.bind(self.instance_buffer, "3f 4f 2f 1f /i", 0, 1, 2, 3),
             topology="triangle_strip", vertex_count=4, instance_count=0,
@@ -222,10 +241,10 @@ class BattleView(SceneView):
 
         installation = self.options.get("installation")
         self.cursors = GameCursors(installation, dll="GMCUR.DLL") if installation is not None else None
-        self._cursor_mode = None
+        self._cursor_mode: str | None = None
         self._set_cursor("default")
 
-    def _set_cursor(self, mode):
+    def _set_cursor(self, mode: str) -> None:
         """Feedback (notes/game_rules.md "Battle HUD layout"): the cursor reflects the pending
         order mode, not hover position - Attack/Fire/Magic get their own cursor, everything else
         (including Move, which has none of its own) uses the default."""
@@ -234,7 +253,7 @@ class BattleView(SceneView):
         self._cursor_mode = mode
         self.cursors.set(BATTLE_CURSOR_GROUPS.get(mode, BATTLE_CURSOR_GROUPS["default"]))
 
-    def events(self, event):
+    def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
         camera = self.camera
         if event.type == pygame.MOUSEWHEEL:
             camera.zoom(WHEEL_ZOOM ** event.y)
@@ -302,7 +321,7 @@ class BattleView(SceneView):
                 return self._ground_click(event.pos, direct=True)
         return ()
 
-    def _ground_click(self, pixel, direct=False):
+    def _ground_click(self, pixel: Sequence[float], direct: bool = False) -> Sequence[SceneEvent]:
         """Translate a screen click into a ("select", id), ("attack", id) or ("move_to", x, y)
         scene event, if it hits ground.
 
@@ -356,7 +375,7 @@ class BattleView(SceneView):
             return (("face_point", x, y),)
         return ()
 
-    def _sprite_pick(self, pixel, projection):
+    def _sprite_pick(self, pixel: Sequence[float], projection: Projection) -> str | None:
         """Screen-space fallback for _ground_click(): which active regiment's rendered sprite
         block, if any, covers this raw window pixel - approximated as a circle around each
         regiment's centre, at half its sprite height (SPRITE_MID_HEIGHT) above the ground and
@@ -364,7 +383,8 @@ class BattleView(SceneView):
         space at that regiment's own depth. Nearest to the camera wins when more than one
         regiment's circle covers the point (the one actually visible there, same as occlusion)."""
         field = self.scene.field
-        best_id, best_depth = None, None
+        best_id: str | None = None
+        best_depth: float | None = None
         for regiment in self.scene.battle.regiments.values():
             if not regiment.active:
                 continue
@@ -382,7 +402,7 @@ class BattleView(SceneView):
                 best_id, best_depth = regiment.identifier, depth
         return best_id
 
-    def _minimap_click(self, pixel):
+    def _minimap_click(self, pixel: Sequence[float]) -> Sequence[SceneEvent]:
         """A minimap click behaves like a 3D-view ground click (notes/game_rules.md "Battle HUD
         layout": "a left click on the minimap is handled exactly like a click in the 3D view"),
         sourced from the HUD's own marker hit-testing instead of 3D picking - see _ground_click's
@@ -409,7 +429,7 @@ class BattleView(SceneView):
             return (("move_to", *world),) if world is not None else ()
         return ()
 
-    def _log_cannot(self, order):
+    def _log_cannot(self, order: str) -> None:
         # notes/game_rules.md's "Feedback" documents no tooltips/hover highlight and a click sound
         # on button press, but not a specific failed-order message; this mirrors the classic WFB
         # UI convention of a "Cannot!" cue on a targetless order, in the same debug event log the
@@ -418,7 +438,7 @@ class BattleView(SceneView):
         # plays yet: which SFX resource is the UI feedback cue is not identified in notes/sfx.md.
         self.event_log.append(f"Cannot {order}!")
 
-    def animate(self, seconds):
+    def animate(self, seconds: float) -> None:
         keys = pygame.key.get_pressed()
         right = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
         forward = (keys[pygame.K_UP] or keys[pygame.K_w]) - (keys[pygame.K_DOWN] or keys[pygame.K_s])
@@ -436,9 +456,9 @@ class BattleView(SceneView):
                 message = event.data.get("message", str(event))
                 self.battle_log.append((f"{sender}:", message))
                 self.log_scroll = 0  # auto-scroll to newest on a new message
-        self.event_log.extend(self.scene.battle.events)
+        self.event_log.extend(str(event) for event in self.scene.battle.events)
 
-    def status(self):
+    def status(self) -> Sequence[str]:
         camera, scene = self.camera, self.scene
         selected = scene.battle.regiments[scene.selected_id].name if scene.selected_id else "-"
         lines = (
@@ -449,9 +469,9 @@ class BattleView(SceneView):
         )
         return lines + tuple(self.event_log)
 
-    def _instances(self):
+    def _instances(self) -> bytes:
         field, yaw, selected_id, data = self.scene.field, self.camera.yaw, self.scene.selected_id, bytearray()
-        banner_instances = []
+        banner_instances: list[tuple[str, bytes]] = []
         for regiment in self.scene.battle.regiments.values():
             sheet = field.sprite_sheet(regiment.sprite)
             selected = 1.0 if regiment.identifier == selected_id else 0.0
@@ -462,13 +482,14 @@ class BattleView(SceneView):
             # not the anchor, or it visibly floats ahead of/behind the block it marks.
             positions = regiment.model_positions() if regiment.active else []
             if sheet is not None and regiment.active:
+                unit_sheet: SpriteSheet = sheet
                 # Each model already steps its own action/program counter every tick
                 # (whshr.animation, game_rules.md "Figure animation"); this only reads it.
-                def draw_model(x, y, model):
+                def draw_model(x: float, y: float, model: Any) -> bytes:
                     action, phase = animation.current(model, regiment.animation_family)
                     facing = regiment.direction if model.drawn_facing is None else model.drawn_facing
-                    index = sheet.frame_index(action, phase, sprite_direction(yaw, facing))
-                    frame, rect = sheet.frames[index], sheet.rects[index]
+                    index = unit_sheet.frame_index(action, phase, sprite_direction(yaw, facing))
+                    frame, rect = unit_sheet.frames[index], _atlas_rect(unit_sheet, index)
                     return INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
                                          *rect, frame.anchor_x, frame.anchor_y, selected)
                 for (x, y), model in zip(positions, regiment.melee_models):
@@ -479,7 +500,7 @@ class BattleView(SceneView):
                 # Corpses (game_rules.md, "Panic": models that died stay on the ground where they fell).
                 for x, y, corpse_direction in regiment.corpses:
                     index = sheet.frame_index("dead", 0, sprite_direction(yaw, corpse_direction))
-                    frame, rect = sheet.frames[index], sheet.rects[index]
+                    frame, rect = sheet.frames[index], _atlas_rect(sheet, index)
                     data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
                                           *rect, frame.anchor_x, frame.anchor_y, 0.0)
             # Burning figures and charred corpses come from the general battle-effects set, addressed by
@@ -487,9 +508,11 @@ class BattleView(SceneView):
             # matching is by eye in the source notes (game_rules.md "Figure animation").
             effects = field.ui_sheets.get("genbatt")
             if effects is not None and effects.rects:
-                def draw_effect(x, y, number):
-                    number = min(number, len(effects.frames) - 1)
-                    frame, rect = effects.frames[number], effects.rects[number]
+                effect_sheet: SpriteSheet = effects
+
+                def draw_effect(x: float, y: float, number: int) -> bytes:
+                    number = min(number, len(effect_sheet.frames) - 1)
+                    frame, rect = effect_sheet.frames[number], _atlas_rect(effect_sheet, number)
                     return INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
                                          *rect, frame.anchor_x, frame.anchor_y, 0.0)
                 for burning in regiment.burning:
@@ -498,7 +521,7 @@ class BattleView(SceneView):
                     data += draw_effect(x, y, animation.charred_frame(body, sprite_direction(yaw, charred_direction)))
             banner = field.ui_sheets.get((regiment.banner or "").casefold())
             if regiment.active and banner is not None and len(banner.frames) > 2 and banner.rects and positions:
-                frame, rect = banner.frames[2], banner.rects[2]
+                frame, rect = banner.frames[2], _atlas_rect(banner, 2)
                 center_x = sum(x for x, _ in positions) / len(positions)
                 center_y = sum(y for _, y in positions) / len(positions)
                 banner_instances.append((regiment.identifier, INSTANCE.pack(
@@ -508,7 +531,7 @@ class BattleView(SceneView):
                     *rect, frame.width / 2, frame.height, selected,
                 )))
         # The original promotes the focused banner in z-order and leaves it promoted after deselecting.
-        order = getattr(self, "_banner_order", [])
+        order: list[str] = getattr(self, "_banner_order", [])  # tests build views without __init__
         identifiers = list(self.scene.battle.regiments)
         order[:] = [identifier for identifier in order if identifier in self.scene.battle.regiments]
         order.extend(identifier for identifier in identifiers if identifier not in order)
@@ -521,7 +544,7 @@ class BattleView(SceneView):
             data.extend(instance)
         return bytes(data[:self.capacity * INSTANCE.size])
 
-    def draw(self):
+    def draw(self) -> None:
         super().draw()
         field, camera = self.scene.field, self.camera
         width, height = self.gpu.target.size
@@ -547,13 +570,13 @@ class BattleView(SceneView):
         sel = self.scene.selected_id
         if sel is not None and sel in self.scene.battle.regiments:
             reg = self.scene.battle.regiments[sel]
-            initial = getattr(self.scene, "initial_models", {})
+            initial: dict[str, int] = getattr(self.scene, "initial_models", {})
             self.hud.set_unit_info(reg.name, reg.hud_class, reg.models, initial.get(sel))
         else:
             self.hud.set_unit_info("", None, None, None)
         self.hud.draw(width, height, self.camera)
 
-    def release(self):
+    def release(self) -> None:
         for resource in (self.mesh, self.sprites, self.vertex_buffer, self.instance_buffer, self.camera_buffer,
                          self.textures, self.atlas, self.palette):
             self.gpu.ctx.release(resource)

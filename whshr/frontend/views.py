@@ -1,4 +1,9 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Scene view registry: which view presents which scene type."""
+from typing import Any
+
+from ..scenes import Scene
+from .gpu import Gpu
 
 from ..battle_scene import BattleScene
 from ..campaign_scenes import (
@@ -15,11 +20,11 @@ from .menu_view import MainMenuView
 from .mission_map_view import MissionMapView
 from .opening_view import OpeningNarrationView
 from .result_view import ResultView
-from .scene_view import PlaceholderView
+from .scene_view import PlaceholderView, SceneView
 from .troop_selection_view import TroopSelectionView
 from .army_records_view import ArmyRecordsView
 
-VIEWS = {
+VIEWS: dict[type[Scene], type[SceneView[Any]]] = {
     OpeningNarrationScene: OpeningNarrationView,
     MovieScene: MovieView,
     MainMenuScene: MainMenuView,
@@ -34,5 +39,5 @@ VIEWS = {
 }
 
 
-def view_for(gpu, scene, options=None):
+def view_for(gpu: Gpu, scene: Scene, options: dict[str, Any] | None = None) -> SceneView[Any]:
     return VIEWS.get(type(scene), PlaceholderView)(gpu, scene, options)

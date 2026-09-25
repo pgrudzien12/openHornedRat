@@ -1,18 +1,26 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Main menu and mission briefing views."""
+
+from collections.abc import Sequence
+from typing import Any
 
 import pygame
 
+from ..campaign_scenes import BriefingScene, MainMenuScene
+from ..scenes import SceneEvent
 from .bitmap_font import BitmapFont
-from .gpu import ScreenQuad
+from .gpu import Gpu, ScreenQuad
 from .glue_bitmap import load_bitmap
 from ..glue_render import build_render_model
 from ..glue_runtime import WindowInstance
 from .scene_view import NativeScreenView, SceneView
 
 
-def _wrap(font, text, max_width):
+def _wrap(font: BitmapFont, text: str, max_width: int) -> list[str]:
     """Split ``text`` into lines that each fit ``max_width`` pixels in ``font``."""
-    words, lines, current = text.split(), [], ""
+    words = text.split()
+    lines: list[str] = []
+    current = ""
     for word in words:
         candidate = f"{current} {word}".strip()
         if not current or font.size(candidate)[0] <= max_width:
@@ -25,42 +33,46 @@ def _wrap(font, text, max_width):
     return lines
 
 
-class MainMenuView(NativeScreenView):
+class MainMenuView(NativeScreenView[MainMenuScene]):
     """The original OPTIONSCREEN menu, with its paired round button sprites."""
 
     # Only the campaign flow's New Campaign and Exit actions have scene
     # implementations today.  The other original controls still react visually.
-    SHORTCUTS = {pygame.K_n: "new_campaign", pygame.K_RETURN: "new_campaign",
+    SHORTCUTS: dict[int, str] = {pygame.K_n: "new_campaign", pygame.K_RETURN: "new_campaign",
                  pygame.K_KP_ENTER: "new_campaign", pygame.K_q: "quit", pygame.K_ESCAPE: "quit"}
-    TARGET_ACTIONS = {"newgame": "new_campaign", "exitprocess": "quit"}
+    TARGET_ACTIONS: dict[str, str] = {"newgame": "new_campaign", "exitprocess": "quit"}
 
-    def __init__(self, gpu, scene, options=None):
+    def __init__(self, gpu: Gpu, scene: MainMenuScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
+        if scene.content is None:
+            raise RuntimeError("the main menu scene has not been entered")
         self.model = build_render_model(scene.content, WindowInstance("MAINMENU", None, -1))
         self.screen = self._load_quad(gpu, self.model.bitmaps[0].name)
         self.hotspots = self.model.hotspots
         self.button_up = self._load_quad(gpu, self.hotspots[0].up_bitmap, transparent_blue=True)
         self.button_down = self._load_quad(gpu, self.hotspots[0].down_bitmap, transparent_blue=True)
-        self.pressed = None
+        self.pressed: int | None = None
 
-    def _load_quad(self, gpu, resource_name, transparent_blue=False):
+    def _load_quad(self, gpu: Gpu, resource_name: str | None, transparent_blue: bool = False) -> ScreenQuad:
         """Read a cached extractor PNG into a GPU texture.
 
         The two button resources use pure blue as a legacy chroma key rather
         than PNG alpha, so turn that colour transparent before upload.
         """
+        if self.scene.content is None or resource_name is None:
+            raise RuntimeError("the menu bitmap is not available")
         surface = load_bitmap(self.scene.content, resource_name)
         width, height = surface.get_size()
         rgba = bytearray(pygame.image.tobytes(surface, "RGBA"))
         if transparent_blue:
             for offset in range(0, len(rgba), 4):
-                if rgba[offset:offset + 3] == b"\x00\x00\xff":
+                if bytes(rgba[offset:offset + 3]) == b"\x00\x00\xff":
                     rgba[offset + 3] = 0
         quad = ScreenQuad(gpu, (width, height))
         quad.write(rgba)
         return quad
 
-    def _button_at(self, pos):
+    def _button_at(self, pos: Sequence[float]) -> int | None:
         left, top, scale = self._layout()
         native_x, native_y = ((pos[0] - left) / scale, (pos[1] - top) / scale)
         for index, hotspot in enumerate(self.hotspots):
@@ -68,7 +80,7 @@ class MainMenuView(NativeScreenView):
                 return index
         return None
 
-    def events(self, event):
+    def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
         if event.type == pygame.KEYDOWN:
             action = self.SHORTCUTS.get(event.key)
             if action:
@@ -82,7 +94,7 @@ class MainMenuView(NativeScreenView):
                 return (action,) if action else ()
         return ()
 
-    def draw(self):
+    def draw(self) -> None:
         super().draw()
         left, top, scale = self._layout()
         self.screen.draw(left, top, self.NATIVE_SIZE[0] * scale, self.NATIVE_SIZE[1] * scale)
@@ -91,25 +103,25 @@ class MainMenuView(NativeScreenView):
             sprite.draw(left + hotspot.x * scale, top + hotspot.y * scale,
                         hotspot.width * scale, hotspot.height * scale)
 
-    def release(self):
+    def release(self) -> None:
         self.screen.release()
         self.button_up.release()
         self.button_down.release()
 
 
-class BriefingView(SceneView):
+class BriefingView(SceneView[BriefingScene]):
     """Shows the mission title and spoken briefing lines; Start Battle enters the battle itself."""
 
     BODY_SIZE = (900, 480)
     BODY_WIDTH = 860
 
-    def __init__(self, gpu, scene, options=None):
+    def __init__(self, gpu: Gpu, scene: BriefingScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
         briefing = scene.briefing
         self.font = BitmapFont(scene.font)
         self.title = gpu.text((900, 24), self.font, background=None)
         self.title.set_lines((briefing["title"],))
-        wrapped = []
+        wrapped: list[str] = []
         for line in briefing["lines"]:
             wrapped.extend(_wrap(self.font, line["text"], self.BODY_WIDTH))
             wrapped.append("")
@@ -118,24 +130,24 @@ class BriefingView(SceneView):
         self.hint = gpu.text((640, 20), self.font, background=None)
         self.hint.set_lines(("Press Enter or click to start the battle",))
 
-    def events(self, event):
+    def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
         if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             return ("start_battle",)
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             return ("start_battle",)
         return ()
 
-    def status(self):
+    def status(self) -> Sequence[str]:
         return (f"briefing {self.scene.battle_id}, {len(self.scene.briefing['lines'])} lines",)
 
-    def draw(self):
+    def draw(self) -> None:
         super().draw()
         width, height = self.gpu.target.size
         self.title.draw((width - self.title.text_size[0]) // 2, 40)
         self.body.draw((width - self.BODY_SIZE[0]) // 2, 120)
         self.hint.draw((width - self.hint.text_size[0]) // 2, height - 60)
 
-    def release(self):
+    def release(self) -> None:
         self.title.release()
         self.body.release()
         self.hint.release()

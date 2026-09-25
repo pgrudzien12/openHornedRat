@@ -1,35 +1,46 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Base scene views: a view draws one scene instance and translates raw input into its scene events."""
+from collections.abc import Sequence
+from typing import Any
+
+import pygame
+
+from ..scenes import Scene, SceneEvent
+from .gpu import Gpu
 
 
-class SceneView:
+class SceneView[S: Scene]:
     """Base view. A view owns GPU resources for one scene instance and releases them when replaced."""
 
-    background = (18, 18, 24)
+    background: tuple[int, int, int] = (18, 18, 24)
 
-    def __init__(self, gpu, scene, options=None):
+    def __init__(self, gpu: Gpu, scene: S, options: dict[str, Any] | None = None) -> None:
         self.gpu = gpu
         self.scene = scene
         self.options = options or {}
 
-    def events(self, event):
+    def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
         """Return the scene events produced by one pygame event."""
         return ()
 
-    def animate(self, seconds):
+    def refresh(self) -> None:
+        """Rebuild presentation state after the scene changed underneath the view (default: nothing to do)."""
+
+    def animate(self, seconds: float) -> None:
         """Advance presentation-only state (camera, animation clocks) by the frame duration."""
 
-    def status(self):
+    def status(self) -> Sequence[str]:
         """Extra debug overlay lines."""
         return ()
 
-    def draw(self):
+    def draw(self) -> None:
         self.gpu.target.clear(self.background)
 
-    def release(self):
+    def release(self) -> None:
         """Release GPU resources owned by this view."""
 
 
-class NativeScreenView(SceneView):
+class NativeScreenView[S: Scene](SceneView[S]):
     """A view that presents a fixed 640x480 original screen, centered and scaled to the window.
 
     The scale is snapped to an integer so every original-game pixel is blown up by a whole
@@ -41,7 +52,7 @@ class NativeScreenView(SceneView):
 
     NATIVE_SIZE = (640, 480)
 
-    def _layout(self):
+    def _layout(self) -> tuple[float, float, float]:
         screen_width, screen_height = self.gpu.target.size
         native_width, native_height = self.NATIVE_SIZE
         exact = min(screen_width / native_width, screen_height / native_height)
@@ -57,18 +68,18 @@ class NativeScreenView(SceneView):
                 (screen_height - native_height * scale) / 2, scale)
 
 
-class PlaceholderView(SceneView):
+class PlaceholderView(SceneView[Scene]):
     """Names a scene whose real presentation is not implemented yet."""
 
-    def __init__(self, gpu, scene, options=None, hint=""):
+    def __init__(self, gpu: Gpu, scene: Scene, options: dict[str, Any] | None = None, hint: str = "") -> None:
         super().__init__(gpu, scene, options)
         self.label = gpu.text((720, 120), gpu.title_font, background=None)
         self.label.set_lines((type(scene).__name__, hint))
 
-    def draw(self):
+    def draw(self) -> None:
         super().draw()
         (width, height), (text_width, text_height) = self.gpu.target.size, self.label.text_size
         self.label.draw((width - text_width) // 2, (height - text_height) // 2)
 
-    def release(self):
+    def release(self) -> None:
         self.label.release()

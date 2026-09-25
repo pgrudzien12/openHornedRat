@@ -1,8 +1,12 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Runtime main loop: window, fixed-step scene updates, input, drawing and the debug overlay."""
 
 import os
+from collections.abc import Sequence
+from os import PathLike
 from pathlib import Path
 import time
+from typing import Any
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
@@ -17,8 +21,9 @@ from ..clock import FixedStepClock  # noqa: E402
 from ..engine import DEFAULT_SEED  # noqa: E402
 from ..game import scene_context  # noqa: E402
 from ..glue_scene import GlueScene  # noqa: E402
-from ..scenes import SceneMachine  # noqa: E402
+from ..scenes import Scene, SceneMachine  # noqa: E402
 from .gpu import Gpu  # noqa: E402
+from .scene_view import SceneView  # noqa: E402
 from .views import view_for  # noqa: E402
 
 # Scene time advances in fixed 10 ms steps; the battle simulation groups them into its own 100 ms ticks.
@@ -30,7 +35,7 @@ WINDOW_TITLE = "openHornedRat"
 FADE_SECONDS = 0.3  # short fade-in from black after every scene switch
 
 
-def open_window(size, hidden=False):
+def open_window(size: tuple[int, int], hidden: bool = False) -> zengl.Context:
     """Open an OpenGL 3.3 core window and return its zengl context."""
     pygame.init()
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
@@ -49,11 +54,12 @@ def open_window(size, hidden=False):
 class FrameRate:
     """Frames per second measured over short wall-clock windows."""
 
-    def __init__(self, window=0.5):
+    def __init__(self, window: float = 0.5) -> None:
         self.window, self.value = window, 0.0
-        self._start, self._frames = None, 0
+        self._start: float | None = None
+        self._frames = 0
 
-    def frame(self, now):
+    def frame(self, now: float) -> None:
         if self._start is None:
             self._start = now
         self._frames += 1
@@ -62,9 +68,12 @@ class FrameRate:
             self._start, self._frames = now, 0
 
 
-def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=None, screenshot=None,
-        frame_time=None, battle=None, camera=None, log_dir=None, seed=DEFAULT_SEED, glue_program=None,
-        save_dir=None, no_battle=False, campaign_log_dir=None):
+def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), skip_intro: bool = False,
+        hidden: bool = False, frames: int | None = None, screenshot: str | PathLike[str] | None = None,
+        frame_time: float | None = None, battle: str | None = None, camera: Sequence[float] | None = None,
+        log_dir: str | PathLike[str] | None = None, seed: int = DEFAULT_SEED, glue_program: str | None = None,
+        save_dir: str | PathLike[str] | None = None, no_battle: bool = False,
+        campaign_log_dir: str | PathLike[str] | None = None) -> dict[str, Any]:
     """Run the game until the window closes, or for ``frames`` frames when given.
 
     ``frame_time`` replaces the measured wall-clock frame duration, so a capture after a number of frames
@@ -86,7 +95,7 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
         # and should not play audio through the machine's real device while running unattended.
         os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     context = scene_context(installation, save_dir=save_dir, no_battle=no_battle)
-    campaign_log = None
+    campaign_log: campaign_log_module.CampaignLogger | None = None
     if campaign_log_dir is not None:
         campaign_log = campaign_log_module.CampaignLogger(campaign_log_module.default_log_path(campaign_log_dir))
         context.campaign_log = campaign_log
@@ -97,18 +106,18 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
     gpu = Gpu(ctx, size)
     # Wider debug overlay; unrelated to the battle HUD.
     overlay = gpu.text((820, 140))
-    initial = (GlueScene(glue_program) if glue_program else
+    initial: Scene = (GlueScene(glue_program) if glue_program else
                BattleScene(AssetId("vanilla", "battle", Path(battle).stem.casefold()), log_dir=log_dir, seed=seed)
                if battle else OpeningNarrationScene(log_dir=log_dir, seed=seed))
     machine = SceneMachine(initial, context)
-    options = {"camera": camera, "installation": context.locator.installation}
+    options: dict[str, Any] = {"camera": camera, "installation": context.locator.installation}
     view = view_for(gpu, machine.active, options)
     clock = FixedStepClock(FIXED_STEP, MAX_STEPS_PER_FRAME)
     rate = FrameRate()
     limiter = pygame.time.Clock()
     fade_remaining = FADE_SECONDS  # fade in from black on the initial scene too
 
-    def synchronise(current):
+    def synchronise(current: SceneView[Any]) -> SceneView[Any]:
         nonlocal fade_remaining
         if current.scene is machine.active:
             return current
@@ -139,8 +148,7 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
                 for scene_event in view.events(event):
                     machine.handle(scene_event)
                     view = synchronise(view)
-                    if hasattr(view, "refresh"):
-                        view.refresh()
+                    view.refresh()
                     if machine.quit is not None:
                         running = False
 
@@ -148,8 +156,7 @@ def run(installation, size=(1280, 800), skip_intro=False, hidden=False, frames=N
             for _ in range(clock.advance(seconds)):
                 machine.update(clock.step)
                 view = synchronise(view)
-                if hasattr(view, "refresh"):
-                    view.refresh()
+                view.refresh()
                 if machine.quit is not None:
                     running = False
             if running:

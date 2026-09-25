@@ -1,15 +1,21 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Data-driven presentation of a campaign briefing glue script."""
+
+from collections.abc import Iterator, Sequence
+from typing import Any
 
 import pygame
 
-from ..controlpanel import button_y, control_panel
+from ..campaign_scenes import BriefingScene
+from ..controlpanel import ControlPanel, button_y, control_panel
+from ..scenes import SceneEvent
 from .bitmap_font import BitmapFont
-from .gpu import ScreenQuad
+from .gpu import Gpu, ScreenQuad, TextLabel
 from .glue_bitmap import TENT_POSITIONS, bitmap_frame_name, load_bitmap
 from .scene_view import SceneView
 
 
-COLORS = {"red": (220, 30, 30), "green": (40, 180, 60), "black": (0, 0, 0)}
+COLORS: dict[str, tuple[int, int, int]] = {"red": (220, 30, 30), "green": (40, 180, 60), "black": (0, 0, 0)}
 # These are glue-renderer rules, not per-briefing content; see
 # notes/briefing_dialogue.md §3.3.  The map window supplies its dimensions.
 DIALOGUE_FONT_SLOT = 4
@@ -19,9 +25,11 @@ DIALOGUE_BOTTOM_BASELINE = 1.5
 DIALOGUE_LINE_SPACING = 1.10
 
 
-def _wrap(font, text, width):
+def _wrap(font: BitmapFont, text: str, width: int) -> list[str]:
     """Wrap one queued BRTXT sentence into the script's two-line caption area."""
-    words, lines, current = text.split(), [], ""
+    words = text.split()
+    lines: list[str] = []
+    current = ""
     for word in words:
         candidate = f"{current} {word}".strip()
         if not current or font.size(candidate)[0] <= width:
@@ -34,7 +42,11 @@ def _wrap(font, text, width):
     return lines
 
 
-class BriefingView(SceneView):
+Spec = dict[str, Any]  # one glue [BITMAP]/[TEXT] record of the briefing map window
+PortraitPanel = tuple[dict[str, Any], ScreenQuad | None, ControlPanel, dict[str, ScreenQuad], list[TextLabel]]
+
+
+class BriefingView(SceneView[BriefingScene]):
     """Render the map, overlays and speakers opened by one briefing script.
 
     Portrait artwork is selected by the verified glue index table.
@@ -44,21 +56,22 @@ class BriefingView(SceneView):
     PORTRAIT_ORIGIN = (12, 12)
     PANEL_ORIGIN = (4, 164)
 
-    def __init__(self, gpu, scene, options=None):
+    def __init__(self, gpu: Gpu, scene: BriefingScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
         self.font = BitmapFont(scene.font)  # glue slot 4: speech subtitles, 22 px native
         self.ui_font = BitmapFont(scene.ui_font)  # glue slot 2: map labels and panel buttons, 12 px native
         layout = scene.briefing
-        self.map_ui = layout.get("map")
+        map_ui: dict[str, Any] | None = layout.get("map")
+        self.map_ui = map_ui
         # Minimal transcript fixtures retain the previous, text-only display.
-        self.transcript_only = self.map_ui is None
-        if self.transcript_only:
+        self.transcript_only = map_ui is None
+        if map_ui is None:
             self.title = gpu.text((900, 24), self.font, background=None)
             self.title.set_lines((layout["title"],))
             self.body = gpu.text((900, 480), self.font, background=None)
             self.body.set_lines(tuple(line["text"] for line in layout["lines"]))
             return
-        position = self.map_ui["position"]
+        position = map_ui["position"]
         self.native_size = (position["vx"], position["vy"])
         self.dialogue_width = round(self.native_size[0] * DIALOGUE_WIDTH)
         self.dialogue_left = round(self.native_size[0] * DIALOGUE_LEFT_MARGIN)
@@ -69,8 +82,8 @@ class BriefingView(SceneView):
         self.map = self._quad("MAP")
         self.overlays = [(self._quad(bitmap_frame_name(spec), True), spec, after) for spec, after in self._bitmap_specs()]
         self.portraits = [self._portrait(window) for window in layout.get("portraits", ())]
-        self.map_labels = []
-        for spec in self.map_ui["texts"]:
+        self.map_labels: list[tuple[TextLabel, Spec]] = []
+        for spec in map_ui["texts"]:
             if spec.get("text"):
                 # This is declared by the map resource.  The current campaign
                 # maps all select slot 2; fail visibly rather than silently
@@ -87,9 +100,11 @@ class BriefingView(SceneView):
         self.dialogue = gpu.text((self.dialogue_width, self.dialogue_height), self.font, background=None, padding=0)
         self._set_dialogue()
 
-    def _bitmap_specs(self):
+    def _bitmap_specs(self) -> Iterator[tuple[Spec, int]]:
         # The map window includes title/crosses. Animated objects accumulate as
         # the script reaches them, so only show ones after completed turns.
+        if self.map_ui is None:
+            return
         for spec in self.map_ui["bitmaps"]:
             yield spec, 0
         for object_ in self.scene.briefing.get("objects", ()):
@@ -102,7 +117,9 @@ class BriefingView(SceneView):
                     spec["x"], spec["y"] = TENT_POSITIONS[tentpos or 0]
                 yield spec, object_["after_turn"]
 
-    def _quad(self, name, colorkey=False):
+    def _quad(self, name: str, colorkey: bool = False) -> ScreenQuad:
+        if self.scene.content is None:
+            raise RuntimeError("the briefing scene has not been entered")
         surface = load_bitmap(self.scene.content, name)
         if colorkey:
             surface = surface.convert()
@@ -112,9 +129,11 @@ class BriefingView(SceneView):
         quad.write(pygame.image.tobytes(surface, "RGBA"))
         return quad
 
-    def _portrait(self, window):
-        portrait = None
+    def _portrait(self, window: dict[str, Any]) -> PortraitPanel:
+        portrait: ScreenQuad | None = None
         try:
+            if self.scene.content is None:
+                raise FileNotFoundError("no glue content")
             width, height, rgba = self.scene.content.portrait_data(window["index"], window["bkindex"])
             portrait = ScreenQuad(self.gpu, (width, height))
             portrait.write(rgba)
@@ -122,7 +141,7 @@ class BriefingView(SceneView):
             pass
         panel = control_panel(window.get("controlpanel", 0))
         frame = {name: self._quad(name, True) for name in ("FRAMETOP", "FRAMELEFT", "FRAMERIGHT", panel.bitmap)}
-        labels = []
+        labels: list[TextLabel] = []
         for label_id in panel.labels:
             label = self.gpu.text((119, 12), self.ui_font, color=(0, 0, 0), background=None,
                                   padding=0, align="center", fixed_width=True)
@@ -130,13 +149,13 @@ class BriefingView(SceneView):
             labels.append(label)
         return window, portrait, panel, frame, labels
 
-    def _layout(self):
+    def _layout(self) -> tuple[float, float, float]:
         width, height = self.gpu.target.size
         native_width, native_height = self.native_size
         scale = min(width / native_width, height / native_height)
         return (width - native_width * scale) / 2, (height - native_height * scale) / 2, scale
 
-    def _set_dialogue(self):
+    def _set_dialogue(self) -> None:
         turns = self.scene.briefing.get("turns", ())
         if not turns or self.scene.dialogue_finished:
             self.dialogue.set_lines(())
@@ -146,7 +165,7 @@ class BriefingView(SceneView):
         text = turn["lines"][0][:self.scene.characters_visible]
         self.dialogue.set_lines(_wrap(self.font, text, self.dialogue_width))
 
-    def events(self, event):
+    def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             action = self._panel_action(event.pos)
             if action:
@@ -155,7 +174,7 @@ class BriefingView(SceneView):
             return ("fast_forward_dialogue",)
         return ()
 
-    def _panel_action(self, pos):
+    def _panel_action(self, pos: Sequence[float]) -> str | None:
         if self.transcript_only:
             return None
         left, top, scale = self._layout()
@@ -167,11 +186,11 @@ class BriefingView(SceneView):
                     return action
         return None
 
-    def status(self):
+    def status(self) -> Sequence[str]:
         turns = self.scene.briefing.get("turns", ())
         return (f"briefing {self.scene.battle_id}, dialogue {min(self.scene.turn_index + 1, len(turns))}/{len(turns)}",)
 
-    def draw(self):
+    def draw(self) -> None:
         super().draw()
         if self.transcript_only:
             width, _ = self.gpu.target.size
@@ -202,7 +221,7 @@ class BriefingView(SceneView):
         self.dialogue.draw(left + self.dialogue_left * scale, top + self.dialogue_top * scale,
                            self.dialogue_width * scale, self.dialogue_height * scale)
 
-    def release(self):
+    def release(self) -> None:
         if self.transcript_only:
             self.title.release(); self.body.release()
             return

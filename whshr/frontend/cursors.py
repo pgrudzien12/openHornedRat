@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Runtime decoder for the game's own Win32 cursor resources (never substitute copied artwork).
 
 Two sources are used across the front-end: ``WHSHR.EXE``'s named cursor groups
@@ -6,36 +7,38 @@ cursor groups, IDs 100-103 (``notes/pe_resources.md``, ``notes/game_rules.md`` "
 """
 
 import struct
+from typing import Any
 
 import pygame
 
 from ..legacy import module
+from ..paths import Installation
 
 
 class GameCursors:
     """Loads and caches cursors from one PE file's ``RT_GROUP_CURSOR`` resources, by name or by
     numeric group ID."""
 
-    def __init__(self, installation, dll="WHSHR.EXE"):
+    def __init__(self, installation: Installation, dll: str = "WHSHR.EXE") -> None:
         self.installation = installation
         self.dll = dll
-        self._cursors = {}
-        self._resources = None
+        self._cursors: dict[str | int, pygame.cursors.Cursor | bool] = {}
+        self._resources: tuple[tuple[Any, ...], Any] | None = None
 
-    def set(self, key):
+    def set(self, key: str | int) -> None:
         if key not in self._cursors:
             try:
                 self._cursors[key] = self._load(key)
             except (FileNotFoundError, IndexError, OSError, StopIteration, ValueError, struct.error, pygame.error):
                 self._cursors[key] = False
         cursor = self._cursors[key]
-        if cursor:
+        if isinstance(cursor, pygame.cursors.Cursor):
             try:
                 pygame.mouse.set_cursor(cursor)
             except pygame.error:
                 pass
 
-    def _load(self, key):
+    def _load(self, key: str | int) -> pygame.cursors.Cursor:
         if self._resources is None:
             # WHSHR.EXE is the game's main executable, at the installation root; every other
             # resource DLL (GMCUR.DLL included) lives under FILE/DLL (whshr.paths.Installation;
@@ -58,7 +61,7 @@ class GameCursors:
         return _cursor_from_dib(image.data(cursor))
 
 
-def _cursor_from_dib(data):
+def _cursor_from_dib(data: bytes) -> pygame.cursors.Cursor:
     """Convert a Win32 monochrome cursor resource to pygame's colour-cursor form."""
     hotspot_x, hotspot_y = struct.unpack_from("<HH", data)
     data = data[4:]

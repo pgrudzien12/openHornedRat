@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Battle HUD: the 640x480 screen's command panel, minimap and selected-unit readout.
 
 Layout source: notes/game_rules.md "Battle HUD layout" (windows, fixed buttons, command
@@ -15,12 +16,23 @@ orders the engine can actually carry out.
 """
 
 import math
+from collections.abc import Iterator, Sequence
+from typing import TYPE_CHECKING, Any
 
 import pygame
 
-from ..battlefield import WORLD_PER_MESH
+from ..battlefield import WORLD_PER_MESH, Battlefield, SpriteFrame, SpriteSheet
 from ..rules import Side
-from .gpu import ScreenQuad
+from .gpu import Gpu, ScreenQuad
+
+if TYPE_CHECKING:
+    from ..camera import BattleCamera
+    from ..engine import Battle, Regiment
+
+Point = tuple[int, int]
+Size = tuple[int, int]
+Rect4 = tuple[int, int, int, int]
+Tint = tuple[float, float, float, float]
 
 # Documented for completeness; battle_view.py's 3D pipeline does not yet clip its viewport to this
 # rect (it renders full-screen, with the HUD's own chrome simply drawn over it).
@@ -34,7 +46,7 @@ COMMAND_SUBWINDOW = (492, 0, 148, 175)
 READOUT_RECT = (72, 0, 128, 177)
 
 # Fixed buttons: name -> (position relative to the panel, raised/pressed frame pair, size).
-FIXED_BUTTONS = {
+FIXED_BUTTONS: dict[str, tuple[Point, tuple[int, int], Size]] = {
     "camera_rotate": ((11, 8), (42, 43), (52, 52)),
     "camera_zoom": ((11, 63), (44, 45), (52, 52)),
     "options": ((448, 13), (58, 59), (44, 44)),
@@ -51,14 +63,14 @@ FIXED_BUTTONS = {
 }
 # The pause/resume button at (11, 118) changes frame pair by context; it is not in FIXED_BUTTONS.
 PAUSE_POS, PAUSE_SIZE = (11, 118), (52, 52)
-PAUSE_FRAMES = {"battle": (46, 47), "deployment": (48, 49), "paused": (50, 51)}
+PAUSE_FRAMES: dict[str, tuple[int, int]] = {"battle": (46, 47), "deployment": (48, 49), "paused": (50, 51)}
 
 # Command sub-window: 5 slots relative to COMMAND_SUBWINDOW's own origin, each 60x60.
-SLOT_POSITIONS = {"TL": (7, 11), "TR": (83, 11), "BR": (83, 109), "BL": (7, 109), "C": (45, 60)}
+SLOT_POSITIONS: dict[str, Point] = {"TL": (7, 11), "TR": (83, 11), "BR": (83, 109), "BL": (7, 109), "C": (45, 60)}
 SLOT_SIZE = (60, 60)
 
 # Command button frames: raised/pressed pair (a single-frame decoration repeats its own index).
-COMMAND_FRAMES = {
+COMMAND_FRAMES: dict[str, tuple[int, int]] = {
     "move": (0, 1), "attack": (2, 3), "fire": (4, 5), "magic": (6, 7), "items": (8, 9),
     "back": (10, 11), "turn_right": (12, 13), "turn_left": (14, 15), "about_face": (16, 17),
     "ranks_subset": (18, 19), "ranks_up": (20, 21), "ranks_down": (22, 23),
@@ -68,17 +80,17 @@ COMMAND_FRAMES = {
 }
 # Commands whshr.engine.Battle can actually carry out today; everything else in COMMAND_FRAMES
 # renders (and, where it is a set-entry button, still navigates the panel) but is disabled.
-ORDER_SUPPORTED = {"move", "attack", "halt", "ranks_up", "ranks_down",
+ORDER_SUPPORTED: set[str] = {"move", "attack", "halt", "ranks_up", "ranks_down",
                    "turn_left", "turn_right", "about_face", "face_point"}
 # Buttons that only change which sub-panel is shown (pure HUD state, always clickable when present).
-SET_ENTRY = {"move": "move", "attack": "attack", "ranks_subset": "ranks", "facing_subset": "facing",
+SET_ENTRY: dict[str, str] = {"move": "move", "attack": "attack", "ranks_subset": "ranks", "facing_subset": "facing",
             "back": "idle"}
 
 CLASSES = ("inf", "arch", "art", "wiz", "mon")
-PANEL_LAYOUT = {}
+PANEL_LAYOUT: dict[tuple[str, str | None], dict[str, str]] = {}
 
 
-def _set(state, classes, **slots):
+def _set(state: str, classes: Sequence[str], **slots: str) -> None:
     for unit_class in classes:
         PANEL_LAYOUT[(state, unit_class)] = dict(slots)
 
@@ -122,10 +134,10 @@ _set("deployment", ("art",), BR="independent")
 _set("charging", CLASSES)  # none
 
 # Minimap (relative to MINIMAP_RECT's own origin).
-MINIMAP_LAYERS = (("101", (0, 0), (216, 16)), ("102", (0, 16), (16, 216)), ("103", (200, 16), (16, 216)),
+MINIMAP_LAYERS: tuple[tuple[str, Point, Size], ...] = (("101", (0, 0), (216, 16)), ("102", (0, 16), (16, 216)), ("103", (200, 16), (16, 216)),
                   ("104", (0, 233), (216, 64)))
 MAP_AREA_RECT = (16, 17, 184, 216)
-MINIMAP_TABS = (((63, 241), (72, 73)), ((110, 241), (74, 75)), ((63, 264), (76, 77)), ((110, 264), (78, 79)))
+MINIMAP_TABS: tuple[tuple[Point, tuple[int, int]], ...] = (((63, 241), (72, 73)), ((110, 241), (74, 75)), ((63, 264), (76, 77)), ((110, 264), (78, 79)))
 MINIMAP_TAB_SIZE = (44, 20)
 MINIMAP_BOOK_POS, MINIMAP_BOOK_FRAMES, MINIMAP_BOOK_SIZE = (162, 242), (80, 81), (40, 40)
 # Tab-to-mode order is not confirmed (notes/game_rules.md marks it 🟡); this assumes the tabs
@@ -140,7 +152,7 @@ CAMERA_MARKER_FRAMES = tuple(range(170, 178))
 CAMERA_TARGET_FRAME = 178  # small "x", the ICONS frame right after the 8 camera-marker frames
 # Regiment dot base frame per (fighting-or-charging, side); add the 0-7 facing index. Broken adds
 # the same offset from its own base.
-DOT_BASE = {
+DOT_BASE: dict[tuple[str, bool], int] = {
     ("fighting", True): 119, ("fighting", False): 111,
     ("normal", True): 135, ("normal", False): 127,
     ("broken", True): 151, ("broken", False): 143,
@@ -153,7 +165,7 @@ LOG_RECT = (200, 8, 223, 51)
 # Unit info panel: below the log, left of the toggle buttons at (337, 66).
 UNIT_INFO_RECT = (204, 71, 128, 36)
 
-HUD_CLASS_NAMES = {
+HUD_CLASS_NAMES: dict[str, str] = {
     "inf": "Infantry", "arch": "Archers", "art": "Artillery",
     "wiz": "Wizard", "mon": "Monster",
 }
@@ -161,7 +173,7 @@ HUD_CLASS_NAMES = {
 BLACK = (0, 0, 0)
 
 
-def frame_rgba(frame, palette):
+def frame_rgba(frame: SpriteFrame, palette: Sequence[tuple[int, int, int]]) -> bytes:
     """Convert a decoded indexed frame to top-down RGBA for a ScreenQuad."""
     rgba = bytearray(frame.width * frame.height * 4)
     for offset, index in enumerate(frame.pixels):
@@ -172,36 +184,41 @@ def frame_rgba(frame, palette):
 class Hud:
     """Battle chrome built from the installation's ICONS sheet and the field's portrait/plan-map art."""
 
-    def __init__(self, gpu, field):
+    def __init__(self, gpu: Gpu, field: Battlefield) -> None:
         self.gpu, self.field = gpu, field
         self.icons = self._sheet("icons")
         self.panel_bg = self._quad(self.icons, PANEL_BG_FRAME)
         self.portrait_bg = self._sheet(field.script["field"].get("portrait_bg"))
         self.portrait_bg_quad = self._quad(self.portrait_bg, 0)
         self.planmap = self._sheet(field.script["field"].get("planmap"))
-        self._icon_cache = {}  # ICONS frame index -> ScreenQuad, built lazily and kept for the view's life
-        self._sheet_frame_cache = {}  # id(frame) -> ScreenQuad, for portrait/banner/plan-map frames outside ICONS
+        self._icon_cache: dict[int, ScreenQuad | None] = {}  # ICONS frame index -> ScreenQuad, built lazily and kept for the view's life
+        self._sheet_frame_cache: dict[int, ScreenQuad] = {}  # id(frame) -> ScreenQuad, for portrait/banner/plan-map frames outside ICONS
         self.minimap_layers = {index: self._icon(int(index)) for index, _pos, _size in MINIMAP_LAYERS}
         self.compass_quads = tuple(self._icon(f) for f in COMPASS_FRAMES)
-        self.selected = None
-        self.battle = None
+        self.selected: str | None = None
+        self.battle: Battle | None = None
         self.marker_mode = 0
         self.panel_set = "idle"  # HUD-local sub-panel navigation: idle/move/ranks/facing/attack
-        self.pending_order = None  # "move" or "attack": next battlefield/minimap click issues it
-        self._draw_size = None
+        self.pending_order: str | None = None  # "move" or "attack": next battlefield/minimap click issues it
+        self._draw_size: Size | None = None
         # Name of the fixed button or command held down, for its pressed art; hit_test()'s return
         # value (fixed-button names and command names never collide).
-        self.pressed = None
-        self._marker_order = []
-        self._log_panel = None
-        self._unit_info_panel = None
+        self.pressed: str | None = None
+        self._marker_order: list[str] = []
+        self._log_panel: Any = None
+        self._unit_info_panel: Any = None
 
-    def _scale(self):
+    def _size(self) -> Size:
+        if self._draw_size is None:
+            raise RuntimeError("the HUD has not been drawn yet")
+        return self._draw_size
+
+    def _scale(self) -> float:
         """The same integer-snap scale NativeScreenView._layout() uses (scene_view.py), applied to
         this HUD's native 640x480 design size. BattleView renders its 3D scene at full window
         resolution rather than through that native-screen letterboxing, but the HUD chrome itself
         is designed at the original's fixed 640x480, so its own pieces need scaling independently."""
-        screen_width, screen_height = self._draw_size
+        screen_width, screen_height = self._size()
         native_width, native_height = 640, 480
         exact = min(screen_width / native_width, screen_height / native_height)
         scale = max(1, round(exact))
@@ -211,43 +228,44 @@ class Hud:
             scale = exact
         return scale
 
-    def _panel_screen_origin(self):
+    def _panel_screen_origin(self) -> tuple[float, float, float]:
         """(left, top, scale) placing the command panel's own (0, 0) on screen, pinned to the
         bottom of the actual window and centered horizontally - not assuming the window itself is
         640x480, per the user's report that a centered 640x480 letterbox left the panel and
         minimap stranded in the middle of a larger window instead of hugging its edges."""
         scale = self._scale()
-        screen_width, screen_height = self._draw_size
+        screen_width, screen_height = self._size()
         panel_width, panel_height = PANEL_RECT[2] * scale, PANEL_RECT[3] * scale
         return (screen_width - panel_width) / 2, screen_height - panel_height, scale
 
-    def _minimap_screen_origin(self):
+    def _minimap_screen_origin(self) -> tuple[float, float, float]:
         """(left, top, scale) placing the minimap's own (0, 0) on screen, pinned to the top-right
         corner of the actual window (keeping the original's own top inset)."""
         scale = self._scale()
-        screen_width, _screen_height = self._draw_size
+        screen_width, _screen_height = self._size()
         return screen_width - MINIMAP_RECT[2] * scale, MINIMAP_RECT[1] * scale, scale
 
-    def _panel_screen_rect(self):
+    def _panel_screen_rect(self) -> pygame.Rect:
         left, top, scale = self._panel_screen_origin()
         return pygame.Rect(left, top, PANEL_RECT[2] * scale, PANEL_RECT[3] * scale)
 
-    def _minimap_screen_rect(self):
+    def _minimap_screen_rect(self) -> pygame.Rect:
         left, top, scale = self._minimap_screen_origin()
         return pygame.Rect(left, top, MINIMAP_RECT[2] * scale, MINIMAP_RECT[3] * scale)
 
-    def _native_panel_point(self, pos):
+    def _native_panel_point(self, pos: Sequence[float]) -> tuple[float, float]:
         """A raw window pixel converted into the command panel's own native-space coordinates."""
         left, top, scale = self._panel_screen_origin()
         return ((pos[0] - left) / scale, (pos[1] - top) / scale)
 
-    def _native_map_point(self, pos):
+    def _native_map_point(self, pos: Sequence[float]) -> tuple[float, float]:
         """A raw window pixel converted into the minimap's own native-space coordinates."""
         left, top, scale = self._minimap_screen_origin()
         return ((pos[0] - left) / scale, (pos[1] - top) / scale)
 
     @staticmethod
-    def _draw_at(origin, quad, x, y, w=None, h=None, **kwargs):
+    def _draw_at(origin: tuple[float, float, float], quad: ScreenQuad | None, x: float, y: float,
+                 w: float | None = None, h: float | None = None, **kwargs: Any) -> None:
         if quad is None:
             return
         left, top, scale = origin
@@ -255,18 +273,20 @@ class Hud:
         h = quad.size[1] if h is None else h
         quad.draw(left + x * scale, top + y * scale, w * scale, h * scale, **kwargs)
 
-    def _draw_panel(self, quad, x, y, w=None, h=None, **kwargs):
+    def _draw_panel(self, quad: ScreenQuad | None, x: float, y: float, w: float | None = None,
+                    h: float | None = None, **kwargs: Any) -> None:
         """Draw one quad at a panel-native (x, y[, w, h]) rect, scaled onto the actual window."""
         self._draw_at(self._panel_screen_origin(), quad, x, y, w, h, **kwargs)
 
-    def _draw_map(self, quad, x, y, w=None, h=None, **kwargs):
+    def _draw_map(self, quad: ScreenQuad | None, x: float, y: float, w: float | None = None,
+                  h: float | None = None, **kwargs: Any) -> None:
         """Draw one quad at a minimap-native (x, y[, w, h]) rect, scaled onto the actual window."""
         self._draw_at(self._minimap_screen_origin(), quad, x, y, w, h, **kwargs)
 
-    def _sheet(self, name):
+    def _sheet(self, name: str | None) -> SpriteSheet | None:
         return self.field.ui_sheets.get(name.casefold()) if name else None
 
-    def _quad(self, sheet, index):
+    def _quad(self, sheet: SpriteSheet | None, index: int) -> ScreenQuad | None:
         if sheet is None or index >= len(sheet.frames):
             return None
         frame = sheet.frames[index]
@@ -274,7 +294,7 @@ class Hud:
         quad.write(frame_rgba(frame, self.field.palette))
         return quad
 
-    def _icon(self, frame_index):
+    def _icon(self, frame_index: int) -> ScreenQuad | None:
         """A cached ICONS-sheet quad. Built once per frame index and reused: every draw()-time
         caller needs this cache, since a fresh ScreenQuad recreates a GPU texture (the earlier
         cause of a severe FPS drop when a similar mistake was made in troop_selection_view.py)."""
@@ -282,7 +302,7 @@ class Hud:
             self._icon_cache[frame_index] = self._quad(self.icons, frame_index)
         return self._icon_cache[frame_index]
 
-    def _sheet_frame_quad(self, frame):
+    def _sheet_frame_quad(self, frame: SpriteFrame) -> ScreenQuad:
         key = id(frame)
         quad = self._sheet_frame_cache.get(key)
         if quad is None:
@@ -293,7 +313,7 @@ class Hud:
 
     # ------------------------------------------------------------------ selection and panel state
 
-    def set_selected(self, regiment_id):
+    def set_selected(self, regiment_id: str | None) -> None:
         """Select a regiment and rebuild only its portrait/ornament art when it changes."""
         if regiment_id == self.selected:
             return
@@ -303,23 +323,23 @@ class Hud:
         if regiment_id is not None:
             self._promote_marker(regiment_id)
 
-    def set_portrait(self, regiment_id):
+    def set_portrait(self, regiment_id: str | None) -> None:
         """Compatibility name for selecting the HUD regiment."""
         self.set_selected(regiment_id)
 
-    def bind_battle(self, battle):
+    def bind_battle(self, battle: "Battle") -> None:
         self.battle = battle
 
-    def _regiment(self, identifier):
-        return self.battle.regiments.get(identifier) if self.battle is not None else None
+    def _regiment(self, identifier: str | None) -> "Regiment | None":
+        return self.battle.regiments.get(identifier) if self.battle is not None and identifier is not None else None
 
-    def _caster(self, regiment):
+    def _caster(self, regiment: "Regiment") -> bool:
         # notes/game_rules.md's attack/melee "caster" variant depends on the unit carrying spells or
         # items; whshr.engine.Regiment models neither (no magic/item system yet), so this is always
         # the non-caster variant, a documented simplification rather than a guess at unmodelled data.
         return False
 
-    def panel_state(self):
+    def panel_state(self) -> tuple[str | None, str | None]:
         """(state, unit_class) selecting a row of PANEL_LAYOUT, per notes/game_rules.md."""
         regiment = self._regiment(self.selected)
         if regiment is None:
@@ -340,13 +360,13 @@ class Hud:
             return ("attack_caster" if self._caster(regiment) else "attack_noncaster"), unit_class
         return self.panel_set, unit_class
 
-    def slots(self):
+    def slots(self) -> dict[str, str]:
         state, unit_class = self.panel_state()
         if state is None:
             return {}
         return PANEL_LAYOUT.get((state, unit_class), {})
 
-    def _button_enabled(self, name, regiment):
+    def _button_enabled(self, name: str, regiment: "Regiment | None") -> bool:
         if name not in ORDER_SUPPORTED and name not in SET_ENTRY:
             return False  # rendered per spec, but nothing in the engine can carry it out yet
         if name == "back":
@@ -359,42 +379,42 @@ class Hud:
 
     # ------------------------------------------------------------------ hit testing
 
-    def _fixed_button_rects(self):
+    def _fixed_button_rects(self) -> Iterator[tuple[str, pygame.Rect]]:
         for name, (pos, _frames, size) in FIXED_BUTTONS.items():
             yield name, pygame.Rect(pos[0], pos[1], *size)
         yield "pause", pygame.Rect(PAUSE_POS[0], PAUSE_POS[1], *PAUSE_SIZE)
 
-    def _slot_rects(self):
+    def _slot_rects(self) -> Iterator[tuple[str, pygame.Rect]]:
         sub_x, sub_y = COMMAND_SUBWINDOW[0], COMMAND_SUBWINDOW[1]
         for slot, (x, y) in SLOT_POSITIONS.items():
             yield slot, pygame.Rect(sub_x + x, sub_y + y, *SLOT_SIZE)
 
-    def occupies(self, pos):
+    def occupies(self, pos: Sequence[float]) -> bool:
         """Whether *pos* lands on any HUD chrome, including non-actionable pixels."""
         if self._draw_size is None:
             return False
         return self._minimap_screen_rect().collidepoint(pos) or self._panel_screen_rect().collidepoint(pos)
 
-    def hit_test(self, pos):
+    def hit_test(self, pos: Sequence[float]) -> str | None:
         """Return an enabled semantic command under *pos* ("pause", a fixed-button name, or a
         command name), otherwise None."""
         if self._draw_size is None or not self._panel_screen_rect().collidepoint(pos):
             return None
-        pos = self._native_panel_point(pos)
+        native = self._native_panel_point(pos)
         for name, rect in self._fixed_button_rects():
-            if rect.collidepoint(pos):
+            if rect.collidepoint(native):
                 return name
         regiment = self._regiment(self.selected)
         slots = self.slots()
         for slot, rect in self._slot_rects():
-            if rect.collidepoint(pos) and slot in slots and self._button_enabled(slots[slot], regiment):
+            if rect.collidepoint(native) and slot in slots and self._button_enabled(slots[slot], regiment):
                 return slots[slot]
         return None
 
-    def set_pressed(self, name):
+    def set_pressed(self, name: str | None) -> None:
         self.pressed = name
 
-    def press(self, name):
+    def press(self, name: str) -> str | None:
         """Apply a clicked command's panel-navigation effect; returns the order to issue, if any."""
         if name in SET_ENTRY:
             self.panel_set = SET_ENTRY[name]
@@ -407,62 +427,69 @@ class Hud:
             return name
         return None
 
-    def order_completed(self):
+    def order_completed(self) -> None:
         """Called once a pending move/attack order has actually been issued (a ground/minimap click)."""
         self.pending_order = None
         self.panel_set = "idle"
 
-    def set_log(self, entries):
+    def set_log(self, entries: Sequence[tuple[str, str]]) -> None:
         """Render (sender, message) pairs into the battle log panel (4 visible lines)."""
         if self._log_panel is None:
             self._log_panel = self.gpu.battle_log((LOG_RECT[2], LOG_RECT[3]), background=(0, 0, 0, 0))
         self._log_panel.set_entries(entries)
 
-    def set_unit_info(self, name, unit_class, models, max_models):
+    def set_unit_info(self, name: str | None, unit_class: str | None, models: int | None,
+                      max_models: int | None) -> None:
         """Render selected unit name, class and casualty count into the info panel."""
         if self._unit_info_panel is None:
             self._unit_info_panel = self.gpu.unit_info((UNIT_INFO_RECT[2], UNIT_INFO_RECT[3]), background=(0, 0, 0, 0))
-        class_name = HUD_CLASS_NAMES.get(unit_class, unit_class or "")
+        class_name = HUD_CLASS_NAMES.get(unit_class or "", unit_class or "")
         self._unit_info_panel.set_info(name, class_name, models, max_models)
 
     # ------------------------------------------------------------------ minimap
 
-    def _map_scale(self):
+    def _map_scale(self) -> Rect4:
         return MAP_AREA_RECT
 
-    def minimap_position(self, pos):
+    def minimap_position(self, pos: Sequence[float]) -> tuple[float, float] | None:
         """Convert a raw window pixel to BTS world coordinates, or return ``None`` off-map."""
         if (self._draw_size is None or not self.field.width or not self.field.height
                 or not self._minimap_screen_rect().collidepoint(pos)):
             return None
-        pos = self._native_map_point(pos)
+        native = self._native_map_point(pos)
         map_left, map_top, width, height = self._map_scale()
-        if not pygame.Rect(map_left, map_top, width, height).collidepoint(pos):
+        if not pygame.Rect(map_left, map_top, width, height).collidepoint(native):
             return None
-        x = (pos[0] - map_left) / (width - 1) * self.field.width
-        y = (1 - (pos[1] - map_top) / (height - 1)) * self.field.height
+        x = (native[0] - map_left) / (width - 1) * self.field.width
+        y = (1 - (native[1] - map_top) / (height - 1)) * self.field.height
         return (x, y)
 
-    def _world_to_map_pixel(self, x, y):
+    def _world_to_map_pixel(self, x: float, y: float) -> tuple[int, int]:
         map_left, map_top, width, height = self._map_scale()
         px = map_left + round(x / self.field.width * (width - 1))
         py = map_top + round((1 - y / self.field.height) * (height - 1))
         return px, py
 
-    def _minimap_marker(self, regiment):
+    def _minimap_marker(self, regiment: "Regiment") -> SpriteFrame | None:
         banner = self._sheet(regiment.banner)
         return banner.frames[1] if banner is not None and len(banner.frames) > 1 else None
 
-    def _minimap_regiments(self):
+    def _minimap_regiments(self) -> list["Regiment"]:
         """Active markers in persistent paint order; selecting a unit promotes it to the top."""
+        battle = self._battle()
         order = self._marker_order
-        identifiers = list(self.battle.regiments)
-        order[:] = [identifier for identifier in order if identifier in self.battle.regiments]
+        identifiers = list(battle.regiments)
+        order[:] = [identifier for identifier in order if identifier in battle.regiments]
         order.extend(identifier for identifier in identifiers if identifier not in order)
-        return [self.battle.regiments[identifier] for identifier in order
-                if self.battle.regiments[identifier].active]
+        return [battle.regiments[identifier] for identifier in order
+                if battle.regiments[identifier].active]
 
-    def _promote_marker(self, identifier):
+    def _battle(self) -> "Battle":
+        if self.battle is None:
+            raise RuntimeError("the HUD is not bound to a battle")
+        return self.battle
+
+    def _promote_marker(self, identifier: str) -> None:
         order = self._marker_order
         if self.battle is not None:
             order.extend(regiment_id for regiment_id in self.battle.regiments if regiment_id not in order)
@@ -470,7 +497,7 @@ class Hud:
             order.remove(identifier)
         order.append(identifier)
 
-    def _marker_hit(self, regiment, native):
+    def _marker_hit(self, regiment: "Regiment", native: Sequence[float]) -> bool:
         """Whether *native* (already minimap-local) lands on this regiment's dot or, when shown,
         its banner - the banner is hit over its own drawn rect, not just the dot underneath it,
         since it is the larger and more obvious target on screen."""
@@ -485,7 +512,7 @@ class Hud:
                     return True
         return False
 
-    def _marker_hits(self, pos):
+    def _marker_hits(self, pos: Sequence[float]) -> list["Regiment"] | None:
         """Regiments whose marker (dot or banner) covers the raw window pixel *pos*, in normal
         bottom-to-top paint order, or None if *pos* is not on the minimap at all."""
         if self.battle is None or self._draw_size is None or not self._minimap_screen_rect().collidepoint(pos):
@@ -493,7 +520,7 @@ class Hud:
         native = self._native_map_point(pos)
         return [regiment for regiment in self._minimap_regiments() if self._marker_hit(regiment, native)]
 
-    def minimap_regiment_at(self, pos):
+    def minimap_regiment_at(self, pos: Sequence[float]) -> str | None:
         """Return the active regiment a plain click at *pos* should select, or None if none is hit.
 
         Several markers (dots and/or banners) can overlap at one point - most often several
@@ -520,7 +547,7 @@ class Hud:
         pool = [regiment for regiment in others if regiment.side == Side.PLAYER] or others
         return pool[0].identifier if pool else top.identifier
 
-    def minimap_target_at(self, pos):
+    def minimap_target_at(self, pos: Sequence[float]) -> str | None:
         """Return the topmost active regiment at *pos*, ignoring current selection entirely - for
         resolving an order's target (Attack). Unlike a plain click (minimap_regiment_at()'s
         cycle-when-already-selected rule, meant for picking a unit to inspect or command),
@@ -531,20 +558,20 @@ class Hud:
         hits = self._marker_hits(pos)
         return hits[-1].identifier if hits else None
 
-    def click_minimap_tab(self, pos):
+    def click_minimap_tab(self, pos: Sequence[float]) -> bool:
         """Handle a click on a marker-display-mode tab or the book; returns True if one was hit."""
         if self._draw_size is None or not self._minimap_screen_rect().collidepoint(pos):
             return False
-        pos = self._native_map_point(pos)
+        native = self._native_map_point(pos)
         for index, ((x, y), _frames) in enumerate(MINIMAP_TABS):
             rect = pygame.Rect(x, y, *MINIMAP_TAB_SIZE)
-            if rect.collidepoint(pos):
+            if rect.collidepoint(native):
                 self.marker_mode = MARKER_MODES[index]
                 return True
         book_rect = pygame.Rect(MINIMAP_BOOK_POS[0], MINIMAP_BOOK_POS[1], *MINIMAP_BOOK_SIZE)
-        return bool(book_rect.collidepoint(pos))
+        return bool(book_rect.collidepoint(native))
 
-    def _regiment_dot_frame(self, regiment):
+    def _regiment_dot_frame(self, regiment: "Regiment") -> int:
         if regiment.in_melee or regiment.attack_target is not None:
             state = "fighting"
         elif regiment.routing:
@@ -556,7 +583,7 @@ class Hud:
         # falls back to the non-player set, same as an enemy.
         return DOT_BASE[(state, regiment.side == Side.PLAYER)] + facing
 
-    def _shows_banner(self, regiment):
+    def _shows_banner(self, regiment: "Regiment") -> bool:
         if self.marker_mode == 0:
             return True
         if self.marker_mode == 1:
@@ -565,7 +592,7 @@ class Hud:
             return regiment.side == Side.PLAYER
         return False  # mode 3: banners only in deployment, which this engine does not model yet
 
-    def _draw_minimap(self, regiment, camera=None):
+    def _draw_minimap(self, regiment: "Regiment | None", camera: "BattleCamera | None" = None) -> None:
         for index, position, _size in MINIMAP_LAYERS:
             self._draw_map(self.minimap_layers.get(index), position[0], position[1])
         if self.planmap and self.planmap.frames:
@@ -598,7 +625,7 @@ class Hud:
         self._draw_map(self._icon(MINIMAP_BOOK_FRAMES[0]), MINIMAP_BOOK_POS[0], MINIMAP_BOOK_POS[1],
                        *MINIMAP_BOOK_SIZE)
 
-    def _draw_regiment_marker(self, regiment):
+    def _draw_regiment_marker(self, regiment: "Regiment") -> None:
         px, py = self._world_to_map_pixel(regiment.x, regiment.y)
         selected = regiment.identifier == self.selected
         # notes/game_rules.md does not document a selection indicator on the minimap; the
@@ -617,7 +644,7 @@ class Hud:
 
     # ------------------------------------------------------------------ readout
 
-    def _readout_ornament_frames(self, regiment):
+    def _readout_ornament_frames(self, regiment: "Regiment | None") -> tuple[int, ...] | None:
         """notes/game_rules.md: 181-188 default, 189-196 enemy, 197-204 wizard/monster - which class
         bits actually pick the frame set is 🟡. PROVISIONAL: wizard/monster is checked ahead of
         enemy here (an enemy wizard/monster gets the wizard/monster set), an unconfirmed priority."""
@@ -631,7 +658,7 @@ class Hud:
             base = 181
         return tuple(range(base, base + 8))
 
-    def _draw_readout(self, regiment):
+    def _draw_readout(self, regiment: "Regiment | None") -> None:
         rx, ry = READOUT_RECT[0], READOUT_RECT[1]
         if regiment is None:
             for quad in self.compass_quads:
@@ -649,7 +676,7 @@ class Hud:
 
     # ------------------------------------------------------------------ draw
 
-    def draw(self, width, height, camera=None):
+    def draw(self, width: int, height: int, camera: "BattleCamera | None" = None) -> None:
         self._draw_size = (width, height)
         self._draw_panel(self.panel_bg, 0, 0)
         regiment = self._regiment(self.selected)
@@ -666,7 +693,7 @@ class Hud:
             self._draw_panel(self._unit_info_panel, UNIT_INFO_RECT[0], UNIT_INFO_RECT[1],
                              UNIT_INFO_RECT[2], UNIT_INFO_RECT[3])
 
-    def _draw_fixed_buttons(self):
+    def _draw_fixed_buttons(self) -> None:
         for name, (pos, frames, size) in FIXED_BUTTONS.items():
             pressed = self.pressed == name
             quad = self._icon(frames[1] if pressed else frames[0])
@@ -677,7 +704,7 @@ class Hud:
         quad = self._icon(pause_frames[1] if pressed else pause_frames[0])
         self._draw_panel(quad, PAUSE_POS[0], PAUSE_POS[1], *PAUSE_SIZE)
 
-    def _draw_slots(self, regiment):
+    def _draw_slots(self, regiment: "Regiment | None") -> None:
         sub_x, sub_y = COMMAND_SUBWINDOW[0], COMMAND_SUBWINDOW[1]
         for slot, command in self.slots().items():
             x, y = SLOT_POSITIONS[slot]
@@ -691,7 +718,7 @@ class Hud:
             self._draw_panel(quad, sub_x + x, sub_y + y, *SLOT_SIZE,
                              tint=(1, 1, 1, 1) if enabled else (0.4, 0.4, 0.4, 0.85))
 
-    def _draw_camera_target(self, camera):
+    def _draw_camera_target(self, camera: "BattleCamera") -> None:
         """A small "x" mark at the camera's look-at target (BattleCamera.target_x/y), the ICONS
         frame right after the 8 camera-marker frames. Drawn at the lowest z-order of anything but
         the plan map itself, so waypoints, regiments and the eye marker all paint over it."""
@@ -701,7 +728,7 @@ class Hud:
             return
         self._draw_map(quad, px - quad.size[0] // 2, py - quad.size[1] // 2)
 
-    def _draw_camera_marker(self, camera):
+    def _draw_camera_marker(self, camera: "BattleCamera") -> None:
         # The marker shows the camera's eye position, not its look-at target: the eye sits
         # pulled back from the target along yaw by the (mesh-to-world scaled) orbit distance,
         # matching how whshr/frontend/battle_view.py positions the camera for panning. The
@@ -723,7 +750,7 @@ class Hud:
         self._draw_map(quad, px - half_w, py - half_h)
 
     @staticmethod
-    def _camera_eye_position(camera):
+    def _camera_eye_position(camera: "BattleCamera") -> tuple[float, float]:
         # whshr.camera.BattleCamera.pan()'s forward (eye-to-target) direction is
         # (-sin yaw, -cos yaw); the eye sits `distance` back along the opposite direction.
         yaw = math.radians(camera.yaw)
@@ -733,7 +760,7 @@ class Hud:
             camera.target_y + distance * math.cos(yaw),
         )
 
-    def release(self):
+    def release(self) -> None:
         quads = [self.panel_bg, self.portrait_bg_quad, *self.compass_quads,
                 *self._icon_cache.values(), *self._sheet_frame_cache.values()]
         for quad in quads:

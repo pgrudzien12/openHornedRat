@@ -88,6 +88,24 @@
     "whshr/battle2d.py",
     "whshr/camera.py",
     "whshr/viewer_web.py",
-    "whshr/__main__.py"
+    "whshr/__main__.py",
+    "whshr/frontend/app.py",
+    "whshr/frontend/army_records_view.py",
+    "whshr/frontend/battle_view.py",
+    "whshr/frontend/bitmap_font.py",
+    "whshr/frontend/briefing_view.py",
+    "whshr/frontend/cursors.py",
+    "whshr/frontend/glue_bitmap.py",
+    "whshr/frontend/glue_view.py",
+    "whshr/frontend/gpu.py",
+    "whshr/frontend/hud.py",
+    "whshr/frontend/menu_view.py",
+    "whshr/frontend/mission_map_view.py",
+    "whshr/frontend/movie_view.py",
+    "whshr/frontend/opening_view.py",
+    "whshr/frontend/result_view.py",
+    "whshr/frontend/scene_view.py",
+    "whshr/frontend/troop_selection_view.py",
+    "whshr/frontend/views.py"
   ]
 }

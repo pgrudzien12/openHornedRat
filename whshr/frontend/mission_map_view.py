@@ -1,21 +1,27 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Campaign map and mission-scroll selection view."""
+
+from collections.abc import Sequence
+from typing import Any
 
 import pygame
 
+from ..campaign_scenes import MissionMapScene
+from ..scenes import SceneEvent
 from .bitmap_font import BitmapFont
 from ..controlpanel import button_y, control_panel
-from .gpu import ScreenQuad
+from .gpu import Gpu, ScreenQuad
 from .glue_bitmap import load_bitmap
 from .scene_view import NativeScreenView
 
 
-class MissionMapView(NativeScreenView):
+class MissionMapView(NativeScreenView[MissionMapScene]):
     """Present the original map artwork with data-driven selectable scrolls."""
 
     SCROLL_ORIGIN = (30, 15)
     SCROLL_SIZE = (144, 88)
     ROW_PITCH = 90  # The glue layout rounds the 88-pixel scroll artwork to 90 pixels.
-    SCROLL_TEXT_X = 10  # FUN_0044d2b2: row label x offset inside Scroll0/Scroll1.
+    SCROLL_TEXT_X = 10  # row label x offset inside Scroll0/Scroll1.
     SCROLL_TEXT_WIDTH = SCROLL_SIZE[0] - 2 * SCROLL_TEXT_X
     TEXT_HEIGHT = 12
     FRAME_ORIGIN = (4, 4)
@@ -24,9 +30,11 @@ class MissionMapView(NativeScreenView):
     BUTTON_X = 9
 
     @staticmethod
-    def _wrap_mission_name(font, name, width=SCROLL_TEXT_WIDTH):
+    def _wrap_mission_name(font: BitmapFont, name: str, width: int = SCROLL_TEXT_WIDTH) -> list[str]:
         """Wrap BRTXT's one-line mission name inside a scroll's text column."""
-        words, lines, current = name.split(), [], ""
+        words = name.split()
+        lines: list[str] = []
+        current = ""
         for word in words:
             candidate = f"{current} {word}".strip()
             if not current or font.size(candidate)[0] <= width:
@@ -38,7 +46,7 @@ class MissionMapView(NativeScreenView):
             lines.append(current)
         return lines
 
-    def __init__(self, gpu, scene, options=None):
+    def __init__(self, gpu: Gpu, scene: MissionMapScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
         self.map = self._load_quad(gpu, "MAP")
         self.scrolls = (self._load_quad(gpu, "SCROLL0", colorkey=True), self._load_quad(gpu, "SCROLL1", colorkey=True))
@@ -56,13 +64,13 @@ class MissionMapView(NativeScreenView):
         # The map/list uses compact black PCTEXT glyphs from glue font 2.
         self.button_color = (0, 0, 0)
         self.text_font = BitmapFont(scene.font)
-        self.dietrich = None
+        self.dietrich: ScreenQuad | None = None
         if portrait is not None:
             width, height, rgba = portrait
             self.dietrich = ScreenQuad(gpu, (width, height))
             self.dietrich.write(rgba)
-        self.hovered = None
-        self.pressed = None
+        self.hovered: int | None = None
+        self.pressed: int | None = None
         # Mission-window scripts define their origin but no text placement or
         # colour.  The original executable owns those values; retain this
         # deliberately isolated approximation until that renderer is traced.
@@ -73,10 +81,12 @@ class MissionMapView(NativeScreenView):
                                        padding=0, align="center", fixed_width=True)
                               for _ in self.button_slots]
         self._set_labels()
-        self._button_selection = object()
+        self._button_selection: object = object()
         self._set_button_labels()
 
-    def _load_quad(self, gpu, resource_name, colorkey=False):
+    def _load_quad(self, gpu: Gpu, resource_name: str, colorkey: bool = False) -> ScreenQuad:
+        if self.scene.content is None:
+            raise RuntimeError("the mission map scene has not been entered")
         surface = load_bitmap(self.scene.content, resource_name)
         if colorkey:
             surface = surface.convert()
@@ -86,7 +96,7 @@ class MissionMapView(NativeScreenView):
         quad.write(pygame.image.tobytes(surface, "RGBA"))
         return quad
 
-    def _set_labels(self):
+    def _set_labels(self) -> None:
         missions = self.scene.missions
         for label, mission in zip(self.labels, missions):
             cash = mission.get("cash") or {}
@@ -101,19 +111,19 @@ class MissionMapView(NativeScreenView):
                 lines.append(self.scene.campaign.hint(612))
             label.set_lines(lines)
 
-    def _set_button_labels(self):
+    def _set_button_labels(self) -> None:
         for index, (label, slot) in enumerate(zip(self.button_labels, self.button_slots)):
             label.set_color(self.button_color if self._button_enabled(index) else (192, 192, 192))
             label.set_lines((self.scene.campaign.hint(self.panel.labels[slot]),))
         self._button_selection = self.scene.selected_index
 
-    def _button_enabled(self, index):
+    def _button_enabled(self, index: int) -> bool:
         """Known slot actions need a selected mission except Caravan."""
         slot = self.button_slots[index]
         action = self.panel.actions[slot] if slot < len(self.panel.actions) else None
         return action == "return_to_caravan" or (action is not None and self.scene.selected_mission is not None)
 
-    def _mission_at(self, pos):
+    def _mission_at(self, pos: Sequence[float]) -> int | None:
         left, top, scale = self._layout()
         point = ((pos[0] - left) / scale, (pos[1] - top) / scale)
         for index in range(len(self.scene.missions)):
@@ -123,8 +133,8 @@ class MissionMapView(NativeScreenView):
                 return index
         return None
 
-    def _button_at(self, pos):
-        if not self.map_panel:
+    def _button_at(self, pos: Sequence[float]) -> int | None:
+        if not self.map_panel or self.portrait_window is None:
             return None
         left, top, scale = self._layout()
         point = ((pos[0] - left) / scale, (pos[1] - top) / scale)
@@ -135,7 +145,7 @@ class MissionMapView(NativeScreenView):
                 return index
         return None
 
-    def events(self, event):
+    def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 return ("return_to_caravan",)
@@ -160,10 +170,10 @@ class MissionMapView(NativeScreenView):
                 return (self.panel.actions[self.button_slots[button]],)
         return ()
 
-    def status(self):
+    def status(self) -> Sequence[str]:
         return (f"mission map {self.scene.campaign.mission_window}, {len(self.scene.missions)} offered",)
 
-    def draw(self):
+    def draw(self) -> None:
         super().draw()
         if self._button_selection != self.scene.selected_index:
             self._set_button_labels()
@@ -175,7 +185,7 @@ class MissionMapView(NativeScreenView):
             x += self.PORTRAIT_ORIGIN[0]
             y += self.PORTRAIT_ORIGIN[1]
             self.dietrich.draw(left + x * scale, top + y * scale, 120 * scale, 152 * scale)
-        if self.map_panel:
+        if self.map_panel and self.portrait_window is not None:
             x, y = self.portrait_window["position"]["x"], self.portrait_window["position"]["y"]
             self.frame["FRAMETOP"].draw(left + (x + 4) * scale, top + (y + 4) * scale, 136 * scale, 8 * scale)
             self.frame["FRAMELEFT"].draw(left + (x + 4) * scale, top + (y + 12) * scale, 8 * scale, 152 * scale)
@@ -195,7 +205,7 @@ class MissionMapView(NativeScreenView):
             label.draw(left + (x + self.SCROLL_TEXT_X) * scale, top + (y + 10) * scale,
                        self.SCROLL_TEXT_WIDTH * scale, 64 * scale)
 
-    def release(self):
+    def release(self) -> None:
         for quad in (self.map, *self.scrolls, *self.frame.values(), self.button_up, self.button_down):
             quad.release()
         if self.dietrich is not None:

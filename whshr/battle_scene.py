@@ -2,7 +2,7 @@
 """Battle scene: owns one loaded battlefield and advances its deterministic simulation."""
 
 import os
-from pathlib import Path
+from os import PathLike
 from . import battle_log, behaviour, combat, payments, skirmish_log
 from .assets import AssetId
 from .battlefield import Battlefield, sprite_files
@@ -31,7 +31,7 @@ class BattleScene(Scene):
     battle: Battle
     initial_models: dict[str, int]
 
-    def __init__(self, battle: AssetId = FIRST_BATTLE, log_dir: str | Path | None = None, seed: int = DEFAULT_SEED,
+    def __init__(self, battle: AssetId = FIRST_BATTLE, log_dir: str | PathLike[str] | None = None, seed: int = DEFAULT_SEED,
                  glue_scene: GlueScene | None = None, request_id: int | None = None) -> None:
         self.battle_id = battle
         self.manifest = SceneManifest(immediate=(battle,))
