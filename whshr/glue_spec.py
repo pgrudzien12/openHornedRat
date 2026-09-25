@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Specification status of every glue script command, and a usage report over the shipped scripts.
 
 The registry is the machine-readable index of ``notes/glue_interpreter.md``: each executable command names the section that
@@ -7,9 +8,12 @@ an engine (or a reviewer) sees at a glance which reachable commands are still in
 """
 
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
+from os import PathLike
+from typing import Any
 
-from .glue import GlueProgram
+from .glue import GlueInstruction, GlueProgram, GlueResource
 
 SPECIFIED = "specified"
 DELEGATED = "delegated"
@@ -23,13 +27,13 @@ class CommandSpec:
     open_question: str = ""
 
 
-def _spec(level, section, summary, open_question=""):
+def _spec(level: str, section: str, summary: str, open_question: str = "") -> CommandSpec:
     return CommandSpec(level, section, summary, open_question)
 
 
 _ACTIVITY_DEBRIEF = "result and completion contract: notes/activity_results.md §5; evaluator/payment rules: notes/debrief_evaluation.md §6"
 
-COMMAND_SPEC = {
+COMMAND_SPEC: dict[str, CommandSpec] = {
     # control flow
     "gosub": _spec(SPECIFIED, "§4.1", "request: push current frame, run target"),
     "iftruegosub": _spec(SPECIFIED, "§4.1", "gosub when the condition holds"),
@@ -127,20 +131,20 @@ COMMAND_SPEC = {
 }
 
 
-def _command_key(instruction):
+def _command_key(instruction: GlueInstruction) -> str:
     if instruction.command == "set" and "=" in instruction.argument:
         return "set:" + instruction.argument.split("=", 1)[0].casefold()
     return instruction.command
 
 
-def specification_report(resources):
+def specification_report(resources: Mapping[str, GlueResource]) -> dict[str, Any]:
     """Return per-command usage joined with specification status for a resource inventory.
 
     ``resources`` is the mapping produced by ``parse_glue_resources``.  ``commands`` is ordered by use count; ``unspecified`` lists
     commands used by scripts that the registry does not know; ``unused`` lists specified commands no script uses.
     """
-    statements = Counter()
-    scripts = defaultdict(set)
+    statements: Counter[str] = Counter()
+    scripts: defaultdict[str, set[str]] = defaultdict(set)
     for resource in resources.values():
         if not isinstance(resource, GlueProgram):
             continue
@@ -148,7 +152,7 @@ def specification_report(resources):
             key = _command_key(instruction)
             statements[key] += 1
             scripts[key].add(resource.name)
-    rows = []
+    rows: list[dict[str, Any]] = []
     for key in sorted(statements, key=lambda name: (-statements[name], name)):
         spec = COMMAND_SPEC.get(key)
         rows.append({
@@ -167,7 +171,7 @@ def specification_report(resources):
     }
 
 
-def format_report(report):
+def format_report(report: Mapping[str, Any]) -> str:
     """Render ``specification_report`` output as a fixed-width table."""
     lines = [f"{'command':32} {'uses':>5} {'scripts':>7}  {'level':11} {'section':10} open question"]
     for row in report["commands"]:
@@ -179,7 +183,7 @@ def format_report(report):
     return "\n".join(lines)
 
 
-def main(installation):
+def main(installation: str | PathLike[str]) -> int:
     """Print the specification table for the installation's WND.DLL; non-zero exit if a used command is unspecified."""
     from .campaign import load_wnd_rcdata
     from .glue import parse_glue_resources

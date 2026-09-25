@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Local browser controls for the static battle viewers."""
 
 import html
@@ -6,14 +7,23 @@ import math
 import sys
 import tempfile
 import traceback
+from collections.abc import Callable, Iterable, Mapping
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from os import PathLike
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from . import battle2d, battle3d
 from .image import load_rgb_palette, write_png
 from .paths import Installation
 from .script import load_battle
+
+Query = dict[str, list[str]]  # urllib.parse.parse_qs result
+Routes = dict[str, tuple[str, bytes]]  # path -> (content type, body)
+Render = Callable[[Query], bytes]
+Control = tuple[str, str, float, float, float, float]  # key, label, low, high, step, value
+PathArg = str | PathLike[str]
 
 HTML = "text/html; charset=utf-8"
 TEXT = "text/plain; charset=utf-8"
@@ -76,12 +86,12 @@ class BadRequest(ValueError):
     """Invalid query parameters; reported to the browser as HTTP 400."""
 
 
-def _battle_path(game, battle_file):
+def _battle_path(game: Installation, battle_file: PathArg) -> Path:
     path = Path(battle_file)
-    return path if path.is_file() else game.file_dir("SCRIPT", battle_file)
+    return path if path.is_file() else game.file_dir("SCRIPT", str(battle_file))
 
 
-def _number(query, key):
+def _number(query: Query, key: str) -> float:
     try:
         value = float(query[key][0])
     except KeyError:
@@ -93,7 +103,7 @@ def _number(query, key):
     return value
 
 
-def _controls(controls):
+def _controls(controls: Iterable[Control]) -> str:
     return "".join(
         f'<label>{html.escape(label)}<output id="{key}-value"></output>'
         f'<input id="{key}" type="range" min="{low}" max="{high}" step="{step}" value="{value}"></label>'
@@ -101,7 +111,8 @@ def _controls(controls):
     )
 
 
-def _page(title, heading, controls, config, extra_script="", image_style=""):
+def _page(title: str, heading: str, controls: str, config: Mapping[str, Any], extra_script: str = "",
+          image_style: str = "") -> str:
     script_config = json.dumps(config).replace("</", "<\\/")
     return f"""<!doctype html><meta charset="utf-8"><title>{html.escape(title)}</title>
 <style>{STYLE}{image_style}</style>
@@ -113,7 +124,7 @@ def _page(title, heading, controls, config, extra_script="", image_style=""):
 {CLIENT}</script>"""
 
 
-def _units(battle):
+def _units(battle: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Scripted unit positions in BTS world units; MRC regiments belong to the player."""
     armies = [(army, False) for army in battle["armies"]]
     armies += [(army, True) for army in (battle["merc"] or {}).get("armies", [])]
@@ -122,10 +133,10 @@ def _units(battle):
             if "x" in unit["set"] and "y" in unit["set"]]
 
 
-def _planmap_png(game, field, path):
+def _planmap_png(game: Installation, field: Mapping[str, Any], path: Path) -> bytes | None:
     """Write the battle plan map (row 0 = highest BTS Y) as PNG bytes, or return None if unavailable."""
     try:
-        width, height, indices = battle2d._load_planmap(game, field["planmap"] or "")
+        width, height, indices = battle2d.load_planmap(game, field["planmap"] or "")
         palette = load_rgb_palette(game.binary_file("STANDARD.PAL"))
     except (FileNotFoundError, ValueError, IndexError) as error:
         print(f"Plan map unavailable: {error}", file=sys.stderr)
@@ -134,12 +145,12 @@ def _planmap_png(game, field, path):
     return path.read_bytes()
 
 
-def _page_3d(battle):
+def _page_3d(battle: Mapping[str, Any]) -> str:
     field = battle["field"]
     camera = field.get("camera")
     # Hypothesis: Camera is the view heading clockwise from north; the eye sits opposite it.
     initial_yaw = (180 + camera) % 360 if camera is not None else battle3d.DEFAULT_YAW
-    controls = _controls((
+    slider_controls = _controls((
         ("yaw", "Yaw", 0, 360, 1, initial_yaw),
         ("pitch", "Pitch", 5, 85, 1, battle3d.DEFAULT_PITCH),
         ("distance", "Distance", 20, 600, 1, battle3d.DEFAULT_DISTANCE),
@@ -156,14 +167,14 @@ def _page_3d(battle):
         '<option value="perspective">Perspective look-at</option></select></label>'
         '<div class="field">Ground target (click the plan map; arrow = look direction)'
         f'<canvas id="minimap" width="{MINIMAP_WIDTH}" height="{minimap_height}"></canvas></div>'
-        + controls
+        + slider_controls
     )
     config = {"debounce": 180, "field": {"width": field["width"], "height": field["height"]},
               "units": _units(battle)}
     return _page("WHSHR battle viewer", "Battle camera", controls, config, MINIMAP)
 
 
-def _parse_3d(query, field):
+def _parse_3d(query: Query, field: Mapping[str, Any]) -> dict[str, Any]:
     projection = query.get("projection", [""])[0]
     if projection not in battle3d.PROJECTIONS:
         raise BadRequest("projection must be orthographic or perspective")
@@ -172,7 +183,7 @@ def _parse_3d(query, field):
         "scenery_scale": (.5, 4), "target_x": (0, field["width"] * 1.25),
         "target_y": (0, field["height"] * 1.25), "ambient": (0, 1),
     }
-    values = {key: _number(query, key) for key in limits}
+    values: dict[str, Any] = {key: _number(query, key) for key in limits}
     for key, (low, high) in limits.items():
         if not low <= values[key] <= high:
             raise BadRequest(f"{key} must be between {low:g} and {high:g}")
@@ -186,8 +197,8 @@ def _parse_3d(query, field):
     return values
 
 
-def _parse_2d(query):
-    values = {key: _number(query, key) for key in ("target_x", "target_y", "zoom", "spacing", "direction_offset")}
+def _parse_2d(query: Query) -> dict[str, Any]:
+    values: dict[str, Any] = {key: _number(query, key) for key in ("target_x", "target_y", "zoom", "spacing", "direction_offset")}
     if values["zoom"] <= 0:
         raise BadRequest("zoom must be greater than zero")
     if values["spacing"] <= 0:
@@ -199,7 +210,7 @@ def _parse_2d(query):
 
 
 class _Server(HTTPServer):
-    def handle_error(self, request, client_address):
+    def handle_error(self, request: Any, client_address: Any) -> None:
         if not isinstance(sys.exc_info()[1], DISCONNECTED):
             super().handle_error(request, client_address)
 
@@ -207,21 +218,21 @@ class _Server(HTTPServer):
 class _Handler(BaseHTTPRequestHandler):
     """Serves fixed ``routes`` plus ``/render``, which calls ``render(query)`` for PNG bytes."""
 
-    routes = {}
+    routes: Routes = {}
 
     @staticmethod
-    def render(query):
+    def render(query: Query) -> bytes:
         raise NotImplementedError
 
-    def _send(self, status, content_type, body):
+    def _send(self, status: int, content_type: str, body: bytes) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", len(body))
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self):
+    def do_GET(self) -> None:
         request = urlparse(self.path)
         try:
             if request.path in self.routes:
@@ -241,11 +252,11 @@ class _Handler(BaseHTTPRequestHandler):
         except DISCONNECTED:
             pass
 
-    def log_message(self, *_):
+    def log_message(self, format: str, *args: Any) -> None:
         pass
 
 
-def _serve(port, routes, render, name):
+def _serve(port: int, routes: Routes, render: Render, name: str) -> None:
     handler = type("Handler", (_Handler,), {"routes": routes, "render": staticmethod(render)})
     server = _Server(("127.0.0.1", port), handler)
     print(f"{name}: http://127.0.0.1:{port}/  (Ctrl+C to stop)")
@@ -257,9 +268,9 @@ def _serve(port, routes, render, name):
         server.server_close()
 
 
-def serve(installation, battle_file, port=8765):
+def serve(installation: Installation | PathArg, battle_file: PathArg, port: int = 8765) -> None:
     """Serve a local slider UI for the 3D battle viewer until Ctrl+C."""
-    game = Installation(installation)
+    game = installation if isinstance(installation, Installation) else Installation(installation)
     battle_path = _battle_path(game, battle_file)
     battle = load_battle(str(battle_path))
     field = battle["field"]
@@ -267,12 +278,12 @@ def serve(installation, battle_file, port=8765):
         raise ValueError(f"{battle_path.name} has no battlefield dimensions")
     with tempfile.TemporaryDirectory(prefix="whshr-viewer-") as temporary:
         output = Path(temporary) / "scene.png"
-        routes = {"/": (HTML, _page_3d(battle).encode())}
+        routes: Routes = {"/": (HTML, _page_3d(battle).encode())}
         planmap = _planmap_png(game, field, Path(temporary) / "planmap.png")
         if planmap is not None:
             routes["/planmap.png"] = ("image/png", planmap)
 
-        def render(query):
+        def render(query: Query) -> bytes:
             values = _parse_3d(query, field)
             battle3d.render(
                 game.root, battle_path, output, 960, 680, False, values["yaw"], values["pitch"],
@@ -285,9 +296,9 @@ def serve(installation, battle_file, port=8765):
         _serve(port, routes, render, "Battle viewer")
 
 
-def serve_2d(installation, battle_file, port=8765):
+def serve_2d(installation: Installation | PathArg, battle_file: PathArg, port: int = 8765) -> None:
     """Serve local top-down game-view controls until Ctrl+C."""
-    game = Installation(installation)
+    game = installation if isinstance(installation, Installation) else Installation(installation)
     battle_path = _battle_path(game, battle_file)
     battle = load_battle(str(battle_path))
     field = battle["field"]
@@ -306,7 +317,7 @@ def serve_2d(installation, battle_file, port=8765):
     with tempfile.TemporaryDirectory(prefix="whshr-2d-viewer-") as temporary:
         output = Path(temporary) / "scene.png"
 
-        def render(query):
+        def render(query: Query) -> bytes:
             values = _parse_2d(query)
             battle2d.render(game.root, battle_path, output, target_x=values["target_x"],
                             target_y=values["target_y"], zoom=values["zoom"], spacing=values["spacing"],

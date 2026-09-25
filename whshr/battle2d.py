@@ -1,8 +1,12 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Render a static top-down game-view battle viewport from 2D game assets."""
 
 import math
 import struct
+from collections.abc import Sequence
+from os import PathLike
 from pathlib import Path
+from typing import Any
 
 from . import formation, legacy
 from .image import load_rgb_palette, write_png
@@ -10,30 +14,35 @@ from .paths import Installation
 from .script import load_battle
 from .sprites import colormap_indices, decode_frame
 
+Rgb = tuple[int, int, int]
+PathArg = str | PathLike[str]
+Frame = dict[str, Any]  # idle frame: pixels, width, height, anchor_x, anchor_y, frame
+PlanMap = tuple[int, int, Sequence[int]]  # width, height, palette indices
+
 DEFAULT_WIDTH = 544
 DEFAULT_HEIGHT = 386
 DEFAULT_ZOOM = 1.0
 DEFAULT_SPACING = formation.MODEL_SPACING
-BACKGROUND = (24, 26, 32)
+BACKGROUND: Rgb = (24, 26, 32)
 
 
-def _battle_path(game, battle_file):
+def _battle_path(game: Installation, battle_file: PathArg) -> Path:
     path = Path(battle_file)
-    return path if path.is_file() else game.file_dir("SCRIPT", battle_file)
+    return path if path.is_file() else game.file_dir("SCRIPT", str(battle_file))
 
 
-def _records(fol):
+def _records(fol: bytes) -> list[tuple[int, ...]]:
     if len(fol) % 16:
         raise ValueError(f"FOL size is not a multiple of 16 bytes: {len(fol)}")
     return [struct.unpack_from("<hhhhIB", fol, offset) for offset in range(0, len(fol), 16)]
 
 
-def _frame_end(records, bop_length, offset):
+def _frame_end(records: Sequence[Sequence[int]], bop_length: int, offset: int) -> int:
     offsets = sorted({record[4] for record in records}) + [bop_length]
     return offsets[offsets.index(offset) + 1]
 
 
-def _load_planmap(game, name):
+def load_planmap(game: Installation, name: str) -> PlanMap:
     """Load the first ``loadplanmap`` frame as indexed pixels and its RGB palette."""
     base = name.split(",", 1)[0].strip()
     fol_path = game.binary_file(base + ".FOL")
@@ -43,7 +52,7 @@ def _load_planmap(game, name):
     if not records:
         raise ValueError(f"{fol_path} has no frames")
     palette_path = game.find("UPDATE", "BINARY", base + ".PAL") or game.find("FILE", "BINARY", base + ".PAL")
-    maps = []
+    maps: list[bytes] = []
     if palette_path:
         data = palette_path.read_bytes()
         if len(data) % 512 == 0:
@@ -58,13 +67,13 @@ def _load_planmap(game, name):
 class SpriteSet:
     """A directional 2D sprite set loaded from the preferred BINARY directory."""
 
-    def __init__(self, game, base, palette):
+    def __init__(self, game: Installation, base: str, palette: Sequence[Rgb]) -> None:
         self.base = base
         self.palette = palette
         self.fol = game.binary_file(base + ".FOL").read_bytes()
         self.bop = game.binary_file(base + ".BOP").read_bytes()
         self.records = _records(self.fol)
-        self.maps = []
+        self.maps: list[bytes] = []
         palette_path = game.find("UPDATE", "BINARY", base + ".PAL") or game.find("FILE", "BINARY", base + ".PAL")
         if palette_path:
             data = palette_path.read_bytes()
@@ -72,8 +81,8 @@ class SpriteSet:
                 self.maps = [data[offset:offset + 512] for offset in range(0, len(data), 512)]
         self.map_indices = colormap_indices(self.records)
 
-    def _groups(self):
-        groups = []
+    def _groups(self) -> list[list[int]]:
+        groups: list[list[int]] = []
         for index, record in enumerate(self.records):
             color_map = record[5] >> 4
             if groups and groups[-1][0] == color_map:
@@ -82,7 +91,7 @@ class SpriteSet:
                 groups.append([color_map, index, 1])
         return groups
 
-    def idle_frame(self, direction):
+    def idle_frame(self, direction: int) -> Frame:
         """Return an idle frame, falling back gracefully for nonstandard unit layouts."""
         if len(self.records) >= 104:
             frame = 72 + direction
@@ -106,7 +115,7 @@ class SpriteSet:
         }
 
 
-def _troop_sprite_files(game):
+def _troop_sprite_files(game: Installation) -> dict[str, str]:
     table = legacy.module("spritemap_build")
     records, _, _ = table.read_tables(game.require("WHSHR.EXE").read_bytes())
     table.assign_categories(records)
@@ -117,12 +126,12 @@ def _troop_sprite_files(game):
     }
 
 
-def _frame_direction(script_dir, offset):
+def _frame_direction(script_dir: float | None, offset: int) -> int:
     """Map clockwise BTS direction units onto the clockwise sprite frame order of a north-up view."""
     return (offset + int(((script_dir or 0) + 32) // 64)) % 8
 
 
-def _formation(unit, spacing):
+def _formation(unit: dict[str, Any], spacing: float) -> tuple[list[tuple[float, float]], int, int]:
     """Return soldier anchors in BTS world coordinates, with the unit anchor at the front-rank centre."""
     return formation.unit_layout(unit, spacing)
 
@@ -130,16 +139,16 @@ def _formation(unit, spacing):
 class Viewport:
     """Top-down viewport: BTS X grows right and BTS Y grows upward."""
 
-    def __init__(self, width, height, target_x, target_y, zoom):
+    def __init__(self, width: int, height: int, target_x: float, target_y: float, zoom: float) -> None:
         self.width, self.height = width, height
         self.target_x, self.target_y, self.zoom = target_x, target_y, zoom
         self.pixels = bytearray(bytes(BACKGROUND) * (width * height))
 
-    def point(self, x, y):
+    def point(self, x: float, y: float) -> tuple[float, float]:
         return (self.width / 2 + (x - self.target_x) * self.zoom,
                 self.height / 2 + (self.target_y - y) * self.zoom)
 
-    def planmap(self, image, field_width, field_height, palette):
+    def planmap(self, image: PlanMap, field_width: float, field_height: float, palette: Sequence[Rgb]) -> None:
         """Sample the entire plan map in world coordinates, without stretching the viewport."""
         map_width, map_height, indices = image
         for screen_y in range(self.height):
@@ -156,7 +165,7 @@ class Viewport:
                 offset = (screen_y * self.width + screen_x) * 3
                 self.pixels[offset:offset + 3] = bytes(color)
 
-    def sprite(self, frame, palette, x, y):
+    def sprite(self, frame: Frame, palette: Sequence[Rgb], x: float, y: float) -> None:
         """Composite an indexed sprite, scaled together with the world map."""
         anchor_x, anchor_y = self.point(x, y)
         scale = self.zoom * formation.SPRITE_PIXEL_WORLD_UNITS
@@ -174,11 +183,11 @@ class Viewport:
                     self.pixels[offset:offset + 3] = bytes(palette[value])
 
 
-def render(installation, battle_file, output, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT,
-           target_x=None, target_y=None, zoom=DEFAULT_ZOOM, spacing=DEFAULT_SPACING,
-           direction_offset=0):
+def render(installation: Installation | PathArg, battle_file: PathArg, output: PathArg, width: int = DEFAULT_WIDTH,
+           height: int = DEFAULT_HEIGHT, target_x: float | None = None, target_y: float | None = None,
+           zoom: float = DEFAULT_ZOOM, spacing: float = DEFAULT_SPACING, direction_offset: int = 0) -> dict[str, Any]:
     """Render a 2D battle viewport and return its assets and unit-rendering statistics."""
-    game = Installation(installation)
+    game = installation if isinstance(installation, Installation) else Installation(installation)
     battle_path = _battle_path(game, battle_file)
     battle = load_battle(str(battle_path))
     field = battle["field"]
@@ -194,16 +203,19 @@ def render(installation, battle_file, output, width=DEFAULT_WIDTH, height=DEFAUL
                         if player_positions else field["width"] / 2)
     default_target_y = (sum(unit["y"] for unit in player_positions) / len(player_positions)
                         if player_positions else field["height"] / 2)
-    target_x = default_target_x if target_x is None else target_x
-    target_y = default_target_y if target_y is None else target_y
+    view_x = default_target_x if target_x is None else target_x
+    view_y = default_target_y if target_y is None else target_y
     palette = load_rgb_palette(game.binary_file("STANDARD.PAL"))
-    viewport = Viewport(width, height, target_x, target_y, zoom)
-    viewport.planmap(_load_planmap(game, field["planmap"]), field["width"], field["height"], palette)
+    viewport = Viewport(width, height, view_x, view_y, zoom)
+    viewport.planmap(load_planmap(game, field["planmap"]), field["width"], field["height"], palette)
 
-    sprite_files, cache = _troop_sprite_files(game), {}
+    sprite_files = _troop_sprite_files(game)
+    cache: dict[str, SpriteSet] = {}
     units = [unit for army in battle["armies"] + (battle["merc"] or {}).get("armies", [])
              for unit in army["units"]]
-    placements, rendered, missing = [], [], []
+    placements: list[tuple[float, float, Frame, float, float]] = []
+    rendered: list[dict[str, Any]] = []
+    missing: list[str] = []
     for unit in units:
         position = unit["set"]
         resource = (unit["sprites"] or "").split(",", 1)[0].strip()
@@ -230,5 +242,5 @@ def render(installation, battle_file, output, width=DEFAULT_WIDTH, height=DEFAUL
     return {
         "battle": battle["file"], "output": str(output), "planmap": field["planmap"],
         "units": len(units), "drawn_units": len(rendered), "soldiers": len(placements),
-        "missing_units": missing, "target": (target_x, target_y), "zoom": zoom, "rendered": rendered,
+        "missing_units": missing, "target": (view_x, view_y), "zoom": zoom, "rendered": rendered,
     }

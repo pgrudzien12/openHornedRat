@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Deterministic battle replay: rebuild a battle from a `whshr.battle_log` JSON Lines log and compare
 it against its recorded snapshots (`python3 -m whshr battle-replay`), stdlib-only.
 
@@ -7,25 +8,35 @@ implementation of the rules: recording and replay only ever run one simulation c
 (notes/engine_architecture.md, "Battle logs and replay").
 """
 import json
+from os import PathLike
+from typing import Any
 
 from .assets import AssetId
 from .battle_scene import BATTLE_TICK_SECONDS, BattleScene
 from .game import scene_context
+from .paths import Installation
+from .scenes import SceneAssets
+
+Record = dict[str, Any]  # one JSON Lines record of a battle log
+PathArg = str | PathLike[str]
+Divergence = dict[str, Any]  # {"tick", "regiment", "field", "recorded", "replayed"}
 
 # Numeric snapshot fields compared with a tolerance instead of exact equality, since they accumulate
 # floating-point movement every tick; still tight enough that only a genuine divergence trips it.
 _TOLERANCE = 1e-6
 
 
-def read_log(path):
+def read_log(path: PathArg) -> tuple[Record, list[Record], list[Record], Record | None, Record | None]:
     """Parse a JSON Lines battle log into `(header, orders, snapshots, result, end)`.
 
     Every line must parse as JSON and the header must come first (docs/testing.md, "Given a JSONL log,
     then every line parses and the header comes first").
     """
-    header = None
-    orders, snapshots = [], []
-    result = end = None
+    header: Record | None = None
+    orders: list[Record] = []
+    snapshots: list[Record] = []
+    result: Record | None = None
+    end: Record | None = None
     with open(path, "r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             line = line.strip()
@@ -55,7 +66,7 @@ def read_log(path):
     return header, orders, snapshots, result, end
 
 
-def _compare_snapshot(recorded, replayed):
+def _compare_snapshot(recorded: dict[str, Record], replayed: dict[str, Record]) -> Divergence | None:
     """The first mismatching `(regiment, field, recorded, replayed)`, or `None` if they agree."""
     if set(recorded) != set(replayed):
         return {"regiment": None, "field": "regiment set",
@@ -74,7 +85,8 @@ def _compare_snapshot(recorded, replayed):
     return None
 
 
-def replay(installation, log_path, until=None, context=None):
+def replay(installation: Installation | PathArg, log_path: PathArg, until: int | None = None,
+           context: SceneAssets | None = None) -> tuple[BattleScene, Record, Divergence | None, list[Record]]:
     """Rebuild the battle from the log's header, apply its recorded orders at their ticks, and compare
     every recorded snapshot as it is reached.
 
@@ -93,7 +105,7 @@ def replay(installation, log_path, until=None, context=None):
     scene = BattleScene(battle_id, log_dir=None, seed=header["seed"])
     scene.enter(context)
 
-    orders_by_tick = {}
+    orders_by_tick: dict[int, list[tuple[Any, ...]]] = {}
     for record in orders:
         orders_by_tick.setdefault(record["tick"], []).append(tuple(record["event"]))
     snapshots_by_tick = {record["tick"]: record for record in snapshots}
@@ -109,7 +121,9 @@ def replay(installation, log_path, until=None, context=None):
     if until is not None:
         max_tick = min(max_tick, until)
 
-    divergence, timeline, tick = None, [], 0
+    divergence: Divergence | None = None
+    timeline: list[Record] = []
+    tick = 0
     while True:
         for event in orders_by_tick.get(tick, []):
             scene.handle(event, context)
@@ -131,7 +145,8 @@ def replay(installation, log_path, until=None, context=None):
     return scene, header, divergence, timeline
 
 
-def main(installation, log_path, timeline=False, until=None):
+def main(installation: Installation | PathArg, log_path: PathArg, timeline: bool = False,
+         until: int | None = None) -> int:
     scene, header, divergence, events_timeline = replay(installation, log_path, until=until)
     if timeline:
         for entry in events_timeline:

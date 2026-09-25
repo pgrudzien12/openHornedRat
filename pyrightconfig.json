@@ -81,6 +81,12 @@
     "whshr/skirmish_log.py",
     "whshr/game.py",
     "whshr/debrief.py",
-    "whshr/briefing.py"
+    "whshr/briefing.py",
+    "whshr/glue_spec.py",
+    "whshr/battle_replay.py",
+    "whshr/battle3d.py",
+    "whshr/battle2d.py",
+    "whshr/camera.py",
+    "whshr/viewer_web.py"
   ]
 }
