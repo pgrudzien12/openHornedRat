@@ -7,7 +7,9 @@ actually used by the BF003/BF005/BF010 walkthroughs -- see that document's "Veri
 Actually Disassembled" section for the real script excerpts these opcodes come from.
 """
 
+import math
 import unittest
+import unittest.mock
 from whshr import interpreter
 from whshr.engine import Battle, Regiment
 from whshr.rules import Side
@@ -70,6 +72,7 @@ class TargetSelectionTests(unittest.TestCase):
 
     def test_attack_nth_nearest_enemy_picks_the_second_closest(self):
         state = self.battle.event_bus.unit_states["enemy_1"]
+        state.threat_range = 500  # the far regiment is 400 away, beyond the fallback range
         self.interp.op_AttackNthNearestEnemy(state, 2, [], "enemy_1", 0, None)
         self.assertEqual(self.enemy.attack_target, "player_far")
 
@@ -82,6 +85,7 @@ class TargetSelectionTests(unittest.TestCase):
     def test_attack_nearest_enemy_ignores_destroyed_regiments(self):
         self.near.models = 0  # destroyed: no longer .active
         state = self.battle.event_bus.unit_states["enemy_1"]
+        state.threat_range = 500  # the far regiment is 400 away, beyond the fallback range
         self.interp.op_AttackNearestEnemy(state, None, [], "enemy_1", 0, None)
         self.assertEqual(self.enemy.attack_target, "player_far")
 
@@ -322,3 +326,264 @@ class EventSourceIsARegimentIdentifierTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EventHandlerFrameTests(unittest.TestCase):
+    """The handler frame `GetEvent; ...; ConsumeEvent; LoopIfTrue; ReturnInterrupt` must drain the queue
+    and then fall through, even when a persistent condition bit (the event-17 gate, 16) is set.
+
+    Regression: the gate bit shared a register with the loop result, so the frame looped forever,
+    every unit spun to the iteration cap (BF001: 2-3 FPS) and never left its handler (reinforcements
+    and Sleaquit never woke).
+    """
+
+    def setUp(self):
+        self.interp = interpreter.ScriptInterpreter(None, None, None)
+        self.state = interpreter.UnitScriptState()
+        self.state.return_stack.append((3,))
+
+    def _end_of_pass(self):
+        self.interp.op_GetEvent(self.state, None, [], "t", 0, None)
+        return self.interp.op_LoopIfTrue(self.state, None, [], "t", 0, None)
+
+    def test_empty_queue_falls_through_despite_persistent_bit(self):
+        self.interp.op_SetCondFlags(self.state, 16, [], "t", 0, None)
+        self.assertEqual(self._end_of_pass(), self.state.pc + 1)
+
+    def test_queued_event_loops_back(self):
+        self.state.event_queue.append(interpreter.Event(code=7))
+        self.assertEqual(self._end_of_pass(), 3)
+
+    def test_persistent_bits_survive_tests_and_are_testable(self):
+        self.interp.op_SetCondFlags(self.state, 16, [], "t", 0, None)
+        self.interp.op_GetEvent(self.state, None, [], "t", 0, None)
+        self.interp.op_TestCondFlags(self.state, 16, [], "t", 0, None)
+        self.assertTrue(self.state.cond_flags)
+        self.interp.op_ClearCondFlags(self.state, 16, [], "t", 0, None)
+        self.interp.op_TestCondFlags(self.state, 16, [], "t", 0, None)
+        self.assertFalse(self.state.cond_flags)
+
+
+class AttackSearchRangeTests(unittest.TestCase):
+    """`Attack*Enemy` only sees enemies within the unit's own SetThreatRange (300 if it set none), so a
+    script's `AttackNearestEnemy; ...IfTrue; LoopIfFalse` gate waits until an enemy comes close (BF001's
+    Hiln's Guard, whose event 17 wakes the reinforcements)."""
+
+    def _attack(self, distance, threat_range):
+        guard = Regiment("guard", "Guard", 0, 0, 0, Side.ENEMY, models=5, ranks=1)
+        player = Regiment("player", "Player", distance, 0, 0, Side.PLAYER, models=5, ranks=1)
+        battle = Battle(2000, 2000, [guard, player], seed=1995)
+        interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        state = battle.event_bus.unit_states["guard"]
+        state.threat_range = threat_range
+        interp.op_AttackNearestEnemy(state, None, [], "guard", 0, None)
+        return state.cond_flags, guard.attack_target
+
+    def test_enemy_inside_the_units_own_range_is_attacked(self):
+        self.assertEqual(self._attack(distance=200, threat_range=240), (1, "player"))
+
+    def test_enemy_beyond_the_units_own_range_is_not(self):
+        self.assertEqual(self._attack(distance=300, threat_range=240), (0, None))
+
+    def test_a_unit_without_a_threat_range_falls_back_to_the_default(self):
+        self.assertEqual(self._attack(distance=290, threat_range=0), (1, "player"))
+        self.assertEqual(self._attack(distance=310, threat_range=0), (0, None))
+
+    def test_distance_is_octagonal(self):
+        # 200 along each axis is 300 octagonal (200 + 100), though only 283 Euclidean.
+        guard = Regiment("guard", "Guard", 0, 0, 0, Side.ENEMY, models=5, ranks=1)
+        player = Regiment("player", "Player", 200, 200, 0, Side.PLAYER, models=5, ranks=1)
+        battle = Battle(2000, 2000, [guard, player], seed=1995)
+        interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        state = battle.event_bus.unit_states["guard"]
+        state.threat_range = 290
+        interp.op_AttackNearestEnemy(state, None, [], "guard", 0, None)
+        self.assertEqual(state.cond_flags, 0)
+
+
+class MeleeFlagMirrorTests(unittest.TestCase):
+    """Script unit flag 0x200 ("in melee") follows the regiment: Otto Hiln's `TestUnitFlags 512;
+    KillAllModels` and the wizards' "no casting while engaged" both read it."""
+
+    def test_flag_follows_in_melee(self):
+        unit = Regiment("u", "U", 0, 0, 0, Side.ENEMY, models=5, ranks=1)
+        battle = Battle(500, 500, [unit], seed=1995)
+        interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        state = battle.event_bus.unit_states["u"]
+        unit.in_melee = True
+        interp._mirror_engine_flags("u", state)
+        self.assertTrue(state.unit_flags & interpreter.IN_MELEE_FLAG)
+        unit.in_melee = False
+        interp._mirror_engine_flags("u", state)
+        self.assertFalse(state.unit_flags & interpreter.IN_MELEE_FLAG)
+
+    def test_other_flags_are_left_alone(self):
+        unit = Regiment("u", "U", 0, 0, 0, Side.ENEMY, models=5, ranks=1)
+        battle = Battle(500, 500, [unit], seed=1995)
+        interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        state = battle.event_bus.unit_states["u"]
+        state.unit_flags = interpreter.ARRIVED_FLAG
+        interp._mirror_engine_flags("u", state)
+        self.assertEqual(state.unit_flags, interpreter.ARRIVED_FLAG)
+
+
+class ScriptedTargetAndFlightOpcodeTests(unittest.TestCase):
+    """notes/game_rules.md, "Scripted target and flight opcodes"."""
+
+    def setUp(self):
+        self.unit = Regiment("u", "U", 500, 500, 100, Side.ENEMY, models=6, ranks=2, speed_per_tick=0.0)
+        self.foe = Regiment("foe", "Foe", 500, 600, 0, Side.PLAYER, models=6, ranks=2, speed_per_tick=0.0)
+        self.battle = Battle(2000, 2000, [self.unit, self.foe], seed=1995)
+        self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
+        self.state = self.battle.event_bus.unit_states["u"]
+
+    def _run(self, name, *args):
+        return getattr(self.interp, "op_" + name)(self.state, None, [], "u", 0, self.battle.rng)
+
+    # DropTarget
+    def test_drop_target_clears_target_and_bracing_and_is_true(self):
+        self.unit.attack_target = "foe"
+        self.state.current_target = ("foe", 0)
+        self.unit.braced, self.unit.braced_target = True, "foe"
+        self._run("DropTarget")
+        self.assertIsNone(self.unit.attack_target)
+        self.assertIsNone(self.state.current_target)
+        self.assertFalse(self.unit.braced)
+        self.assertEqual(self.state.cond_flags, 1)
+
+    def test_drop_target_without_a_target_does_nothing_and_is_false(self):
+        self._run("DropTarget")
+        self.assertEqual(self.state.cond_flags, 0)
+
+    def test_drop_target_on_a_broken_unit_does_nothing_and_is_false(self):
+        self.unit.attack_target = "foe"
+        self.unit.routing = True
+        self._run("DropTarget")
+        self.assertEqual(self.unit.attack_target, "foe")
+        self.assertEqual(self.state.cond_flags, 0)
+
+    def test_drop_target_does_not_leave_a_melee(self):
+        self.unit.attack_target = "foe"
+        self.unit.in_melee, self.unit.melee_group = True, "g"
+        self._run("DropTarget")
+        self.assertTrue(self.unit.in_melee)
+        self.assertEqual(self.unit.melee_group, "g")
+
+    # FleeAhead
+    def test_flee_ahead_breaks_the_unit_and_runs_along_its_facing(self):
+        self.unit.attack_target = "foe"
+        facing = self.unit.direction
+        self._run("FleeAhead")
+        self.assertTrue(self.unit.routing)
+        self.assertIsNone(self.unit.attack_target)
+        self.assertEqual(self.unit.direction, facing)
+        self.assertEqual(self.state.cond_flags, 1)
+        angle = facing * math.tau / 512
+        bearing = math.atan2(self.unit.flee_x - self.unit.x, self.unit.flee_y - self.unit.y)
+        self.assertAlmostEqual(bearing, math.atan2(math.sin(angle), math.cos(angle)), places=3)
+
+    def test_flee_ahead_ignores_cant_break(self):
+        self.unit.psychology = frozenset({"CantBreak"})
+        self._run("FleeAhead")
+        self.assertTrue(self.unit.routing)
+
+    def test_flee_ahead_is_refused_by_an_anchored_war_machine_but_clears_its_target(self):
+        self.unit.anchor_cleared = False
+        with unittest.mock.patch.object(Regiment, "anchored", new_callable=unittest.mock.PropertyMock, return_value=True):
+            self.unit.attack_target = "foe"
+            self._run("FleeAhead")
+        self.assertFalse(self.unit.routing)
+        self.assertIsNone(self.unit.attack_target)
+
+    def test_flee_ahead_alerts_the_enemy_side_that_it_routed(self):
+        self._run("FleeAhead")
+        self.assertTrue(any(e.kind == "rout_start" for e in self.battle.events))
+
+    # StoreEventInfo
+    def test_store_event_info_remembers_sender_and_code_and_overwrites(self):
+        self.state.current_event = interpreter.Event(code=7, source="foe")
+        self._run("StoreEventInfo")
+        self.assertEqual(self.state.remembered_event, ("foe", 7))
+        self.state.current_event = interpreter.Event(code=9, source="other")
+        self._run("StoreEventInfo")
+        self.assertEqual(self.state.remembered_event, ("other", 9))
+
+    def test_the_remembered_event_outlives_the_event(self):
+        self.state.current_event = interpreter.Event(code=7, source="foe")
+        self._run("StoreEventInfo")
+        self.state.current_event = interpreter.Event()
+        self.assertEqual(self.state.remembered_event, ("foe", 7))
+
+    # FaceModelsToTarget
+    def test_face_models_with_no_target_does_nothing_and_is_false(self):
+        self._run("FaceModelsToTarget")
+        self.assertEqual(self.state.cond_flags, 0)
+
+    def test_face_models_turns_resting_models_once_then_reports_done(self):
+        self.unit.attack_target = "foe"
+        facing = self.unit.direction
+        self._run("FaceModelsToTarget")
+        self.assertEqual(self.state.cond_flags, 1)
+        for model in self.unit.melee_models:
+            self.assertEqual((model.heading_x, model.heading_y), (0.0, 1.0))  # foe is straight ahead in y
+        self._run("FaceModelsToTarget")
+        self.assertEqual(self.state.cond_flags, 0)
+        self.assertEqual(self.unit.direction, facing)  # the regiment itself does not turn
+
+    def test_face_models_leaves_walking_models_alone_and_reports_not_finished(self):
+        self.unit.attack_target = "foe"
+        self.unit.model_positions()
+        walker = self.unit.melee_models[0]
+        walker.at_rest = False
+        self._run("FaceModelsToTarget")
+        self.assertEqual(self.state.cond_flags, 1)
+        self.assertEqual((walker.heading_x, walker.heading_y), (0.0, 0.0))
+
+
+class OpponentGoneEventTests(unittest.TestCase):
+    """A unit whose opponent dies leaves the fight and gets event 0x19 "opponent gone" (game_rules.md event
+    table); BF001's assassin runs off on it. A routing opponent is not gone: the rout event decides."""
+
+    def _duel(self):
+        killer = Regiment("killer", "K", 0, 0, 0, Side.ENEMY, models=1, ranks=1, speed_per_tick=0.0)
+        victim = Regiment("victim", "V", 0, 6, 0, Side.PLAYER, models=1, ranks=1, speed_per_tick=0.0)
+        battle = Battle(500, 500, [killer, victim], seed=1995)
+        battle.tick()
+        self.assertTrue(killer.in_melee)
+        battle.event_bus.unit_states["killer"].event_queue.clear()
+        return battle, killer, victim
+
+    def test_a_dead_opponent_sends_event_0x19(self):
+        battle, killer, victim = self._duel()
+        victim.models = 0
+        battle.tick()
+        codes = [e.code for e in battle.event_bus.unit_states["killer"].event_queue]
+        self.assertIn(0x19, codes)
+
+    def test_a_routing_opponent_does_not(self):
+        battle, killer, victim = self._duel()
+        victim.routing = True
+        battle.tick()
+        codes = [e.code for e in battle.event_bus.unit_states["killer"].event_queue]
+        self.assertNotIn(0x19, codes)
+
+
+class BreakJumpsToItsLabelTests(unittest.TestCase):
+    """`Break` (operand 0x1ABC) jumps to the next 0x0ABC label, so a matched `CaseEvent` body skips the rest
+    of the chain and the default handler after it (behaviour.py header)."""
+
+    LABEL, BREAK = 0x0ABC, 0x1ABC
+
+    def _interp(self):
+        return interpreter.ScriptInterpreter(None, None, None)
+
+    def test_break_lands_on_the_next_label_word(self):
+        words = [0x6B, self.BREAK, 0x11, 153, self.LABEL, 0x69]  # Break; GosubScript 153; L: ConsumeEvent
+        state = interpreter.UnitScriptState()
+        state.pc = 0
+        self.assertEqual(self._interp().op_Break(state, self.BREAK, words, "t", 0, None), 4)
+
+    def test_break_without_a_label_falls_through(self):
+        state = interpreter.UnitScriptState()
+        state.pc = 0
+        self.assertEqual(self._interp().op_Break(state, self.BREAK, [0x6B, self.BREAK, 0x69], "t", 0, None), 2)

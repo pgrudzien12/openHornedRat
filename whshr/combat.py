@@ -29,7 +29,8 @@ import math
 
 from . import animation, battle_grid, formation
 from .battle_events import BattleEvent
-from .rules import EXPECTED_ARMOUR_SAVE, Side, can_fight, hostile_sides, wfb_to_hit, wfb_to_wound
+from .rules import EXPECTED_ARMOUR_SAVE, Side, hostile_sides, may_engage, wfb_to_hit, wfb_to_wound
+from .interpreter import Event
 
 SEGMENT_TICKS = 19  # game_rules.md, "Battle clock": 19 ticks per segment
 SEGMENTS_PER_TURN = 10  # game_rules.md 5.1: segments count down from 10 to 1 within a turn
@@ -234,10 +235,14 @@ def refresh_melee_state(battle):
             continue
         if _fight_has_enemy(battle, regiment):
             continue
+        gone = _opponent_gone(battle, regiment, regiment.melee_touching)
         battle_grid.release(battle, regiment)
         regiment.in_melee = False
+        regiment.melee_camp = None
         regiment.melee_group = None
         regiment.melee_touching = frozenset()
+        if gone:
+            _send_opponent_gone(battle, regiment)
         # The unit's *order* survives leaving a fight: leaving a grid never touches one (game_rules.md 5.7), and the
         # pursuit granted when the last enemy broke is issued on the very tick before this runs.
         # Clearing it here cancelled every pursuit one tick after it started. A target that is gone
@@ -264,12 +269,29 @@ def refresh_braced_state(battle):
             regiment.braced_target = None
 
 
+OPPONENT_GONE_EVENT = 0x19  # game_rules.md event table: "current opponent gone"
+
+
+def _opponent_gone(battle, regiment, touched):
+    """True when every regiment this one was fighting is destroyed or off the field. A routing opponent
+    is not gone: the rout itself (event 0x0F) decides between pursuit and a new opponent."""
+    return bool(touched) and all(
+        other is None or not other.active for other in (battle.regiments.get(i) for i in touched))
+
+
+def _send_opponent_gone(battle, regiment):
+    """Queue event 0x19 to `regiment` (game_rules.md section 5, "Leaving": its opponent is gone and no
+    other enemy remains on the grid), so its script clears the target and re-forms."""
+    if battle.event_bus is not None:
+        battle.event_bus.queue_event(regiment.identifier, Event(code=OPPONENT_GONE_EVENT), route="self")
+
+
 def _fight_has_enemy(battle, regiment):
     """True while some active, standing enemy is still in `regiment`'s fight."""
     if regiment.melee_group is None:
         return False
     return any(other.active and not other.routing
-               and other.side != regiment.side
+               and other.camp != regiment.camp
                and other.melee_group == regiment.melee_group
                for other in battle.regiments.values())
 
@@ -323,6 +345,14 @@ def _merge_fights(battle, keep_id, other_ids):
         keep["next_test_turn"] = min(keep["next_test_turn"], other["next_test_turn"])
 
 
+def _split_scripted_pair(first, second):
+    """A scripted same-side engagement starts: the regiment whose script named the other as its
+    opponent (the attacker) takes the `Side.DUEL` camp, so the two are opponents in every
+    tally, break test and grid check that follows (rules.may_engage)."""
+    attacker = first if first.attack_target == second.identifier else second
+    attacker.melee_camp = Side.DUEL
+
+
 def resolve_contacts(battle):
     """Group regiments whose oriented footprints actually touch into shared fights (game_rules.md 5.7's
     battle grid: several regiments per side may share one fight, so a side can gang up on a lone enemy);
@@ -341,9 +371,11 @@ def resolve_contacts(battle):
     old_touching = {r.identifier: r.melee_touching for r in active}
     for i, first in enumerate(active):
         for second in active[i + 1:]:
-            if not can_fight(first.side, second.side):
+            if not may_engage(first, second):
                 continue
             if formation.penetrates(first.block(), second.block()):
+                if first.camp == second.camp:
+                    _split_scripted_pair(first, second)
                 touching[first.identifier].add(second.identifier)
                 touching[second.identifier].add(first.identifier)
 
@@ -434,10 +466,14 @@ def resolve_contacts(battle):
 
     for identifier, regiment in by_id.items():
         if not touching[identifier] and regiment.in_melee:
+            gone = _opponent_gone(battle, regiment, old_touching[identifier])
             battle_grid.release(battle, regiment)
             regiment.in_melee = False
+            regiment.melee_camp = None
             regiment.melee_group = None
             regiment.melee_touching = frozenset()
+            if gone:
+                _send_opponent_gone(battle, regiment)
 
     for group_id in list(battle.fights):
         if group_id not in kept_groups:
@@ -520,15 +556,15 @@ def _strike_with_models(attacker, group_id, fight, turn, segment_number, battle)
     defender = battle.regiments[max(victims, key=lambda key: len(victims[key]))] if victims else pairs[0][2]
     rank_bonus = _rank_bonus(attacker)
     direction_bonus = _direction_bonus(attacker, defender)
-    fight["tally"][attacker.side] += kills + rank_bonus + direction_bonus
-    breakdown = fight["breakdown"][attacker.side]
+    fight["tally"][attacker.camp] += kills + rank_bonus + direction_bonus
+    breakdown = fight["breakdown"][attacker.camp]
     breakdown["kills"] += kills
     breakdown["rank"] += rank_bonus
     breakdown["direction"] += direction_bonus
     battle.events.append(BattleEvent(
         f"{attacker.name} strikes {defender.name} in segment {segment_number} (turn {turn}): "
         f"{len(pairs)} models fighting, {kills} casualties, side tally "
-        f"{fight['tally'][attacker.side]:.0f} (+{rank_bonus} rank, +{direction_bonus} dir).",
+        f"{fight['tally'][attacker.camp]:.0f} (+{rank_bonus} rank, +{direction_bonus} dir).",
         "melee_strike",
         attacker=attacker.identifier, defender=defender.identifier, fight=group_id, turn=turn,
         segment=segment_number, kills=kills, fighting=len(pairs), rank_bonus=rank_bonus,
@@ -558,7 +594,7 @@ def _resolve_group_break_test(group_id, members, turn, battle):
         seen[regiment.identifier] = seen.get(regiment.identifier, 0) + 1
     if turn < fight["next_test_turn"]:
         return
-    present = {regiment.side for regiment in members}
+    present = {regiment.camp for regiment in members}
     if len(present) >= 2:
         tallies = {side: fight["tally"][side] for side in present}
         winning_tally = max(tallies.values())
@@ -567,7 +603,7 @@ def _resolve_group_break_test(group_id, members, turn, battle):
         if modifier != 0:
             breakdown = {side: dict(fight["breakdown"][side]) for side in Side}
             for regiment in members:
-                if regiment.side == losing_side and seen.get(regiment.identifier, 0) >= 2:
+                if regiment.camp == losing_side and seen.get(regiment.identifier, 0) >= 2:
                     _break_test(regiment, modifier, group_id, breakdown, battle)
     fight["tally"] = {side: 0.0 for side in Side}
     fight["breakdown"] = _empty_breakdown()
@@ -597,15 +633,16 @@ def _break_test(regiment, modifier, group_id, breakdown, battle):
         _start_rout(regiment, battle)
 
 
-def _start_rout(regiment, battle):
+def _start_rout(regiment, battle, flee_point=None):
     # game_rules.md "Flight and catching fleeing units": the flight starts "directly away from its
     # opponent" - a one-time bearing, not re-aimed every tick at whichever enemy is momentarily
     # nearest (whshr.engine.Battle._advance_regiments reads this fixed point back every tick).
-    flee_x, flee_y = battle._flee_point(regiment)
+    # `flee_point` overrides that bearing (a scripted flight along the unit's own facing).
+    flee_x, flee_y = flee_point if flee_point is not None else battle._flee_point(regiment)
     regiment.flee_x, regiment.flee_y = flee_x, flee_y
     group_id = regiment.melee_group
     opponents = [other for other in battle.regiments.values()
-                 if other.active and other.side != regiment.side
+                 if other.active and other.camp != regiment.camp
                  and other.melee_group == group_id and group_id is not None]
     regiment.model_positions()
     for index, model in enumerate(regiment.melee_models):
@@ -629,6 +666,7 @@ def _start_rout(regiment, battle):
     battle_grid.release(battle, regiment)
     regiment.routing = True
     regiment.in_melee = False
+    regiment.melee_camp = None
     regiment.melee_group = None
     regiment.melee_touching = frozenset()
     regiment.attack_target = None
@@ -660,7 +698,7 @@ def _react_to_rout(routed, opponents, group_id, battle):
         if opponent.routing or not opponent.active:
             continue
         still_fighting = any(
-            other.active and not other.routing and other.side != opponent.side
+            other.active and not other.routing and other.camp != opponent.camp
             and other.melee_group == group_id
             for other in battle.regiments.values())
         if still_fighting:

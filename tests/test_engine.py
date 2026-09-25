@@ -1136,3 +1136,16 @@ class ModelStaggerValueTests(unittest.TestCase):
         regiment = Regiment("solo", "Solo", 100.0, 100.0, 0, Side.PLAYER, models=5, ranks=1)
         regiment.model_positions()
         self.assertEqual([m.stagger for m in regiment.melee_models], [0, 29, 58, 87, 116])
+
+
+class NodeTableTests(unittest.TestCase):
+    """Scripts address [NODES] entries by position (from 0); the `id` field is mostly 0 and not a key."""
+
+    def test_nodes_are_keyed_by_position_even_when_every_id_is_zero(self):
+        source = {
+            "field": {"width": 500, "height": 500},
+            "armies": [], "merc": None,
+            "nodes": [{"x": 10, "y": 20, "id": 0}, {"x": 30, "y": 40, "id": 0}, {"x": 50, "y": 60, "id": 2}],
+        }
+        battle = Battle.from_script(source)
+        self.assertEqual(battle.nodes, {0: (10.0, 20.0), 1: (30.0, 40.0), 2: (50.0, 60.0)})

@@ -6,7 +6,7 @@ import random
 
 from . import animation, battle_grid, behaviour, combat, formation, interpreter
 from .battle_events import BattleEvent
-from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, MOUNT_PROFILES, Side, can_fight, side_of_code, stat_fields
+from .rules import EXPECTED_WEAPON_BONUS, MISSILE_RANGES, MOUNT_PROFILES, Side, may_engage, side_of_code, stat_fields
 from .script import load_battle, resource_name
 
 TICK_SECONDS = 0.1  # the battle clock ticks every 100 ms (game_rules.md, "Battle clock")
@@ -166,6 +166,9 @@ class Regiment:
     braced: bool = False
     braced_target: str | None = None  # identifier of the regiment this one is braced against
     in_melee: bool = False
+    # Set (to `Side.DUEL`) only while this regiment is fighting a same-side regiment its script named as
+    # its opponent; see `rules.may_engage`. Cleared whenever it leaves its fight.
+    melee_camp: Side | None = None
     melee_group: str | None = None  # id of the shared multi-regiment fight (Battle.fights), if any
     melee_touching: frozenset = field(default_factory=frozenset)  # enemy ids this footprint touches now
     held: bool = False  # reserved for a Tangling-Thorn-style hold; already gates re-forms if ever set
@@ -215,6 +218,12 @@ class Regiment:
         if self.frontage is None:
             sizes = formation.rank_sizes(self.models, self.ranks)
             self.frontage = sizes[0] if sizes else 0
+
+    @property
+    def camp(self):
+        """Who this regiment fights for in a melee: its side, unless a scripted same-side engagement
+        put it on its own `Side.DUEL` camp."""
+        return self.melee_camp or self.side
 
     @property
     def anchored(self):
@@ -466,9 +475,13 @@ class Battle:
         real world coordinate instead of only recording the id.
         """
         field_data = source["field"]
-        nodes = {node["id"]: (float(node["x"]), float(node["y"]))
-                 for node in source.get("nodes") or ()
-                 if node.get("id") is not None and node.get("x") is not None and node.get("y") is not None}
+        # Scripts name a node by its position in the [NODES] table, counted from 0. The `set:id=` field is
+        # not a key: nearly every node has id 0, so keying by it collapsed BF001's 11 nodes into one.
+        # Evidence for the base: BF001's Hiln's Guard patrols MoveToNode 6 <-> 7 and only counting from 0
+        # gives it a beat beside its own camp ((924,1183) <-> (1247,1370)) instead of the east map edge.
+        nodes = {index: (float(node["x"]), float(node["y"]))
+                 for index, node in enumerate(source.get("nodes") or ())
+                 if node.get("x") is not None and node.get("y") is not None}
         regiments, script_ids, used = [], {}, set()
         # `source["armies"]` are the .BTS file's own [UNITS] sections (both the "Enemy Army" and "NPC
         # units" ones, notes/neutral_units.md section 2): each unit's own s_side byte says whether it
@@ -1244,6 +1257,8 @@ class Battle:
         diagnosis for "defeat never triggered": every result check's inputs are visible here)."""
         counts = {}
         for side in Side:
+            if side is Side.DUEL:
+                continue  # a melee camp, not a side (rules.Side.DUEL)
             regiments = [r for r in self.regiments.values() if r.side == side]
             counts[side.value] = {
                 "active": sum(1 for r in regiments if r.active),
@@ -1282,7 +1297,7 @@ class Battle:
             for second in regiments[i + 1:]:
                 if first.in_melee or second.in_melee:
                     continue
-                if can_fight(first.side, second.side):
+                if may_engage(first, second):
                     # A pair that can actually fight never pushes apart: a charging regiment must be
                     # free to close all the way to footprint contact (combat.resolve_contacts), not
                     # stop at circle distance (see combat.resolve_contacts: contact needs real

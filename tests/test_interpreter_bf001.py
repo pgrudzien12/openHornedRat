@@ -132,10 +132,10 @@ class BF001InterpreterTests(unittest.TestCase):
 
         # Test conditional flags
         interp.op_SetCondFlags(state, 0x01, script_words, "test", 0, None)
-        self.assertEqual(state.cond_flags, 0x01)
+        self.assertEqual(state.cond_bits, 0x01)
 
         interp.op_ClearCondFlags(state, 0x01, script_words, "test", 0, None)
-        self.assertEqual(state.cond_flags, 0x00)
+        self.assertEqual(state.cond_bits, 0x00)
 
     def test_opcode_handler_wait_timing(self):
         """Test Wait and timing opcodes."""
@@ -316,11 +316,11 @@ class BF001ScenarioTests(unittest.TestCase):
 
         # Simulate: initially dormant
         interp.op_ClearCondFlags(state, 16, [], "enemy_2", 0, battle.rng)
-        self.assertEqual(state.cond_flags, 0)
+        self.assertEqual(state.cond_bits, 0)
 
         # Simulate: external event sets flag
         interp.op_SetCondFlags(state, 16, [], "enemy_2", 0, battle.rng)
-        self.assertEqual(state.cond_flags, 16)
+        self.assertEqual(state.cond_bits, 16)
 
         # Simulate: set wait timer for 80 ticks
         interp.op_SetWait(state, 80, [], "enemy_2", 0, battle.rng)

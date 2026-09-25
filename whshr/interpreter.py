@@ -31,6 +31,20 @@ SCATTER_RADIUS = 40.0  # world units: ScatterModelsToNode's wander distance from
 # WaitUntilUnitFlags 16 idiom seen throughout real mission scripts. No other candidate meaning for
 # that specific bit, immediately after a MoveToNode call, was found in the public notes.
 ARRIVED_FLAG = 0x10
+# game_rules.md, unit flags: 0x200 is "in melee" -- Otto Hiln's script tests it (`TestUnitFlags 512`) and
+# the wizard casting scripts refuse to cast while it is set. Mirrored from `Regiment.in_melee`.
+IN_MELEE_FLAG = 0x200
+
+# PROVISIONAL: the search radius of the `Attack*Enemy` opcode family for a unit that never ran
+# `SetThreatRange`. The units that gate a mission on "an enemy came close" (BF001's Hiln's Guard) all
+# set their own range, which is used instead; the fallback is a project decision, not an observed value.
+DEFAULT_ATTACK_SEARCH_RANGE = 300
+
+
+def _octagonal_distance(first, second):
+    """The game's cheap distance (game_rules.md, threat score): larger axis delta + half the smaller."""
+    dx, dy = abs(first.x - second.x), abs(first.y - second.y)
+    return max(dx, dy) + min(dx, dy) / 2
 
 
 @dataclass
@@ -67,8 +81,12 @@ class UnitScriptState:
     # Unit state (flags set by SetUnitFlags, SetCondFlags, etc.)
     unit_flags: int = 0  # bit field (+0xB4 in the original)
     unit_flags2: int = 0  # secondary flags (+0xB8)
-    cond_flags: int = 0  # condition flags for If/IfNot branching
+    cond_flags: int = 0  # truth result read by If/IfNot/LoopIf*/SendEvent*If*, written by Test*/Find*/GetEvent
+    cond_bits: int = 0  # persistent condition bit word: only SetCondFlags/ClearCondFlags/TestCondFlags touch it
     threat_range: int = 0  # set by SetThreatRange; used by threat scoring
+    # The single "remembered event" slot of StoreEventInfo (game_rules.md, scripted target and flight
+    # opcodes): (sender regiment identifier, event code) of the event last stored, or None.
+    remembered_event: tuple | None = None
 
     # Timing (SetWait, TestWait, Wait)
     wait_remaining: float = 0.0  # ticks left in current Wait
@@ -241,6 +259,17 @@ class ScriptInterpreter:
             state.unit_flags |= ARRIVED_FLAG
             state.pending_arrival = False
 
+    def _mirror_engine_flags(self, unit_id, state):
+        """Copy engine-owned conditions into the script's unit flags, so scripts see what the battle
+        knows: IN_MELEE_FLAG follows `Regiment.in_melee` (raised and cleared as the fight starts and ends)."""
+        regiment = self.battle.regiments.get(unit_id) if self.battle is not None else None
+        if regiment is None:
+            return
+        if regiment.in_melee:
+            state.unit_flags |= IN_MELEE_FLAG
+        else:
+            state.unit_flags &= ~IN_MELEE_FLAG
+
     def raise_charge_events(self):
         """Queue event 0x07 ("you are being charged") to any regiment an attacker has closed to
         within actual charge reach of (game_rules.md event table: 0x07 = charge start; "Charge":
@@ -318,6 +347,7 @@ class ScriptInterpreter:
         Returns the state after execution. Modifies state in-place.
         """
         self._update_arrival_flag(unit_id, state)
+        self._mirror_engine_flags(unit_id, state)
 
         if state.script_dll is None:
             state.script_dll = self.script_dll
@@ -446,7 +476,7 @@ class ScriptInterpreter:
             return script_words[operand_pc]
         return None
 
-    def _nearest_enemy_id(self, regiment, n=1, side=None):
+    def _nearest_enemy_id(self, regiment, n=1, side=None, max_distance=None):
         """The n-th nearest active regiment identifier to `regiment` (1 = nearest), or None if fewer
         than n candidates remain. Euclidean distance; shared by the Target*/Attack* opcode families
         (TargetNearestEnemy, AttackNearestEnemy, AttackNthNearestEnemy, ...).
@@ -466,6 +496,9 @@ class ScriptInterpreter:
         else:
             candidates = (other for other in self.battle.regiments.values()
                           if other.active and other.side != regiment.side)
+        if max_distance is not None:
+            candidates = (other for other in candidates
+                          if _octagonal_distance(regiment, other) <= max_distance)
         enemies = sorted(candidates, key=lambda other: math.hypot(other.x - regiment.x, other.y - regiment.y))
         return enemies[n - 1].identifier if len(enemies) >= n else None
 
@@ -639,21 +672,21 @@ class ScriptInterpreter:
         return state.pc
 
     def op_SetCondFlags(self, state, operand, script_words, unit_id, tick_count, rng):
-        """SetCondFlags N: set bits in cond_flags (for If/IfNot)."""
+        """SetCondFlags N: set bits in the persistent condition bit word (not the If/Loop result)."""
         if operand is not None:
-            state.cond_flags |= operand
+            state.cond_bits |= operand
         return state.pc + 1
 
     def op_ClearCondFlags(self, state, operand, script_words, unit_id, tick_count, rng):
-        """ClearCondFlags N: clear bits in cond_flags."""
+        """ClearCondFlags N: clear bits in the persistent condition bit word."""
         if operand is not None:
-            state.cond_flags &= ~operand
+            state.cond_bits &= ~operand
         return state.pc + 1
 
     def op_TestCondFlags(self, state, operand, script_words, unit_id, tick_count, rng):
-        """TestCondFlags N: test if any cond_flags match N."""
+        """TestCondFlags N: result = any of the persistent bits N is set."""
         if operand is not None:
-            state.cond_flags = (state.cond_flags & operand) != 0
+            state.cond_flags = (state.cond_bits & operand) != 0
         return state.pc + 1
 
     # ===== Event handling opcodes =====
@@ -669,8 +702,10 @@ class ScriptInterpreter:
         """
         if state.event_queue:
             state.current_event = state.event_queue.popleft()
+            state.cond_flags = 1
         else:
             state.current_event = Event()
+            state.cond_flags = 0  # the handler frame's `ConsumeEvent; LoopIfTrue` ends when drained
         return state.pc + 1
 
     def op_ConsumeEvent(self, state, operand, script_words, unit_id, tick_count, rng):
@@ -692,10 +727,18 @@ class ScriptInterpreter:
         return state.pc + 1
 
     def op_Break(self, state, operand, script_words, unit_id, tick_count, rng):
-        """Break: jump to the next label (matching CaseEvent)."""
-        # The operand is the label to jump to (0x1ABC encodes the label address)
-        # For now, simplified: skip to next instruction after the current opcode
-        return state.pc + 1
+        """Break: jump to the next label word (0x0ABC) after this instruction (behaviour.py: the operand
+        0x1ABC with bit 12 cleared is the word it scans forward for).
+
+        This ends a matched `CaseEvent` body by skipping the rest of the case chain *and* the default
+        handler that follows it. Falling through instead ran the default `GosubScript 153` after every
+        handled event, so e.g. BF001's assassin (case 25: `SwitchScript 3`) was switched on to the
+        library's rally script 163 in the same tick and never fled."""
+        wanted = (operand if operand is not None else behaviour.BREAK_LABEL) & ~0x1000
+        for pc in range(state.pc + 2, len(script_words)):
+            if script_words[pc] == wanted:
+                return pc
+        return state.pc + 2
 
     def op_SendEventSelf(self, state, operand, script_words, unit_id, tick_count, rng):
         """SendEventSelf CODE: queue an event to self."""
@@ -906,7 +949,9 @@ class ScriptInterpreter:
 
     def _attack_nearest(self, state, unit_id, n, side=None):
         regiment = self.battle.regiments.get(unit_id)
-        target_id = self._nearest_enemy_id(regiment, n, side=side) if regiment else None
+        search_range = state.threat_range if state.threat_range > 0 else DEFAULT_ATTACK_SEARCH_RANGE
+        target_id = (self._nearest_enemy_id(regiment, n, side=side, max_distance=search_range)
+                     if regiment else None)
         if target_id:
             state.current_target = (target_id, 0)
             if not regiment.anchored:
@@ -1290,6 +1335,72 @@ class ScriptInterpreter:
     def op_ReformBlock(self, state, operand, script_words, unit_id, tick_count, rng):
         """ReformBlock: reform unit into a tight block formation."""
         # TODO: adjust regiment.ranks based on available models
+        return state.pc + 1
+
+    def op_DropTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+        """DropTarget: forget the current attack target (game_rules.md, scripted target and flight
+        opcodes). Only a unit that is not broken and has a target acts: it clears the target and its
+        braced state, and the condition is true; otherwise nothing changes and the condition is false.
+        It never leaves a melee, changes orders or sends events."""
+        regiment = self.battle.regiments.get(unit_id) if self.battle is not None else None
+        has_target = regiment is not None and (regiment.attack_target is not None or state.current_target)
+        if regiment is None or regiment.routing or not has_target:
+            state.cond_flags = 0
+            return state.pc + 1
+        regiment.attack_target = None
+        state.current_target = None
+        regiment.braced = False
+        regiment.braced_target = None
+        state.cond_flags = 1
+        return state.pc + 1
+
+    def op_FleeAhead(self, state, operand, script_words, unit_id, tick_count, rng):
+        """FleeAhead: start a rout along the unit's current facing (game_rules.md, scripted target and
+        flight opcodes). It is the rout itself, so `CantBreak` does not stop it; only an anchored war
+        machine refuses. The target is always cleared; the condition is true when a rout started."""
+        regiment = self.battle.regiments.get(unit_id) if self.battle is not None else None
+        state.cond_flags = 0
+        if regiment is None:
+            return state.pc + 1
+        regiment.attack_target = None
+        state.current_target = None
+        if regiment.anchored or regiment.routing or not regiment.active:
+            return state.pc + 1
+        from . import combat
+        angle = regiment.direction * math.tau / 512
+        combat._start_rout(regiment, self.battle, flee_point=(
+            regiment.x + math.sin(angle) * 1e4, regiment.y + math.cos(angle) * 1e4))
+        state.cond_flags = 1
+        return state.pc + 1
+
+    def op_StoreEventInfo(self, state, operand, script_words, unit_id, tick_count, rng):
+        """StoreEventInfo: remember the sender and code of the event being handled, overwriting any
+        earlier one (game_rules.md, scripted target and flight opcodes)."""
+        state.remembered_event = (state.current_event.source, state.current_event.code)
+        return state.pc + 1
+
+    def op_FaceModelsToTarget(self, state, operand, script_words, unit_id, tick_count, rng):
+        """FaceModelsToTarget: turn the individual models, not the regiment, to face the target
+        (game_rules.md, scripted target and flight opcodes). A model still walking is left alone and
+        counts as "not finished"; a model at rest facing elsewhere gets its heading set instantly and
+        also counts; the condition is true while any did. No target: nothing happens, condition false."""
+        regiment = self.battle.regiments.get(unit_id) if self.battle is not None else None
+        target = self.battle.regiments.get(regiment.attack_target) if regiment and regiment.attack_target else None
+        state.cond_flags = 0
+        if regiment is None or target is None or regiment.anchored:
+            return state.pc + 1
+        dx, dy = target.x - regiment.x, target.y - regiment.y
+        distance = math.hypot(dx, dy)
+        if distance < 1e-6:
+            return state.pc + 1
+        heading = (dx / distance, dy / distance)
+        regiment.model_positions()  # seeds the per-model state
+        for model in regiment.melee_models:
+            if not model.at_rest:
+                state.cond_flags = 1
+            elif (model.heading_x, model.heading_y) != heading:
+                model.heading_x, model.heading_y = heading
+                state.cond_flags = 1
         return state.pc + 1
 
     def op_RunAway(self, state, operand, script_words, unit_id, tick_count, rng):

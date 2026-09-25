@@ -52,3 +52,48 @@ All of this is already public in `notes/game_rules.md` §"Unit behaviour scripts
 - `whshr/ai.py`'s placeholder `ENGAGE_DISTANCE` rule should be replaced by the interpreter driving standard
   library behaviour 15 (`TrackThreat`) for AI-controlled units, once threat scoring (already documented in
   game_rules.md's "Routes, collisions and visibility" section) is ported.
+
+## BF001 chain: what the scripts do and how the engine reads them
+
+Observable behaviour, from the script data and play tests (issue [#143](https://github.com/pgrudzien12/openHornedRat/issues/143)
+tracks the four opcodes that are still unspecified):
+
+1. Hiln's Guard idles until an enemy is inside its own threat range (240), then tells its whole side
+   (event 17). The default handler answers by raising a persistent gate bit (16) that the Clanrat
+   reinforcements and the assassin Sleaquit wait for.
+2. Sleaquit then hunts Otto Hiln (same side; the tag Otto sets on himself). Otto's script kills him as soon
+   as he is in melee (unit flag `0x200`), which the engine mirrors from `Regiment.in_melee`.
+3. The three Clanrat regiments march to script nodes 8 and 9 and patrol between them, attacking anything
+   within their own threat range.
+
+Engine decisions (each one covered by a test):
+
+- **Condition register vs. condition bits.** `SetCondFlags`/`ClearCondFlags`/`TestCondFlags` operate on a
+  persistent bit word; `If`/`LoopIf*`/`SendEvent*If*` read a separate true/false result that `Test*`, `Find*`,
+  `Attack*` and `GetEvent` write. Mixing them made every event-handler frame (`GetEvent … ConsumeEvent;
+  LoopIfTrue; ReturnInterrupt`) loop forever once bit 16 was set.
+- **Node numbers are positions in `[NODES]`, counted from 0.** The `id` field is 0 for almost every node and
+  is not a key. Evidence for base 0: only counting from 0 gives BF001's Hiln's Guard a patrol beside its own
+  camp instead of the east map edge, and the Clanrats a route from their spawn towards the player.
+- **`Attack*Enemy` search radius** = the unit's own `SetThreatRange`, else 300 (`DEFAULT_ATTACK_SEARCH_RANGE`,
+  PROVISIONAL: a project decision, not an observed value), measured octagonally.
+- **Scripted same-side fights.** Same-side engagement is refused unless the target is the unit's current
+  opponent (game_rules.md, engagement rules), so a scripted opponent may be a friend. The attacker fights on
+  a camp of its own (`Side.DUEL`) for that fight, so tallies, break tests and the grid's adjacency check tell
+  the two apart. The player's own orders never name a same-side target.
+
+- **`Break` jumps to its label** (the next `0x0ABC` word after its operand), so a matched `CaseEvent` body skips the
+  rest of the case chain and the default handler behind it. Falling through ran the default handler after every
+  handled event and overrode scripted switches.
+- **Event 0x19 "opponent gone"** is queued to a unit that leaves a fight because every opponent it had is
+  destroyed or off the field (not merely routing: the rout event decides between pursuit and a new opponent).
+- **`DropTarget`, `FleeAhead`, `StoreEventInfo`, `FaceModelsToTarget`** follow `game_rules.md`, "Scripted target and
+  flight opcodes". `StoreEventInfo` fills the remembered-event slot; its only reader, the brace query
+  (`Query 7`), is not implemented yet, so bracing still comes from `FearWhenCharged`.
+
+Result in a headless BF001 run (player cavalry sent into Hiln's Guard's range): Otto dies about tick 353, Sleaquit
+routs at once, runs along the bearing of node 5 and leaves the field by the east edge.
+
+Still open here: the three Clanrat regiments ordered to the same node block each other around it (each is held
+off by the other two, ~35 units from a node with radius 16) and never reach it; `WaitWhileUnitFlags` (0x22) and
+`DrainEvents` (0xe2) have no handler (flag 8 is not raised by anything yet); `Query 7`.

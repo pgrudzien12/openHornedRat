@@ -1037,3 +1037,54 @@ class BracedStateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScriptedSameSideFightTests(unittest.TestCase):
+    """notes/game_rules.md, engagement rules: same-side engagement is refused "when the target is not the
+    current opponent", so a script's own target may be a friend (BF001: the assassin Sleaquit hunts Otto
+    Hiln, both enemy side). The attacker fights on its own camp (`Side.DUEL`) for that fight only."""
+
+    def _pair(self, target="otto"):
+        assassin = _regiment("assassin", 0, 0, Side.ENEMY, models=1, ranks=1, speed_per_tick=0.0)
+        otto = _regiment("otto", 0, 6, Side.ENEMY, models=1, ranks=1, speed_per_tick=0.0)
+        assassin.attack_target = target
+        return assassin, otto, Battle(500, 500, [assassin, otto], seed=1995)
+
+    def test_overlapping_same_side_regiments_without_a_scripted_target_do_not_engage(self):
+        assassin, otto, battle = self._pair(target=None)
+        battle.tick()
+        self.assertFalse(assassin.in_melee or otto.in_melee)
+
+    def test_the_scripted_opponent_is_engaged_even_on_the_same_side(self):
+        assassin, otto, battle = self._pair()
+        battle.tick()
+        self.assertTrue(assassin.in_melee and otto.in_melee)
+
+    def test_the_attacker_takes_its_own_camp_and_the_target_keeps_its_side(self):
+        assassin, otto, battle = self._pair()
+        battle.tick()
+        self.assertEqual(assassin.camp, Side.DUEL)
+        self.assertEqual(otto.camp, Side.ENEMY)
+
+    def test_the_camp_is_dropped_when_the_fight_ends(self):
+        assassin, otto, battle = self._pair()
+        battle.tick()
+        otto.models = 0  # killed (e.g. by his own script)
+        battle.tick()
+        self.assertFalse(assassin.in_melee)
+        self.assertEqual(assassin.camp, Side.ENEMY)
+
+    def test_strikes_are_tallied_per_camp_so_the_duel_has_a_loser(self):
+        assassin, otto, battle = self._pair()
+        events = _run(battle, combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN * 2)
+        strikes = [e for e in events if e.kind == "melee_strike"]
+        self.assertTrue(strikes)
+        self.assertEqual({e.data["attacker"] for e in strikes} - {"assassin", "otto"}, set())
+        self.assertIn(Side.DUEL, next(iter(strikes)).data["tally"])
+
+    def test_a_third_party_of_the_same_side_stays_out_of_the_duel(self):
+        assassin, otto, battle = self._pair()
+        bystander = _regiment("bystander", 0, 3, Side.ENEMY, models=1, ranks=1, speed_per_tick=0.0)
+        battle.regiments["bystander"] = bystander
+        battle.tick()
+        self.assertFalse(bystander.in_melee)

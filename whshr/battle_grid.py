@@ -162,7 +162,7 @@ def _sync_arrival(grid, members):
 
 
 def _owner_outnumbers(owner, members):
-    enemies = sum(r.models for r in members if r.side != owner.side)
+    enemies = sum(r.models for r in members if r.camp != owner.camp)
     return enemies and owner.models * 2 > enemies * 3
 
 
@@ -187,7 +187,7 @@ def _enemy_models_on_grid(battle, grid, regiment, members):
     """Every enemy model that already holds a cell, with its cell and world position."""
     found = []
     for other in members:
-        if other.side == regiment.side or not other.active:
+        if other.camp == regiment.camp or not other.active:
             continue
         for index, model in enumerate(other.melee_models):
             if model.cell is not None:
@@ -303,7 +303,7 @@ def _pair_owner(battle, grid, regiment, members):
                 continue
             enemy_id, enemy_uid = occupant
             enemy = battle.regiments.get(enemy_id)
-            if enemy is None or enemy.side == regiment.side or not enemy.active:
+            if enemy is None or enemy.camp == regiment.camp or not enemy.active:
                 continue
             enemy_index = enemy.index_of(enemy_uid)
             if enemy_index is None:

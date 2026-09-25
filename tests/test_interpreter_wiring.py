@@ -92,17 +92,17 @@ class NodeWiringTests(unittest.TestCase):
             "nodes": nodes,
         }
 
-    def test_nodes_with_id_and_coordinates_become_battle_nodes(self):
+    def test_nodes_become_battle_nodes_keyed_by_their_position_not_their_id(self):
         battle = Battle.from_script(self._source([
             {"id": 0, "x": 300, "y": 400, "radius": 10, "dir": 0, "status": []},
             {"id": 2, "x": 500.5, "y": 600.5, "radius": None, "dir": None, "status": ["ns_startpos"]},
         ]))
-        self.assertEqual(battle.nodes, {0: (300.0, 400.0), 2: (500.5, 600.5)})
+        self.assertEqual(battle.nodes, {0: (300.0, 400.0), 1: (500.5, 600.5)})
 
-    def test_a_node_with_no_id_is_excluded(self):
+    def test_a_node_with_no_id_still_counts_by_position(self):
         battle = Battle.from_script(self._source([{"id": None, "x": 1, "y": 2, "radius": None,
                                                      "dir": None, "status": []}]))
-        self.assertEqual(battle.nodes, {})
+        self.assertEqual(battle.nodes, {0: (1.0, 2.0)})
 
     def test_a_node_with_missing_coordinates_is_excluded(self):
         battle = Battle.from_script(self._source([{"id": 5, "x": None, "y": None, "radius": None,

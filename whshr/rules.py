@@ -22,6 +22,11 @@ class Side(str, Enum):
     PLAYER = "player"
     NEUTRAL = "neutral"
     ENEMY = "enemy"
+    # Engine-internal *camp*, never decoded from data: the attacker of a scripted same-side engagement
+    # (notes/game_rules.md, "Engagement is refused ... same side and the target is not the current
+    # opponent") fights on a camp of its own for the length of that fight, so tallies and break tests
+    # can tell the two same-side regiments apart. Not a side: `hostile_sides` gives it no opponents.
+    DUEL = "duel"
 
 
 _SIDE_BITS = {0: Side.PLAYER, 1: Side.NEUTRAL, 2: Side.ENEMY}
@@ -29,7 +34,7 @@ _SIDE_BITS = {0: Side.PLAYER, 1: Side.NEUTRAL, 2: Side.ENEMY}
 # Requirements": behaviour is script-driven, not flag-driven). Player and enemy are each other's
 # default opponents; neutral has none -- "no offensive orders unless provoked".
 _HOSTILE = {Side.PLAYER: frozenset({Side.ENEMY}), Side.ENEMY: frozenset({Side.PLAYER}),
-            Side.NEUTRAL: frozenset()}
+            Side.NEUTRAL: frozenset(), Side.DUEL: frozenset()}
 
 
 def side_of_code(code):
@@ -65,6 +70,22 @@ def can_fight(side_a, side_b):
     `AttackNearestFlag40Unit`, actually plays out physically), but Player and Neutral cannot.
     """
     return side_a != side_b and frozenset({side_a, side_b}) not in _NEVER_FIGHT
+
+
+def is_scripted_opponent(first, second):
+    """Two regiments of the *same* side where one has the other as its explicit attack target.
+
+    The original refuses same-side engagement "when the target is not the current opponent"
+    (notes/game_rules.md, engagement rules), so a script's own target (e.g. `AttackTagged`) may be a
+    friend. The player's own orders never name a same-side target (`Battle.order_attack`)."""
+    return (first.side == second.side
+            and (first.attack_target == second.identifier or second.attack_target == first.identifier))
+
+
+def may_engage(first, second):
+    """Whether two regiments fight on physical contact: different camps (`can_fight`), or a scripted
+    same-side opponent pair (`is_scripted_opponent`). Takes regiments, not sides, for that reason."""
+    return can_fight(first.camp, second.camp) or is_scripted_opponent(first, second)
 
 
 # Virtual addresses in GAMEF.DLL (image base 0x10000000, linker timestamp 1995-12-11).
