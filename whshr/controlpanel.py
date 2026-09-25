@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Fixed front-end portrait control-panel rules (notes/mission_selection.md §9.3–9.4)."""
 
 from dataclasses import dataclass
@@ -12,17 +13,17 @@ class ControlPanel:
     actions: tuple[str | None, ...] = ()
 
     @property
-    def slot_count(self):
+    def slot_count(self) -> int:
         return len(self.labels)
 
     @property
-    def height(self):
+    def height(self) -> int:
         return 8 + 20 * self.slot_count
 
 
 # Labels are BRTXT ids. The map's and the encounter windows' actions are traced (notes/activity_results.md §3); unknown
 # actions remain deliberately disabled instead of being guessed.
-_PANELS = {
+_PANELS: dict[int, ControlPanel] = {
     0: ControlPanel("FRAMEBOTTOM"),
     1: ControlPanel("FRAMEPANEL3", (311, 309, 310),
                     ("abort_briefing", "accept_briefing", "toggle_pause")),
@@ -41,17 +42,17 @@ _PANELS = {
 PORTRAIT_HEIGHT = 152
 
 
-def control_panel(value):
+def control_panel(value: int) -> ControlPanel:
     """Return the fixed panel definition for a glue ``controlpanel`` value."""
     return _PANELS.get(value, _PANELS[0])
 
 
-def portrait_window_height(value, portrait_height=PORTRAIT_HEIGHT):
+def portrait_window_height(value: int, portrait_height: int = PORTRAIT_HEIGHT) -> int:
     """Return the frame height: top/side start + portrait + panel + lower margin."""
     return 12 + portrait_height + control_panel(value).height + 8
 
 
-def button_y(value, slot, portrait_height=PORTRAIT_HEIGHT):
+def button_y(value: int, slot: int, portrait_height: int = PORTRAIT_HEIGHT) -> int:
     """Return a button's y coordinate for a bottom-to-top panel slot."""
     panel = control_panel(value)
     if not 0 <= slot < panel.slot_count:

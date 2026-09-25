@@ -8,7 +8,7 @@ projections over these models; they must not parse the source text again.
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True, order=True)
@@ -38,15 +38,15 @@ class MissionRef:
     window: str
     record_index: int
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "window", self.window.upper())
 
     @property
-    def key(self):
+    def key(self) -> str:
         return f"{self.window.casefold()}.{self.record_index}"
 
 
-def _value(instruction):
+def _value(instruction: GlueInstruction) -> tuple[str, int | str]:
     if instruction.command == "set" and "=" in instruction.argument:
         key, value = instruction.argument.split("=", 1)
         try:
@@ -89,14 +89,14 @@ class WindowRecord:
     mission_ref: MissionRef | None = None
 
     @property
-    def values(self):
+    def values(self) -> dict[str, int | str]:
         """Convenience last-value projection; ``fields`` remains lossless."""
         return dict(_value(item) for item in self.fields)
 
     @property
-    def unknown_fields(self):
+    def unknown_fields(self) -> tuple[UnknownField, ...]:
         set_keys, commands = _ACCEPTED.get(self.block_type, (set(), set()))
-        result = []
+        result: list[UnknownField] = []
         for item in self.fields:
             key, _ = _value(item)
             accepted = key in set_keys if item.command == "set" else item.command in commands
@@ -170,7 +170,7 @@ class UnknownRecord(WindowRecord):
     pass
 
 
-_RECORD_TYPES = {
+_RECORD_TYPES: dict[str, type[WindowRecord]] = {
     "POSITION": PositionRecord,
     "BITMAP": BitmapRecord,
     "MISSION": MissionRecord,
@@ -205,7 +205,7 @@ class WindowDefinition:
 GlueResource = GlueProgram | WindowDefinition
 
 
-def _strip_comment(raw):
+def _strip_comment(raw: str) -> str:
     cut = len(raw)
     for marker in ("//", ";"):
         found = raw.find(marker)
@@ -214,10 +214,10 @@ def _strip_comment(raw):
     return raw[:cut].strip()
 
 
-def tokenize_glue(resource_name, text):
+def tokenize_glue(resource_name: object, text: str) -> tuple[GlueInstruction, ...]:
     """Return every meaningful statement with its original line location."""
     name = str(resource_name).upper()
-    statements = []
+    statements: list[GlueInstruction] = []
     for number, raw in enumerate(text.splitlines(), 1):
         line = _strip_comment(raw)
         if not line or line[0] in "\x1a\x1b":
@@ -232,7 +232,7 @@ def tokenize_glue(resource_name, text):
     return tuple(statements)
 
 
-def parse_glue_resource(name, text):
+def parse_glue_resource(name: object, text: str) -> GlueResource:
     """Import one resource as a typed program or window definition."""
     name = str(name).upper()
     statements = tokenize_glue(name, text)
@@ -241,19 +241,19 @@ def parse_glue_resource(name, text):
     # Small synthetic fixtures and diagnostic snippets sometimes contain one
     # record without its [WINDOW] wrapper.  Keep accepting that historical
     # parser input while representing it through the same typed record model.
-    if block_type in _RECORD_TYPES:
+    if block_type in _RECORD_TYPES and first is not None:
         record_type = _RECORD_TYPES[block_type]
-        fields = tuple(item for item in statements if not item.command.startswith("["))
+        body = tuple(item for item in statements if not item.command.startswith("["))
         mission_ref = MissionRef(name, 0) if block_type == "MISSION" else None
-        return WindowDefinition(name, (record_type(block_type, fields, first.location, mission_ref),), statements)
+        return WindowDefinition(name, (record_type(block_type, body, first.location, mission_ref),), statements)
     if block_type != "WINDOW":
         instructions = tuple(item for item in statements if not item.command.startswith("["))
         return GlueProgram(name, block_type, instructions, statements)
 
-    records = []
-    current_type = None
-    current_location = None
-    fields = []
+    records: list[WindowRecord] = []
+    current_type: str | None = None
+    current_location: SourceLocation | None = None
+    fields: list[GlueInstruction] = []
     mission_index = 0
     for item in statements[1:]:
         if item.command.startswith("["):
@@ -265,23 +265,23 @@ def parse_glue_resource(name, text):
                     if current_type == "MISSION":
                         mission_ref = MissionRef(name, mission_index)
                         mission_index += 1
-                    records.append(record_type(current_type, tuple(fields), current_location, mission_ref))
+                    records.append(record_type(current_type, tuple(fields), current_location or SourceLocation(name, 0), mission_ref))
                     current_type, current_location, fields = None, None, []
                 continue
             # Retain malformed nesting as separate records rather than losing it.
             if current_type is not None:
                 record_type = _RECORD_TYPES.get(current_type, UnknownRecord)
-                records.append(record_type(current_type, tuple(fields), current_location))
+                records.append(record_type(current_type, tuple(fields), current_location or SourceLocation(name, 0)))
             current_type, current_location, fields = marker, item.location, []
         elif current_type is not None:
             fields.append(item)
     if current_type is not None:
         record_type = _RECORD_TYPES.get(current_type, UnknownRecord)
-        records.append(record_type(current_type, tuple(fields), current_location))
+        records.append(record_type(current_type, tuple(fields), current_location or SourceLocation(name, 0)))
     return WindowDefinition(name, tuple(records), statements)
 
 
-def parse_glue_resources(texts: Mapping[str, str]):
+def parse_glue_resources(texts: Mapping[str, str]) -> dict[str, GlueResource]:
     """Import a resource mapping exactly once in deterministic name order."""
     return {str(name).upper(): parse_glue_resource(name, text)
             for name, text in sorted(texts.items(), key=lambda pair: str(pair[0]).upper())}
@@ -308,9 +308,9 @@ _IMPLEMENTED_COMMANDS = {
 }
 
 
-def diagnostic_text(resource):
+def diagnostic_text(resource: GlueResource) -> str:
     """Render a normalized, order-preserving diagnostic form of one resource."""
-    lines = []
+    lines: list[str] = []
     depth = 0
     for item in resource.statements:
         if item.command == "[END]":
@@ -322,7 +322,7 @@ def diagnostic_text(resource):
     return "\n".join(lines)
 
 
-def _status(command):
+def _status(command: str) -> str:
     if command in _EXTERNAL_COMMANDS:
         return "known_external"
     if command in _NOOP_COMMANDS:
@@ -332,7 +332,7 @@ def _status(command):
     return "unknown"
 
 
-def validate_program(program):
+def validate_program(program: GlueResource) -> GlueProgram:
     """Reject an executable program containing an unclassified reachable command."""
     if not isinstance(program, GlueProgram):
         raise TypeError("only GlueProgram resources are executable")
@@ -351,11 +351,11 @@ def validate_program(program):
     return program
 
 
-def coverage_report(resources: Mapping[str, GlueResource]):
+def coverage_report(resources: Mapping[str, GlueResource]) -> dict[str, Any]:
     """Return deterministic block, command and field coverage for an inventory."""
-    blocks = Counter()
-    commands = defaultdict(Counter)
-    fields = defaultdict(Counter)
+    blocks: Counter[str] = Counter()
+    commands: defaultdict[str, Counter[str]] = defaultdict(Counter)
+    fields: defaultdict[str, Counter[str]] = defaultdict(Counter)
     for resource in resources.values():
         blocks[resource.block_type] += 1
         if isinstance(resource, WindowDefinition):
@@ -373,8 +373,8 @@ def coverage_report(resources: Mapping[str, GlueResource]):
                 else:
                     commands[resource.block_type][item.command] += 1
 
-    def entries(counter, block=None, are_fields=False):
-        result = {}
+    def entries(counter: Counter[str], block: str | None = None, are_fields: bool = False) -> dict[str, Any]:
+        result: dict[str, Any] = {}
         for key, count in sorted(counter.items()):
             if are_fields:
                 accepted = (key in {"animseq", "tentpos", "textlines"} if block in {"RUN", "START"}

@@ -112,7 +112,9 @@ tests/             - BDD-style unittest scenarios (docs/testing.md): run them wi
 typecheck.sh / pyrightconfig.json - static typing (issue #149). New and changed code in `whshr/` must be fully
                      type-annotated; run `./typecheck.sh` before committing. Modules listed under `"strict"` in
                      pyrightconfig.json are fully annotated and held to pyright's strict mode -- when you finish
-                     annotating a module, add it to that list so it cannot regress
+                     annotating a module, add it to that list so it cannot regress. Two tiers: a module either passes full strict, or carries the one-line
+                     `# pyright: reportUnknown{Member,Argument,Variable,Lambda}Type=false` header (every signature annotated, real type
+                     errors fixed, but inference through untyped dicts/libraries not policed) -- copy the header from any module that has it
 docs/              - asset_pipeline.md (lazy loading, scene lifecycle), testing.md (BDD rules)
 tools/ghidra/      - OPTIONAL analysis-only Ghidra headless scripts (Java) + setup notes; not stdlib Python,
                      their decompiled output must never be committed

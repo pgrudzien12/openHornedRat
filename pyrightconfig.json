@@ -35,6 +35,27 @@
     "whshr/combat.py",
     "whshr/interpreter.py",
     "whshr/battle_grid.py",
-    "whshr/battle_log.py"
+    "whshr/battle_log.py",
+    "whshr/image.py",
+    "whshr/rnc.py",
+    "whshr/assets.py",
+    "whshr/catalog.py",
+    "whshr/cache.py",
+    "whshr/sprites.py",
+    "whshr/legacy.py",
+    "whshr/glue_fonts.py",
+    "whshr/glue.py",
+    "whshr/campaign_runtime.py",
+    "whshr/controlpanel.py",
+    "whshr/cutscene.py",
+    "whshr/glue_animation.py",
+    "whshr/glue_palette.py",
+    "whshr/launcher/__main__.py",
+    "whshr/launcher/battles.py",
+    "whshr/launcher/config.py",
+    "whshr/launcher/discovery.py",
+    "whshr/launcher/engine_launch.py",
+    "whshr/launcher/validate.py",
+    "whshr/launcher/gui.py"
   ]
 }

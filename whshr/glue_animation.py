@@ -1,7 +1,10 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Deterministic 50 ms animation state for glue ``[BITMAP]`` records."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import re
+from typing import Any
 
 
 STEP_MILLISECONDS = 50
@@ -17,7 +20,7 @@ class AnimationUpdate:
 class GlueBitmapAnimator:
     """Advance one bitmap using the original descending-frame state machine."""
 
-    def __init__(self, spec):
+    def __init__(self, spec: Mapping[str, Any]) -> None:
         self.base = spec["bitmap"]
         self.current = int(spec.get("animstartframe", -1))
         self.restart = int(spec.get("animrestartframe", self.current))
@@ -38,15 +41,15 @@ class GlueBitmapAnimator:
         self.drawn_name = self.base
 
     @property
-    def finished(self):
+    def finished(self) -> bool:
         return self.current == self.stop
 
     @property
-    def display_name(self):
+    def display_name(self) -> str:
         """The resource a renderer should show before and after the first timer step."""
         return self.drawn_name
 
-    def tick(self, milliseconds):
+    def tick(self, milliseconds: float) -> AnimationUpdate:
         """Apply one original-style animation step at most, returning its update."""
         if milliseconds < 0:
             raise ValueError("tick duration must not be negative")
@@ -58,7 +61,7 @@ class GlueBitmapAnimator:
         self._timer_remainder &= 1  # Late timer messages do not catch up multiple frames.
         return self.step()
 
-    def step(self):
+    def step(self) -> AnimationUpdate:
         if self.current == self.stop:
             return AnimationUpdate(self.drawn_name, False, True)
         if self.delay > 0:

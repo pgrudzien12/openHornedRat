@@ -18,8 +18,9 @@ The game's .PBX files have one 0x01 byte before the header (except
 MESH/BF004/GRND.PBX), see notes/pbx_rnc.md.
 """
 import glob, os, struct, sys
+from typing import Any
 
-_CRC_TAB = []
+_CRC_TAB: list[int] = []
 for _i in range(256):
     _c = _i
     for _ in range(8):
@@ -27,7 +28,7 @@ for _i in range(256):
     _CRC_TAB.append(_c)
 
 
-def crc16(data):
+def crc16(data: bytes) -> int:
     """CRC-16/ARC (reflected polynomial 0xA001, init 0), as used in the RNC header."""
     c = 0
     for b in data:
@@ -39,7 +40,7 @@ class RncError(Exception):
     pass
 
 
-def parse_header(buf, pos=0):
+def parse_header(buf: bytes, pos: int = 0) -> dict[str, Any]:
     if buf[pos:pos + 3] != b'RNC':
         raise RncError('no RNC signature at offset %d' % pos)
     method, unp, pk, cu, cp, leeway, chunks = struct.unpack_from('>BIIHHBB', buf, pos + 3)
@@ -47,7 +48,7 @@ def parse_header(buf, pos=0):
                 crc_packed=cp, leeway=leeway, chunks=chunks)
 
 
-def _unpack_m2(src, out_size):
+def _unpack_m2(src: bytes, out_size: int) -> tuple[bytes, int, int]:
     """Method 2. Bits are read MSB-first from bytes that are interleaved with raw
     bytes of the same stream (a new bit byte is fetched only when the previous one
     is used up). Returns (data, bytes consumed, chunk end markers seen)."""
@@ -57,7 +58,7 @@ def _unpack_m2(src, out_size):
     bitcnt = 0
     chunks = 0
 
-    def bit():
+    def bit() -> int:
         nonlocal pos, bitbuf, bitcnt
         if bitcnt == 0:
             bitbuf = src[pos]
@@ -66,18 +67,18 @@ def _unpack_m2(src, out_size):
         bitcnt -= 1
         return (bitbuf >> bitcnt) & 1
 
-    def bits(n):
+    def bits(n: int) -> int:
         v = 0
         for _ in range(n):
             v = (v << 1) | bit()
         return v
 
-    def byte():
+    def byte() -> int:
         nonlocal pos
         pos += 1
         return src[pos - 1]
 
-    def offset():
+    def offset() -> int:
         # match distance: high part 0..15 from bits, low byte raw
         hi = 0
         if bit():
@@ -125,7 +126,7 @@ def _unpack_m2(src, out_size):
     return bytes(out[:out_size]), pos, chunks
 
 
-def rnc_unpack(buf, pos=0, check_crc=True):
+def rnc_unpack(buf: bytes, pos: int = 0, check_crc: bool = True) -> tuple[bytes, dict[str, Any]]:
     """Unpacks the RNC block starting at buf[pos]. Returns (data, header dict)."""
     h = parse_header(buf, pos)
     src = buf[pos + 18:pos + 18 + h['packed']]
@@ -144,7 +145,7 @@ def rnc_unpack(buf, pos=0, check_crc=True):
     return data, h
 
 
-def unpack_pbx(path):
+def unpack_pbx(path: str | os.PathLike[str]) -> tuple[bytes, dict[str, Any]]:
     """Reads a .PBX file: optional 0x01 byte, then one RNC block. Returns (data, header)."""
     raw = open(path, 'rb').read()
     pos = raw.find(b'RNC', 0, 4)
@@ -156,7 +157,7 @@ def unpack_pbx(path):
     return data, h
 
 
-def main(argv):
+def main(argv: list[str]) -> None:
     if argv and argv[0] == '--check':
         files = sorted(glob.glob(os.path.join(argv[1], '*', '*.[Pp][Bb][Xx]')))
         ok = 0

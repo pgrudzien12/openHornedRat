@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Tkinter launcher UI: recognize an installation, then start the game or a battle.
 
 Two screens swapped inside one window: :class:`InstallScreen` (auto-discovery, manual override,
@@ -9,6 +10,8 @@ back to the main thread through a queue polled with ``Tk.after``.
 import queue
 import threading
 import tkinter as tk
+from collections.abc import Callable
+from os import PathLike
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -17,15 +20,18 @@ from whshr.launcher import discovery, engine_launch, validate
 from whshr.launcher.battles import list_battles
 from whshr.paths import Installation
 
+PathArg = str | PathLike[str]
+CheckResult = tuple[bool, list[str], str]  # (passed, report lines, checked path)
+
 
 class InstallScreen(ttk.Frame):
     """Lets the user pick an installation path (discovered or manual) and validates it."""
 
-    def __init__(self, parent, on_validated):
+    def __init__(self, parent: tk.Misc, on_validated: Callable[[str], None]) -> None:
         super().__init__(parent)
         self.pack(fill="both", expand=True)
         self._on_validated = on_validated
-        self._queue = queue.Queue()
+        self._queue: queue.Queue[CheckResult] = queue.Queue()
         self._candidates = discovery.discover_installations()
 
         ttk.Label(self, text="Game installation", font=("", 12, "bold")).pack(anchor="w")
@@ -51,18 +57,18 @@ class InstallScreen(ttk.Frame):
         self._log = tk.Text(self, height=12, state="disabled")
         self._log.pack(fill="both", expand=True, pady=(10, 0))
 
-    def _browse(self):
+    def _browse(self) -> None:
         chosen = filedialog.askdirectory(title="Select the WARFB installation directory")
         if chosen:
             self._selected.set(chosen)
 
-    def _log_line(self, line):
+    def _log_line(self, line: str) -> None:
         self._log.configure(state="normal")
         self._log.insert("end", line + "\n")
         self._log.see("end")
         self._log.configure(state="disabled")
 
-    def _validate(self):
+    def _validate(self) -> None:
         path = self._selected.get().strip()
         if not path:
             messagebox.showerror("Open Horned Rat Launcher", "Choose an installation directory first.")
@@ -82,7 +88,7 @@ class InstallScreen(ttk.Frame):
         threading.Thread(target=self._run_full_check, args=(path,), daemon=True).start()
         self.after(100, self._poll_check_result)
 
-    def _run_full_check(self, path):
+    def _run_full_check(self, path: str) -> None:
         try:
             passed, lines = validate.full_check(path)
         except Exception as error:  # surfaced to the user instead of a silent freeze
@@ -90,7 +96,7 @@ class InstallScreen(ttk.Frame):
             return
         self._queue.put((passed, lines, path))
 
-    def _poll_check_result(self):
+    def _poll_check_result(self) -> None:
         try:
             passed, lines, path = self._queue.get_nowait()
         except queue.Empty:
@@ -106,7 +112,8 @@ class InstallScreen(ttk.Frame):
             self._log_line("Some checks failed; see above.")
 
 
-def launch_with_checks(installation_path, battle_id, options):
+def launch_with_checks(installation_path: PathArg, battle_id: str | None,
+                       options: engine_launch.LaunchOptions) -> None:
     """Starts the engine after checking its dependencies; reports problems in a dialog."""
     python_path = engine_launch.find_engine_python()
     if not engine_launch.engine_dependencies_available(python_path):
@@ -122,7 +129,8 @@ def launch_with_checks(installation_path, battle_id, options):
 class BattleDialog(tk.Toplevel):
     """Modal list of the installation's battles; launches the chosen one."""
 
-    def __init__(self, parent, installation_path, get_options):
+    def __init__(self, parent: tk.Misc, installation_path: PathArg,
+                 get_options: Callable[[], engine_launch.LaunchOptions]) -> None:
         super().__init__(parent)
         self.title("Start a battle")
         self.transient(parent.winfo_toplevel())
@@ -140,7 +148,7 @@ class BattleDialog(tk.Toplevel):
         self._list.bind("<Double-Button-1>", lambda _event: self._launch())
         ttk.Button(self, text="Launch battle", command=self._launch).pack(anchor="w", padx=12, pady=12)
 
-    def _launch(self):
+    def _launch(self) -> None:
         selection = self._list.curselection()
         if not selection:
             messagebox.showerror("Open Horned Rat Launcher", "Choose a battle first.", parent=self)
@@ -151,7 +159,8 @@ class BattleDialog(tk.Toplevel):
 class LaunchScreen(ttk.Frame):
     """Two tabs: start buttons (normal game / a chosen battle) and checkbox options for both."""
 
-    def __init__(self, parent, installation_path, on_change_installation):
+    def __init__(self, parent: tk.Misc, installation_path: PathArg,
+                 on_change_installation: Callable[[], None]) -> None:
         super().__init__(parent)
         self.pack(fill="both", expand=True)
         self._installation_path = installation_path
@@ -182,22 +191,22 @@ class LaunchScreen(ttk.Frame):
         ttk.Checkbutton(options_tab, text="Skip intro (start in the main menu)",
                         variable=self._skip_intro).pack(anchor="w", pady=(6, 0))
 
-    def options(self):
+    def options(self) -> engine_launch.LaunchOptions:
         return engine_launch.LaunchOptions(
             no_battles=self._no_battles.get(), trace=self._trace.get(), skip_intro=self._skip_intro.get(),
         )
 
-    def _start_game(self):
+    def _start_game(self) -> None:
         launch_with_checks(self._installation_path, None, self.options())
 
-    def _choose_battle(self):
+    def _choose_battle(self) -> None:
         BattleDialog(self, self._installation_path, self.options)
 
 
 class LauncherApp:
     """Top-level window: shows the launch screen directly once a path is already recognized."""
 
-    def __init__(self, root, config_path=None):
+    def __init__(self, root: tk.Tk, config_path: PathArg | None = None) -> None:
         self.root = root
         self._config_path = config_path
         self.config = config_module.load_config(config_path)
@@ -206,32 +215,32 @@ class LauncherApp:
         self._container.pack(fill="both", expand=True)
         self._show_initial_screen()
 
-    def _clear(self):
+    def _clear(self) -> None:
         for child in self._container.winfo_children():
             child.destroy()
 
-    def _show_initial_screen(self):
+    def _show_initial_screen(self) -> None:
         path = self.config.installation_path
         if path and validate.quick_validate(path):
             self._show_launch_screen(path)
         else:
             self._show_install_screen()
 
-    def _show_install_screen(self):
+    def _show_install_screen(self) -> None:
         self._clear()
         InstallScreen(self._container, on_validated=self._on_installation_chosen)
 
-    def _on_installation_chosen(self, path):
+    def _on_installation_chosen(self, path: PathArg) -> None:
         self.config.installation_path = str(path)
         config_module.save_config(self.config, self._config_path)
         self._show_launch_screen(path)
 
-    def _show_launch_screen(self, path):
+    def _show_launch_screen(self, path: PathArg) -> None:
         self._clear()
         LaunchScreen(self._container, Path(path), on_change_installation=self._show_install_screen)
 
 
-def main():
+def main() -> None:
     root = tk.Tk()
     LauncherApp(root)
     root.mainloop()

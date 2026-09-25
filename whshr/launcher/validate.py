@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Validates a candidate installation path before the launcher lets the user proceed.
 
 Two layers, reusing existing logic rather than re-deriving it:
@@ -12,11 +13,12 @@ Two layers, reusing existing logic rather than re-deriving it:
 
 import contextlib
 import io
+from os import PathLike
 
 from whshr.launcher.discovery import looks_like_installation as quick_validate
 
 
-def full_check(path):
+def full_check(path: str | PathLike[str]) -> tuple[bool, list[str]]:
     """Runs ``whshr check`` against ``path``, returning (passed, per-group report lines).
 
     Imports ``whshr.__main__`` lazily: it pulls in the whole tool suite (engine, viewers, ...),
@@ -29,3 +31,5 @@ def full_check(path):
         passed = run_check(path)
     lines = [line for line in output.getvalue().splitlines() if line.strip()]
     return passed, lines
+
+__all__ = ["full_check", "quick_validate"]

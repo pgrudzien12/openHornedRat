@@ -1,8 +1,13 @@
 """Metadata-only catalog for lazily resolving assets in an original installation."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 import json
+from os import PathLike
 from pathlib import Path
+from typing import Any
+
+from .paths import Installation
 
 from .assets import AssetId, AssetLocator, source_fingerprint
 from .glue_fonts import GLUE_FONT_FILES
@@ -19,13 +24,13 @@ class AssetRecord:
     scope: str
     path: str
     decoder: str
-    fingerprint: dict
+    fingerprint: dict[str, int]
 
 
 class AssetCatalog:
     """Deterministic logical-ID index; records refer to original files, never copied data."""
 
-    def __init__(self, records):
+    def __init__(self, records: Iterable[AssetRecord]) -> None:
         ordered = tuple(sorted(records, key=lambda record: str(record.identifier)))
         identifiers = [record.identifier for record in ordered]
         if len(set(identifiers)) != len(identifiers):
@@ -33,7 +38,7 @@ class AssetCatalog:
         self.records = ordered
         self._by_identifier = {record.identifier: record for record in ordered}
 
-    def get(self, identifier):
+    def get(self, identifier: AssetId | str) -> AssetRecord:
         asset_id = AssetId.parse(identifier) if isinstance(identifier, str) else identifier
         record = self._by_identifier.get(asset_id)
         if record is not None:
@@ -55,12 +60,12 @@ class AssetCatalog:
                 return replace(template, identifier=asset_id)
         raise KeyError(asset_id)
 
-    def resolve(self, installation, identifier):
+    def resolve(self, installation: Installation | str | PathLike[str], identifier: AssetId | str) -> Path:
         """Resolve an asset through the same original-install lookup policy as its decoder."""
         record = self.get(identifier)
         return AssetLocator(installation).resolve(record.scope, record.path)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "version": CATALOG_VERSION,
             "assets": [{
@@ -74,7 +79,7 @@ class AssetCatalog:
         }
 
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(cls, data: dict[str, Any]) -> "AssetCatalog":
         if data.get("version") != CATALOG_VERSION:
             raise ValueError(f"unsupported catalog version: {data.get('version')!r}")
         return cls(AssetRecord(
@@ -83,7 +88,7 @@ class AssetCatalog:
         ) for record in data["assets"])
 
 
-def _files(directory, suffix):
+def _files(directory: Path | None, suffix: str) -> Iterable[Path]:
     if directory is None:
         return ()
     return sorted(
@@ -92,12 +97,12 @@ def _files(directory, suffix):
     )
 
 
-def build(installation):
+def build(installation: Installation | str | PathLike[str]) -> AssetCatalog:
     """Index currently supported lazy asset roots without decoding or exporting game data."""
     locator = AssetLocator(installation)
     game = locator.installation
     locator.validate()
-    records = []
+    records: list[AssetRecord] = []
 
     for path in _files(game.find("FILE", "SCRIPT"), ".bts"):
         records.append(AssetRecord(
@@ -190,7 +195,7 @@ def build(installation):
     return AssetCatalog(records)
 
 
-def write(installation, output):
+def write(installation: Installation | str | PathLike[str], output: str | PathLike[str]) -> AssetCatalog:
     """Build and write a reproducible metadata index; callers choose a local cache destination."""
     catalog = build(installation)
     output = Path(output)
@@ -199,6 +204,6 @@ def write(installation, output):
     return catalog
 
 
-def read(path):
+def read(path: str | PathLike[str]) -> AssetCatalog:
     """Load a previously generated metadata-only catalog."""
     return AssetCatalog.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))

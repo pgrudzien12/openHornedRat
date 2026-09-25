@@ -1,6 +1,9 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Campaign operations used by the glue runtime."""
 
 from typing import Protocol
+
+ObjectiveResult = tuple[bool, tuple[int, ...]]  # (met, (v1, v2, v3, v4)); notes/debrief_evaluation.md 2.1
 
 from .glue import MissionRef
 
@@ -20,7 +23,7 @@ class CampaignRuntime(Protocol):
 
     def mark_pending_join(self, unit_id: int) -> None: ...
 
-    def objective(self, letter: str) -> tuple | None: ...
+    def objective(self, letter: str) -> ObjectiveResult | None: ...
 
     def bonus_init(self) -> None: ...
 

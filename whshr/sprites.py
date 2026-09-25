@@ -2,11 +2,13 @@
 
 import os
 import struct
+from collections.abc import Sequence
+from os import PathLike
 
 from .image import load_rgb_palette, write_png
 
 
-def unzero(seg):
+def unzero(seg: bytes) -> tuple[bytes, int]:
     """Zero RLE: 00 NN = NN zero bytes, 00 00 = end, any other byte = literal."""
     out, i = bytearray(), 0
     while True:
@@ -21,9 +23,11 @@ def unzero(seg):
             i += 1
 
 
-def colormap_indices(recs):
+def colormap_indices(recs: Sequence[Sequence[int]]) -> list[int | None]:
     """Return the full color map index for each frame record."""
-    out, wraps, prev = [], 0, None
+    out: list[int | None] = []
+    wraps = 0
+    prev: int | None = None
     for record in recs:
         if (record[5] & 0x0F) not in (2, 4):
             out.append(None)
@@ -36,7 +40,8 @@ def colormap_indices(recs):
     return out
 
 
-def decode_frame(bop, rec, seg_end, colormaps, map_index=None):
+def decode_frame(bop: bytes, rec: Sequence[int], seg_end: int, colormaps: Sequence[bytes],
+                 map_index: int | None = None) -> list[int]:
     """Decode a frame to palette indices, with zero as transparent."""
     _, _, width, height, offset, flags = rec[:6]
     kind, segment = flags & 0x0F, bop[offset:seg_end]
@@ -46,7 +51,7 @@ def decode_frame(bop, rec, seg_end, colormaps, map_index=None):
     packed = unzero(segment)[0] if kind == 4 else segment[:bytes_per_row * height]
     cmap_index = flags >> 4 if map_index is None else map_index
     cmap = colormaps[cmap_index] if cmap_index < len(colormaps) else None
-    pixels = []
+    pixels: list[int] = []
     for row in range(height):
         for column in range(width):
             byte = packed[row * bytes_per_row + column // 2]
@@ -57,7 +62,8 @@ def decode_frame(bop, rec, seg_end, colormaps, map_index=None):
     return pixels
 
 
-def main(bindir, name, first=0, count=24, out=None, cols=8, scale=3):
+def main(bindir: str | PathLike[str], name: str, first: int = 0, count: int = 24, out: str | None = None,
+         cols: int = 8, scale: int = 3) -> None:
     """Decode selected frames and write a PNG sheet."""
     fol = open(f"{bindir}/{name}.FOL", 'rb').read()
     bop = open(f"{bindir}/{name}.BOP", 'rb').read()

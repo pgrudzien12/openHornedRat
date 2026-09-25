@@ -2,9 +2,11 @@
 
 import struct
 import zlib
+from collections.abc import Sequence
+from os import PathLike
 
 
-def load_rgb_palette(path):
+def load_rgb_palette(path: str | PathLike[str]) -> list[tuple[int, int, int]]:
     """Read the game's four-byte indexed RGB palette."""
     with open(path, 'rb') as source:
         data = source.read()
@@ -14,16 +16,15 @@ def load_rgb_palette(path):
     return palette
 
 
-def write_png(path, width, height, rgb):
+def write_png(path: str | PathLike[str], width: int, height: int, rgb: Sequence[int]) -> None:
     """Write an RGB byte sequence as a non-interlaced PNG."""
     raw = b''.join(
         b'\0' + bytes(rgb[row * width * 3:(row + 1) * width * 3])
         for row in range(height)
     )
-    chunk = lambda kind, data: (
-        struct.pack('>I', len(data)) + kind + data +
-        struct.pack('>I', zlib.crc32(kind + data))
-    )
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+
     open(path, 'wb').write(
         b'\x89PNG\r\n\x1a\n'
         + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))

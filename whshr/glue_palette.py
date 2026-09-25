@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """The one indexed application palette used by the glue front end.
 
 This is deliberately independent of pygame and installation paths.  A content
@@ -5,25 +6,29 @@ loader supplies named ``STANDARD``, ``GLUE*`` and ``WIND*`` palette records;
 the renderer supplies indexed pixels and looks colours up here.
 """
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
+
+Colour = tuple[int, int, int]
 
 
-SYSTEM_COLOURS = (
+SYSTEM_COLOURS: tuple[Colour, ...] = (
     (0, 0, 0), (128, 0, 0), (0, 128, 0), (128, 128, 0), (0, 0, 128),
     (128, 0, 128), (0, 128, 128), (192, 192, 192), (192, 220, 192), (166, 202, 240),
 )
-SYSTEM_TAIL_COLOURS = (
+SYSTEM_TAIL_COLOURS: tuple[Colour, ...] = (
     (255, 251, 240), (160, 160, 164), (128, 128, 128), (255, 0, 0), (0, 255, 0),
     (0, 0, 255), (255, 0, 255), (0, 255, 255), (255, 255, 255), (255, 255, 255),
 )
 PALETTE_NAMES = ("BOOK", "MAP", "CAR", "MIND", "END", "TITL", "GAME", "OPT", "BK2")
 
 
-def _records(values):
+def _records(values: Any) -> dict[int, Colour]:
     """Normalise a file's indexed records into a mapping without file I/O."""
     if isinstance(values, dict):
-        return {int(index): tuple(colour) for index, colour in values.items()}
-    return {index: tuple(colour) for index, colour in enumerate(values)}
+        return {int(index): (colour[0], colour[1], colour[2]) for index, colour in values.items()}
+    return {index: (colour[0], colour[1], colour[2]) for index, colour in enumerate(values)}
 
 
 @dataclass(frozen=True)
@@ -34,7 +39,8 @@ class AppPalette:
     colours: tuple[tuple[int, int, int], ...]
 
     @classmethod
-    def select(cls, palette_id, tables, *, embedded=None):
+    def select(cls, palette_id: int | str, tables: Mapping[str, Any], *,
+               embedded: Any = None) -> "AppPalette":
         """Build the palette selected by a top-level window or built-in screen.
 
         ``tables`` maps names such as ``STANDARD``, ``GLUEMAP`` and ``WINDMAP``
@@ -42,8 +48,8 @@ class AppPalette:
         embedded palette falls back to STANDARD, matching restoration's safe
         compatibility behaviour.
         """
-        tables = {str(name).upper(): _records(records) for name, records in tables.items()}
-        standard = tables.get("STANDARD", {})
+        named = {str(name).upper(): _records(records) for name, records in tables.items()}
+        standard = named.get("STANDARD", {})
         colours = [standard.get(index, (0, 0, 0)) for index in range(256)]
         try:
             selection = int(palette_id)
@@ -56,10 +62,10 @@ class AppPalette:
                     colours[index] = source[index]
         elif 1 <= selection <= len(PALETTE_NAMES):
             name = PALETTE_NAMES[selection - 1]
-            for index, colour in tables.get(f"GLUE{name}", {}).items():
+            for index, colour in named.get(f"GLUE{name}", {}).items():
                 if 10 <= index <= 105:
                     colours[index] = colour
-            for index, colour in tables.get(f"WIND{name}", {}).items():
+            for index, colour in named.get(f"WIND{name}", {}).items():
                 if 106 <= index <= 245:
                     colours[index] = colour
         for index, colour in enumerate(SYSTEM_COLOURS):
@@ -68,7 +74,7 @@ class AppPalette:
             colours[index] = colour
         return cls(selection if selection >= 0 else "embedded", tuple(colours))
 
-    def rgba(self, pixels, *, transparent_index=0):
+    def rgba(self, pixels: Sequence[int], *, transparent_index: int = 0) -> bytes:
         """Map indexed pixels to RGBA bytes without making a pygame surface."""
         rgba = bytearray(len(pixels) * 4)
         for offset, index in enumerate(pixels):

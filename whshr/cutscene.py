@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Timed text cues decoded from Omni cutscene event tracks.
 
 The event tracks advance at the cutscene's fixed 8 Hz cadence.  They identify a
@@ -7,16 +8,18 @@ evenly through most of that recorded interval, then keeps completed text on
 screen for a short reading hold.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 
 # The event track's speaker field is a stable slot (2, 3 or 4), not a random
 # value.  The original subtitles use the corresponding primary display color.
-SPEAKER_COLORS = {3: (0, 255, 0), 4: (0, 0, 255), 2: (255, 0, 0)}
-DEFAULT_SUBTITLE_COLOR = (255, 255, 255)
+SPEAKER_COLORS: dict[int, tuple[int, int, int]] = {3: (0, 255, 0), 4: (0, 0, 255), 2: (255, 0, 0)}
+DEFAULT_SUBTITLE_COLOR: tuple[int, int, int] = (255, 255, 255)
 
 
-def subtitle_color(speaker):
+def subtitle_color(speaker: int) -> tuple[int, int, int]:
     """Return the original-style RGB subtitle color for an event speaker slot."""
     return SPEAKER_COLORS.get(speaker, DEFAULT_SUBTITLE_COLOR)
 
@@ -32,7 +35,7 @@ class SubtitleCue:
     reveal_end_seconds: float
     end_seconds: float
 
-    def text_at(self, elapsed_seconds):
+    def text_at(self, elapsed_seconds: float) -> str:
         """Return the typewritten portion visible at ``elapsed_seconds``."""
         if elapsed_seconds < self.start_seconds or elapsed_seconds >= self.end_seconds:
             return ""
@@ -51,8 +54,8 @@ class SubtitleTimeline:
     REVEAL_FRACTION = 0.8
     READING_HOLD_SECONDS = 1.0
 
-    def __init__(self, media, strings):
-        cues = []
+    def __init__(self, media: Mapping[str, Any], strings: Mapping[int, str]) -> None:
+        cues: list[SubtitleCue] = []
         for entry in media.get("objects", {}).values():
             event = entry.get("evt")
             rows = event.get("rows", ()) if event else ()
@@ -73,12 +76,12 @@ class SubtitleTimeline:
             ))
         self.cues = tuple(sorted(cues, key=lambda cue: (cue.start_seconds, cue.text_id)))
 
-    def current(self, elapsed_seconds):
+    def current(self, elapsed_seconds: float) -> SubtitleCue | None:
         """Return the newest active cue; dialogue overlaps replace older text."""
         active = [cue for cue in self.cues
                   if cue.start_seconds <= elapsed_seconds < cue.end_seconds]
         return active[-1] if active else None
 
-    def text_at(self, elapsed_seconds):
+    def text_at(self, elapsed_seconds: float) -> str:
         cue = self.current(elapsed_seconds)
         return cue.text_at(elapsed_seconds) if cue else ""
