@@ -2147,12 +2147,17 @@ BF001's scripted flight.
 - It is the fall-back half of the library's ordinary rout script: `FleeFromTarget` (start a rout directly away
   from the target, bearing + 180°) and, when there is no target, `FleeAhead`.
 - A scripted flee is the same as any other for rallying: it only rallies if the unit carries the automatic-rally
-  flag or is ordered to rally, and never with an enemy within 160 units. 🟡 The shipped scripted fleers are not
-  expected to rally.
-- Example (BF001): the unit whose opponent has just died runs the script `wait until re-forming is finished`,
-  `FaceNode 5`, `FleeAhead`: it turns instantly to face node 5, becomes broken, sends "enemy routed" to the
-  player's regiments, runs off in a straight line at 1.5 × its move speed and is removed when it crosses the edge
-  of the battlefield. Test: facing 100/512 before `FleeAhead`, facing 100/512 after, target empty, broken set,
+  flag or is ordered to rally, and never with an enemy within 160 units. BF001's Sleaquit carries `CantRally`
+  (and `CantDie`), so once he flees he never rallies and runs until he is off the battlefield.
+- Example (BF001, the assassin Sleaquit): the enemy army's Otto Hiln carries the tag `0xabc0` and a script that
+  kills all his models the moment his unit is in melee; Sleaquit waits until his own watch flag is set or 80 ticks
+  have passed, then `AttackTagged 0xabc0` — he attacks Hiln although both are nominally the same side. When
+  Hiln's models are killed, Sleaquit's opponent is gone and his unit receives event 0x19; Sleaquit's interrupt
+  script handles event 25 by an immediate `SwitchScript 3` (no `DropTarget` — `FleeAhead` clears the target
+  itself) and drains the queued events. Script 3 is `wait until re-forming is finished`, `FaceNode 5`,
+  `FleeAhead`, then an idle loop of 100-tick waits: Sleaquit turns instantly to face node 5, becomes broken,
+  sends "enemy routed" to the player's regiments, runs off in a straight line at 1.5 × his move speed and is
+  removed when he crosses the edge of the battlefield. Test: facing 100/512 before `FleeAhead`, facing 100/512 after, target empty, broken set,
   position advancing along facing 100 each tick until off-field.
 
 **`StoreEventInfo` (0x61)** — remember who sent the event being handled.
@@ -2185,11 +2190,9 @@ BF001's scripted flight.
 - Test: a halted regiment with a target 90° off, all models at rest: the first call sets every model's heading to
   the bearing and returns true; the second call changes nothing and returns false.
 
-🟡 **Uncertain.** Which BF001 unit runs which script was taken from the mission script numbering (`FleeAhead`
-sits in mission script 3, reached from the event-0x19 handler of the interrupt script). Whether a scripted fleer
-that was fighting a same-side unit (BF001's assassin killing his own side's leader) is subject to any extra
-objective bookkeeping is not settled; "Capture Hiln" (objective S) itself checks nothing. The rally test for a
-scripted flee has not been observed in play.
+🟡 **Uncertain.** Whether a scripted fleer that was fighting a same-side unit (BF001's assassin, whose target
+kills itself when engaged) is subject to any extra objective bookkeeping is not settled; "Capture Hiln"
+(objective S) itself checks nothing.
 
 ### Charge into the flank or rear ✅
 
