@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Pure-Python parsers for MIDI, SoundFont, SFX and WAV game audio formats."""
 
 """Pure-Python Standard MIDI File (SMF, format 0/1) parser. Target: FILE/BINARY/MUSIC/*.MID.
@@ -21,11 +22,18 @@ What is computed:
     lyric (0x05), marker (0x06), cue (0x07).
 """
 import glob, json, os, struct
+from collections.abc import Iterator, Sequence
+from os import PathLike
+from typing import Any
+
+PathArg = str | PathLike[str]
+Rec = dict[str, Any]  # a parsed MIDI / SoundFont / SFX / WAV description
+Event = tuple[int, str, Any]  # (tick, kind, data)
 
 META_TEXT = {1: 'text', 2: 'copyright', 3: 'track_name', 4: 'instrument', 5: 'lyric', 6: 'marker', 7: 'cue'}
 
 
-def read_vlq(d, pos):
+def read_vlq(d: bytes, pos: int) -> tuple[int, int]:
     val = 0
     while True:
         b = d[pos]
@@ -35,9 +43,11 @@ def read_vlq(d, pos):
             return val, pos
 
 
-def parse_track(d, start, end, idx):
+def parse_track(d: bytes, start: int, end: int, idx: int) -> tuple[list[Event], int]:
     """Return (events, end position) of one MTrk; event = (tick, kind, data)."""
-    events, pos, tick, status = [], start, 0, None
+    events: list[Event] = []
+    pos, tick = start, 0
+    status: int | None = None
     while pos < end:
         delta, pos = read_vlq(d, pos)
         tick += delta
@@ -70,7 +80,7 @@ def parse_track(d, start, end, idx):
     return events, pos
 
 
-def tempo_seconds(tempo_map, tick, division):
+def tempo_seconds(tempo_map: Sequence[tuple[int, int]], tick: int, division: int) -> float:
     """Seconds at `tick`; tempo_map = sorted list of (tick, microseconds per quarter note)."""
     if division & 0x8000:  # SMPTE: -fps, ticks per frame
         fps = 256 - (division >> 8)
@@ -84,7 +94,7 @@ def tempo_seconds(tempo_map, tick, division):
     return sec + (tick - last_tick) * uspq / 1e6 / division
 
 
-def parse_midi(path):
+def parse_midi(path: PathArg) -> Rec:
     d = open(path, 'rb').read()
     if d[:4] != b'MThd':
         raise ValueError('%s: no MThd' % path)
@@ -167,7 +177,7 @@ def parse_midi(path):
     }
 
 
-def programs_used(m):
+def programs_used(m: Rec) -> set[tuple[int, int, int | None, int]]:
     """Set of (bank_msb, bank_lsb, program, channel) actually sounding notes.
     Channel index 9 (MIDI channel 10) is the GM drum channel. Channels with notes but no
     program change are reported with program None (default program 0 / standard kit)."""
@@ -182,7 +192,7 @@ def programs_used(m):
     return out
 
 
-def midi_summary(m):
+def midi_summary(m: Rec) -> str:
     out = ['%s: SMF format %d, tracks %d/%d, PPQN %d, initial tempo %.1f BPM (%d tempo events), '
            'length %.2f s (last note %.2f s), track structure %s'
            % (m['file'], m['format'], m['ntrks_found'], m['ntrks_header'], m['division'], m['initial_bpm'],
@@ -203,11 +213,11 @@ def midi_summary(m):
     return '\n'.join(out)
 
 
-def find_midis(directory):
+def find_midis(directory: PathArg) -> list[str]:
     return sorted(p for p in glob.glob(os.path.join(directory, '*')) if p.lower().endswith('.mid'))
 
 
-def check(directory):
+def check(directory: PathArg) -> str:
     rows, bad = [], 0
     for p in find_midis(directory):
         m = parse_midi(p)
@@ -220,7 +230,7 @@ def check(directory):
     return '\n'.join(rows)
 
 
-def midi_main(argv):
+def midi_main(argv: list[str]) -> int:
     if not argv:
         print(__doc__)
         return 1
@@ -257,7 +267,7 @@ Layout (SoundFont 2.01 spec; SoundFont 1.0 differences observed in WARINTR3.SBK)
   phdr/inst/bag lists end with a terminal record (EOP/EOI) that is not counted.
   SF1 pmod/imod are 6-byte stubs in WARINTR3.SBK (no modulators), so they are read leniently.
 """
-import json, os, struct, sys, wave
+import wave
 
 # SF2 generator numbers (SF1 uses the same numbers for everything seen here, except 55,
 # which is reserved in SF2 - its SF1 meaning is unknown)
@@ -308,11 +318,11 @@ PDTA_RECORDS = {  # chunk id -> (record size, struct format)
 SF1_SHDR = (16, '<IIII')
 
 
-def cstr(b):
+def cstr(b: bytes) -> str:
     return b.split(b'\0', 1)[0].decode('latin-1').rstrip()
 
 
-def iter_chunks(data, start, end):
+def iter_chunks(data: bytes, start: int, end: int) -> Iterator[tuple[str, int, int]]:
     """Yield (id, data offset, size) for consecutive RIFF chunks in [start, end)."""
     pos = start
     while pos + 8 <= end:
@@ -321,7 +331,7 @@ def iter_chunks(data, start, end):
         pos += 8 + size + (size & 1)  # chunks are padded to an even size
 
 
-def gen_value(oper, raw):
+def gen_value(oper: int, raw: int) -> Any:
     """Generator amount: ranges as (lo, hi), indices unsigned, everything else signed."""
     if oper in RANGE_GENS:
         return (raw & 0xFF, raw >> 8)
@@ -330,14 +340,16 @@ def gen_value(oper, raw):
     return raw - 0x10000 if raw >= 0x8000 else raw
 
 
-def parse_sf2(path):
+def parse_sf2(path: PathArg) -> Rec:
     data = open(path, 'rb').read()
     riff, total, form = struct.unpack_from('<4sI4s', data, 0)
     if riff != b'RIFF' or form != b'sfbk':
         raise ValueError('%s: not a RIFF sfbk file' % path)
-    sf = {'file': os.path.basename(path), 'file_size': len(data), 'riff_size_ok': total + 8 == len(data),
+    sf: Rec = {'file': os.path.basename(path), 'file_size': len(data), 'riff_size_ok': total + 8 == len(data),
           'info': {}, 'smpl_offset': None, 'smpl_bytes': 0, 'warnings': []}
-    raw, snam, major = {}, [], 2
+    raw: dict[str, list[Any]] = {}
+    snam: list[str] = []
+    major = 2
     for cid, off, size in iter_chunks(data, 12, len(data)):
         if cid != 'LIST':
             continue
@@ -363,7 +375,7 @@ def parse_sf2(path):
                 raw[sid] = [struct.unpack_from(fmt, body, i) for i in range(0, ssize - rsize + 1, rsize)]
     sf['version_major'] = major
 
-    def zones(bags, gens, lo, hi):
+    def zones(bags: Sequence[Any], gens: Sequence[Any], lo: int, hi: int) -> list[dict[int, Any]]:
         """Zones (dict generator -> value) for bags [lo, hi)."""
         out = []
         for b in range(lo, hi):
@@ -392,7 +404,7 @@ def parse_sf2(path):
                             'samples': sorted({z[53] for z in zs if 53 in z})})
     presets = []
     for i in range(len(raw['phdr']) - 1):
-        name, prog, bank, bag, lib, genre, morph = raw['phdr'][i]
+        name, prog, bank, bag, _lib, _genre, _morph = raw['phdr'][i]
         zs = zones(raw['pbag'], raw['pgen'], bag, raw['phdr'][i + 1][3])
         presets.append({'name': cstr(name), 'bank': bank, 'program': prog, 'zones': zs,
                         'instruments': sorted({z[41] for z in zs if 41 in z})})
@@ -401,13 +413,13 @@ def parse_sf2(path):
     return sf
 
 
-def gm_name(bank, program):
+def gm_name(bank: int, program: int) -> str:
     if bank == 128:
         return 'Drum kit %d' % program
     return GM_PROGRAMS[program] if 0 <= program < 128 else '?'
 
 
-def sf2_summary(sf):
+def sf2_summary(sf: Rec) -> str:
     out = ['%s: %d B, RIFF sfbk version %s, RIFF size %s' % (
         sf['file'], sf['file_size'], sf['info'].get('ifil'), 'matches' if sf['riff_size_ok'] else 'MISMATCH')]
     for k, v in sf['info'].items():
@@ -438,13 +450,13 @@ def sf2_summary(sf):
     return '\n'.join(out)
 
 
-def sample_pcm(sf, s):
+def sample_pcm(sf: Rec, s: Rec) -> bytes:
     """Raw 16-bit little-endian PCM bytes of one sample."""
     base = sf['smpl_offset']
     return sf['_data'][base + 2 * s['start']:base + 2 * s['end']]
 
 
-def extract_samples(sf, outdir, rate=None):
+def extract_samples(sf: Rec, outdir: PathArg, rate: int | None = None) -> list[str]:
     """Write RAM samples (not ROM) as WAV. SF1 has no rate field, so `rate` (default 44100) is used."""
     os.makedirs(outdir, exist_ok=True)
     paths = []
@@ -461,7 +473,7 @@ def extract_samples(sf, outdir, rate=None):
     return paths
 
 
-def sf2_main(argv):
+def sf2_main(argv: list[str]) -> int:
     if not argv:
         print(__doc__)
         return 1
@@ -492,7 +504,7 @@ Usage:
 Example:
   python3 scripts/sfx_parse.py ".../WARFB" --check --json extracted/sfx/sfx.json
 """
-import glob, hashlib, json, os, struct, sys
+import hashlib
 
 CHUNK_ORDER = (b'INFO', b'SFX ', b'SMP ', b'LIST', b'NAME', b'SFID')
 RECORD_SIZE = 60
@@ -523,11 +535,11 @@ RECORD_FIELDS = (
 )
 
 
-def u32(b, o):
+def u32(b: bytes, o: int) -> int:
     return struct.unpack_from('<I', b, o)[0]
 
 
-def flag_names(f):
+def flag_names(f: int) -> list[str]:
     names = [n for bit, n in FLAGS if f & bit]
     rest = f & ~sum(bit for bit, _ in FLAGS)
     if rest:
@@ -535,7 +547,7 @@ def flag_names(f):
     return names
 
 
-def split_names(body, count):
+def split_names(body: bytes, count: int) -> tuple[list[str], bool]:
     """Null-terminated strings stored one after another; returns up to count names."""
     parts = body.split(b'\0')
     names = [p.decode('latin-1') for p in parts[:count]]
@@ -543,7 +555,7 @@ def split_names(body, count):
     return names, complete
 
 
-def parse_sfx(data):
+def parse_sfx(data: bytes) -> Rec:
     """Parses a .SFX file image. Returns a dict with chunks, samples, effects and a list of problems."""
     problems, notes = [], []
     pkg = {'size': len(data), 'problems': problems, 'notes': notes}
@@ -606,7 +618,7 @@ def parse_sfx(data):
     effects = []
     for i in range(len(raw) // RECORD_SIZE):
         r = raw[i * RECORD_SIZE:(i + 1) * RECORD_SIZE]
-        e = {'index': i, 'name': sfid[i] if i < len(sfid) else None}
+        e: Rec = {'index': i, 'name': sfid[i] if i < len(sfid) else None}
         for off, name, size in RECORD_FIELDS:
             e[name] = struct.unpack_from('<H' if size == 2 else '<I', r, off)[0]
         e['flag_names'] = flag_names(e['flags'])
@@ -643,7 +655,7 @@ def parse_sfx(data):
 
 # --- installation layout -----------------------------------------------------------------
 
-def find_ci(directory, name):
+def find_ci(directory: PathArg, name: str) -> str | None:
     """Case-insensitive lookup of one path component; returns the real path or None."""
     try:
         for n in os.listdir(directory):
@@ -654,7 +666,7 @@ def find_ci(directory, name):
     return None
 
 
-def resolve(root, relpath):
+def resolve(root: PathArg, relpath: str) -> str | None:
     """Resolves a game path like 'binary\\sound\\race\\x.wav': UPDATE/BINARY first, then FILE/BINARY."""
     parts = [p for p in relpath.replace('\\', '/').split('/') if p]
     for base in ('UPDATE', 'FILE'):
@@ -673,7 +685,7 @@ def _require(path: str | None, what: str) -> str:
     return path
 
 
-def packet_table(root):
+def packet_table(root: PathArg) -> list[Rec]:
     """Reads the loadsfx name -> directory table from GAMEF.DLL (84-byte entries: name[9], path[71], int32)."""
     gamef = _require(find_ci(root, 'GAMEF.DLL'), 'GAMEF.DLL')
     d = open(gamef, 'rb').read()
@@ -692,10 +704,10 @@ def packet_table(root):
     return table
 
 
-def loadsfx_usage(root):
+def loadsfx_usage(root: PathArg) -> dict[str, list[str]]:
     """Map lower-case packet name -> list of .BTS files that load it (via whscript.load_battle)."""
     from .script import load_battle
-    usage, unknown = {}, []
+    usage: dict[str, list[str]] = {}
     script = _require(find_ci(_require(find_ci(root, 'FILE'), 'FILE'), 'SCRIPT'), 'FILE/SCRIPT')
     for p in sorted(glob.glob(os.path.join(script, '*'))):
         if not p.upper().endswith('.BTS'):
@@ -705,7 +717,7 @@ def loadsfx_usage(root):
     return usage
 
 
-def analyse_install(root):
+def analyse_install(root: PathArg) -> Rec:
     table = packet_table(root)
     usage = loadsfx_usage(root)
     sound = _require(resolve(root, 'binary\\sound'), 'binary/sound')
@@ -713,12 +725,15 @@ def analyse_install(root):
                      if p.upper().endswith('.SFX'))
     all_wav = sorted(p for p in glob.glob(os.path.join(sound, '**', '*'), recursive=True)
                      if p.upper().endswith('.WAV'))
-    rel = lambda p: os.path.relpath(p, root)
-    wav_users = {rel(p): [] for p in all_wav}
-    packets, seen = [], set()
+    def rel(p: str) -> str:
+        return os.path.relpath(p, root)
+
+    wav_users: dict[str, list[str]] = {rel(p): [] for p in all_wav}
+    packets: list[Rec] = []
+    seen: set[str] = set()
     for t in table[1:]:
         path = resolve(root, t['dir'] + t['name'] + '.sfx')
-        pk = {'name': t['name'], 'slot': t['slot'], 'dir': t['dir'], 'file': path and rel(path),
+        pk: Rec = {'name': t['name'], 'slot': t['slot'], 'dir': t['dir'], 'file': path and rel(path),
               'loaded_by': usage.get(t['name'].lower(), [])}
         if path:
             seen.add(path)
@@ -759,7 +774,7 @@ def analyse_install(root):
 
 # --- output ------------------------------------------------------------------------------
 
-def print_package(pk, title):
+def print_package(pk: Rec, title: str) -> None:
     print('== %s  (%s samples, %s effects)' % (title, pk.get('n_samples'), pk.get('n_sfx')))
     for e in pk.get('effects', []):
         extra = ''
@@ -776,7 +791,7 @@ def print_package(pk, title):
         print('  note: %s' % n)
 
 
-def print_check(res):
+def print_check(res: Rec) -> None:
     pk = res['packets'] + res['unlisted_sfx_files']
     print('SFX files parsed: %d (%d in the GAMEF.DLL table, %d not listed)'
           % (len([p for p in pk if p.get('file')]), len(res['packets']), len(res['unlisted_sfx_files'])))
@@ -807,7 +822,7 @@ def print_check(res):
     print('identical WAV files: %s' % res['duplicate_wavs'])
 
 
-def sfx_main(argv):
+def sfx_main(argv: list[str]) -> None:
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__)
         return
@@ -834,7 +849,7 @@ def sfx_main(argv):
         print('wrote %s' % out)
 
 
-def extract_sfx_effects(root, out_dir):
+def extract_sfx_effects(root: PathArg, out_dir: PathArg) -> None:
     """Extract sound effects with pitch applied into out_dir/effects, raw WAVs into out_dir/raw."""
     out_dir_path = os.path.abspath(str(out_dir))
     raw_dir = os.path.join(out_dir_path, "raw")
@@ -892,7 +907,7 @@ def extract_sfx_effects(root, out_dir):
                 pass
 
 
-def extract_speech(root, out_dir):
+def extract_speech(root: PathArg, out_dir: PathArg) -> None:
     """Extract speech WAV files from REMOTE/BINARY/GLUE/SPEECH/ to out_dir."""
     out_dir_path = os.path.abspath(str(out_dir))
     os.makedirs(out_dir_path, exist_ok=True)
@@ -924,14 +939,14 @@ Usage:
 Example:
   python3 scripts/sfx_wavstats.py ".../WARFB" --json extracted/sfx/wavstats.json
 """
-import collections, glob, json, os, struct, sys, wave
+import collections
 
 GROUPS = (('SOUND', ('FILE/BINARY/SOUND', 'UPDATE/BINARY/SOUND')),
           ('SPEECH', ('REMOTE/BINARY/GLUE/SPEECH',)))
 
 
-def find_path_ci(root, rel):
-    cur = root
+def find_path_ci(root: PathArg, rel: str) -> str | None:
+    cur: str | None = str(root)
     for part in rel.split('/'):
         try:
             cur = next((os.path.join(cur, n) for n in os.listdir(cur) if n.lower() == part.lower()), None)
@@ -942,9 +957,9 @@ def find_path_ci(root, rel):
     return cur
 
 
-def analyse(path):
+def analyse(path: PathArg) -> Rec:
     d = open(path, 'rb').read()
-    r = {'bytes': len(d), 'problems': [], 'chunks': []}
+    r: Rec = {'bytes': len(d), 'problems': [], 'chunks': []}
     if d[:4] != b'RIFF' or d[8:12] != b'WAVE':
         r['problems'].append('not RIFF WAVE')
         return r
@@ -987,7 +1002,7 @@ def analyse(path):
     r['frames'] = r['data_size'] // r['block_align']
     r['seconds'] = r['frames'] / r['rate']
     try:
-        with wave.open(path) as w:
+        with wave.open(str(path)) as w:
             r['wave_module'] = 'ok'
             if (w.getnchannels(), w.getframerate(), w.getsampwidth() * 8, w.getnframes()) != \
                     (r['channels'], r['rate'], r['bits'], r['frames']):
@@ -998,7 +1013,7 @@ def analyse(path):
     return r
 
 
-def wavstats_main(argv):
+def wavstats_main(argv: list[str]) -> None:
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__)
         return

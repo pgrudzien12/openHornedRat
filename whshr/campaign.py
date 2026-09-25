@@ -1,27 +1,37 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Parser and flow graph builder for the campaign glue scripts in WND.DLL."""
 
 import json
-import os
+from collections.abc import Iterator, Mapping, Sequence
+from os import PathLike
 from pathlib import Path
 from dataclasses import asdict, is_dataclass
+from typing import Any
 
 from .glue import (
     AnimRecord, BitmapRecord, GlueProgram, HotspotRecord, IncludeRecord, MissionRecord,
-    PositionRecord, TextRecord, WindowDefinition, parse_glue_resource,
+    GlueInstruction, GlueResource, PositionRecord, TextRecord, WindowDefinition, parse_glue_resource,
     parse_glue_resources, tokenize_glue, coverage_report, validate_program,
 )
 from .legacy import module
 from .paths import Installation
 
+PathArg = str | PathLike[str]
+Resources = Mapping[str, GlueResource]  # imported WND.DLL glue resources by upper-case name
+Strings = Mapping[int, str]  # a string table (BRTXT / BKTXT / GMTXT)
+Ui = dict[str, Any]  # parse_window_ui's result: window, position, bitmaps, hotspots, anims, texts
+Mission = dict[str, Any]  # one mission record of a mission window
+Graph = dict[str, Any]  # build_campaign_graph's result
 
-def load_wnd_rcdata(wnd_dll_path):
+
+def load_wnd_rcdata(wnd_dll_path: PathArg) -> dict[str, str]:
     """Load all RT_RCDATA text resources from WND.DLL."""
     pe_cls = module("pe_resources").PE
     pe = pe_cls(str(wnd_dll_path))
     return {str(r.name).upper(): pe.data(r).decode("latin-1") for r in pe.resources() if r.type == 10}
 
 
-def check_glue_inventory(installation_path, expected_resources=535):
+def check_glue_inventory(installation_path: PathArg, expected_resources: int = 535) -> dict[str, Any]:
     """Validate complete glue coverage for the supported GOG v1.0 installation."""
     game = Installation(installation_path)
     resources = parse_glue_resources(load_wnd_rcdata(game.file_dir("DLL", "WND.DLL")))
@@ -41,19 +51,19 @@ def check_glue_inventory(installation_path, expected_resources=535):
     return report
 
 
-def parse_glue_lines(text):
+def parse_glue_lines(text: str) -> Iterator[tuple[str, str]]:
     """Compatibility projection of the typed importer as ``(command, argument)`` pairs."""
     for statement in tokenize_glue("<memory>", text):
         yield statement.command, statement.argument
 
 
-def _imported_resources(wnd):
+def _imported_resources(wnd: Mapping[str, Any]) -> Resources:
     if all(isinstance(resource, (GlueProgram, WindowDefinition)) for resource in wnd.values()):
         return wnd
     return parse_glue_resources(wnd)
 
 
-def _program_instructions(program_or_text, name="<memory>"):
+def _program_instructions(program_or_text: GlueResource | str, name: str = "<memory>") -> Sequence[GlueInstruction]:
     if isinstance(program_or_text, WindowDefinition):
         return ()
     program = (program_or_text if isinstance(program_or_text, GlueProgram)
@@ -63,7 +73,7 @@ def _program_instructions(program_or_text, name="<memory>"):
     return program.instructions
 
 
-def parse_cash_field(cash_str):
+def parse_cash_field(cash_str: str | None) -> dict[str, Any] | None:
     """Parse cash:type,initial,completion,per_unit,penalty,letters..."""
     if not cash_str:
         return None
@@ -90,21 +100,24 @@ def parse_cash_field(cash_str):
         return {"raw": cash_str}
 
 
-def parse_mission_windows(wnd, brtxt=None):
+def parse_mission_windows(wnd: Mapping[str, Any], brtxt: Strings | None = None) -> dict[str, list[Mission]]:
     """Parse all [MISSION] blocks grouped by mission window resource name."""
     brtxt = brtxt or {}
-    windows = {}
+    windows: dict[str, list[Mission]] = {}
     for name, resource in _imported_resources(wnd).items():
         if not ("MISSION" in name and "WINDOW" in name) and not name.startswith("MISSION"):
             continue
-        missions = []
+        missions: list[Mission] = []
         if not isinstance(resource, WindowDefinition):
             continue
         for record in resource.records:
             if not isinstance(record, MissionRecord):
                 continue
-            cur_mission = {"mission_ref": record.mission_ref,
-                           "briefing_key": record.mission_ref.key}
+            mission_ref = record.mission_ref
+            if mission_ref is None:
+                continue
+            cur_mission: Mission = {"mission_ref": mission_ref,
+                           "briefing_key": mission_ref.key}
             for statement in record.fields:
                 cmd, arg = statement.command, statement.argument
                 if cmd == "set" and arg.startswith("res="):
@@ -137,7 +150,7 @@ def parse_mission_windows(wnd, brtxt=None):
     return windows
 
 
-def parse_window_hotspots(wnd, name, seen=()):
+def parse_window_hotspots(wnd: Mapping[str, Any], name: str, seen: Sequence[str] = ()) -> list[dict[str, Any]]:
     """Return a window's hotspots, expanding its original ``[INCLUDE]`` blocks.
 
     ``set:res=<number>`` is the BRTXT hover-hint resource.  A later ``res:``
@@ -149,7 +162,7 @@ def parse_window_hotspots(wnd, name, seen=()):
             if {"x", "y", "vx", "vy"} <= hotspot.keys()]
 
 
-def parse_window_ui(wnd, name, seen=()):
+def parse_window_ui(wnd: Mapping[str, Any], name: str, seen: Sequence[str] = ()) -> Ui:
     """Parse one glue window into presentation data, expanding ``[INCLUDE]`` blocks.
 
     This deliberately preserves targets as glue-resource names. Mapping those
@@ -166,7 +179,7 @@ def parse_window_ui(wnd, name, seen=()):
     if not isinstance(resource, WindowDefinition):
         raise ValueError(f"resource is not a window: {name}")
 
-    result = {"window": name, "position": {}, "bitmaps": [], "hotspots": [], "anims": [], "texts": []}
+    result: Ui = {"window": name, "position": {}, "bitmaps": [], "hotspots": [], "anims": [], "texts": []}
     for record in resource.records:
         if isinstance(record, IncludeRecord):
             scripts = (item.argument for item in record.fields if item.command == "script")
@@ -178,7 +191,7 @@ def parse_window_ui(wnd, name, seen=()):
                 result["texts"].extend(included["texts"])
             continue
         if isinstance(record, PositionRecord):
-            current = result["position"]
+            current: dict[str, Any] = result["position"]
         elif isinstance(record, BitmapRecord):
             current = {}
         elif isinstance(record, HotspotRecord):
@@ -221,7 +234,7 @@ def parse_window_ui(wnd, name, seen=()):
     return result
 
 
-def parse_window_portrait(wnd, name):
+def parse_window_portrait(wnd: Mapping[str, Any], name: str) -> dict[str, Any] | None:
     """Parse a window's data-defined position and speaker portrait settings."""
     ui = parse_window_ui(wnd, name)
     if not ui["position"] or not ui["anims"]:
@@ -232,11 +245,11 @@ def parse_window_portrait(wnd, name):
     return {"window": ui["window"], "position": ui["position"], **portrait}
 
 
-def parse_mission_script(text, bktxt=None):
+def parse_mission_script(text: GlueResource | str, bktxt: Strings | None = None) -> dict[str, Any]:
     """Analyze actions inside a mission runner script (e.g. BPMISSION1)."""
     bktxt = bktxt or {}
-    actions = []
-    summary = {
+    actions: list[dict[str, Any]] = []
+    summary: dict[str, Any] = {
         "battles": [],
         "movies": [],
         "reinforcements": [],
@@ -311,13 +324,13 @@ def parse_mission_script(text, bktxt=None):
     return {"actions": actions, "summary": summary}
 
 
-def build_campaign_graph(installation_path, wnd=None, string_tables=None):
+def build_campaign_graph(installation_path: PathArg, wnd: Mapping[str, Any] | None = None,
+                         string_tables: Mapping[str, Strings] | None = None) -> Graph:
     """Build the complete campaign transition graph from WND.DLL and associated string tables."""
     game = Installation(installation_path)
     wnd_dll = game.file_dir("DLL", "WND.DLL")
     brtxt_dll = game.file_dir("DLL", "BRTXT.DLL")
     bktxt_dll = game.file_dir("DLL", "BKTXT.DLL")
-    gmtxt_dll = game.file_dir("DLL", "GMTXT.DLL")
 
     pe_missions = module("pe_missions")
     wnd = parse_glue_resources(load_wnd_rcdata(wnd_dll)) if wnd is None else _imported_resources(wnd)
@@ -326,8 +339,6 @@ def build_campaign_graph(installation_path, wnd=None, string_tables=None):
              else pe_missions.load_strings(str(brtxt_dll)))
     bktxt = (string_tables["BKTXT"] if "BKTXT" in string_tables
              else pe_missions.load_strings(str(bktxt_dll)))
-    gmtxt = (string_tables["GMTXT"] if "GMTXT" in string_tables
-             else pe_missions.load_strings(str(gmtxt_dll)))
 
     windows = parse_mission_windows(wnd, brtxt)
     # Battle script names are not unique: placeholder BF003 alone occurs in
@@ -340,11 +351,11 @@ def build_campaign_graph(installation_path, wnd=None, string_tables=None):
     }
 
     # Parse flow scripts
-    flow_scripts = {}
+    flow_scripts: dict[str, list[dict[str, Any]]] = {}
     for name, resource in sorted(wnd.items()):
         if not name.startswith("FLOWSCRIPT"):
             continue
-        steps = []
+        steps: list[dict[str, Any]] = []
         for instruction in _program_instructions(resource, name):
             cmd, arg = instruction.command, instruction.argument
             if cmd == "addobject" and "res=" in arg.lower():
@@ -361,15 +372,15 @@ def build_campaign_graph(installation_path, wnd=None, string_tables=None):
         flow_scripts[name] = steps
 
     # Parse all execution mission scripts
-    mission_scripts = {}
+    mission_scripts: dict[str, dict[str, Any]] = {}
     for name, resource in sorted(wnd.items()):
         if (isinstance(resource, GlueProgram) and "MISSION" in name
                 and not ("WINDOW" in name) and not name.startswith("FLOW")):
             mission_scripts[name] = parse_mission_script(resource, bktxt)
 
     # Resolve links and branches
-    nodes = {}
-    edges = []
+    nodes: dict[str, dict[str, Any]] = {}
+    edges: list[dict[str, Any]] = []
 
     # Each mission window is a state node offering choices
     for wname, mlist in windows.items():
@@ -386,7 +397,7 @@ def build_campaign_graph(installation_path, wnd=None, string_tables=None):
             "steps": steps,
         }
         # Chain flow steps
-        prev_w = None
+        prev_w: str | None = None
         for s in steps:
             if s["action"] == "add_window":
                 w = s["window"]
@@ -437,14 +448,14 @@ def build_campaign_graph(installation_path, wnd=None, string_tables=None):
     }
 
 
-def json_default(value):
+def json_default(value: object) -> Any:
     """Encode typed campaign identities in legacy JSON report output."""
-    if is_dataclass(value):
+    if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
     raise TypeError(f"{type(value).__name__} is not JSON serializable")
 
 
-def export_graph_dot(campaign_data):
+def export_graph_dot(campaign_data: Mapping[str, Any]) -> str:
     """Generate Graphviz DOT representation of the campaign flow."""
     lines = [
         "digraph CampaignFlow {",
@@ -486,7 +497,7 @@ def export_graph_dot(campaign_data):
     return "\n".join(lines)
 
 
-def export_campaign_markdown(campaign_data):
+def export_campaign_markdown(campaign_data: Mapping[str, Any]) -> str:
     """Generate a readable Markdown summary of the campaign missions and branches."""
     lines = [
         "# Campaign Flow and Mission Branching Graph",
@@ -544,7 +555,7 @@ def export_campaign_markdown(campaign_data):
     return "\n".join(lines)
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> int:
     import argparse
     parser = argparse.ArgumentParser(description="Extract and parse campaign flow scripts and mission graphs.")
     parser.add_argument("installation", type=Path, help="WARFB installation directory")

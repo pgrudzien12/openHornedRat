@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Campaign session logging: JSON Lines recording, stdlib-only (no frontend import).
 
 `notes/engine_architecture.md`, "Campaign session log" documents the format. One JSON object per
@@ -11,20 +12,30 @@ typing progress, and (unless `trace_glue` is on) per-instruction glue traces.
 """
 import json
 import os
+from collections.abc import Iterable
 from datetime import datetime, timezone
+from os import PathLike
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, TextIO
+
+if TYPE_CHECKING:
+    from .campaign_state import CampaignState
+    from .glue_runtime import GlueRuntime
+
+Row = dict[str, Any]
+Summary = dict[str, Any]  # campaign_summary's result
 
 FORMAT_VERSION = 1
 TRACE_ENV = "WHSHR_TRACE_GLUE"
 
 
-def default_log_path(log_dir, when=None):
+def default_log_path(log_dir: str | PathLike[str], when: datetime | None = None) -> Path:
     """`<log_dir>/campaign-YYYYmmdd-HHMMSS.jsonl`."""
     when = when or datetime.now()
     return Path(log_dir) / f"campaign-{when:%Y%m%d-%H%M%S}.jsonl"
 
 
-def format_diagnostic(location, message):
+def format_diagnostic(location: object, message: str) -> str:
     """Same text the frontend prints to stderr for a glue diagnostic."""
     return f"glue: {location}: {message}"
 
@@ -36,12 +47,12 @@ class CampaignLogger:
     per executed glue instruction -- high volume, off by default.
     """
 
-    def __init__(self, path=None, trace_glue=None):
+    def __init__(self, path: str | PathLike[str] | None = None, trace_glue: bool | None = None) -> None:
         self.path = Path(path) if path is not None else None
         self.trace_glue = bool(os.environ.get(TRACE_ENV)) if trace_glue is None else trace_glue
-        self._file = None
+        self._file: TextIO | None = None
         self.enabled = False
-        self._last = None
+        self._last: str | None = None
         if self.path is not None:
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,11 +62,11 @@ class CampaignLogger:
                 self._file = None
                 self.enabled = False
 
-    def write(self, type_, **fields):
+    def write(self, type_: str, **fields: Any) -> None:
         """One row. A row identical to the previous one (apart from `time`) is dropped."""
-        if not self.enabled:
+        if not self.enabled or self._file is None:
             return
-        row = {"type": type_, **fields}
+        row: Row = {"type": type_, **fields}
         try:
             key = json.dumps(row, ensure_ascii=False, sort_keys=True, default=str)
             if key == self._last:
@@ -69,7 +80,7 @@ class CampaignLogger:
             self.enabled = False
             self.close()
 
-    def close(self):
+    def close(self) -> None:
         if self._file is not None:
             try:
                 self._file.close()
@@ -79,51 +90,51 @@ class CampaignLogger:
         self.enabled = False
 
     # -- session -----------------------------------------------------------------------------
-    def session_start(self, **options):
+    def session_start(self, **options: Any) -> None:
         self.write("session_start", format_version=FORMAT_VERSION, options=options)
 
-    def session_end(self, reason, **fields):
+    def session_end(self, reason: str, **fields: Any) -> None:
         self.write("session_end", reason=reason, **fields)
 
     # -- scene machine -----------------------------------------------------------------------
-    def scene_change(self, old, new, reason):
+    def scene_change(self, old: object | None, new: object | None, reason: str) -> None:
         self.write("scene_change", **{"from": _scene_name(old), "to": _scene_name(new), "reason": reason})
         if old is not None and _is_battle(old):
             self.write("battle_result", **_battle_fields(old), result=_battle_result(old))
 
-    def scene_entered(self, scene):
+    def scene_entered(self, scene: object) -> None:
         """Called once the scene's `enter` ran (a battle's own log path exists only from then on)."""
         if _is_battle(scene):
             self.write("battle_start", **_battle_fields(scene))
 
-    def quit(self, reason):
+    def quit(self, reason: str) -> None:
         self.write("quit", reason=reason)
 
-    def asset_failed(self, identifier, error):
+    def asset_failed(self, identifier: object, error: BaseException) -> None:
         self.write("asset_failed", asset=str(identifier), error=f"{type(error).__name__}: {error}")
 
 
-def _scene_name(scene):
+def _scene_name(scene: object | None) -> str | None:
     return type(scene).__name__ if scene is not None else None
 
 
-def _is_battle(scene):
+def _is_battle(scene: object) -> bool:
     return hasattr(scene, "battle_id") and hasattr(scene, "logger")
 
 
-def _battle_fields(scene):
+def _battle_fields(scene: Any) -> Row:
     logger = getattr(scene, "logger", None)
     path = getattr(logger, "path", None)
     return {"battle": str(scene.battle_id), "battle_log": str(path) if path is not None else None}
 
 
-def _battle_result(scene):
+def _battle_result(scene: object) -> str | None:
     battle = getattr(scene, "battle", None)
     result = getattr(battle, "result", None)
     return str(result) if result is not None else None
 
 
-def campaign_summary(campaign):
+def campaign_summary(campaign: "CampaignState | None") -> Summary | None:
     """Small comparable summary of a `CampaignState` (None when there is none)."""
     if campaign is None:
         return None
@@ -146,24 +157,24 @@ class GlueWatcher:
     interpreter is not seen (use `WHSHR_TRACE_GLUE` for that).
     """
 
-    def __init__(self, logger, scene_name, campaign=None):
+    def __init__(self, logger: CampaignLogger, scene_name: str, campaign: "CampaignState | None" = None) -> None:
         self.logger = logger
         self.scene_name = scene_name
         self.campaign = campaign
-        self._stack = []
-        self._wait = None
-        self._pending = None
-        self._mission = None
+        self._stack: list[str] = []
+        self._wait: tuple[Any, ...] | None = None
+        self._pending: tuple[Any, ...] | None = None
+        self._mission: Any = None
         self._summary = campaign_summary(campaign)
         self._trace_seen = 0
 
-    def update(self, runtime, effects=()):
+    def update(self, runtime: "GlueRuntime", effects: Iterable[Any] = ()) -> None:
         try:
             self._update(runtime, effects)
         except Exception:  # logging must never change behaviour
             self.logger.enabled = False
 
-    def _update(self, runtime, effects):
+    def _update(self, runtime: "GlueRuntime", effects: Iterable[Any]) -> None:
         log, state = self.logger, runtime.state
         if not log.enabled:
             return
@@ -206,7 +217,7 @@ class GlueWatcher:
             log.write("campaign_state", before=self._summary, after=summary)
             self._summary = summary
 
-    def _trace(self, state):
+    def _trace(self, state: Any) -> None:
         if self._trace_seen > len(state.trace):
             self._trace_seen = 0
         for item in state.trace[self._trace_seen:]:
@@ -214,7 +225,7 @@ class GlueWatcher:
                               argument=item.argument)
         self._trace_seen = len(state.trace)
 
-    def _effect(self, runtime, effect):
+    def _effect(self, runtime: "GlueRuntime", effect: Any) -> None:
         log, name = self.logger, type(effect).__name__
         if name == "Diagnostic":
             log.write("diagnostic", text=format_diagnostic(effect.location, effect.message),
@@ -234,20 +245,21 @@ class GlueWatcher:
             log.write("glue_effect", effect=name, **vars(effect))
 
     @staticmethod
-    def _program(runtime):
+    def _program(runtime: "GlueRuntime") -> str | None:
         return runtime.state.current.program if runtime.state.current is not None else None
 
     @staticmethod
-    def _open_location(runtime, window):
+    def _open_location(runtime: "GlueRuntime", window: str) -> Any:
         for item in reversed(runtime.state.trace[-200:]):
             if item.command in ("openwindow", "opensubwindow") and item.argument.split("=")[-1].upper() == window.upper():
                 return item.location
         return None
 
     @staticmethod
-    def _assets(runtime, window):
+    def _assets(runtime: "GlueRuntime", window: str) -> Row:
         """Bitmaps and music named by the window definition (empty when it cannot be read)."""
-        bitmaps, music = [], []
+        bitmaps: list[str] = []
+        music: list[str] = []
         try:
             for record in runtime.content.window(window).records:
                 for item in record.fields:

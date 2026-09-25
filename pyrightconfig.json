@@ -62,6 +62,14 @@
     "whshr/roster.py",
     "whshr/payments.py",
     "whshr/smacker.py",
-    "whshr/si.py"
+    "whshr/si.py",
+    "whshr/audio.py",
+    "whshr/battlefield.py",
+    "whshr/campaign.py",
+    "whshr/glue_content.py",
+    "whshr/portraits.py",
+    "whshr/campaign_log.py",
+    "whshr/campaign_state.py",
+    "whshr/troop_selection.py"
   ]
 }

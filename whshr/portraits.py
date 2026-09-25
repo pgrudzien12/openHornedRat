@@ -1,11 +1,22 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Runtime compositing for the verified campaign speaker portraits."""
 
-from .battlefield import read_sprite_sheet
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING
+
+from .battlefield import SpriteFrame, SpriteSheet, read_sprite_sheet
+from .paths import Installation
 from .script import resource_name
+
+if TYPE_CHECKING:
+    from .glue_content import GlueContent
+
+Rgb = tuple[int, int, int]
+Rgba = tuple[int, int, bytes]  # (width, height, RGBA bytes)
 
 # Glue's resident portrait list, notes/glue_portraits.md §1.  Index 36 is
 # BACKALL itself and is not a foreground speaker.
-PORTRAIT_SPRITES = {
+PORTRAIT_SPRITES: dict[int, str] = {
     0: "CER1", 1: "CARL", 2: "COMM", 3: "SKA4", 4: "SCRI", 5: "MER1", 6: "DWA1", 7: "DWA2",
     8: "DWA3", 9: "DWA4", 10: "GOTR", 11: "ELF1", 12: "BRIW", 13: "MER2", 14: "REIK", 15: "ORC2",
     16: "GOB1", 17: "BERN", 18: "CER2", 19: "BERI", 20: "HOLG", 21: "ENGR", 22: "AZGU", 23: "AMBE",
@@ -19,7 +30,7 @@ FALLBACK_POSITION = 4  # SCRI: no roster loaded, or the speaker's set is not in 
 VOID_LEADER_PORTRAIT = "VoidType"  # sprite-table entry 0: the regiment has no leader portrait
 
 
-def first_leader_speaker(leader_portraits, portrait_sets):
+def first_leader_speaker(leader_portraits: Iterable[str | None], portrait_sets: Mapping[str, str]) -> str | None:
     """The current speaker for a marching roster (§1.4 items 1-2).
 
     ``leader_portraits`` are the ``leaderportrait:`` names of the marching regiments in file
@@ -35,7 +46,7 @@ def first_leader_speaker(leader_portraits, portrait_sets):
     return None
 
 
-def speaker_position(speaker, available=None):
+def speaker_position(speaker: str | None, available: Callable[[int], bool] | None = None) -> int:
     """Resident-list position for ``index=-1`` (§1.4 items 3-4).
 
     A linear search of the list for the speaker's set; a miss (or no speaker) uses position 4.
@@ -60,7 +71,7 @@ def speaker_position(speaker, available=None):
 LEADER_BOX_SIZE = (72, 104)
 BACKGROUND_SET = "BACKALL"
 NO_MATCH_CROP_WINDOW = (25, 5)  # background origin when the leader's portrait set has no entry below
-CROP_WINDOWS = {
+CROP_WINDOWS: dict[str, tuple[int, int]] = {
     "CER1": (0, 0), "CARL": (0, 0), "COMM": (26, 6), "SKA4": (0, 0), "SCRI": (0, 0),
     "MER1": (26, 5), "DWA1": (23, 12), "DWA2": (25, 17), "DWA3": (47, 5), "DWA4": (30, 21),
     "GOTR": (20, 6), "ELF1": (29, 5), "BRIW": (41, 16), "MER2": (16, 5), "REIK": (19, 4),
@@ -72,7 +83,7 @@ CROP_WINDOWS = {
 }
 
 
-def load_sprite_sheet(game, name):
+def load_sprite_sheet(game: Installation, name: str) -> SpriteSheet:
     """Decode one installation-resident FOL/BOP sprite set."""
     return read_sprite_sheet(
         name,
@@ -82,7 +93,7 @@ def load_sprite_sheet(game, name):
     )
 
 
-def compose_portrait(palette, background, foreground):
+def compose_portrait(palette: Sequence[Rgb], background: SpriteFrame, foreground: SpriteFrame) -> Rgba:
     """Composite one decoded foreground frame over one background frame."""
     if (background.width, background.height) != (foreground.width, foreground.height):
         raise ValueError("speaker portrait and background dimensions do not match")
@@ -96,7 +107,7 @@ def compose_portrait(palette, background, foreground):
 # Mouth/eye overlay rectangles verified for the two portraits used by every shipped briefing
 # (notes/glue_portraits.md §3.1); other sprite sets' overlay geometry is not yet reverse-engineered
 # (§6 open question), so they fall back to the static frame-0 portrait with no talk/blink overlay.
-OVERLAY_POSITIONS = {
+OVERLAY_POSITIONS: dict[str, dict[int, tuple[int, int, int, int]]] = {
     "SCRI": {frame: (40, 84, 44, 26) for frame in (1, 3, 4, 5, 6)} | {frame: (47, 69, 32, 5) for frame in (2, 7)},
     "COMM": {frame: (43, 64, 36, 27) for frame in (1, 3, 4, 5, 6)} | {frame: (45, 52, 28, 4) for frame in (2, 7)},
 }
@@ -106,11 +117,11 @@ OVERLAY_POSITIONS = {
 # non-generated prefix ("looks pseudo-random but is a fixed sequence... then loops"); this repeats
 # that documented prefix rather than inventing the undocumented remainder of the real 36-step table.
 _EYE_OPEN_TICKS = (49, 36, 40, 46, 22, 44)
-EYE_SEQUENCE = tuple(step for open_ticks in _EYE_OPEN_TICKS for step in ((2, open_ticks + 1), (7, 2)))
+EYE_SEQUENCE: tuple[tuple[int, int], ...] = tuple(step for open_ticks in _EYE_OPEN_TICKS for step in ((2, open_ticks + 1), (7, 2)))
 MOUTH_TALK_FRAMES = (1, 4, 6, 5, 3, 4, 1, 4, 3, 4, 1, 4, 6, 4, 1, 3, 5, 3)
 
 
-def _mouth_step_ticks(frame):
+def _mouth_step_ticks(frame: int) -> int:
     return 2 if frame == 6 else 3
 
 
@@ -127,7 +138,7 @@ class PortraitAnimator:
     """
     TICK_MILLISECONDS = 55
 
-    def __init__(self, sequence=1):
+    def __init__(self, sequence: int = 1) -> None:
         self.sequence = 1
         self._mouth_index = 0
         self._mouth_remaining = 0
@@ -136,7 +147,7 @@ class PortraitAnimator:
         self._elapsed_ms = 0
         self.apply(sequence)
 
-    def apply(self, sequence):
+    def apply(self, sequence: int) -> None:
         self.sequence = 2 if int(sequence) == 2 else 1
         self._mouth_index = 0
         self._mouth_remaining = _mouth_step_ticks(MOUTH_TALK_FRAMES[0])
@@ -145,21 +156,21 @@ class PortraitAnimator:
         self._elapsed_ms = 0
 
     @property
-    def mouth_frame(self):
+    def mouth_frame(self) -> int:
         return MOUTH_TALK_FRAMES[self._mouth_index] if self.sequence == 1 else 1
 
     @property
-    def eye_frame(self):
+    def eye_frame(self) -> int:
         return EYE_SEQUENCE[self._eye_index][0]
 
-    def advance(self, milliseconds):
+    def advance(self, milliseconds: float) -> None:
         """One step per glue timer message (§3.2), see TICK_MILLISECONDS."""
         self._elapsed_ms += milliseconds
         while self._elapsed_ms >= self.TICK_MILLISECONDS:
             self._elapsed_ms -= self.TICK_MILLISECONDS
             self._step()
 
-    def _step(self):
+    def _step(self) -> None:
         if self.sequence == 1:
             self._mouth_remaining -= 1
             if self._mouth_remaining <= 0:
@@ -171,7 +182,8 @@ class PortraitAnimator:
             self._eye_remaining = EYE_SEQUENCE[self._eye_index][1]
 
 
-def compose_talking_portrait(palette, background, base, sprite_sheet, mouth_frame, eye_frame):
+def compose_talking_portrait(palette: Sequence[Rgb], background: SpriteFrame, base: SpriteFrame,
+                             sprite_sheet: SpriteSheet, mouth_frame: int, eye_frame: int) -> Rgba:
     """Composite the base portrait, then stamp the current mouth and eye overlay frames onto it."""
     width, height, rgba = compose_portrait(palette, background, base)
     positions = OVERLAY_POSITIONS.get(sprite_sheet.name)
@@ -197,13 +209,13 @@ def compose_talking_portrait(palette, background, base, sprite_sheet, mouth_fram
     return width, height, bytes(canvas)
 
 
-def speaker_portrait(installation, index, bkindex):
+def speaker_portrait(installation: "GlueContent | Installation | str", index: int, bkindex: int) -> Rgba:
     """Compatibility wrapper around the shared content repository."""
     from .glue_content import GlueContent
     content = installation if isinstance(installation, GlueContent) else GlueContent(installation)
     return content.portrait_data(index, bkindex)
 
 
-def dietrich_portrait(installation, bkindex=15):
+def dietrich_portrait(installation: "GlueContent | Installation | str", bkindex: int = 15) -> Rgba:
     """Compatibility wrapper for callers that explicitly need index 4 / SCRI."""
     return speaker_portrait(installation, 4, bkindex)

@@ -1,12 +1,14 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Headless troop-selection model: notes/troop_selection.md §10 (P0 select, P1 marching order).
 
 Scope: the in-memory core flow only (notes/glue_engine_integration.md GEI7). The real P0/P1
 view, the bankruptcy page's presentation, and the roster book are deferred to GEI7b-GEI7d.
 """
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-from .roster import ALWAYS_FORCED_WHOAMI
+from .roster import ALWAYS_FORCED_WHOAMI, Regiment
 
 DEFAULT_LIMIT = 13
 LIMIT_RANGE = (8, 38)
@@ -21,7 +23,7 @@ STATUS_DESTROYED = "destroyed"
 class TroopRow:
     """One P0/P1 row; notes/troop_selection.md §3.2, §3.4."""
 
-    regiment: object  # roster.Regiment
+    regiment: Regiment
     status: str
     toggleable: bool
     selected: bool
@@ -34,16 +36,17 @@ class TroopRow:
 class Deployment:
     """Result of a confirmed troop selection: notes/troop_selection.md §5.3."""
 
-    units: tuple      # whoami, in marching order
+    units: tuple[int, ...]      # whoami, in marching order
     money_delta: int  # prepaid - total_cost; notes/campaign.md §2.3
-    hired: frozenset  # whoami hired going forward
+    hired: frozenset[int]  # whoami hired going forward
 
 
 class TroopSelection:
     """Pure P0/P1 state; notes/troop_selection.md §4 (P0), §5 (P1)."""
 
-    def __init__(self, company, forced=(), excluded=(), limit=DEFAULT_LIMIT, coffers=0, prepaid=0):
-        self.company = {regiment.whoami: regiment for regiment in company}
+    def __init__(self, company: Iterable[Regiment], forced: Iterable[int] = (), excluded: Iterable[int] = (),
+                 limit: int = DEFAULT_LIMIT, coffers: int = 0, prepaid: int = 0) -> None:
+        self.company: dict[int, Regiment] = {regiment.whoami: regiment for regiment in company}
         # a forced regiment that is not in the company file (it has not joined yet) cannot be selected or paid for
         self.forced = (frozenset(forced) | {ALWAYS_FORCED_WHOAMI}) & self.company.keys()
         self.excluded = frozenset(excluded)
@@ -53,13 +56,13 @@ class TroopSelection:
         # notes/troop_selection.md §4.1: forced regiments become hired; selected unless destroyed.
         self.hired = {whoami: regiment.hired or whoami in self.forced
                       for whoami, regiment in self.company.items()}
-        self.selection = [whoami for whoami in self.company
+        self.selection: list[int] = [whoami for whoami in self.company
                           if whoami in self.forced and self.hired[whoami] and not self.company[whoami].destroyed]
 
-    def _destroyed(self, whoami):
+    def _destroyed(self, whoami: int) -> bool:
         return self.company[whoami].destroyed
 
-    def status(self, whoami):
+    def status(self, whoami: int) -> str:
         """notes/troop_selection.md §3.4, checked in this order."""
         if not self.hired[whoami]:
             return STATUS_NOT_HIRED
@@ -69,25 +72,25 @@ class TroopSelection:
             return STATUS_DESTROYED
         return STATUS_AVAILABLE
 
-    def toggleable(self, whoami):
+    def toggleable(self, whoami: int) -> bool:
         """notes/troop_selection.md §4.2: hired, not forced, not excluded, not destroyed."""
         return whoami not in self.forced and self.status(whoami) == STATUS_AVAILABLE
 
-    def row(self, whoami):
+    def row(self, whoami: int) -> TroopRow:
         regiment = self.company[whoami]
         selected = whoami in self.selection
         total = regiment.price if selected else regiment.retainer
         return TroopRow(regiment, self.status(whoami), self.toggleable(whoami), selected,
                         regiment.price, regiment.retainer, total)
 
-    def rows(self):
+    def rows(self) -> tuple[TroopRow, ...]:
         return tuple(self.row(whoami) for whoami in self.company)
 
     @property
-    def roster_full(self):
+    def roster_full(self) -> bool:
         return len(self.selection) >= self.limit
 
-    def toggle(self, whoami):
+    def toggle(self, whoami: int) -> bool:
         """notes/troop_selection.md §4.2. Returns True when the refusal sound should play."""
         if not self.toggleable(whoami):
             return False
@@ -99,7 +102,7 @@ class TroopSelection:
         self.selection.append(whoami)
         return False
 
-    def set_hired_from_book(self, whoami, hired):
+    def set_hired_from_book(self, whoami: int, hired: bool) -> bool:
         """Apply the selection-variant Army Records Hire/Fire action (§4.3, §8).
 
         This deliberately does not use :meth:`toggle`: book hiring never makes the
@@ -116,7 +119,7 @@ class TroopSelection:
             self.selection.remove(whoami)
         return True
 
-    def restore_book_hired(self, snapshot):
+    def restore_book_hired(self, snapshot: Mapping[int, bool]) -> None:
         """Restore only the documented hired snapshot, retaining valid picks (§8).
 
         The specification does not state that Abort restores a prior marching
@@ -126,7 +129,7 @@ class TroopSelection:
         self.hired.update(snapshot)
         self.selection[:] = [whoami for whoami in self.selection if self.hired[whoami]]
 
-    def move(self, whoami, new_index):
+    def move(self, whoami: int, new_index: int) -> None:
         """notes/troop_selection.md §5.2: reorder the marching-order list."""
         if whoami not in self.selection:
             return
@@ -134,26 +137,26 @@ class TroopSelection:
         self.selection.insert(max(0, min(new_index, len(self.selection))), whoami)
 
     @property
-    def total_cost(self):
+    def total_cost(self) -> int:
         """notes/troop_selection.md §3.1: sum of the numbers shown, i.e. AVAILABLE rows only."""
         return sum(self.row(whoami).total for whoami in self.company if self.status(whoami) == STATUS_AVAILABLE)
 
     @property
-    def affordable(self):
+    def affordable(self) -> bool:
         return self.total_cost <= self.coffers + self.prepaid
 
     @property
-    def bankrupt(self):
+    def bankrupt(self) -> bool:
         """notes/troop_selection.md §4.1, §7: forced-selected cost exceeds coffers + prepaid."""
         return self.forced_cost > self.coffers + self.prepaid
 
     @property
-    def forced_cost(self):
+    def forced_cost(self) -> int:
         """P5's required amount: price of still-living forced regiments (§7)."""
         return sum(self.company[whoami].price for whoami in self.forced
                    if self.hired[whoami] and not self._destroyed(whoami))
 
-    def confirm(self):
+    def confirm(self) -> Deployment:
         """notes/troop_selection.md §5.3 (money in notes/campaign.md §2.3). Assumes affordable."""
         money_delta = self.prepaid - self.total_cost
         hired = frozenset(whoami for whoami, is_hired in self.hired.items() if is_hired)

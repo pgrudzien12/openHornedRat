@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Battle scene data shared by the viewers and the engine: terrain, scenery, troop sprites, world conventions.
 
 A battlefield is decoded once on the CPU. Renderers only upload it (the engine) or rasterize it (the
@@ -5,11 +6,14 @@ static viewers); none of them re-derive placements, frame selection or lighting 
 """
 
 from array import array
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 import functools
 import math
+from os import PathLike
 from pathlib import Path
 import struct
+from typing import Any
 
 from . import legacy, pbx
 from .image import load_rgb_palette
@@ -17,58 +21,66 @@ from .paths import Installation
 from .script import load_battle, resource_name
 from .sprites import colormap_indices, decode_frame
 
+Vec3 = tuple[float, float, float]
+Mesh = dict[str, Any]  # a parsed PBX mesh (whshr.pbx.parse_mesh)
+Texture = dict[str, Any]  # a parsed PBX texture
+Container = dict[str, Any]  # a parsed PBX container (whshr.pbx.parse_container)
+Item = Mapping[str, Any]  # a scenery/furniture placement from the battle script
+VertexFn = Callable[[Sequence[float]], Vec3]
+NormalFn = Callable[[Sequence[float]], Vec3]
+
 WORLD_PER_MESH = 8.0  # BTS world units per mesh (PBX/GD) unit
 FULL_TURN = 512  # script `dir` units per turn: 0 = +Y, clockwise
 DIRECTIONS = 8
 DEFAULT_AMBIENT = 0.45
-DEFAULT_LIGHT = (-0.4, 0.8, -0.3)
+DEFAULT_LIGHT: Vec3 = (-0.4, 0.8, -0.3)
 # Group order of the standard directional unit sets (notes/animations.md).
-ACTION_GROUPS = {"move": 0, "dead": 1, "attack": 2, "stand": 3, "shoot": 4}
+ACTION_GROUPS: dict[str, int] = {"move": 0, "dead": 1, "attack": 2, "stand": 3, "shoot": 4}
 # Baked static geometry, one vertex: mesh-space position, texture UV, texture-array layer, flat shade.
 VERTEX_FORMAT = "3f 2f 1f 1f"
 VERTEX_FLOATS = 7
 ATLAS_WIDTH = 2048
 
 
-def container(path):
+def container(path: str | PathLike[str]) -> Container:
     data, _ = pbx.pbx_rnc.unpack_pbx(str(path))
     return pbx.parse_container(data)
 
 
 @functools.lru_cache(maxsize=4)
-def mesh_assets(mesh_dir):
+def mesh_assets(mesh_dir: Path) -> tuple[Container, Container, Container, Any]:
     """Decode a MESH directory once per process: (GRND, SCENERY, SPRITES containers, GRND.GD terrain)."""
-    containers = (container(mesh_dir / f"{name}.PBX") for name in ("GRND", "SCENERY", "SPRITES"))
-    return (*containers, legacy.module("gd_render").Terrain(mesh_dir / "GRND.GD"))
+    ground, scenery, sprites = (container(mesh_dir / f"{name}.PBX") for name in ("GRND", "SCENERY", "SPRITES"))
+    return ground, scenery, sprites, legacy.module("gd_render").Terrain(mesh_dir / "GRND.GD")
 
 
 @functools.lru_cache(maxsize=2)
-def exe_tables(exe_path):
+def exe_tables(exe_path: Path) -> Any:
     return legacy.module("spritemap_build").read_tables(exe_path.read_bytes())
 
 
-def furniture_meshes(game):
+def furniture_meshes(game: Installation) -> dict[str, str]:
     """Script furniture name (casefolded) -> scenery mesh name in SCENERY.PBX."""
     _, furniture, _ = exe_tables(game.require("WHSHR.EXE"))
     return {entry["name"].casefold(): entry["file"] + ".XOF" for entry in furniture if entry["file"]}
 
 
-def sprite_files(game, category):
+def sprite_files(game: Installation, category: str) -> dict[str, str]:
     """Sprite resources in one sprite-table category -> FOL/BOP/PAL file base."""
     return resource_files(game, {category})
 
 
-def resource_files(game, categories=None):
+def resource_files(game: Installation, categories: Iterable[str] | None = None) -> dict[str, str]:
     """Return sprite resources by name, optionally restricted to sprite-table categories."""
     table = legacy.module("spritemap_build")
     records = [dict(entry) for entry in exe_tables(game.require("WHSHR.EXE"))[0]]  # assign_categories mutates.
     table.assign_categories(records)
-    categories = set(categories) if categories is not None else None
+    wanted = set(categories) if categories is not None else None
     return {entry["name"].casefold(): entry["file"] for entry in records
-            if entry["file"] and (categories is None or entry["category"] in categories)}
+            if entry["file"] and (wanted is None or entry["category"] in wanted)}
 
 
-def sprite_direction(camera_yaw, script_dir):
+def sprite_direction(camera_yaw: float, script_dir: float | None) -> int:
     """Directional frame (0-7) of a unit with script ``dir`` seen by a camera with ``camera_yaw`` degrees.
 
     Frame 0 shows the unit's back and the frames run clockwise on screen, like script dir: frame 2 faces
@@ -80,12 +92,12 @@ def sprite_direction(camera_yaw, script_dir):
     return math.floor(((script_dir or 0) - heading + 32) / 64) % DIRECTIONS
 
 
-def view_angle(camera_yaw):
+def view_angle(camera_yaw: float) -> int:
     """Camera rotation as a script `dir` value (1/512 turns): the camera's screen-up heading."""
     return round((camera_yaw + 180) * FULL_TURN / 360) % FULL_TURN
 
 
-def scenery_transform(item, ground_height, scale=1.0):
+def scenery_transform(item: Item, ground_height: float, scale: float = 1.0) -> tuple[VertexFn, NormalFn]:
     """Return (vertex, normal) transforms placing a scenery mesh at a script ``placefurniture`` item.
 
     Script dir turns clockwise seen from above (as for unit formations): local +Z faces (sin a, cos a) and
@@ -95,19 +107,19 @@ def scenery_transform(item, ground_height, scale=1.0):
     x, z = item["x"] / WORLD_PER_MESH, item["y"] / WORLD_PER_MESH
     cos, sin = math.cos(angle), math.sin(angle)
 
-    def vertex(position):
+    def vertex(position: Sequence[float]) -> Vec3:
         vx, vy, vz = position
         vx, vy, vz = vx * scale, vy * scale, vz * scale
         return (x + vx * cos + vz * sin, ground_height + vy, z - vx * sin + vz * cos)
 
-    def normal(direction):
+    def normal(direction: Sequence[float]) -> Vec3:
         nx, ny, nz = direction
         return (nx * cos + nz * sin, ny, -nx * sin + nz * cos)
 
     return vertex, normal
 
 
-def face_shade(normal, ambient=DEFAULT_AMBIENT, light=DEFAULT_LIGHT):
+def face_shade(normal: Sequence[float], ambient: float = DEFAULT_AMBIENT, light: Sequence[float] = DEFAULT_LIGHT) -> float:
     """Ambient plus Lambert diffuse brightness of a face with an unnormalized normal."""
     length = math.sqrt(sum(component * component for component in normal)) or 1
     light_length = math.sqrt(sum(component * component for component in light))
@@ -115,11 +127,12 @@ def face_shade(normal, ambient=DEFAULT_AMBIENT, light=DEFAULT_LIGHT):
     return ambient + (1 - ambient) * diffuse
 
 
-def bake_mesh(mesh, layer_offset, layer_count, vertex=None, normal=None, ambient=DEFAULT_AMBIENT,
-              light=DEFAULT_LIGHT, out=None):
+def bake_mesh(mesh: Mesh, layer_offset: int, layer_count: int, vertex: VertexFn | None = None,
+              normal: NormalFn | None = None, ambient: float = DEFAULT_AMBIENT,
+              light: Sequence[float] = DEFAULT_LIGHT, out: array[float] | None = None) -> array[float]:
     """Append a PBX mesh as world-space triangles in ``VERTEX_FORMAT``; polygons are fanned."""
-    vertex = vertex or (lambda position: position)
-    normal = normal or (lambda direction: direction)
+    vertex = vertex or (lambda position: (position[0], position[1], position[2]))
+    normal = normal or (lambda direction: (direction[0], direction[1], direction[2]))
     out = array("f") if out is None else out
     positions, texcoords, normals = mesh["verts"], mesh["uv"], mesh["normals"]
     for (indices, normal_indices), texture in zip(mesh["faces"], mesh["ftex"]):
@@ -137,14 +150,14 @@ def bake_mesh(mesh, layer_offset, layer_count, vertex=None, normal=None, ambient
     return out
 
 
-def texture_layers(textures, size, transparent_black=False):
+def texture_layers(textures: Iterable[Texture], size: tuple[int, int], transparent_black: bool = False) -> list[bytes]:
     """RGBA texture-array layers of one ``size``; smaller textures are tiled by texel repetition.
 
     Repeating each texel is exact under nearest sampling and keeps UV wrapping, so every mesh texture fits
     one texture array. Black scenery texels are transparent (alpha 0).
     """
     width, height = size
-    layers = []
+    layers: list[bytes] = []
     for texture in textures:
         w, h = texture["w"], texture["h"]
         if width % w or height % h:
@@ -174,21 +187,21 @@ class SpriteSheet:
     """One FOL/BOP directional set: frames, animation groups and, once packed, atlas rectangles."""
 
     name: str
-    frames: list
-    groups: list  # (first frame, frame count) runs of one colour-map nibble
-    rects: list = field(default_factory=list)  # (x, y, width, height) per frame in the atlas
+    frames: list[SpriteFrame]
+    groups: list[tuple[int, int]]  # (first frame, frame count) runs of one colour-map nibble
+    rects: list[tuple[int, int, int, int] | None] = field(default_factory=list[tuple[int, int, int, int] | None])  # (x, y, width, height) per frame in the atlas
 
-    def _group(self, action):
+    def _group(self, action: str) -> tuple[int, int]:
         group = ACTION_GROUPS[action]
         if group < len(self.groups) and self.groups[group][1] >= DIRECTIONS:
             return self.groups[group]
         # Nonstandard layouts: fall back to the longest group.
         return max(self.groups, key=lambda item: item[1])
 
-    def phases(self, action):
+    def phases(self, action: str) -> int:
         return max(1, self._group(action)[1] // DIRECTIONS)
 
-    def frame_index(self, action, phase, direction):
+    def frame_index(self, action: str | int, phase: int, direction: int) -> int:
         """``frame = group_start + phase * 8 + direction`` for an action of the standard layout."""
         if isinstance(action, int):  # a first-frame number from a costume-variant family table
             return min(action + phase * DIRECTIONS + direction % DIRECTIONS, len(self.frames) - 1)
@@ -198,7 +211,7 @@ class SpriteSheet:
         return start + (phase % self.phases(action)) * DIRECTIONS + direction % DIRECTIONS
 
 
-def read_sprite_sheet(name, fol, bop, colors=b""):
+def read_sprite_sheet(name: str, fol: bytes, bop: bytes, colors: bytes = b"") -> SpriteSheet:
     """Decode every frame of a FOL/BOP pair with its optional 512-byte colour maps."""
     if len(fol) % 16:
         raise ValueError(f"{name}.FOL size is not a multiple of 16 bytes: {len(fol)}")
@@ -209,7 +222,8 @@ def read_sprite_sheet(name, fol, bop, colors=b""):
     map_indices = colormap_indices(records)
     offsets = sorted({record[4] for record in records}) + [len(bop)]
     ends = dict(zip(offsets, offsets[1:]))
-    frames, groups = [], []
+    frames: list[SpriteFrame] = []
+    groups: list[list[int]] = []
     for index, record in enumerate(records):
         width, height = record[2], record[3]
         pixels = decode_frame(bop, record, ends[record[4]], maps, map_indices[index])
@@ -224,10 +238,11 @@ def read_sprite_sheet(name, fol, bop, colors=b""):
     return SpriteSheet(name, frames, [(start, count) for _, start, count in groups])
 
 
-def pack_atlas(sizes, width=ATLAS_WIDTH, padding=1):
+def pack_atlas(sizes: Iterable[tuple[int, int]], width: int = ATLAS_WIDTH,
+               padding: int = 1) -> tuple[int, list[tuple[int, int]]]:
     """Shelf-pack (width, height) rectangles in order; return (used height, top-left positions)."""
     x = y = shelf = 0
-    positions = []
+    positions: list[tuple[int, int]] = []
     for w, h in sizes:
         if w > width:
             raise ValueError(f"a {w} pixel wide frame does not fit a {width} pixel atlas")
@@ -239,7 +254,7 @@ def pack_atlas(sizes, width=ATLAS_WIDTH, padding=1):
     return y + shelf, positions
 
 
-def build_atlas(sheets, width=ATLAS_WIDTH):
+def build_atlas(sheets: Sequence[SpriteSheet], width: int = ATLAS_WIDTH) -> tuple[tuple[int, int], bytes]:
     """Pack all frames of ``sheets`` into one palette-index image and set each sheet's ``rects``."""
     frames = [(sheet, index, frame) for sheet in sheets for index, frame in enumerate(sheet.frames)]
     used, positions = pack_atlas([(frame.width, frame.height) for _, _, frame in frames], width)
@@ -259,39 +274,39 @@ def build_atlas(sheets, width=ATLAS_WIDTH):
 class Battlefield:
     """Everything needed to present one battle: script, terrain, baked static geometry and sprites."""
 
-    script: dict
-    terrain: object
-    vertices: array
-    texture_size: tuple
-    texture_layers: list
-    palette: list
-    atlas_size: tuple
+    script: dict[str, Any]
+    terrain: Any  # gd_render.Terrain
+    vertices: array[float]
+    texture_size: tuple[int, int]
+    texture_layers: list[bytes]
+    palette: list[tuple[int, int, int]]
+    atlas_size: tuple[int, int]
     atlas: bytes
-    sheets: dict  # troop sprite resource name (casefolded) -> SpriteSheet
-    ui_sheets: dict  # global HUD and per-unit portrait/banner sheets
-    missing_scenery: list
+    sheets: dict[str, SpriteSheet]  # troop sprite resource name (casefolded) -> SpriteSheet
+    ui_sheets: dict[str, SpriteSheet]  # global HUD and per-unit portrait/banner sheets
+    missing_scenery: list[str]
 
     @property
-    def width(self):
+    def width(self) -> int:
         return self.script["field"]["width"]
 
     @property
-    def height(self):
+    def height(self) -> int:
         return self.script["field"]["height"]
 
-    def ground_height(self, x, y):
+    def ground_height(self, x: float, y: float) -> float:
         """Terrain height in mesh units under a BTS world point (0 outside GRND.GD)."""
         return self.terrain.height(x / WORLD_PER_MESH, y / WORLD_PER_MESH) or 0.0
 
-    def sprite_sheet(self, resource):
+    def sprite_sheet(self, resource: str | None) -> SpriteSheet | None:
         return self.sheets.get((resource or "").casefold())
 
 
-def script_units(script):
+def script_units(script: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [unit for army in script["armies"] + (script["merc"] or {}).get("armies", []) for unit in army["units"]]
 
 
-def _sprite_file(game, bundled, filename, required=True):
+def _sprite_file(game: Installation, bundled: Mapping[str, bytes], filename: str, required: bool = True) -> bytes:
     data = bundled.get(filename.casefold())
     if data is not None:
         return data
@@ -303,12 +318,13 @@ def _sprite_file(game, bundled, filename, required=True):
         return b""
 
 
-def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=DEFAULT_LIGHT):
+def load_battlefield(installation: Installation | str | PathLike[str], battle_file: str | PathLike[str],
+                     ambient: float = DEFAULT_AMBIENT, light: Sequence[float] = DEFAULT_LIGHT) -> Battlefield:
     """Load a battle script and decode its terrain, scenery and troop sprites (per-battle bundle, then BINARY)."""
     game = installation if isinstance(installation, Installation) else Installation(installation)
     path = Path(battle_file)
     if not path.is_file():
-        path = game.file_dir("SCRIPT", battle_file)
+        path = game.file_dir("SCRIPT", str(battle_file))
     script = load_battle(str(path))
     ground, scenery, sprites, terrain = mesh_assets(game.file_dir("MESH", script["field"]["mesh"]))
 
@@ -318,7 +334,7 @@ def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=D
     vertices = bake_mesh(ground["meshes"][0], 0, len(ground["textures"]), ambient=ambient, light=light)
     meshes = {mesh["name"].casefold(): mesh for mesh in scenery["meshes"]}
     furniture = furniture_meshes(game)
-    missing = []
+    missing: list[str] = []
     for item in script["scenery"]:
         mesh = meshes.get((furniture.get(item["name"].casefold()) or "").casefold())
         if mesh is None:
@@ -331,9 +347,10 @@ def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=D
     bundled = {name.casefold(): data for name, data in sprites["files"]}
     names = sprite_files(game, "troops")
     ui_names = resource_files(game, {"portraits", "banners", "backgrounds", "special", "terrain"})
-    sheets, by_base = {}, {}
+    sheets: dict[str, SpriteSheet] = {}
+    by_base: dict[str, SpriteSheet | None] = {}
     for unit in script_units(script):
-        resource = resource_name(unit["sprites"])
+        resource = resource_name(unit["sprites"]) or ""
         base = names.get(resource.casefold())
         if base is None:
             continue
@@ -344,11 +361,13 @@ def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=D
                                                   _sprite_file(game, bundled, base + ".PAL", required=False))
             except FileNotFoundError:
                 by_base[base] = None
-        if by_base[base] is not None:
-            sheets[resource.casefold()] = by_base[base]
-    ui_sheets, ui_by_base = {}, {}
+        loaded = by_base[base]
+        if loaded is not None:
+            sheets[resource.casefold()] = loaded
+    ui_sheets: dict[str, SpriteSheet] = {}
+    ui_by_base: dict[str, SpriteSheet | None] = {}
 
-    def load_ui(base):
+    def load_ui(base: str | None) -> None:
         if not base or base in ui_by_base:
             return
         try:
@@ -368,7 +387,8 @@ def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=D
     load_ui(planmap)
     portrait_bg = script["field"].get("portrait_bg")
     load_ui(portrait_bg)
-    ui_resources, banner_bases = [], {}
+    ui_resources: list[tuple[str, str | None]] = []
+    banner_bases: dict[str, None] = {}
     for unit in script_units(script):
         banner = resource_name(unit.get("banner"))
         for resource in (banner, resource_name((unit.get("leader") or {}).get("portrait"))):
@@ -380,14 +400,17 @@ def load_battlefield(installation, battle_file, ambient=DEFAULT_AMBIENT, light=D
                     banner_bases[base] = None
     for resource, base in (("ICONS", "ICONS"), ("BACKALL", "BACKALL"), ("GENBATT", "GENBATT"), (planmap, planmap),
                            (portrait_bg, portrait_bg), *ui_resources):
-        if resource and base in ui_by_base and ui_by_base[base] is not None:
-            ui_sheets[resource.casefold()] = ui_by_base[base]
+        loaded_ui = ui_by_base.get(base) if base is not None else None
+        if resource and loaded_ui is not None:
+            ui_sheets[resource.casefold()] = loaded_ui
     # Banner frame 2 is an in-world regiment marker, so these sheets also need atlas rectangles.
     if ui_by_base.get("GENBATT") is not None:
         banner_bases["GENBATT"] = None
     atlas_sheets = [sheet for sheet in by_base.values() if sheet is not None]
-    atlas_sheets.extend(ui_by_base[base] for base in banner_bases
-                        if ui_by_base.get(base) is not None)
+    for base in banner_bases:
+        banner_sheet = ui_by_base.get(base)
+        if banner_sheet is not None:
+            atlas_sheets.append(banner_sheet)
     atlas_size, atlas = build_atlas(atlas_sheets)
     palette = load_rgb_palette(game.binary_file((script["field"]["palette"] or "standard") + ".PAL"))
     return Battlefield(script, terrain, vertices, size, layers, palette, atlas_size, atlas, sheets, ui_sheets,

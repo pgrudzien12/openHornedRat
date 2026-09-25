@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Data-driven campaign progression for the caravan's mission choices.
 
 The original interpreter persists its active glue contexts in a save's STAX
@@ -5,8 +6,11 @@ chunk.  The engine keeps the same useful pieces explicitly: the active flow,
 the current mission window, completed mission resource ids, and coffers.
 """
 
+from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
+from os import PathLike
+from typing import TYPE_CHECKING, Any
 
 from .campaign import build_campaign_graph, parse_window_ui
 from .glue import MissionRecord, MissionRef
@@ -14,13 +18,20 @@ from .glue_content import GlueContent
 from .paths import Installation
 from . import roster
 from .portraits import first_leader_speaker
-from .roster import load_company
+from .roster import Regiment, load_company
+
+if TYPE_CHECKING:
+    from .payments import CashTerms
+    from .troop_selection import Deployment
+
+Mission = dict[str, Any]  # one mission record of a mission window (campaign.parse_mission_windows)
+ObjectiveResult = tuple[bool, tuple[int, ...]]  # (met, (v1, v2, v3, v4))
 
 
 FIRST_FLOW = "FLOWSCRIPTBP01"
 INITIAL_COFFERS = 500
 
-CARAVAN_MODE_WINDOWS = {
+CARAVAN_MODE_WINDOWS: dict[str, str] = {
     "start": "STARTCARAVAN",
     "select": "CARAVANAFTERMISSION",
     "resume": "CARAVANAFTERENCOUNTER",
@@ -29,7 +40,7 @@ CARAVAN_MODE_WINDOWS = {
 }
 
 
-def caravan_window(mode):
+def caravan_window(mode: str) -> str | None:
     """The caravan window a ``gocaravan:<mode>`` request names, or ``None`` for an unknown name
     (notes/glue_interpreter.md section 7.3: ``info<letters>`` names ``InfoCaravan<letters>``; an
     unknown name is resumed at once).  The window may still be missing from a given installation."""
@@ -40,7 +51,7 @@ def caravan_window(mode):
     return name
 
 
-def mission_visible(missions, mission, taken):
+def mission_visible(missions: Sequence[Mission], mission: Mission, taken: Iterable[int]) -> bool:
     """Is ``mission`` offered in its window right now?
 
     ``taken`` holds the name ids of missions already committed to.  ``depend`` and
@@ -60,15 +71,15 @@ def mission_visible(missions, mission, taken):
     return True
 
 
-def eligible_missions(missions, taken):
+def eligible_missions(missions: Sequence[Mission], taken: Iterable[int]) -> tuple[Mission, ...]:
     """Return the mission entries a window offers once ``taken`` have been committed to."""
     taken = set(taken)
     return tuple(mission for mission in missions if mission_visible(missions, mission, taken))
 
 
-def _record_gates(record):
+def _record_gates(record: MissionRecord) -> dict[str, int]:
     """Return ``(name_id, gates)`` of one typed ``[MISSION]`` record (``gates``: depend/inactivedepend)."""
-    entry = {}
+    entry: dict[str, int] = {}
     for field_ in record.fields:
         if field_.command != "set" or "=" not in field_.argument:
             continue
@@ -82,7 +93,7 @@ def _record_gates(record):
     return entry
 
 
-def offered_refs(records, taken):
+def offered_refs(records: Iterable[MissionRecord], taken: Iterable[MissionRef]) -> tuple[MissionRef | None, ...]:
     """Return the ``MissionRef`` of every mission record a window offers, in window order.
 
     ``records`` are the window's typed ``[MISSION]`` records and ``taken`` the set of committed
@@ -90,9 +101,9 @@ def offered_refs(records, taken):
     :func:`mission_visible` (notes/mission_selection.md, notes/campaign.md section 7.2).
     """
     taken = set(taken)
-    entries = []
+    entries: list[dict[str, Any]] = []
     for record in records:
-        gates = _record_gates(record)
+        gates: dict[str, Any] = dict(_record_gates(record))
         gates["name_id"] = gates.pop("res", None)
         gates["ref"] = record.mission_ref
         entries.append(gates)
@@ -101,7 +112,7 @@ def offered_refs(records, taken):
                  if entry["ref"] not in taken and mission_visible(entries, entry, taken_ids))
 
 
-def initial_flow(hotspots):
+def initial_flow(hotspots: Iterable[Mapping[str, Any]]) -> str:
     """Return the flow resource selected by STARTCARAVAN's original hotspot."""
     flows = [hotspot["target"].upper() for hotspot in hotspots
              if hotspot.get("target_kind") == "res" and hotspot.get("target", "").upper().startswith("FLOWSCRIPT")]
@@ -114,13 +125,13 @@ def initial_flow(hotspots):
 class CampaignState:
     """The portion of original campaign state needed to populate the caravan."""
 
-    graph: dict
+    graph: dict[str, Any]
     flow: str = FIRST_FLOW
     # Every flow the campaign has run, oldest first, ending with ``flow``: a replacement flow carries
     # on inside the map its predecessors built, so resuming replays the chain (notes/mission_selection.md §10).
     flow_history: list[str] = field(default_factory=list)
     flow_step: int = 0
-    mission_window: str = None
+    mission_window: str | None = None
     completed: set[int] = field(default_factory=set)
     coffers: int = INITIAL_COFFERS
     army_units: set[int] = field(default_factory=set)
@@ -129,19 +140,19 @@ class CampaignState:
     selected_mission: MissionRef | None = None
     taken_missions: set[MissionRef] = field(default_factory=set)
     book_flags: dict[int, set[int]] = field(default_factory=dict)
-    autosave_state: object = field(default=None, repr=False, compare=False)
+    autosave_state: Any = field(default=None, repr=False, compare=False)
     tentpos: int = 0
     hints: dict[int, str] = field(default_factory=dict)
-    content: object = field(default=None, repr=False, compare=False)
-    company: tuple = field(default_factory=tuple)
+    content: GlueContent | None = field(default=None, repr=False, compare=False)
+    company: tuple[Regiment, ...] = field(default_factory=tuple[Regiment, ...])
     # The engine's own save directory (never the original installation's SAVE/, GEI7e); None
     # (e.g. focused tests, --glue-program runs) means troop selection stays in-memory only.
-    save_dir: object = field(default=None, repr=False, compare=False)
+    save_dir: str | PathLike[str] | None = field(default=None, repr=False, compare=False)
     # The portrait set of the first marching regiment with a leader portrait (notes/glue_portraits.md
     # §1.4); recomputed only when the marching roster is loaded, None until then.
     current_speaker: str | None = None
     # Optional lower-case sprite name -> portrait set override; default is read from the installation.
-    portrait_sets: dict | None = field(default=None, repr=False, compare=False)
+    portrait_sets: dict[str, str] | None = field(default=None, repr=False, compare=False)
     # Roster flag "pending join" set by the glue ``addunit`` (notes/campaign.md section 3.2). The copy into the
     # army happens when the after-mission caravan is entered; the engine does not merge yet.
     pending_join: set[int] = field(default_factory=set)
@@ -149,70 +160,70 @@ class CampaignState:
     bonus_counter: int = 0
     # The latest battle's objective records: letter -> (met, (v1, v2, v3, v4)), the ``Result:`` lines of
     # notes/debrief_evaluation.md section 2.1. Empty until a battle writes its result.
-    objective_results: dict[str, tuple] = field(default_factory=dict)
+    objective_results: dict[str, ObjectiveResult] = field(default_factory=dict[str, ObjectiveResult])
     # The payment terms (whshr.payments.CashTerms) of the mission being played, and whether its final
     # payment was already credited; both are reset when the next mission's troop selection opens.
-    mission_cash: object = field(default=None, repr=False, compare=False)
+    mission_cash: "CashTerms | None" = field(default=None, repr=False, compare=False)
     mission_paid: bool = False
     # True while ``objective_results`` is the no-battle mode's flawless win (whshr.payments.flawless_results).
     flawless_result: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.flow_history or self.flow_history[-1] != self.flow:
             self.flow_history.append(self.flow)
         if self.mission_window is None:
             self._open_next_window(0)
 
-    def add_cash(self, amount):
+    def add_cash(self, amount: int) -> None:
         self.coffers += int(amount)
 
-    def begin_mission(self, terms):
+    def begin_mission(self, terms: "CashTerms | None") -> None:
         """A new mission starts: remember its payment terms, forget the previous battle result."""
         self.mission_cash = terms
         self.mission_paid = False
         self.objective_results = {}
         self.flawless_result = False
 
-    def is_unit_in_army(self, unit_id):
+    def is_unit_in_army(self, unit_id: int) -> bool:
         return int(unit_id) in self.army_units
 
-    def is_unit_in_march(self, unit_id):
+    def is_unit_in_march(self, unit_id: int) -> bool:
         return int(unit_id) in self.march_units
 
-    def add_reinforcements(self, unit_id, count):
+    def add_reinforcements(self, unit_id: int, count: int) -> None:
         unit_id = int(unit_id)
         self.reinforcements[unit_id] = self.reinforcements.get(unit_id, 0) + int(count)
 
-    def join_mission(self, unit_id):
+    def join_mission(self, unit_id: int) -> None:
         self.march_units.add(int(unit_id))
 
-    def leave_mission(self, unit_id):
+    def leave_mission(self, unit_id: int) -> None:
         self.march_units.discard(int(unit_id))
 
-    def mark_pending_join(self, unit_id):
+    def mark_pending_join(self, unit_id: int) -> None:
         self.pending_join.add(int(unit_id))
 
-    def objective(self, letter):
+    def objective(self, letter: str) -> ObjectiveResult | None:
         """The ``(met, values)`` record of an objective letter, or ``None`` when the battle did not define it."""
         return self.objective_results.get(str(letter).upper()[:1])
 
-    def bonus_init(self):
+    def bonus_init(self) -> None:
         self.bonus_counter = 0
 
-    def bonus_adjust(self, delta):
+    def bonus_adjust(self, delta: int) -> None:
         self.bonus_counter += int(delta)
 
-    def enable_book(self, book, index):
+    def enable_book(self, book: int, index: int) -> None:
         """Unlock a book/encyclopedia page (glue ``enablebook``, notes/campaign.md §4.4)."""
         self.book_flags.setdefault(int(book), set()).add(int(index))
 
-    def select_mission(self, mission):
+    def select_mission(self, mission: MissionRef) -> None:
         self.selected_mission = mission
 
-    def mark_mission_taken(self, mission):
+    def mark_mission_taken(self, mission: MissionRef) -> None:
         self.taken_missions.add(mission)
 
-    def commit_troop_selection(self, deployment):
+    def commit_troop_selection(self, deployment: "Deployment") -> None:
         """Apply a confirmed troop_selection.Deployment; notes/troop_selection.md §5.3."""
         self.coffers += deployment.money_delta
         self.march_units = set(deployment.units)
@@ -229,7 +240,7 @@ class CampaignState:
         by_whoami = {regiment.whoami: regiment for regiment in self.company}
         self.refresh_speaker([by_whoami[whoami] for whoami in deployment.units if whoami in by_whoami])
 
-    def refresh_speaker(self, marching_regiments):
+    def refresh_speaker(self, marching_regiments: Sequence[Regiment]) -> None:
         """Recompute the current speaker from the marching roster, in file order (§1.4 items 1-2)."""
         if self.portrait_sets is None:
             installation = getattr(self.content, "installation", None)
@@ -241,14 +252,14 @@ class CampaignState:
         self.current_speaker = first_leader_speaker(
             [regiment.leader_portrait for regiment in marching_regiments], self.portrait_sets)
 
-    def autosave(self, runtime_state):
+    def autosave(self, runtime_state: object) -> None:
         self.autosave_state = deepcopy(runtime_state)
 
     @property
-    def missions(self):
+    def missions(self) -> tuple[Mission, ...]:
         return eligible_missions(self.graph["mission_windows"].get(self.mission_window, ()), self.completed)
 
-    def _open_next_window(self, start):
+    def _open_next_window(self, start: int) -> None:
         steps = self.graph["flow_scripts"].get(self.flow, ())
         for index in range(start, len(steps)):
             if steps[index]["action"] == "set_tentpos":
@@ -260,7 +271,7 @@ class CampaignState:
         raise ValueError(f"flow {self.flow!r} has no mission window at or after step {start}")
 
     @property
-    def map_portrait_window(self):
+    def map_portrait_window(self) -> dict[str, Any] | None:
         """The data-defined portrait sub-window opened by the active flow."""
         steps = self.graph["flow_scripts"].get(self.flow, ())[:self.flow_step + 1]
         for step in reversed(steps):
@@ -268,15 +279,15 @@ class CampaignState:
                 return self.graph.get("portrait_windows", {}).get(step["window"])
         return None
 
-    def offered_missions(self, records):
+    def offered_missions(self, records: Iterable[MissionRecord]) -> tuple[MissionRef | None, ...]:
         """The refs of the typed mission ``records`` of one window that are on offer now."""
         return offered_refs(records, self.taken_missions)
 
-    def is_mission_taken(self, mission_ref):
+    def is_mission_taken(self, mission_ref: MissionRef) -> bool:
         """Has this mission already been committed to or finished (so it is no longer offered)?"""
         return mission_ref in self.taken_missions
 
-    def wait_already_released(self, flow, ordinal):
+    def wait_already_released(self, flow: str, ordinal: int) -> bool:
         """Was the ``ordinal``-th (0-based) ``waitforrelease`` of ``flow`` already passed?
 
         A flow script restarted at the campaign's saved position replays its set-up and skips the
@@ -291,10 +302,10 @@ class CampaignState:
         waits = [index for index, step in enumerate(steps) if step["action"] == "wait_player_choice"]
         return ordinal < len(waits) and waits[ordinal] < self.flow_step
 
-    def _anything_offered(self):
+    def _anything_offered(self) -> bool:
         """Does the current mission window still offer a row?  Keyed by mission record, because the
         same name id recurs in several windows (a finished one must not hide another window's row)."""
-        if self.content is not None:
+        if self.content is not None and self.mission_window is not None:
             try:
                 records = [record for record in self.content.window(self.mission_window).records
                            if isinstance(record, MissionRecord)]
@@ -304,7 +315,7 @@ class CampaignState:
                 return bool(self.offered_missions(records))
         return bool(self.missions)
 
-    def complete(self, mission):
+    def complete(self, mission: Mission) -> tuple[str | None, bool]:
         """Record a chosen mission and say how the flow continues.
 
         A ``replacescript`` switches flow.  Otherwise the mission is marked taken and the
@@ -326,7 +337,7 @@ class CampaignState:
             return None, True
         return None, False
 
-    def complete_mission(self, mission_ref):
+    def complete_mission(self, mission_ref: MissionRef) -> tuple[str | None, bool]:
         """Complete the mission a glue ``MissionRef`` names (the mission release step,
         notes/activity_results.md §6.1); see :meth:`complete`.  An unknown reference is ignored."""
         for window in self.graph["mission_windows"].values():
@@ -338,16 +349,13 @@ class CampaignState:
                         return None, True
         return None, False
 
-    def hotspot(self, hint_id):
-        """Return the original hotspot that advertises ``hint_id``."""
-        return next((hotspot for hotspot in self.hotspots if hotspot.get("res") == hint_id), None)
-
-    def hint(self, hint_id, *format_args):
+    def hint(self, hint_id: int, *format_args: Any) -> str:
         text = self.hints.get(hint_id, "")
         return text % format_args if format_args else text
 
     @classmethod
-    def from_installation(cls, installation, content=None, save_dir=None):
+    def from_installation(cls, installation: Installation | str | PathLike[str], content: GlueContent | None = None,
+                          save_dir: str | PathLike[str] | None = None) -> "CampaignState":
         game = installation if isinstance(installation, Installation) else Installation(installation)
         content = content or GlueContent(game)
         wnd = content.resources
@@ -364,7 +372,7 @@ class CampaignState:
                    save_dir=save_dir)
 
     @classmethod
-    def single_mission(cls, briefing):
+    def single_mission(cls, briefing: Any) -> "CampaignState":
         """Compatibility state for focused tests and development-only briefings."""
         mission = {"name_id": 0, "name": briefing.battle_id.name.upper(),
                    "battle": briefing.battle_id.name.upper(), "briefing_key": "test.0", "briefing": briefing}
