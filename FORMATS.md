@@ -562,7 +562,7 @@ Mercenary Crossbows (M4 WS3 BS4 S3 T3 W1 I3 A1 Ld7, "Crossbow 12/12") is `SAVE/P
   The editor computes the comment from `s_race` (agrees in 879/889 units) and warned about the
   mismatch between the two fields.
 
-**`psy_status`** (`|` flags) ✅ is a 16-bit field at `unit + 0xBE`, bit = token − 19:
+**`psy_status`** (`|` flags) ✅ is a 16-bit field, bit = token − 19:
 0 `CantBreak`, 1 `Frenzy`, 2 `CauseFear`, 3 `CauseTerror`, 4 `FearToGobs`, 5 `HateDwarfs`,
 6 `HateGreens`, 7 `HateSkaven`, 8 `PsyImmune`, 9 `MagicResistent`, 10 `CantRally`,
 11 `AlwaysPursue` (unused by the scripts), 12 `CantMelee`, 13 `CantDie`. Their effects are listed
