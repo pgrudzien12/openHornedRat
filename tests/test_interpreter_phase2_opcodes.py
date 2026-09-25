@@ -587,3 +587,38 @@ class BreakJumpsToItsLabelTests(unittest.TestCase):
         state = interpreter.UnitScriptState()
         state.pc = 0
         self.assertEqual(self._interp().op_Break(state, self.BREAK, [0x6B, self.BREAK, 0x69], "t", 0, None), 2)
+
+
+class NestedLoopStackTests(unittest.TestCase):
+    """A conditional loop that ends drops its PushPC entry, so an enclosing `Loop` returns to its own start.
+    BF001's patrol scripts nest `PushPC; ..; PushPC; ..; LoopIfFalse; ..; Loop`: with the inner entry left
+    behind, `Loop` re-entered the inner wait forever and the patrol never turned round."""
+
+    def setUp(self):
+        self.interp = interpreter.ScriptInterpreter(None, None, None)
+        self.state = interpreter.UnitScriptState()
+
+    def _push(self, at):
+        self.state.pc = at - 1
+        self.interp.op_PushPC(self.state, None, [], "t", 0, None)
+
+    def test_a_finished_conditional_loop_pops_its_entry_so_the_outer_loop_returns_to_the_outer_start(self):
+        self._push(10)   # outer loop start = 10
+        self._push(20)   # inner loop start = 20
+        self.state.pc, self.state.cond_flags = 30, 1  # LoopIfFalse with a true condition: the loop ends
+        self.assertEqual(self.interp.op_LoopIfFalse(self.state, None, [], "t", 0, None), 31)
+        self.state.pc = 40
+        self.assertEqual(self.interp.op_Loop(self.state, None, [], "t", 0, None), 10)
+
+    def test_a_repeating_conditional_loop_keeps_its_entry(self):
+        self._push(20)
+        self.state.pc, self.state.cond_flags = 30, 0
+        self.assertEqual(self.interp.op_LoopIfFalse(self.state, None, [], "t", 0, None), 20)
+        self.assertEqual(len(self.state.return_stack), 1)
+
+    def test_an_unconditional_loop_still_keeps_its_entry(self):
+        self._push(10)
+        self.state.pc = 40
+        self.interp.op_Loop(self.state, None, [], "t", 0, None)
+        self.interp.op_Loop(self.state, None, [], "t", 0, None)
+        self.assertEqual(len(self.state.return_stack), 1)

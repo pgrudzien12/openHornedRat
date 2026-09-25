@@ -615,6 +615,14 @@ class ScriptInterpreter:
         state.return_stack.append((state.pc + 1,))  # tag with tuple to distinguish from gosub
         return state.pc + 1
 
+    @staticmethod
+    def _leave_loop(state):
+        """A conditional loop that ends drops its `PushPC` entry. Left in place, the next unconditional
+        `Loop` of an enclosing cycle jumps back into the *inner* loop instead of its own start (BF001's
+        patrols: `PushPC; MoveToNode..; PushPC; ..wait..; LoopIfFalse; ..; Loop` never left the last wait)."""
+        if state.return_stack and len(state.return_stack[-1]) == 1:
+            state.return_stack.pop()
+
     def op_Loop(self, state, operand, script_words, unit_id, tick_count, rng):
         """Loop: jump back to the PC pushed by PushPC.
 
@@ -891,12 +899,14 @@ class ScriptInterpreter:
         """LoopIfTrue: jump back to pushed PC if cond_flags is true."""
         if state.cond_flags and state.return_stack and len(state.return_stack[-1]) == 1:
             return state.return_stack[-1][0]
+        self._leave_loop(state)
         return state.pc + 1
 
     def op_LoopIfFalse(self, state, operand, script_words, unit_id, tick_count, rng):
         """LoopIfFalse: jump back to pushed PC if cond_flags is false."""
         if not state.cond_flags and state.return_stack and len(state.return_stack[-1]) == 1:
             return state.return_stack[-1][0]
+        self._leave_loop(state)
         return state.pc + 1
 
     # ===== Targeting and threat opcodes =====
