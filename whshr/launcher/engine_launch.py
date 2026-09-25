@@ -8,8 +8,10 @@ locates the ``.venv`` interpreter next to the repository root and falls back to 
 interpreter only if no ``.venv`` is found.
 """
 
+import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -35,10 +37,49 @@ def engine_dependencies_available(python_path, modules=("pygame", "zengl"), time
     return result.returncode == 0
 
 
-def launch_battle(installation, battle_id, python_path=None):
-    """Starts ``whshr engine <installation> --battle <battle_id>`` as an independent process."""
-    python_path = python_path or find_engine_python()
+@dataclass(frozen=True)
+class LaunchOptions:
+    """Optional switches chosen on the launcher's options tab."""
+
+    no_battles: bool = False
+    trace: bool = False
+    skip_intro: bool = False
+
+
+def build_command(installation, battle_id=None, options=None, python_path=None):
+    """The ``whshr engine`` command line: a normal start, or a direct battle when ``battle_id`` is given."""
+    options = options or LaunchOptions()
+    command = [str(python_path or find_engine_python()), "-m", "whshr", "engine", str(installation)]
+    if battle_id:
+        command += ["--battle", battle_id]
+    if options.skip_intro:
+        command.append("--skip-intro")
+    if options.no_battles:
+        command.append("--no-battle")
+    return command
+
+
+def build_environment(options=None, base=None):
+    """The child's environment: the checkout on ``PYTHONPATH``, plus ``WHSHR_TRACE_SCRIPTS=1`` when tracing."""
+    environment = dict(os.environ if base is None else base)
+    # Put the checkout on the child's import path explicitly: a debugger-wrapped child does not
+    # get the working directory on sys.path, and `-m whshr` then fails with "No module named whshr".
+    existing = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = os.pathsep.join([str(REPOSITORY_ROOT)] + ([existing] if existing else []))
+    if options and options.trace:
+        environment["WHSHR_TRACE_SCRIPTS"] = "1"
+    return environment
+
+
+def launch_engine(installation, battle_id=None, options=None, python_path=None):
+    """Starts the engine as an independent process (a normal game, or one battle)."""
     return subprocess.Popen(
-        [str(python_path), "-m", "whshr", "engine", str(installation), "--battle", battle_id],
+        build_command(installation, battle_id, options, python_path),
         cwd=str(REPOSITORY_ROOT),
+        env=build_environment(options),
     )
+
+
+def launch_battle(installation, battle_id, python_path=None, options=None):
+    """Starts ``whshr engine <installation> --battle <battle_id>`` as an independent process."""
+    return launch_engine(installation, battle_id, options, python_path)

@@ -1,7 +1,7 @@
-"""Tkinter launcher UI: recognize an installation, then pick and launch a battle.
+"""Tkinter launcher UI: recognize an installation, then start the game or a battle.
 
 Two screens swapped inside one window: :class:`InstallScreen` (auto-discovery, manual override,
-and validation) and :class:`BattleScreen` (battle list and launch). Validation and battle
+and validation) and :class:`LaunchScreen` (start buttons and an options tab; battles are chosen in a dialog). Validation and battle
 enumeration run on a background thread so the window stays responsive; results are marshalled
 back to the main thread through a queue polled with ``Tk.after``.
 """
@@ -106,51 +106,96 @@ class InstallScreen(ttk.Frame):
             self._log_line("Some checks failed; see above.")
 
 
-class BattleScreen(ttk.Frame):
-    """Lists the battles of a validated installation and launches the chosen one."""
+def launch_with_checks(installation_path, battle_id, options):
+    """Starts the engine after checking its dependencies; reports problems in a dialog."""
+    python_path = engine_launch.find_engine_python()
+    if not engine_launch.engine_dependencies_available(python_path):
+        messagebox.showerror(
+            "Open Horned Rat Launcher",
+            "The engine's dependencies (pygame-ce, zengl) are not installed. "
+            "See README.md: create .venv and install requirements-engine.txt.",
+        )
+        return
+    engine_launch.launch_engine(installation_path, battle_id, options, python_path)
 
-    def __init__(self, parent, installation_path, on_change_installation):
+
+class BattleDialog(tk.Toplevel):
+    """Modal list of the installation's battles; launches the chosen one."""
+
+    def __init__(self, parent, installation_path, get_options):
         super().__init__(parent)
-        self.pack(fill="both", expand=True)
+        self.title("Start a battle")
+        self.transient(parent.winfo_toplevel())
         self._installation_path = installation_path
-        self._on_change_installation = on_change_installation
-
-        header = ttk.Frame(self)
-        header.pack(fill="x")
-        ttk.Label(header, text=f"Installation: {installation_path}").pack(side="left")
-        ttk.Button(header, text="Change...", command=on_change_installation).pack(side="right")
+        self._get_options = get_options
 
         self._battles = list_battles(Installation(installation_path))
         self._list = tk.Listbox(self, height=15)
         for battle in self._battles:
             label = battle.id if not battle.map else f"{battle.id}  ({battle.map})"
             self._list.insert("end", label)
-        self._list.pack(fill="both", expand=True, pady=(10, 0))
+        self._list.pack(fill="both", expand=True, padx=12, pady=(12, 0))
         if self._battles:
             self._list.selection_set(0)
-
-        self._launch_button = ttk.Button(self, text="Launch battle", command=self._launch)
-        self._launch_button.pack(anchor="w", pady=(10, 0))
+        self._list.bind("<Double-Button-1>", lambda _event: self._launch())
+        ttk.Button(self, text="Launch battle", command=self._launch).pack(anchor="w", padx=12, pady=12)
 
     def _launch(self):
         selection = self._list.curselection()
         if not selection:
-            messagebox.showerror("Open Horned Rat Launcher", "Choose a battle first.")
+            messagebox.showerror("Open Horned Rat Launcher", "Choose a battle first.", parent=self)
             return
-        battle = self._battles[selection[0]]
-        python_path = engine_launch.find_engine_python()
-        if not engine_launch.engine_dependencies_available(python_path):
-            messagebox.showerror(
-                "Open Horned Rat Launcher",
-                "The engine's dependencies (pygame-ce, zengl) are not installed. "
-                "See README.md: create .venv and install requirements-engine.txt.",
-            )
-            return
-        engine_launch.launch_battle(self._installation_path, battle.id, python_path)
+        launch_with_checks(self._installation_path, self._battles[selection[0]].id, self._get_options())
+
+
+class LaunchScreen(ttk.Frame):
+    """Two tabs: start buttons (normal game / a chosen battle) and checkbox options for both."""
+
+    def __init__(self, parent, installation_path, on_change_installation):
+        super().__init__(parent)
+        self.pack(fill="both", expand=True)
+        self._installation_path = installation_path
+
+        self._no_battles = tk.BooleanVar(value=False)
+        self._trace = tk.BooleanVar(value=True)
+        self._skip_intro = tk.BooleanVar(value=False)
+
+        header = ttk.Frame(self)
+        header.pack(fill="x")
+        ttk.Label(header, text=f"Installation: {installation_path}").pack(side="left")
+        ttk.Button(header, text="Change...", command=on_change_installation).pack(side="right")
+
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill="both", expand=True, pady=(10, 0))
+        start_tab = ttk.Frame(notebook, padding=12)
+        options_tab = ttk.Frame(notebook, padding=12)
+        notebook.add(start_tab, text="Start")
+        notebook.add(options_tab, text="Options")
+
+        ttk.Button(start_tab, text="Start game", command=self._start_game).pack(fill="x")
+        ttk.Button(start_tab, text="Start a battle...", command=self._choose_battle).pack(fill="x", pady=(8, 0))
+
+        ttk.Checkbutton(options_tab, text="No battles (every battle settles as an instant win)",
+                        variable=self._no_battles).pack(anchor="w")
+        ttk.Checkbutton(options_tab, text="Trace mission scripts (WHSHR_TRACE_SCRIPTS=1)",
+                        variable=self._trace).pack(anchor="w", pady=(6, 0))
+        ttk.Checkbutton(options_tab, text="Skip intro (start in the main menu)",
+                        variable=self._skip_intro).pack(anchor="w", pady=(6, 0))
+
+    def options(self):
+        return engine_launch.LaunchOptions(
+            no_battles=self._no_battles.get(), trace=self._trace.get(), skip_intro=self._skip_intro.get(),
+        )
+
+    def _start_game(self):
+        launch_with_checks(self._installation_path, None, self.options())
+
+    def _choose_battle(self):
+        BattleDialog(self, self._installation_path, self.options)
 
 
 class LauncherApp:
-    """Top-level window: shows the battle screen directly once a path is already recognized."""
+    """Top-level window: shows the launch screen directly once a path is already recognized."""
 
     def __init__(self, root, config_path=None):
         self.root = root
@@ -168,7 +213,7 @@ class LauncherApp:
     def _show_initial_screen(self):
         path = self.config.installation_path
         if path and validate.quick_validate(path):
-            self._show_battle_screen(path)
+            self._show_launch_screen(path)
         else:
             self._show_install_screen()
 
@@ -179,11 +224,11 @@ class LauncherApp:
     def _on_installation_chosen(self, path):
         self.config.installation_path = str(path)
         config_module.save_config(self.config, self._config_path)
-        self._show_battle_screen(path)
+        self._show_launch_screen(path)
 
-    def _show_battle_screen(self, path):
+    def _show_launch_screen(self, path):
         self._clear()
-        BattleScreen(self._container, Path(path), on_change_installation=self._show_install_screen)
+        LaunchScreen(self._container, Path(path), on_change_installation=self._show_install_screen)
 
 
 def main():

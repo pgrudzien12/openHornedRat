@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import unittest
@@ -40,3 +41,31 @@ class EngineLaunchTests(unittest.TestCase):
         available = engine_launch.engine_dependencies_available(Path(sys.executable), modules=("os",))
 
         self.assertTrue(available)
+
+
+class BuildCommandTests(unittest.TestCase):
+    def test_given_no_battle_or_options_when_building_the_command_then_it_is_a_plain_engine_start(self):
+        command = engine_launch.build_command("/game", python_path="py")
+
+        self.assertEqual(command, ["py", "-m", "whshr", "engine", "/game"])
+
+    def test_given_a_battle_and_all_options_when_building_the_command_then_every_flag_is_present(self):
+        options = engine_launch.LaunchOptions(no_battles=True, trace=True, skip_intro=True)
+
+        command = engine_launch.build_command("/game", "BF001", options, python_path="py")
+
+        self.assertEqual(command, ["py", "-m", "whshr", "engine", "/game", "--battle", "BF001",
+                                   "--skip-intro", "--no-battle"])
+
+    def test_given_trace_when_building_the_environment_then_the_trace_variable_is_set(self):
+        traced = engine_launch.build_environment(engine_launch.LaunchOptions(trace=True), base={})
+        plain = engine_launch.build_environment(engine_launch.LaunchOptions(), base={})
+
+        self.assertEqual(traced["WHSHR_TRACE_SCRIPTS"], "1")
+        self.assertNotIn("WHSHR_TRACE_SCRIPTS", plain)
+
+    def test_given_any_options_when_building_the_environment_then_the_checkout_is_on_the_import_path(self):
+        environment = engine_launch.build_environment(base={"PYTHONPATH": "/other"})
+
+        self.assertEqual(environment["PYTHONPATH"].split(os.pathsep),
+                         [str(engine_launch.REPOSITORY_ROOT), "/other"])
