@@ -921,8 +921,8 @@ class BattleBannerVisibilityTests(unittest.TestCase):
 
     def test_given_models_lagging_behind_a_charging_anchor_then_the_banner_follows_the_models(self):
         # The anchor (regiment.x/y) can visibly outrun the models during a charge (they only ever
-        # catch up to it at the unit's base speed - notes/game_rules.md "Formations", "MoveModels
-        # ... never faster than the unit's s_rlmv"); the banner must hover over the rendered
+        # catch up to it at the unit's base speed - notes/game_rules.md "Formations": models walk
+        # never faster than the unit's s_rlmv); the banner must hover over the rendered
         # troops' actual current positions, not the anchor, or it visibly floats ahead of the block.
         from whshr.battlefield import SpriteFrame, SpriteSheet
         from whshr.frontend.battle_view import BANNER_MARKER_RAISE, INSTANCE

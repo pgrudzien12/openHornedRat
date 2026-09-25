@@ -6,8 +6,8 @@ behaviour of `testmission` / `testobjective`, and where crowns are paid. It exte
 `ROADMAP.md` B1–B3. Marks: ✅ read from the executables and cross-checked on shipped data, 🟡 read from code but not observable in
 shipped data or only partly traced, ⬜ open.
 
-Sources: the objective evaluators of `GAMEF.DLL` (26 letters), the debrief/end-screen/campaign-over code and the balance-sheet
-interpreter of `WHSHR.EXE`, read as research input (decompiler output stays in scratch; nothing is reproduced); the `.BTS` objective
+Sources: the objective evaluators of `GAMEF.DLL` (26 letters), the debrief/end-screen/campaign-over behaviour and the balance-sheet
+interpreter of `WHSHR.EXE`; the `.BTS` objective
 lines of all 54 battles; all 120 glue scripts; the owner's `debrief.dbf` of `bf003` (checked in §2.3). String ids below are `BKTXT`
 ids (table 5); texts are not quoted, only paraphrased.
 

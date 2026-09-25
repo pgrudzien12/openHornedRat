@@ -258,7 +258,7 @@ constant, and models walk to their own formation slot rather than teleporting wi
 - **Formation catch-up**: `Battle._advance_models` recomputes each model's formation slot from the
   current anchor position and facing (`formation.block_slots` + `formation.place`, the traced block
   layout) every tick, then walks each model toward its slot by at most the regiment's own per-tick
-  distance — matching `MoveModels`' "never faster than the unit's `s_rlmv`" rule in game_rules.md. A
+  distance — matching the model walking rule ("never faster than the unit's `s_rlmv`") in game_rules.md. A
   regiment therefore visibly reforms while turning or after arrival, instead of snapping into shape;
   `tests/test_engine.py` (`FormationMovementTests`) asserts a turning order leaves models short of their
   ideal slots after one tick and that they do settle back into the exact block after enough ticks. This
@@ -309,7 +309,7 @@ constant, and models walk to their own formation slot rather than teleporting wi
   own depth (`battle3d.Projection.view`/`.project`), and picks whichever covers the click point,
   nearest to the camera first if more than one does (the one actually visible there).
 - **Collisions**: `Battle._resolve_collisions`, run once per tick after movement, is a simplified,
-  deterministic `PushApart` (game_rules.md, "Routes, collisions and visibility"): when the bounding circles
+  deterministic push-apart rule (game_rules.md, "Routes, collisions and visibility"): when the bounding circles
   (`formation.bounding_radius`) of two regiments overlap, only the regiments under a move order give way,
   sharing the overlap, in identifier order for determinism. Standing regiments are never pushed, so
   scripted deployments that already overlap (BF001's Grudgebringer cavalry and infantry) stay put. This keeps regiments from passing through each other but is not

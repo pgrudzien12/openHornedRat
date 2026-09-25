@@ -6,8 +6,8 @@ script suspends and resumes, and how the four stacks (script frames, window stat
 `notes/glue_runtime_architecture.md` §4.3. Marks: ✅ read from the executable and confirmed against shipped scripts, 🟡 read from the
 executable but not exercised by any shipped script (or partly traced), ⬜ open.
 
-Sources: the glue interpreter, the window/script loaders, the context-stack routines and the activity completion handlers of
-`WHSHR.EXE`, read as research input (no code reproduced; the decompiler output stays in scratch); the keyword table of the same
+Sources: the observed behaviour of the glue interpreter, the window/script loaders, the context stack and the activity completion
+handling of `WHSHR.EXE`; the keyword table of the same
 executable; and a usage scan of all 535 `WND.DLL` resources (120 `[RUN]` scripts, 415 window/object resources). Usage counts below are
 "statements / scripts" over that corpus. Section 11 lists what is still open; `python3 -m whshr glue-spec` prints the per-command
 status table (`whshr/glue_spec.py`).

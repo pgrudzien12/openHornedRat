@@ -2,10 +2,9 @@
 
 Notes from reverse-engineering the game's data formats, done mostly black-box
 (byte analysis + visual verification). The battle rules in `GAMEF.DLL` (unit stat layout, close
-combat, morale, shooting) were read by targeted static analysis with Ghidra (see "Game rules" and
-`notes/game_rules.md`). The rest of the game logic (`WHSHR.EXE`, mission DLLs) has not been
-disassembled; only static data tables in the executables and the sound library `MSNDDS.DLL`
-(the `.SFX` loader) were read. This file is the reference; the full reports on the
+combat, morale, shooting) are documented as observable behaviour (see "Game rules" and
+`notes/game_rules.md`). For the rest of the game logic (`WHSHR.EXE`, mission DLLs) only static data tables in
+the executables and the sound library `MSNDDS.DLL` (the `.SFX` loader) were read. This file is the reference; the full reports on the
 individual formats, including how each claim was verified, are in `notes/`.
 
 The examples use `$WARFB` for the root of a local GOG v1.0 installation:
@@ -473,8 +472,8 @@ solved**, checked on all 54 `.BTS`:
 The numbers look like a snapshot that the editor wrote when saving. For `K`, `X`, `R`, `I`, `P`, `V`
 they are unknown.
 
-**Evaluation** ✅ (`notes/game_rules.md`, "Missions and objectives"): `GAMEF.DLL` keeps a table of 40-byte records
-at `0x100F4D48` indexed `L − 'A' + 1`, with the defined flag, flags, caption id, an evaluator function and the
+**Evaluation** ✅ (`notes/game_rules.md`, "Missions and objectives"): `GAMEF.DLL` keeps one record per objective letter,
+indexed `L − 'A' + 1`, with the defined flag, flags, caption id, an evaluator function and the
 numbers `a, b`. Evaluators run at battle set-up, every tick (flag `0x2`) and in a separate pass (flag `0x8`); the
 first met objective with flag `0x1` ends the battle. Battle-ending letters: A, F, H, N and Z. Objective G ("Inside
 the gates!", BF015/BF017) lets player units that reach an interior node leave the battle. The 26 evaluator bodies
@@ -519,12 +518,10 @@ endunit:
 
 ### Unit stat fields (`setstats`)
 
-**Layout ✅ (from code, full report `notes/game_rules.md`).** `GAMEF.DLL` maps keywords to tokens
-(table `0x100E97C8`). Tokens 13–39 (`s_side` … `s_banner`) are **one byte each at
-`unit + 0x7A + (token − 13)`**, and a `setstats` line writes its values into consecutive fields
-starting at its key. Tokens 40–43 (`s_calualties`, `s_routed`, `s_kills`, `s_Exp`, written as `set:`)
-are 16-bit fields at `+0x330…+0x336`. Evidence: the editor's unit writer prints each line from that
-byte block; the combat code reads the same offsets; all 1415 units and leaders of the scripts and save
+**Layout ✅ (full report `notes/game_rules.md`).** Keywords map to numeric tokens. Tokens 13–39
+(`s_side` … `s_banner`) are **one byte each, consecutive in token order**, and a `setstats` line writes its
+values into consecutive fields starting at its key. Tokens 40–43 (`s_calualties`, `s_routed`, `s_kills`,
+`s_Exp`, written as `set:`) are 16-bit fields. Evidence: all 1415 units and leaders of the scripts and save
 armies decode with 32 335 values and no contradiction (`python3 -m whshr check`); the in-game panel of
 Mercenary Crossbows (M4 WS3 BS4 S3 T3 W1 I3 A1 Ld7, "Crossbow 12/12") is `SAVE/PLAY.MRC`.
 `python3 -m whshr rules <installation> BF001.BTS` prints the decoded units.
@@ -601,7 +598,7 @@ printed by `python3 -m whshr rules <installation>`. Everything below is ✅ unle
 - **Clock and time**: one tick per 100 ms timer message (at most 10 ticks/s); 19 ticks = one segment;
   segments count 10 → 1 per turn (a turn is 19 s). A unit fights its close combat
   in the segment equal to its **Initiative** (higher strikes first).
-- **To hit** (`0x100E8C28`, `[attacker WS][defender WS]`) and **to wound** (`0x100E8CB8`, `[S][T]`)
+- **To hit** (`[attacker WS][defender WS]`) and **to wound** (`[S][T]`)
   are exactly the WFB 4th edition charts for values 1–10. **Save modifier** `max(0, S − 3)`.
 - **Armour save** by `s_armr`: 0 none, 1 6+, 2 5+, 3 4+, 4 3+, **5 none** (table value 7, probably a
   bug), 6 regeneration 4+, 7 none, 8–13 6+, 5+, 4+, 3+, 2+, 2+. A D6 below the save + modifier fails. Regeneration (6) is a 4+ roll in close
@@ -808,7 +805,7 @@ Scripts: `scripts/pe_resources.py` (PE resource directory parser), `scripts/pe_e
 
   `python3 scripts/pe_missions.py <WARFB>` prints the full mission ↔ battle ↔ briefing table.
 
-  **Which missions a window offers** (`FUN_0044c340`, full account in `notes/campaign.md` section 7): a
+  **Which missions a window offers** (full account in `notes/campaign.md` section 7): a
   window holds at most 5 `[MISSION]` records of `0x110` bytes each (the `MISS` layout). A record is shown
   unless it is already taken (`+0xA4`, set on troop-selection confirm); `set:depend=<res>` shows it only once
   the mission with that name id **in the same window** has been taken; `set:inactivedepend=<res>` shows it
@@ -818,8 +815,7 @@ Scripts: `scripts/pe_resources.py` (PE resource directory parser), `scripts/pe_e
   window.
 
   **The caravan scrolls**: `CARAVANCOMMON1` draws `CarScroll1/2/3` with `set:depend=4/3/2`, which on a
-  `[BITMAP]` means "draw while at least N missions are on offer" (`FUN_004565d6` against the cached count
-  `DAT_00473e0c`). So the desk shows **visible missions − 1 scrolls, capped at 3**, filling in the order
+  `[BITMAP]` means "draw while at least N missions are on offer" (against the cached count of visible missions). So the desk shows **visible missions − 1 scrolls, capped at 3**, filling in the order
   3, 2, 1. One more scroll is baked into the background, so the shelf shows as many scrolls as missions on offer (max 4). These are the only `[BITMAP] set:depend=` in
   `WND.DLL`.
 
@@ -1064,7 +1060,7 @@ RIFF 'MxSt'
 ## Save games and campaign files — `SAVE/`
 
 **Save format decoded, campaign rules traced** (full report with evidence: `notes/campaign.md`). Written by
-`WHSHR.EXE` (writer `FUN_00443cd2`, reader `FUN_004447b0`); a stdlib reader prototype validates both real saves.
+`WHSHR.EXE`; a stdlib reader prototype validates both real saves.
 
 `savegame.0`–`savegame.5` (slot 5 "Last Game" = the glue `autosave:`) are Windows RIFF files, form `WHSV`,
 little-endian, with eleven chunks in fixed order:

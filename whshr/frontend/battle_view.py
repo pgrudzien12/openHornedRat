@@ -476,8 +476,8 @@ class BattleView(SceneView[BattleScene]):
             sheet = field.sprite_sheet(regiment.sprite)
             selected = 1.0 if regiment.identifier == selected_id else 0.0
             # The anchor (regiment.x/y) can visibly outrun the models during a charge (they only
-            # ever catch up to it at the unit's base speed, notes/game_rules.md "Formations": "
-            # MoveModels... never faster than the unit's s_rlmv", notes/engine_architecture.md
+            # ever catch up to it at the unit's base speed, notes/game_rules.md "Formations": models
+            # walk "never faster than the unit's s_rlmv", notes/engine_architecture.md
             # "Formation catch-up") - the banner should hover over the rendered troops themselves,
             # not the anchor, or it visibly floats ahead of/behind the block it marks.
             positions = regiment.model_positions() if regiment.active else []

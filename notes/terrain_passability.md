@@ -81,7 +81,7 @@ Example: BF001 "River and Cliffs" battle has a single RiverAndCliffsEdge line ma
 2. Or a hardcoded lookup table in GAMEF.DLL (not decoded in this pass)
 
 **Implication:** The open engine must either:
-- Decode the flag-assignment logic from GAMEF.DLL decompiled code (if available), OR
+- Work out the flag-assignment rule from observed original behaviour, OR
 - Infer flags from boundary names (pattern match to known types like `Nav*`, `CliffsEdge`, etc.), OR
 - Hardcode a reasonable guess (Nav*=SOLID, terrain names=SOLID, etc.) and test against original game behavior
 

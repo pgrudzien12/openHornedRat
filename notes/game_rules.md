@@ -24,14 +24,14 @@ This is a behavioural specification for the original game. Findings are based on
 5. **Combat result** ✅ Kills + rank bonus `size / width − 1` (no +3 cap) + rear +2 / flank +1, summed per
    side over all units sharing a battle grid; no standard bonus. Resolved once per turn at the grid's
    creation segment: first two turns after contact, then every 1–2 turns.
-6. **Leadership** ✅ `modifier + (rand() % 11 + 2) <= Ld` of the leader: a **uniform 2–12 roll, not 2D6**.
+6. **Leadership** ✅ `modifier + (rand % 11 + 2) <= Ld` of the leader: a **uniform 2–12 roll, not 2D6**.
 7. **Morale** ✅ Break test at the losing margin; beaten by a fear-causer = break; hatred = pass on
    10 or less. Panic at every lost quarter of original strength (casualties only). A charge into the rear
    or the rear half of a flank forces a Leadership test. Failed fear tests and any contact with a
    terror-causer mean flight. Routed units run straight away from their opponent and leave the table;
    pursuers get automatic hits while in contact; rally and pursuit restraint are rolled only on the
    player's order (or for units with the "independent" toggle).
-8. **Shooting** ✅ No to-hit chart: a projectile flies to a point scattered by `rand() % (11 − BS)` steps
+8. **Shooting** ✅ No to-hit chart: a projectile flies to a point scattered by `rand % (11 − BS)` steps
    per axis (step grows with distance; +8 behind scenery). Archers fire one projectile per 4 models,
    artillery one; targets must be in the 90° front arc and in range; reload `(10 − I) × 18` ticks minus a
    weapon constant. Arrows wound one model; blast weapons wound every model of a unit they land in or
@@ -112,30 +112,30 @@ each other (e.g. every `s_mount[2]` equals the separate `s_weap` line). The in-g
 
 ### Field meanings
 
-| Token | Field | Offset | Meaning | Status and evidence |
-|---|---|---|---|---|
-| 13 | `s_side` | `+0x7A` | bit 7 enemy side, bit 6 NPC/neutral, bits 0–5 type code (table in `FORMATS.md`) | ✅ bit 7 selects the side a combat result is credited to (the game); type codes from statistics |
-| 14 | `s_orgsize` | `+0x7B` | original number of models | ✅ panic test uses `orgsize >> 2`; test files write 0 here and a size in the next byte |
-| 15 | `s_size` | `+0x7C` | current number of models | ✅ every per-model loop; decremented when a model is removed (the game) |
-| 16 | `s_rnks` | `+0x7D` | number of ranks | 🟡 read by formation code; values 1–7 fit the unit sizes |
-| 17 | `s_wdth` | `+0x7E` | frontage (models per rank) | ✅ recomputed by the formation code the game as `ceil(size / ranks)`; rank bonus `size / width − 1` (section 6); charge bonus `1.5 × frontage` |
-| 18, 19 | `s_rkmd`, `s_spar` | `+0x7F`, `+0x80` | runtime: number of ranks in the formation, number of front ranks at full frontage (all ranks when `size % ranks = 0`) | ✅ written by the game, read by the slot code the game (later ranks are offset by half a slot); never set by scripts |
-| 20 | `s_rlmv` | `+0x81` | flee movement rate | 🟡 recomputed from a float at unit set-up (the game); subtracted from the movement counter of fleeing units every tick (the game) |
-| 21–29 | `s_move`, `s_wepn`, `s_bals`, `s_strn`, `s_tuff`, `s_wnds`, `s_init`, `s_atks`, `s_lead` | `+0x82…+0x8A` | M WS BS S T W I A Ld | ✅ tables indexed by these bytes (sections 5–8); in-game panel |
-| 30 | `s_mount` | `+0x8B` | 0 none, 1 Warhorse, 2 War Boar, 3 Giant Wolf, 4 Cave Squig | ✅ mount records (section 5.4); 1 on all horse riders, 2 on Boar Boyz, 3 on Wolf Riders |
-| 31 | `s_armr` | `+0x8C` | armour code: 0–5 rating, 6 regeneration, 7 void, 8–13 mounted rating 1–6 | ✅ save table (section 5.3); `BRTXT` 100–105 "Armour Rating 0–5", 106 "REGENERATE!!!!", 107 "VOID!!!!!!!!!!", 108–113 "Armour Rating 1–6"; Troll has 6 |
-| 32 | `s_weap` | `+0x8D` | close combat weapon class: 0 none, 3 hand weapon, 4 two-handed, 10 spear/halberd class | ✅ strength table (section 5.2); class 4 on Greatswords, Hammerers, Rat Ogre, Treeman; 10 on halberdiers, Stormvermin, Stickers, Wolf Riders, artillery crews |
-| 33 | `s_race` | `+0x8E` | `class × 8 + race`; race 0 Human, 1 Elven, 2 Dwarven, 3 Goblinoid, 4 Orc, 5 Skaven, 6 Peasant, 7 big; class 0 notype, 1 Infantry, 2 Cavalry, 3 Archers, 4 Artillary, 5 Wizard, 6 Monster, 7 RollingStock, 8 Special, 9 Furniture | ✅ name tables; the editor output agrees with `s_race` in 879/889 units; class determines behaviour (`& 0xF8`) |
-| 34 | `s_pntval` | `+0x8F` | points value: experience gained by the killer, +7 per campaign promotion | ✅ `RemoveModel`; promotions in `notes/campaign.md` |
-| 35 | `S_BalWeap` | `+0x90` | missile weapon code (section 8) | ✅ shooting switches on it |
-| 36 | `s_cmdr` | `+0x91` | unknown, always 0 | ⬜ |
-| 37 | `s_armname` | `+0x92` | armour name, always 0 | 🟡 by analogy with the next field |
-| 38 | `s_weponame` | `+0x93` | weapon name: string `BRTXT 200 + n` | ✅ 22 names checked against their units (1 Spear on Stickers, 11 Halberd, 13 2-H Hammer, 15 Crossbow, 17 Lance on Reiksguard, 25 Scimitar on Clanrats…) |
-| 39 | `s_banner` | `+0x94` | unknown, always 0 | ⬜ |
-| 40 | `s_calualties` | `+0x330` (16 bit) | models lost | ✅ incremented per model killed; used by the rally test |
-| 41 | `s_routed` | `+0x332` | models removed without being killed | 🟡 incremented on the other removal path |
-| 42 | `s_kills` | `+0x334` | enemy models killed | ✅ incremented on the killer unit |
-| 43 | `s_Exp` | `+0x336` | experience | ✅ killer gains the victim's `s_pntval` |
+| Token | Field | Meaning | Status and evidence |
+|---|---|---|---|
+| 13 | `s_side` | bit 7 enemy side, bit 6 NPC/neutral, bits 0–5 type code (table in `FORMATS.md`) | ✅ bit 7 selects the side a combat result is credited to; type codes from statistics |
+| 14 | `s_orgsize` | original number of models | ✅ panic test uses `orgsize >> 2`; test files write 0 here and a size in the next byte |
+| 15 | `s_size` | current number of models | ✅ every per-model loop; decremented when a model is removed |
+| 16 | `s_rnks` | number of ranks | 🟡 read by formation code; values 1–7 fit the unit sizes |
+| 17 | `s_wdth` | frontage (models per rank) | ✅ recomputed by the formation code as `ceil(size / ranks)`; rank bonus `size / width − 1` (section 6); charge bonus `1.5 × frontage` |
+| 18, 19 | `s_rkmd`, `s_spar` | runtime: number of ranks in the formation, number of front ranks at full frontage (all ranks when `size % ranks = 0`) | ✅ written by, read by the slot code the game (later ranks are offset by half a slot); never set by scripts |
+| 20 | `s_rlmv` | flee movement rate | 🟡 recomputed from a float at unit set-up; subtracted from the movement counter of fleeing units every tick |
+| 21–29 | `s_move`, `s_wepn`, `s_bals`, `s_strn`, `s_tuff`, `s_wnds`, `s_init`, `s_atks`, `s_lead` | M WS BS S T W I A Ld | ✅ tables indexed by these bytes (sections 5–8); in-game panel |
+| 30 | `s_mount` | 0 none, 1 Warhorse, 2 War Boar, 3 Giant Wolf, 4 Cave Squig | ✅ mount records (section 5.4); 1 on all horse riders, 2 on Boar Boyz, 3 on Wolf Riders |
+| 31 | `s_armr` | armour code: 0–5 rating, 6 regeneration, 7 void, 8–13 mounted rating 1–6 | ✅ save table (section 5.3); `BRTXT` 100–105 "Armour Rating 0–5", 106 "REGENERATE!!!!", 107 "VOID!!!!!!!!!!", 108–113 "Armour Rating 1–6"; Troll has 6 |
+| 32 | `s_weap` | close combat weapon class: 0 none, 3 hand weapon, 4 two-handed, 10 spear/halberd class | ✅ strength table (section 5.2); class 4 on Greatswords, Hammerers, Rat Ogre, Treeman; 10 on halberdiers, Stormvermin, Stickers, Wolf Riders, artillery crews |
+| 33 | `s_race` | `class × 8 + race`; race 0 Human, 1 Elven, 2 Dwarven, 3 Goblinoid, 4 Orc, 5 Skaven, 6 Peasant, 7 big; class 0 notype, 1 Infantry, 2 Cavalry, 3 Archers, 4 Artillary, 5 Wizard, 6 Monster, 7 RollingStock, 8 Special, 9 Furniture | ✅ name tables; the editor output agrees with `s_race` in 879/889 units; class determines behaviour (`& 0xF8`) |
+| 34 | `s_pntval` | points value: experience gained by the killer, +7 per campaign promotion | ✅ `RemoveModel`; promotions in `notes/campaign.md` |
+| 35 | `S_BalWeap` | missile weapon code (section 8) | ✅ shooting switches on it |
+| 36 | `s_cmdr` | unknown, always 0 | ⬜ |
+| 37 | `s_armname` | armour name, always 0 | 🟡 by analogy with the next field |
+| 38 | `s_weponame` | weapon name: string `BRTXT 200 + n` | ✅ 22 names checked against their units (1 Spear on Stickers, 11 Halberd, 13 2-H Hammer, 15 Crossbow, 17 Lance on Reiksguard, 25 Scimitar on Clanrats…) |
+| 39 | `s_banner` | unknown, always 0 | ⬜ |
+| 40 | `s_calualties` | models lost | ✅ incremented per model killed; used by the rally test |
+| 41 | `s_routed` | models removed without being killed | 🟡 incremented on the other removal path |
+| 42 | `s_kills` | enemy models killed | ✅ incremented on the killer unit |
+| 43 | `s_Exp` | experience | ✅ killer gains the victim's `s_pntval` |
 
 A leader has its own block of the same layout; the unit record keeps a second copy at `+0x95`
 (the reload and missile code read `+0xA3` and `+0xAB`, which are I and `S_BalWeap` of that copy).
@@ -152,7 +152,7 @@ first model.
 
 | Bit | Flag | Effect found in the code |
 |---|---|---|
-| 0 | `CantBreak` | rout and fear-flight events are ignored (op 0xC8 the game; Dwarfs shout "We fight to the death!"); fear does not apply |
+| 0 | `CantBreak` | rout and fear-flight events are ignored (op 0xC8; Dwarfs shout "We fight to the death!"); fear does not apply |
 | 1 | `Frenzy` | Attacks doubled in close combat; excluded from fear and terror |
 | 2 | `CauseFear` | enemies that lose a combat against it break without a test; engaging it needs a Leadership test |
 | 3 | `CauseTerror` | units without `Frenzy`/`PsyImmune` cannot charge it and **flee without a roll** when charged by it or touching it (section 7.3) |
@@ -181,8 +181,8 @@ never use `AlwaysPursue`.
 - **Models**: `0x8C`-byte records: flags `+0`, pointer to the stat block `+0x40`,
   opponent model `+0x48`, opponent unit `+0x4C`, wounds taken `+0x54` (a model dies when
   wounds ≥ W), attack counter `+0x58`.
-- **Random numbers** ✅ the game is MSVC `rand()`: `seed = seed * 214013 + 2531011`,
-  result `(seed >> 16) & 0x7FFF`. A D6 is always `rand() % 6 + 1`.
+- **Random numbers** ✅ the game is MSVC `rand`: `seed = seed * 214013 + 2531011`,
+  result `(seed >> 16) & 0x7FFF`. A D6 is always `rand % 6 + 1`.
 - **Battle clock** ✅ (the game reset, the game tick): **19 ticks** form a *segment* (the counter
   starts at 18 and is decremented before the `< 0` test);
   the segment counter runs 10, 9, … 1, then the turn counter increases
@@ -194,7 +194,7 @@ never use `AlwaysPursue`.
   (the game → `BattleTick`) and renders. Frame-driven, no catch-up: at most 10 ticks per second, so a
   segment (19 ticks) lasts 1.9 s and a turn (10 segments) 19 s. Pause is bit `0x80` of the game state; there is
   no game speed option.
-- **Speed stat**: Movement is used only to derive `s_rlmv` at unit set-up (the game):
+- **Speed stat**: Movement is used only to derive `s_rlmv` at unit set-up:
   `trunc(4.8 × M' + I) / 2`, or `trunc(2.4 × M') + 4` for neutral units. `M'` is the **mount's** M when the
   armour code marks the model as mounted, otherwise the model's own M; the Initiative term is always the
   rider's. After set-up nothing reads M again — `s_rlmv` is the only movement input (see "Mounts").
@@ -214,7 +214,7 @@ never use `AlwaysPursue`.
   and 5.4" closing in. Pursuers and fugitives use the same factor, so only a higher `s_rlmv` closes the gap.
   **Terrain has no effect on speed.** Note that "in melee" shares the charge factor, but an engaged unit does
   not translate at all (see below), so the value is inert there.
-- **Turning** ✅ (the game, reached only through the game): facing is a **16.16 accumulator** at
+- **Turning** ✅ (reached only through): facing is a **16.16 accumulator** at
   `+0xCC` whose high word `+0xCE` is the integer facing in 1/512 turn. Per tick it advances by
   `s_rlmv × (144 − s²) × 2^(scale − 9)` facing units, with `s = frontage + ranks − min(frontage, ranks) / 2`
   and `scale` by state: **2 pursuing** (re-aiming at the fugitive), **1** halted-turn or turn order,
@@ -224,14 +224,14 @@ never use `AlwaysPursue`.
   **Facing is never snapped to the travel bearing per tick**: the goal bearing lives in `+0x1DE` and the
   amount still owed in `+0x1F4`, and the unit always translates along its **current** facing (`+0xD0/+0xD4`
   = sin/cos of `+0xCE`), so a unit whose facing has not caught up walks off-axis and re-plans.
-  Thresholds (the game): required turn **> 45°** → halt and turn on the spot (`+0xBC |= 8`, no
+  Thresholds: required turn **> 45°** → halt and turn on the spot (`+0xBC |= 8`, no
   translation that tick); **7.7°…45°** → wheel while moving (`+0xBC |= 4`, half speed); **< 7.7°** → absorbed.
   A **pursuing** unit re-aims once per segment and turns only when the bearing error exceeds 22.5°; a
   **charge** turns for any non-zero angle at its start (no threshold, no snap), re-reads its aim point once at
   its halfway point, and never uses the half-speed wheel or the zero-translation turn (see "Turning,
   wheeling and reversing"). Separately, **at the moment a move order is
   issued** (the game from `GotoTarget`) a required turn of **68.2°–135°** snaps instantly 90°
-  (the game) and **> 135°** snaps instantly 180° (the game); the residue is then wheeled.
+  and **> 135°** snaps instantly 180°; the residue is then wheeled.
 - **A turn always moves the unit position to keep the pivot still** ✅ — the rule an engine is most likely to
   get wrong. In-place turns pivot about the **block centre**: the about-face displaces the anchor by
   `(ranks − 1) × 12` backwards along the old facing (exactly twice the map-object offset, which holds the
@@ -241,26 +241,26 @@ never use `AlwaysPursue`.
   applied to the half-frontage vector `6 × (frontage − 1)`; a wheel then keeps half its translation speed and
   every other gradual turn drops to zero. Details and the formation differences are in
   "Turning, wheeling and reversing" below. In both cases every model's
-  stored offset is counter-shifted (the game, the game) so the soldiers do not teleport, and a
+  stored offset is counter-shifted so the soldiers do not teleport, and a
   re-form is queued (`+0xBC |= 1`). **The unit position is never held fixed while the facing changes**, so a
   turn cannot open a gap between two touching units.
-- **The footprint belongs to the map object, not to the unit position** ✅ (the game, the game):
+- **The footprint belongs to the map object, not to the unit position** ✅:
   the box is stored as half-extents `frontage × 6` by `ranks × 6` **symmetric about the map-object centre**
   and independent of the facing; the four rotated corners live at `+0x312…+0x320`; the bounding radius at
   `object+4` is the box half-diagonal and the diagonal angle at `+0x322`. Every collision query — the broad
   circle and the narrow corner test — is expressed in object space and never touches the unit position.
   Note the half-extents use the **raw** frontage and rank counts, not `count − 1`, which is where the
   "half a cell to spare" comes from.
-- **Contact is resolved by rolling the tick back** ✅ (the game): when a move would overlap an enemy,
+- **Contact is resolved by rolling the tick back** ✅: when a move would overlap an enemy,
   the tick's translation **and** rotation are undone for both the unit and its map object (`+0xC4`, `+0xC8`,
   `+0xCC`, ranks, and the object's centre and facing are all restored from saved copies), then
   the game halts the unit and queues a re-form. The contact pose is simply the last pose that did not
   overlap: there is no snap to a facing, no alignment to the target's edge and no stand-off distance.
   A charge aims at the target's object centre pushed out by the target's bounding radius along the
   **target's own** facing (the game; the rear/flank variants add 0x100/±0x80), and is aborted without
-  engaging if it meets anything within ±45° of its front (the game → the game).
+  engaging if it meets anything within ±45° of its front .
 - **A unit in close combat does not move or turn at all** ✅: engaging clears every `+0xBC` movement state
-  bit, and the tick dispatcher the game selects a handler purely from `+0xBC`, so a unit whose only
+  bit, and the tick dispatcher selects a handler purely from `+0xBC`, so a unit whose only
   relevant flag is `+0xB4 & 0x200` runs no movement or turn code — it does not even set the idle flag. No
   store to `+0xCE` exists anywhere in the melee path. (`A_close_combat.md`'s remark that a model is "made to
   face an attacker" by the `0x44000` test is a misreading: that test is on a **model** record and only pairs
@@ -284,15 +284,15 @@ battles infantry units have 1–32 models (median 19), cavalry up to 28 (median 
 artillery 4–6 crew plus the machine, monsters and special units 1, wagons 2; enemy units have a median of 16
 and at most 32 models, usually in 4 ranks (3–5).
 
-- **Formation kind** by unit class (`FormationKind` the game, table the relevant data), dispatched by
-  `ReformUnit` (the game): Infantry, Cavalry, Archers, Wizard, Special and notype use the **block**
-  (the game); Artillery the war machine layout (the game); Monster a single-model footprint
-  (the game); RollingStock the wagon layout (the game). **The block is the only formation**: there
+- **Formation kind** by unit class (`FormationKind`, table the relevant data), dispatched by
+  `ReformUnit`: Infantry, Cavalry, Archers, Wizard, Special and notype use the **block**
+ ; Artillery the war machine layout; Monster a single-model footprint
+ ; RollingStock the wagon layout. **The block is the only formation**: there
   is no skirmish, column or wedge order.
-- **Size** (`ComputeFormationSize` the game): `frontage = ceil(models / ranks)`; the leftover models go
+- **Size**: `frontage = ceil(models / ranks)`; the leftover models go
   into the **front** ranks (18 models in 4 ranks: rows of 5, 5, 4, 4).
 - **Spacing**: **12 world units** (half an inch) between models, sideways and front to back, for every class
-  including cavalry. The same 12 units are the battle-grid cell. The collision footprint (the game) is a
+  including cavalry. The same 12 units are the battle-grid cell. The collision footprint is a
   box with half-extents `frontage × 6` and `ranks × 6`; its diagonal angle is stored in `+0x322` (the arc used
   for front/flank/rear). The box belongs to the unit's **map object** (`runtime state` + index × 0x20), which
   the game keeps in step with the unit (facing in `+0xC`, centre in `+6`/`+8`): for a block the centre
@@ -300,29 +300,29 @@ and at most 32 models, usually in 4 ranks (3–5).
   last rank, so the symmetric box covers every model with half a cell to spare. War machines, monsters and
   wagons keep the map object at the unit position. `+4` holds a square root computed from the extents
   (probably the bounding radius). the game shifts every model of a unit and refreshes its map object.
-- **Block layout** (the game): rank *n* stands `12 × n` units behind the first rank; each rank is centred
+- **Block layout**: rank *n* stands `12 × n` units behind the first rank; each rank is centred
   and filled from the outside in, pairwise, with a centre model when its count is odd.
-- **Placement** (the game): a slot offset `(x, y)` is rotated by the unit's facing (sine/cosine tables
+- **Placement**: a slot offset `(x, y)` is rotated by the unit's facing (sine/cosine tables
   the relevant data, the relevant data, 8.8 fixed point; world offset `x = side·cos + forward·sin`, `y = forward·cos − side·sin`) and stored in the model as its target relative to the unit
   position, together with its slot, rank and file. **The unit position is the front-rank centre**, and that
   slot is reserved for the leader model (unless it is fleeing). Every other slot takes the nearest free model
-  (octagonal distance), so re-forming moves each soldier to the closest position. `MoveModels`
-  (the game) then walks each model towards its slot every tick — at a **rank-dependent** rate, described in
+  (octagonal distance), so re-forming moves each soldier to the closest position. The model walking rule
+  then walks each model towards its slot every tick — at a **rank-dependent** rate, described in
   "Models chase the unit, they are not carried by it" below.
-- **Ranks** (the game, orders 0x0F/0x10 and the deployment buttons the game): refused while fleeing,
+- **Ranks** (orders 0x0F/0x10 and the deployment buttons): refused while fleeing,
   held (Tangling Thorn) or charging; the request is clamped to `[min, models / min]` with
   `min = max(1, trunc(0.75 × √models))` (constants 1.5 × 0.5 at the relevant data/the relevant data). Examples: 8 models
   2–4 ranks, 18 models 3–6, 24 models 3–8, 32 models 4–8. Re-forming (`HaltAndReform`) restores the script's
   `s_rnks`.
-- **War machines** (the game): the layout depends on the **leader's sprite** (unit `+0x4E`, the machine,
+- **War machines**: the layout depends on the **leader's sprite** (unit `+0x4E`, the machine,
   set by the leader's `troopsprites`): Mortar, Cannon, Volley Gun and Doom Diver catapult use a box 2 wide × 3
   ranks, Great Cannon and Rock Lobber 3 wide × 4 ranks; the machine takes the centre and the crew stand in fixed
   slots around it.
-- **Monsters** (the game): one model at the unit position; footprint 2 × 2 cells by default (Troll, Rat
+- **Monsters**: one model at the unit position; footprint 2 × 2 cells by default (Troll, Rat
   Ogre, Warpfire Thrower), 3 × 3 for the sprites Gyrocopter, Wyvern, Treeman, Giant, Doomwheel and Dragon
-  (the game), 5 × 8 for the Mole Machine. Units whose sprite is not on that list fall back to 2 × 2 even when
+ , 5 × 8 for the Mole Machine. Units whose sprite is not on that list fall back to 2 × 2 even when
   large: the 3D-mesh Dragon of BF014 (`MeshDragon`) and the Doomwheel entry with `VoidType`.
-- **Wagons** (the game, units of exactly 2 models): the two models stand 22 units apart front to back
+- **Wagons** (units of exactly 2 models): the two models stand 22 units apart front to back
   (team and wagon), footprint 2 × 4 cells, facing snapped to 45° steps.
 - **Script opcodes**: `ScatterModelsAtNode` (0x48) spreads a unit's models around a node, `PlaceAndReformAtNode`
   (0x4A) re-forms at a node.
@@ -820,39 +820,39 @@ attached light/effect. There are 59 such operations in total.
 
 The key visibility constants are recorded here for implementers.
 
-- **Waypoints**: `ExecuteGoto` (the game) replaces and shift-click (the game) appends to a queue of
-  **at most 8 waypoints** (the game); a point within 17 units of the queue head or tail is ignored. Moving
+- **Waypoints**: `ExecuteGoto` replaces and shift-click appends to a queue of
+  **at most 8 waypoints**; a point within 17 units of the queue head or tail is ignored. Moving
   onto the unit's own position just halts and re-forms.
 - **Routing is not pathfinding**: a unit walks straight towards its current waypoint. When `ObjectsOnPath`
-  (the game) finds the first blocking map object on the line (scenery, spell area objects **or another
+  finds the first blocking map object on the line (scenery, spell area objects **or another
   unit's footprint**, tested with the same `asin(radius / d)` geometry as missile obstruction), `GotoTarget`
   dry-runs a detour to the left and to the right (cost `4 × turn + distance` per
   leg, +12 000 for leaving the playable area, abandoned beyond a full turn or cost 5 999) and keeps the cheaper
   side; if both exceed 11 999 the unit gives up ("can't find the way to target"). Each tick `PlanStep`
-  (the game) deflects the heading around the current obstruction again. `Nav*`, `SOLID`, `INVSOLID` and
+  deflects the heading around the current obstruction again. `Nav*`, `SOLID`, `INVSOLID` and
   `BATTLEEDGE` boundaries are polygon-membership obstacles only, never a graph, so units can get stuck against
   concave shapes; an engine may use real pathfinding without visible change on the open maps.
-- **Region masks**: `InRegion`/`NotInRegion`/`RegionCrossings` (the game, the game, the game)
+- **Region masks**: `InRegion`/`NotInRegion`/`RegionCrossings`
   scan the 40-byte boundary records whose flags are active and match the mask; `INVSOLID`
   inverts containment (the outside of `BattleEdge` is solid); crossings snap to the boundary so movers slide
   along it. `0xB0` routes and fanatic jumps, `0x100` deployment, `0x200` `SightEdge` (spotting only), `8`
   `ViewEdge` and `0x40` `CameraEdge` (camera only), `0x20` leaving the table, `0x90` the rout probe.
-- **Collisions** (`ResolveUnitCollisions`, the game, once per tick): every overlapping pair of footprints
+- **Collisions** (`ResolveUnitCollisions`, once per tick): every overlapping pair of footprints
   or objects is resolved. **Friendly units and solid scenery push apart** by half the overlap each
   (circle-circle resolution; a charging unit hitting something within its 45°
   front arc ends the charge, event 0x09). **Enemy contact** engages (fear test, charge, redirect, rout: section
   5.5 and 7.3); contact with a routing unit makes automatic contact attacks (section 7.7). An `INVSOLID` object
   straight ahead sends event 0x27. There is no sub-tick sweep, so fast units can briefly overlap.
-- **Visibility** (`IsVisible`, the game), shared by hidden-unit spotting and "is my target visible" for
+- **Visibility** (`IsVisible`), shared by hidden-unit spotting and "is my target visible" for
   AI shooting and casting: the target must lie within the looker's **view cone** (half-width 71/512 turn =
   **±50°**, doubled to ±100° while in melee), one of three sample rays towards the target (spread by its
   footprint) must be free of scenery (`ScanObjectsOnLine`, the missile obstruction test), and the line must not
   cross a **`SightEdge`** boundary (if a battle has none, "No Sight Boundary" and visible). **No range limit and
   no terrain height** anywhere in spotting, shooting or casting line of sight: hills never hide units.
-- **Hidden units** (`SpotHiddenUnits`, the game, run by threat detection): each hidden enemy that passes
+- **Hidden units** (`SpotHiddenUnits`, run by threat detection): each hidden enemy that passes
   `IsVisible` is revealed **permanently** (flag `0x80000` cleared), with event 0x1C to it and 0x1D to the spotter.
-- **AI decisions**: `PickBestTarget` (the game) scans all units for the highest `UnitScore`; `DetectThreat`
-  (the game) spots hidden units, then keeps or re-picks the threat unless braced. `RunAway` (206) is one
+- **AI decisions**: `PickBestTarget` scans all units for the highest `UnitScore`; `DetectThreat`
+  spots hidden units, then keeps or re-picks the threat unless braced. `RunAway` (206) is one
   reactive flee step per behaviour period (±67.5° away from visible enemies), `CircleAroundTarget` (228) one
   offset move of +11.25°. **There is no army-level AI**: coordination comes only from the "assist a friend who
   attacks" rule (event 0x13, `AIQuery` 9/10) and from mission scripts that assign "attack the n-th nearest
@@ -862,7 +862,7 @@ The key visibility constants are recorded here for implementers.
 ### Unit behaviour scripts and events ✅
 
 **Most consequences of morale are decided by bytecode, not C code.** Every live unit runs a behaviour
-script each tick (`RunUnitScript`, the game, called from the battle tick the game).
+script each tick (the per-tick script step, called from the battle tick).
 
 - **Code**: 32-bit words; a word with bit 15 set is opcode `word & 0x7FFF`, dispatched through a
   **232-entry handler table**; `0x0ABC` is a label, `0x80E8` ends a script. Operand counts
@@ -893,10 +893,10 @@ script each tick (`RunUnitScript`, the game, called from the battle tick the gam
   interrupted script or apply a pending switch (0x14), yield (0x17), skip if true (0x19), test/set/clear unit flags `+0xB4` (0x22–0x26) and `+0xB8`
   (0x29–0x2B), condition flags (0x2E–0x30), `GetEvent` (0x68), `ConsumeEvent` (0x69), `CaseEvent N`
   (0x6A), `Break` (0x6B, jumps to the next label, operand = label word `0x1ABC`), `If/IfNot/Else/EndIf` (0x6C–0x6F), queue event to self (0x5E/0x5F), send to own side / **enemy side**
-  (0x62/0x63), `Query N` (0x16, cases of the AI routine the game), `React N` (0xC2).
+  (0x62/0x63), `Query N` (0x16, cases of the AI routine), `React N` (0xC2).
 - **More from the catalogue** ✅: after `ExecuteOrder` applies a player order, the interpreter drops the target and
   restarts the unit's script at its restart point (op 0x1E). `SetThreatRange` (0x31) sets `+0x218`, used by the AI
-  threat score (`UnitScore`, the game): `worth × (range − d) / round(range / 4)` with the octagonal distance
+  threat score (`UnitScore`): `worth × (range − d) / round(range / 4)` with the octagonal distance
   `d = max(|dx|, |dy|) + min(|dx|, |dy|) / 2`, 0 for friends, broken, `CantMelee` or hidden units and beyond the
   range; ×4 if the enemy targets this unit, or ×32 instead if it is also charging (see "Routes, collisions and
   visibility"). Node opcodes move to a node (0x1F), face it (0x20), teleport to it (0x49), place and re-form there
@@ -911,12 +911,12 @@ script each tick (`RunUnitScript`, the game, called from the battle tick the gam
   filters; 206 is an AI "run away"; 208 turns an artillery crew into Infantry when its machine is lost. Some
   handlers are duplicates (181 = 180, 185 = 184, 136 = 175) or unused (137, 171, 173, 174).
 - **Events**: 14-byte records `[recipient, code, source, parameter, x, y, link]` in a 128-record pool at
-  the relevant data, queued per unit by `SendEvent` (the game), `BroadcastEvent` (the game) and
-  `SendEventToSide` (the game). There is no C handler table: every unit script has the frame
+  the relevant data, queued per unit by `SendEvent`, `BroadcastEvent` and
+  `SendEventToSide`. There is no C handler table: every unit script has the frame
   `GetEvent; CaseEvent a … Break; CaseEvent b … Break; Gosub 153…156 (library defaults, all ending in 152);
   ConsumeEvent; loop`. Player units run library script 100, which installs an event handler by class
   (101 default, 102 Artillery, 103 Wizards, 104 Archers → 154/155/156); mission scripts gosub 153.
-- **`React N`** (the game): per race (`s_race & 7`) and code, a battle message (table the relevant data),
+- **`React N`**: per race (`s_race & 7`) and code, a battle message (table the relevant data),
   a leader portrait expression (the relevant data) and a speech sample (the relevant data): 1 "Engage!", 2 "CHARGE!"
   ("WAARRGGH!"), 3 "Destroy them!", 4 "Retreat!", 5 "My men fear the beast!", 6 "Flee the abomination!",
   7 "We fight to the death!" (Dwarfs), 8 "No mercy!" (hatred), 10–14 shooting and order replies, 17
@@ -1025,7 +1025,7 @@ Per-battle detail and the BF001 walkthrough are retained in private research not
   scripted flight towards node 5 (🟡 exact trigger chain), the delayed Clanrat wave, and standard interrupt
   handlers; nothing beyond the general interpreter and library scripts is needed to run it.
 - **Objective table** ✅ the relevant data: 40-byte records indexed `L − 'A' + 1` (record 0 is empty; opcode 222
-  `IfObjective` uses the same index), with `+0x00` defined (set by the `.BTS` parser the game, which also links
+  `IfObjective` uses the same index), with `+0x00` defined (set by the `.BTS` parser, which also links
   the defined letters), `+0x08` flags, `+0x0C` in-battle caption (`GMTXT 33000 + L − 'A'`), `+0x10` evaluator function,
   `+0x14` met, `+0x18/+0x1C` the numbers `a, b`. Flags: `0x1` ends the battle when met, `0x2` evaluated every tick,
   `0x4` no caption in the end-of-battle list, `0x8` evaluated in the separate pass, `0x10` still evaluated after the
@@ -1055,7 +1055,7 @@ Per-battle detail and the BF001 walkthrough are retained in private research not
     tick).
 - **Evaluation** ✅: battle set-up calls every defined evaluator with mode 1; the game runs each tick (from
   `BattleTick`) and tests the not-yet-met objectives with flag `0x2` in mode 2; the first met objective with flag
-  `0x1` decides the battle (`runtime state = 1`), opens the win or loss dialog (the game) and plays the end
+  `0x1` decides the battle (`runtime state = 1`), opens the win or loss dialog and plays the end
   stinger. the game evaluates flag-`0x8` objectives in mode 3 from a less frequent poll; at the end
   the game lists captions, or calls the evaluator in mode 4 for a custom debrief line.
 - **All 26 letter evaluators read** ✅ (static analysis). Every evaluator shares the same four-mode contract
@@ -1124,21 +1124,21 @@ Per-battle detail and the BF001 walkthrough are retained in private research not
 
 ### Player orders and the command panel ✅
 
-The battle window (the game) maps panel buttons (records at the relevant data, icons = frames of
+The battle window maps panel buttons (records at the relevant data, icons = frames of
 `ICONS.BOP`; there are no tooltip strings) to a global order code (`runtime state`, cleared every tick).
-`ExecuteOrder` (the game), run from the behaviour script, applies it to **player units** only: to every
+`ExecuteOrder`, run from the behaviour script, applies it to **player units** only: to every
 selected unit (unit flag bit 25), otherwise to the unit's own pending order (`+0x200`); orders 0x17 and 0x1B act
-only on the focused unit (the game). In deployment (`runtime state == 1`) only placing and waypoints run.
+only on the focused unit. In deployment (`runtime state == 1`) only placing and waypoints run.
 The panel shows a button set by class and state (idle, attack sub-panel, broken/pursuing, melee, charging: none,
 deployment).
 
 | Order | Button (icon) | Effect |
 |---|---|---|
-| 1 / 2 | Move (boots) + click / shift-click | go to point (the game) / add waypoint; queued while busy |
+| 1 / 2 | Move (boots) + click / shift-click | go to point / add waypoint; queued while busy |
 | 3 | Attack (crossed swords) + click | event 0x04: approach and attack a unit (not `CantMelee`) or building |
 | 0x0B–0x0E | face point, turn left/right 90°, about face | facing ∓0x80 / +0x100 (increasing facing = clockwise) |
 | 0x0F / 0x10 | ranks up / down | re-form with ±1 rank |
-| 0x13 | Withdraw (banner flag, melee) | disengages only when fighting rolling stock or furniture (classes 7, 9) with no other enemy unit fighting its models (the game); **against living enemies the unit routs** (a voluntary rout) |
+| 0x13 | Withdraw (banner flag, melee) | disengages only when fighting rolling stock or furniture (classes 7, 9) with no other enemy unit fighting its models; **against living enemies the unit routs** (a voluntary rout) |
 | 0x14 | Rally (open hand, broken or pursuing) | toggles the rally / pursuit-restraint attempts (section 7.4) |
 | 0x15 | Charge (war horn) | event 0x06 → script 106 `ChargeForward` (op 0x4F): a charge **straight ahead**, reach 12 × `s_rlmv`, not inside `0xB0` regions |
 | 0x16 | Fire (crossed bow) + click; Ctrl = Gyrocopter bomb | `OrderFire` (section 8.1) |
@@ -1290,7 +1290,7 @@ waypoints; there is no deployment phase yet, so deployment zone squares and the 
 state are unreachable; the spell/item list window at (200, 64) is left as background-only chrome
 for the same no-spell/item-system reason. The HUD's own two chrome pieces (the command panel and
 the minimap) are each designed at their documented native size and scaled with the same
-integer-snap factor as `NativeScreenView._layout()` (`scene_view.py`), since `BattleView` itself
+integer-snap factor as `NativeScreenView._layout` (`scene_view.py`), since `BattleView` itself
 renders its 3D scene at full window resolution rather than through that letterbox; unlike a plain
 centered letterbox of the whole 640×480 screen, each piece is then pinned to its own edge of the
 actual window — the command panel to the bottom (horizontally centered), the minimap to the
@@ -1307,9 +1307,9 @@ above the plan map so every other minimap element paints over it.
 
 An enemy regiment can be selected too (3D-view or minimap left-click, at any time - not only with
 no player regiment already selected), for its HUD readout/banner/minimap highlight only: the
-original lets a player inspect any regiment this way. `whshr.battle_scene.BattleScene.handle()`'s
+original lets a player inspect any regiment this way. `whshr.battle_scene.BattleScene.handle`'s
 "select" no longer restricts the identifier to a player regiment, but `whshr.engine.Battle`'s
-`order_move`/`order_attack`/`order_halt` (and `Hud._button_enabled()`, independently) all still
+`order_move`/`order_attack`/`order_halt` (and `Hud._button_enabled`, independently) all still
 refuse a command for a non-player regiment, so selecting one for inspection never grants it
 orders. A first version of this only allowed an enemy click to select (rather than immediately
 charge) when nothing player-owned was already selected — the pre-existing "click an enemy with a
@@ -1325,7 +1325,7 @@ since it is a distinct, deliberate convenience the user did not report as broken
 
 The four cursors ("Feedback" above) are loaded from `GMCUR.DLL`'s own `RT_GROUP_CURSOR` resources
 (`notes/pe_resources.md`, IDs 100-103) via `whshr.frontend.cursors.GameCursors` (shared with
-`TroopSelectionView`'s `WHSHR.EXE`-named cursors), never substitute artwork. `BattleView._set_cursor()`
+`TroopSelectionView`'s `WHSHR.EXE`-named cursors), never substitute artwork. `BattleView._set_cursor`
 switches it purely on `order_mode` (Attack armed → attack cursor; an immediately-issued order, no
 action, or Escape → default) - Fire/Magic have their own cursor group ids wired up too, but nothing
 currently arms those modes (no engine order exists for them yet, `ORDER_SUPPORTED`). The DLL's own
@@ -1344,33 +1344,33 @@ found the file and the cursor never changed.
 
 A regiment's banner marker on the minimap is anchored 8px left, 24px above its dot and can hang
 outside the minimap's strict inner map-area rect near an edge (more often an enemy regiment's, in
-a battle whose armies start apart along that axis). `BattleView.events()`'s minimap-click routing
-now checks `Hud.minimap_regiment_at()` (no inner-rect restriction) as well as `minimap_position()`
+a battle whose armies start apart along that axis). `BattleView.events`'s minimap-click routing
+now checks `Hud.minimap_regiment_at` (no inner-rect restriction) as well as `minimap_position`
 (inner-rect only, for "move" world coordinates), or such a banner click fell through to
-`hit_test()`/`occupies()` and was silently swallowed as plain HUD chrome - the click never reached
-`_minimap_click()` at all, regardless of the fix earlier in this section.
+`hit_test`/`occupies` and was silently swallowed as plain HUD chrome - the click never reached
+`_minimap_click` at all, regardless of the fix earlier in this section.
 
 Markers (dots and/or banners) can overlap on the minimap - most often several regiments' banners
-near each other - so a click can land on more than one regiment at once. `Hud.minimap_regiment_at()`
+near each other - so a click can land on more than one regiment at once. `Hud.minimap_regiment_at`
 (engine addition, not derived from the original: there is nothing in the research to say how the
 original handled this, if it came up at all given its markers are smaller/sparser) resolves the
 whole hit stack, in normal top-to-bottom paint order: the topmost hit regiment wins, unless it is
 already selected, in which case the click instead selects the bottom-most *other* regiment in the
 stack that is friendly (falling back to the bottom-most of any side if none is friendly) - normal
-selection promotes the picked regiment to the top of the paint order (`Hud._promote_marker()`,
-already wired through `Hud.set_selected()`), so repeated clicks on the same spot step through
+selection promotes the picked regiment to the top of the paint order (`Hud._promote_marker`,
+already wired through `Hud.set_selected`), so repeated clicks on the same spot step through
 every regiment there, friendly ones first, without ever getting stuck reselecting the same one. If
 the already-selected regiment is elsewhere in the stack but not on top, that is treated the same
 as it not being in the stack at all (the topmost one wins) rather than a third special case.
 
 That cycling rule is only for a plain click (selecting/inspecting a regiment); resolving an
-order's target (Attack) uses a separate lookup, `Hud.minimap_target_at()`, that always just
+order's target (Attack) uses a separate lookup, `Hud.minimap_target_at`, that always just
 returns whichever regiment in the hit stack is topmost, ignoring current selection entirely - an
 order's own acting regiment (`Hud.selected`) is essentially never one of its own targets, so the
 cycling rule (meant to make an otherwise-stuck plain-click selection reachable) does not apply.
 Issuing an order never changes the current selection either way, on either the minimap or the 3D
-view. An Attack order with no regiment under the click point (`BattleView._ground_click()`,
-`_minimap_click()`) is simply cancelled - the order mode clears exactly as if the order had fired
+view. An Attack order with no regiment under the click point (`BattleView._ground_click`,
+`_minimap_click`) is simply cancelled - the order mode clears exactly as if the order had fired
 - and logs a `"Cannot attack!"` line to the same debug event log the HUD's own message-text window
 would show it in, if that window were wired (see the "Implemented" paragraph above). This mirrors
 the classic Warhammer UI's "Cannot!" cue on a targetless order, but only the log line: which SFX
@@ -1383,7 +1383,7 @@ resource plays that cue is not identified anywhere in `notes/sfx.md`, so no soun
 the game runs a unit's close combat only **in the segment equal to its Initiative**
 (`unit I == segment`). Segments count down from 10, so higher Initiative strikes first. In the first
 combat round it also triggers hatred and frenzy shouts (events 8 and 9). Monsters (class 6) go
-through the game, everything else through the game.
+through, everything else through.
 
 **Initiative above 10** ✅: only two spells write I: "Ere We Go!" sets **I := 20** (and T +1) and "The Curse of
 Anraheir" halves I, both restored when the effect ends. A unit with I 20 never matches a segment, so **Orcs and
@@ -1399,7 +1399,7 @@ For every live model engaged with an enemy model, an attack profile is assembled
 - `WS` = model WS, **+1 when ganging up**: the first model to attack a free enemy model becomes its
   opponent and gets no bonus; every further model attacking that enemy model gets +1 WS (not against
   monsters). Up to 4 attackers fit around an enemy model (section 5.7);
-- `S` = attack strength (the game): `weapon_table[s_weap] + S`, +1 while the unit's charge
+- `S` = attack strength: `weapon_table[s_weap] + S`, +1 while the unit's charge
   counter is non-zero, +1 while the "fight harder" flag (unit flag bit 30, order 0x1B, see "Player orders") is set. Weapon table at
   the relevant data: class 0 → +0, 3 → +0, **4 → +2, 10 → +1**; classes 1, 2, 9 hold `0x83/0x84`
   (bit 7 = fixed strength 3/4, unused by the scripts);
@@ -1423,10 +1423,10 @@ Automatic hits use to-wound and saves, with no to-hit or hatred re-roll,
 apply in three cases: (1) the war machine model of an artillery or rolling stock unit (the leader
 model, flag `0x40000` set at unit set-up; the crew fight normally); (2) targets of class RollingStock or
 Furniture: all attacks go to the unit's first model and the wounds do **not** count for the combat
-result; (3) 🟡 contact attacks of charging or pursuing units (the game, reach 12 units, 18 cavalry,
+result; (3) 🟡 contact attacks of charging or pursuing units (reach 12 units, 18 cavalry,
 24 monsters) against models that are not in the timed "turning" state set when a unit routs.
 
-**Return blows** ✅ (the game) exist only for monsters: `model+0x58` is a per-round attack pool
+**Return blows** ✅ exist only for monsters: `model+0x58` is a per-round attack pool
 (A, 2A with frenzy) that only monster models get. Each enemy model that attacks a monster immediately
 draws one blow back from the pool (one hit/wound/save roll against the attacker's modified WS, hatred
 re-roll allowed, credited to the monster's side); the monster spends what is left in its own Initiative
@@ -1520,9 +1520,9 @@ strength**. Its BS, T, W, I, Ld and the byte `+4` (255 on the War Boar) are neve
 
 ### Charge ✅
 
-`EngageCharging` (the game) stores **`charge counter = floor(1.5 × frontage)`** (frontage `+0x7E`,
-constant 1.5 at the relevant data) on the unit that joins the battle grid; `Engage` (the game, re-engaging
-the current opponent) stores 0. The contact handler the game treats the moving unit with flags
+`EngageCharging` stores **`charge counter = floor(1.5 × frontage)`** (frontage `+0x7E`,
+constant 1.5 at the relevant data) on the unit that joins the battle grid; `Engage` (re-engaging
+the current opponent) stores 0. The contact handler treats the moving unit with flags
 `0x8080` (charge or pursuit order; event 8 "charge") as the charger; otherwise the game gives the
 counter to whichever unit is not yet on a grid, so a unit that runs into an ongoing combat also gets
 one. The defender's counter is untouched and nothing resets it when the combat ends.
@@ -1580,21 +1580,20 @@ After the attacker's items, S is capped at 9 and WS at 10.
 
 ### Engagement: battle grid and pairing ✅
 
-**Battle grid record** (pool of `0x14C`-byte records allocated at battle start, the game):
+**Battle grid record** (pool of `0x14C`-byte records allocated at battle start):
 unit count `+0`, flags `+2` (bit 0 in use, bit 1 result resolved), facing `+4`, sound handles, side
 vectors, owner unit `+0x20`, **tallies `+0x24` (side without `s_side` bit 7) and `+0x25` (with)**,
 creation segment `+0x26`, turn of the last reset `+0x28`, and a **17 × 17 cell map** `+0x2A` (one cell =
 12 world units = one model; bits 0–2 cell type, bits 5–7 side).
 
-**What triggers engagement** ✅ (traced September 2026): contact is decided in `ResolveUnitCollisions`
-(the game), not in the contact handler, and it is a two-stage geometric test **between the two
+**What triggers engagement** ✅ (traced September 2026): contact is decided in `ResolveUnitCollisions`, not in the contact handler, and it is a two-stage geometric test **between the two
 units' map objects** (see "Formations": a block's map object sits `(ranks − 1) × 6` behind the unit
 position):
 
 - **Broad phase**: `trunc(sqrt(dx² + dy²)) − r_a − r_b < 0` on the two map-object centres, where `r` is
-  the bounding radius at `object+4` (the box half-diagonal, the game).
-- **Narrow phase** (the game → the game): at least one of the mover's four rotated footprint
-  corners (`unit+0x312…+0x320`, rebuilt by the game) must lie **strictly inside** the other unit's
+  the bounding radius at `object+4` (the box half-diagonal).
+- **Narrow phase** : at least one of the mover's four rotated footprint
+  corners (`unit+0x312…+0x320`, rebuilt by) must lie **strictly inside** the other unit's
   rectangular footprint, after being rotated into that unit's object frame. So engagement needs real
   **penetration**, not mere proximity: there is no "reach" constant and no facing or arc requirement.
   (The 12 / 18 / 24 reach values belong to the contact attacks of section 7.7, not to engagement.)
@@ -1619,7 +1618,7 @@ target's collision record is **routing** (record bit `0x400`, set by `StartRout`
 re-form), when the target carries flag the relevant data (🟡 no writer found, R70), when the two are on the
 same side and the target is not the current opponent, or when the grid pool is exhausted (event 0x0C).
 
-**Creation and joining** (`GetOrCreateBattleGrid`, the game): when unit A engages B, A joins B's
+**Creation and joining**: when unit A engages B, A joins B's
 grid if B already has one (so several units share one combat and one pair of tallies); otherwise a
 new record is taken, B's models are written into the cells around the centre (one cell per model,
 or a full rectangle for war machines, rolling stock and monsters) and B becomes the owner. If the pool
@@ -1629,7 +1628,7 @@ round counter to 0, stores the charge counter, attack direction and side, and se
 **A unit is never on two grids** ✅: the game routes the engagement so that whichever side does
 *not* already have a grid is the one that joins, and `EngageCharging` refuses a second grid ("Allready
 has a BattleGrid") while still returning success, so no 0x0C is raised. Multi-unit fights are therefore
-always one shared record. The **attack direction** (`+0x22E`, the game) is computed once at
+always one shared record. The **attack direction** (`+0x22E`) is computed once at
 engagement, from the attacker's unit position to the defender's object centre against the defender's
 box diagonal `+0x322`, and is never recomputed while the fight lasts.
 
@@ -1657,7 +1656,7 @@ determined. Practically, this only matters for the exact edge case of two units 
 other head-on and reaching contact together; the common case (one moving unit reaching a
 stationary or already-engaged one) is unambiguous, as already described above.
 
-**Pairing** runs every tick (`EngageTroops`, the game):
+**Pairing** runs every tick:
 - The joining unit places at most **frontage** free models per tick, each in a free cell orthogonally
   next to the nearest enemy model (only the front and one flank cell are offered while the model is
   more than 18 units away, all four closer in). Models without a cell become **reserves** that wait
@@ -1731,7 +1730,7 @@ test sets a flag that makes the engine ignore movement, turn, rank and charge **
 what the unit may be *told* to do. The stillness described here is mechanical and happens regardless — the
 defender's models have nowhere to go because the grid was built on top of them.
 
-**Leaving** (`LeaveBattleGrid`, the game): models are unpaired, ownership passes to another unit
+**Leaving**: models are unpaired, ownership passes to another unit
 on the grid or the record is freed; a lone remaining unit with `s_side & 0xE0 == 0x20` leaves as well.
 Tallies are **not** reset on join or leave.
 
@@ -1748,10 +1747,10 @@ Tallies are **not** reset on join or leave.
 | the game (opcode 0x56 `TargetGone`) | the event source was my target and no other enemy is found |
 | the game case 0x16/0x17 | "unit removed" / "leader killed" naming my opponent, and no other enemy → leave, event 0x19 |
 | the game itself | recursion: the last unit on a grid whose `s_side & 0xE0 == 0x20` |
-| opcode 0x57 `LeaveSharedGrid` | script-driven; the **first instruction of the pursuit script 164** (R71) |
+| opcode 0x57 leaving a shared grid | script-driven; the **first instruction of the pursuit script 164** (R71) |
 
 **There is no geometric disengagement** ✅ — the single most important consequence for an engine.
-Nothing in `LeaveBattleGrid`, in the per-tick pairing (the game, the game, the game)
+Nothing in leaving a grid, in the per-tick pairing
 or in their callers reads a position, distance, footprint or collision record in order to leave. A unit
 stays on the grid until one of the **state** conditions above fires. Two units that have engaged can
 never be pulled apart by drifting, by turning, or by their footprints shrinking as models die.
@@ -1774,7 +1773,7 @@ opponent (`+0x48` model, `+0x4C` unit), `0x8000` reserve, `0x10000` in hand-to-h
 grid, `0x40000` war machine. Unit flags: `0x200` in melee, `0x400` owner pairing mode, `0x800` has a
 grid, `0x1000` grid owner, `0x2000` broken.
 
-**Cell ownership is per side, not per unit** ✅ (the game, the routine that stamps a cell):
+**Cell ownership is per side, not per unit** ✅ (the routine that stamps a cell):
 `*cell = placing_model's_unit.s_side & 0xE1 | 1` keeps only the side bits (5–7) and the "occupied"
 bit — nothing identifies *which* unit on that side placed the model. So when several units of one
 side share a grid against a common enemy, their models fill one undivided pool of free cells: there
@@ -1783,12 +1782,12 @@ processed first in a tick (`BattleTick`'s fixed unit-array order) claims the fre
 enemy; a second, later-processed friendly unit's excess models fall through to the reserve queue
 exactly like an overflow from a single deep unit would.
 
-**Grid ownership handover** (`LeaveBattleGrid` → `FindOwnerCandidate`, the game) is a linear
+**Grid ownership handover** is a linear
 scan of the whole unit array for the first unit still pointing at this grid, **with no side filter**
 — the new owner can be an ally or an enemy of the departing owner, decided purely by array order, not
 by any tactical criterion.
 
-**Retargeting** (`OpponentRetarget`, the game) is a one-shot comparison made only when a model
+**Retargeting** (`OpponentRetarget`) is a one-shot comparison made only when a model
 first arrives at its cell (distance to target < 3 units): it keeps its assigned opponent unless that
 opponent has none, or the arriving attacker's own unit has a higher `s_pntval` than the current
 attacker's unit, or the current target is a war machine — in which case it steals the pairing.
@@ -1796,21 +1795,20 @@ A single model never re-polls this once `0x10000` (in hand-to-hand) is set, but 
 with two enemy units sharing a grid, a defending model's recorded "primary attacker" can flip more
 than once as higher-`s_pntval` attackers arrive later — driven by arrival order, not stability.
 
-**Result accounting for a pile-on** (`AddCombatResult`, the game): rank and direction bonus are
+**Result accounting for a pile-on** (`AddCombatResult`): rank and direction bonus are
 computed **per attacking unit**, from that unit's own frontage/ranks and its own recorded attack
 direction — there is no reference to which enemy unit or model it actually fought. Both attacking
 units' bonuses (which can differ, e.g. one gets a flank bonus the other doesn't) add into the *same*
 single shared side tally with no cap or diminishing return: a multi-unit pile-on onto one grid is
 strictly additive.
 
-**Grid pool and its limits** ✅: allocated once per battle as `total_battle_units / 2` records
-(the game), the hard cap on the number of *simultaneous, separate* close-combat grids (each
+**Grid pool and its limits** ✅: allocated once per battle as `total_battle_units / 2` records, the hard cap on the number of *simultaneous, separate* close-combat grids (each
 needs ≥ 2 distinct units) — ordinary battles never approach it. Exhaustion sends event `0x0C` only on
 the "new contact" engage path (the game → the game/the game); the "re-engage the
-same opponent" path (the game) fails **silently**, with no event, if the pool happens to be
+same opponent" path fails **silently**, with no event, if the pool happens to be
 exhausted at that moment.
 
-**No spatial awareness between separate grids or with terrain** ✅: `GetOrCreateBattleGrid` decides
+**No spatial awareness between separate grids or with terrain** ✅: grid lookup or creation decides
 join-vs-create purely from a per-unit "already has a grid" flag — there is no proximity check against
 *other* grid records. Two unrelated fights can freely overlap in world space with zero interaction:
 each grid's cell array, model placement, movement and `AddCombatResult` accounting only ever indexes
@@ -1819,17 +1817,16 @@ its own record. Likewise, grid creation and per-tick pairing never call the regi
 ordinary movement respects (see "Routes, collisions and visibility"): a grid can be seeded on top of
 impassable scenery or straddling `BATTLEEDGE`, and per-tick pairing will place and walk models into
 such cells unconditionally. The only terrain interaction any unit gets, combat or not, is
-`ResolveUnitCollisions`'s unconditional per-tick boundary repel (the game, mask `SOLID |
+`ResolveUnitCollisions`'s unconditional per-tick boundary repel (mask `SOLID |
 INVSOLID | BATTLEEDGE`), which shoves the whole unit back over the boundary regardless of melee state
 and does not reconcile the resulting displacement with the unit's assigned grid cell — a unit already
-fighting can still be jostled off its nominal cell position by ordinary scenery push-apart
-(the game) resolved in the same neighbour scan, with nothing detecting or correcting the drift.
+fighting can still be jostled off its nominal cell position by ordinary scenery push-apart resolved in the same neighbour scan, with nothing detecting or correcting the drift.
 
 🟡 **Grid-footprint overflow at creation is unchecked**: per-tick reinforcement placement
-(the game/the game) bounds-checks every candidate cell to `0..16` and simply defers an
+ bounds-checks every candidate cell to `0..16` and simply defers an
 out-of-range model to a later tick (it stays free, is retried, and can end up a permanent
 non-fighter if the geometry never changes — not written off after one failure). But the *initial*
-footprint written when a grid is first created (`CreateGridTroops`/`CreateGridBlock`) computes cell
+footprint written when a grid is first created computes cell
 indices as `8 − frontage/2`, `8 − ranks/2` with **no clamp at all**; a unit with frontage or ranks
 above roughly 16 would write outside the 17×17 array into adjacent grid-record memory. Whether any
 real formation (given the formation-size caps in "Formations" above) can actually reach that width is
@@ -1889,7 +1886,7 @@ The unit's own score also gets, when its enemy is a unit of classes 1–6:
   bonus therefore **decays as the unit is worn down** and vanishes once it is below two full ranks.
   Deriving the width from the current model count instead pins the bonus near `ranks − 1` for the
   whole fight and inflates every result the unit is part of;
-- **direction bonus** from the attack direction code (the game, the angle of the attacker
+- **direction bonus** from the attack direction code (the angle of the attacker
   relative to the defender's facing): code 1 (behind) **+2**, codes 2–3 (sides) **+1**, 0 (front) 0.
 
 `AttackDirection` returns eight codes (two halves each of front arc 0/4, rear arc 1/5, flanks 2/6 and 3/7);
@@ -1946,18 +1943,18 @@ elif LeadershipTest(unit, modifier = −difference) fails:
 ### The Leadership test ✅
 
 ```
-pass  <=>  modifier + (rand() % 11 + 2) <= effective Ld     # modifier − 1 (= +1 Ld) while the "fight harder" flag is set
+pass  <=>  modifier + (rand % 11 + 2) <= effective Ld     # modifier − 1 (= +1 Ld) while the "fight harder" flag is set
 ```
 
 The roll is **uniform over 2–12**, not 2D6. For Ld 7 the chance to pass is 6/11 = 54.5% (2D6:
 58.3%); Ld 9: 72.7% (83.3%); Ld 5: 36.4% (27.8%). Low Leadership is better and high Leadership
 worse than on the tabletop. Callers: break test, panic, fear, rally, pursuit, artillery crews,
-and a scripted test the game.
+and a scripted test.
 
 ### Panic ✅
 
 **There is no friendly-unit panic** ✅ (re-verified September 2026 over every caller of the game
-and the game): nothing makes a unit test morale because a *friendly* unit broke or was destroyed.
+and): nothing makes a unit test morale because a *friendly* unit broke or was destroyed.
 The rout broadcast (event 0x0F) goes to enemies only and drives pursuit; events 0x0E and 0x16 only make
 other units drop the unit as a target. Panic is driven purely by a unit's **own** casualty thresholds
 plus area damage and two spell effects, so it is one of the engine's *decorrelators* of morale: adding
@@ -1976,12 +1973,12 @@ modifier 0 when a unit is at or below a quarter of its original size.
 Only **deaths** trigger panic ✅: `RemoveModel(unit, slot, killed)` runs the check only when `killed != 0`,
 which the death paths pass (the model death callback at the relevant data and the unit destruction callback at
 the relevant data, both reached through animation callbacks). Removal without death (`killed = 0`: units that
-leave the table, the game; destroyed buildings, the game) adds to `s_routed` instead, so
+leave the table; destroyed buildings) adds to `s_routed` instead, so
 `s_routed` counts **models that fled off the battlefield**. A killed model flagged `0x40` also sends event 0x17.
 
 ### Fear and terror ✅
 
-`MayEngage(unit, enemy)` (the game):
+`MayEngage(unit, enemy)`:
 - enemy causes terror and the unit has neither `Frenzy` nor `PsyImmune` → refused, **no roll**;
 - fear applies (enemy `CauseFear` or Dread Banner; the unit has none of `CantBreak`, `Frenzy`, `PsyImmune` and
   no own Dread Banner) → Leadership test at modifier 0; a pass sets psy bit 14 (no further tests until the
@@ -1994,7 +1991,7 @@ It is used in three situations:
 2. **Charging a target** (op 0x4E, the attack/approach charge of scripts 105, 158, 159 → 160; the player's Charge
    button uses the straight-ahead op 0x4F instead, 🟡 whether that tests fear): failure → "My men fear the beast!" and the unit halts and re-forms; success starts
    the charge (flag `0x80`) and sends event 0x07 to the target.
-3. **Contact while moving** (the game, unless bit 14 is set): failure → event 0x0D, flight.
+3. **Contact while moving** (unless bit 14 is set): failure → event 0x0D, flight.
 
 So a failed fear test means flight (when charged or on contact) or a refused charge, whatever the numbers,
 and a terror-causer makes every non-immune unit that it charges or touches flee without a roll. There is no
@@ -2021,11 +2018,10 @@ When a unit routs, every enemy unit receives event 0x0F, but only the routed uni
 there is one; otherwise it pursues. A unit not on a grid pursues only if it was charging. Player artillery,
 wizards and archers never pursue.
 
-**Opcode 0x53 in full** ✅ (the game, traced September 2026). Only opponents react because the
-opcode gates on `event sender == +0x220` (the unit's current opponent); a unit busy casting
-(the game) aborts first. Then, exactly:
+**Opcode 0x53 in full** ✅ (traced September 2026). Only opponents react because the
+opcode gates on `event sender == +0x220` (the unit's current opponent); a unit busy casting aborts first. Then, exactly:
 
-- **in melee** (`+0xB4 & 0x200`): call the game. If it finds another enemy on the grid, **switch to
+- **in melee** (`+0xB4 & 0x200`): call. If it finds another enemy on the grid, **switch to
   it** — the game unpairs the models that were fighting the router, `+0x22E` is zeroed, `0x400` is
   cleared (back to joiner pairing mode) and `+0x220` is set to the new enemy — and the pursuit condition
   is **false**. If it finds nobody, the condition is **true** and the unit pursues.
@@ -2042,23 +2038,22 @@ scripts **151** (generic) and **153** (melee) do an unconditional `IfSwitchScrip
 flag `0x8000000` is set, else they just send event 25; script **154** (artillery / static) handles the
 event with the separate opcode 0x54 `EnemyRoutedStatic` and never enters 164 at all. Script 164 itself is
 `LeaveSharedGrid; ReformToScriptRanks; React 3 ("Destroy them!"); Query 1; IfThreatOutweighsWorth;
-SendEventSelfIfTrue 3; YieldIfTrue; StartPursuit`, and `StartPursuit` (the game) sets state `0x200`
+SendEventSelfIfTrue 3; YieldIfTrue; StartPursuit`, and `StartPursuit` sets state `0x200`
 and flag `0x8000`, refused if `+0xB8 & 9`.
 
 **A pursuer can never re-engage its fugitive** ✅: the routing collision-record bit `0x400` removes the
 fleeing unit from the collision scan and from the contact handler's entry check. All damage during a chase
-comes from the contact attacks of section 7.7 — the game, once per segment per attacker
-(`+0xB8` bit 5), against models within `2 × reach` where reach is **12 units, 18 cavalry, 24 monsters**
-(the game), hitting automatically any model that lacks the `0x4` turning/braced flag. There is no
+comes from the contact attacks of section 7.7 —, once per segment per attacker
+(`+0xB8` bit 5), against models within `2 × reach` where reach is **12 units, 18 cavalry, 24 monsters**, hitting automatically any model that lacks the `0x4` turning/braced flag. There is no
 instant kill, and no close combat.
 
-**No re-engage cooldown** ✅, but a re-form gate: `0x400` is cleared by the game, which every re-form
+**No re-engage cooldown** ✅, but a re-form gate: `0x400` is cleared by, which every re-form
 calls, so a rallied unit becomes engageable again as soon as it re-forms. The only other bar is the broken
 flag `0x2000`.
 
 The pursuit script (164) shouts "Destroy them!", may attack a more attractive target instead (if its
-value exceeds the unit's worth `+0x33E`), and starts the pursuit (`StartPursuit`, the game: state
-`0x200`, flag `0x8000`). `PursuingUnitUpdate` (the game) and `PursuitStep` (the game) end it
+value exceeds the unit's worth `+0x33E`), and starts the pursuit (`StartPursuit`,: state
+`0x200`, flag `0x8000`). the pursuit update and the pursuit step end it
 with event 0x10 when:
 - the target is gone, rallied or died;
 - the chase budget runs out (not with `AlwaysPursue`): `min(2 × distance, 120)` at first, then changed at
@@ -2071,7 +2066,7 @@ with event 0x10 when:
 
 - `CantDie` ✅: the game removes a model when wounds ≥ W only if the unit lacks `CantDie`.
 - `MagicResistent` ✅: in the area damage routine, a wound from a magical source is ignored on
-  an even `rand()`.
+  an even `rand`.
 - Hatred and frenzy: section 5.2; fear in break tests: section 6.2.
 
 ### Flight and catching fleeing units ✅ / 🟡
@@ -2082,15 +2077,15 @@ while its leader model lives). Otherwise the unit shouts "Retreat!" or "Flee the
 the rout script, which starts the flight **directly away from its opponent** (bearing + 180°), or along its
 facing without one.
 
-`StartRout` (the game): movement state `0x100`, leaves the combat grid, **loses `Frenzy`**, gets the
+`StartRout`: movement state `0x100`, leaves the combat grid, **loses `Frenzy`**, gets the
 broken flag `0x2000`, sends event 0x0F to every enemy unit and schedules the rally attempts.
-`FleeingUnitUpdate` moves the unit; `RoutRoute` (the game) probes one step ahead and deflects the
+`FleeingUnitUpdate` moves the unit; `RoutRoute` probes one step ahead and deflects the
 heading by ±0x20 (of 512) around obstacles. Once outside the battle area the unit sends event 0x0E and is
 then removed alive (every model counts in `s_routed`). 🟡 Speeds: the flee counter uses `s_rlmv`, the
 distance per tick comes from the generic mover the game (not traced).
 
 🟡 **Catching.** Pursuers never engage fleeing units in close combat: the collision pass skips routing
-footprints. Instead, the fleeing unit's own collision pass calls `ContactAttacks` (the game) for every
+footprints. Instead, the fleeing unit's own collision pass calls `ContactAttacks` for every
 enemy unit it touches: once per segment per attacker, each attacker model makes up to A attempts against
 random victim models within twice its reach (12, cavalry 18, monsters 24), with automatic hits (fleeing models
 lack the "braced" model flag 4), charge bonus included. As the pursuer is steered onto the fugitive, this
@@ -2108,7 +2103,7 @@ charge that never seemed to catch and kill a fleeing goblin unit while a second 
 was also chasing it. `RoutRoute`'s own small per-step deflection around obstacles (±0x20 of 512) is
 still not modelled - the frozen bearing here is exactly straight, an existing, separately-flagged
 simplification of the pathing itself (`notes/engine_architecture.md`'s "Collisions": a simplified
-`PushApart`, not the original's polygon obstruction routing).
+push-apart rule, not the original's polygon obstruction routing).
 
 ### Scripted target and flight opcodes: `DropTarget`, `FleeAhead`, `StoreEventInfo`, `FaceModelsToTarget` ✅
 
@@ -2214,7 +2209,7 @@ battle clock (19 per segment, 100 ms each).
   (the game; 64 for spell effects). The missile code is `S_BalWeap` of the unit (Archers), of the
   leader's block (Artillery) or the leader's if non-zero (others).
 - Shooting is run by the **library behaviour scripts** (107–124, handlers 154/156, identical in all mission
-  DLLs). A player fire order (`OrderFire`, the game) **halts a moving unit** and queues an event:
+  DLLs). A player fire order (`OrderFire`) **halts a moving unit** and queues an event:
   target unit, target building, search (click on itself), ground point, or hunt variants with unit flag
   bit 27. Special shooters (codes 14, 15, 17) fire their own routine at once.
 - The fire loops re-run every update: `ReadyToFire` (reload) ∧ `InArcAndRange` ∧ `TargetValid` → volley;
@@ -2227,7 +2222,7 @@ battle clock (19 per segment, 100 ms each).
   arc test). **Range**: strictly below the maximum range (`GMTXT 2001`). No long-range, moving or cover
   modifier; **shooting into close combat is allowed** (hits are geometric, friends near the target can be
   hit). Crossbows alone refuse to shoot when a non-enemy unit stands on the line of fire (`TargetValid`).
-- `ReadyToFire` (the game) order: hold-fire bit `+0xB8 & 8` → reload (`GMTXT 2003`) → machine present
+- `ReadyToFire` order: hold-fire bit `+0xB8 & 8` → reload (`GMTXT 2003`) → machine present
   (`2015` "Artillery destroyed!") → at least 2 crew (`2016`). `GMTXT 2000` "Missiles fired!" is never used.
 
 ### Reload time ✅
@@ -2248,22 +2243,21 @@ fires about twice per turn; WFB fires every turn.
 
 ### Aim, scatter, flight ✅
 
-Each projectile (`LaunchProjectile`, the game, 27 arguments; records of `0x2DC` bytes at
+Each projectile (`LaunchProjectile`, 27 arguments; records of `0x2DC` bytes at
 the relevant data) flies to the target point displaced on each axis by
 
 ```
-offset = (rand() % (11 − min(BS, 10))) × (random sign) × spread × distance / max_range
+offset = (rand % (11 − min(BS, 10))) × (random sign) × spread × distance / max_range
 ```
 
 `spread` = 8 for bows and crossbows, `8 × d` for artillery (*d* = the first artillery die, 8.5), **+8 if a
-scenery object lies on the line of fire** (`NextObjectOnLine`, the game: buildings, walls, trees). An object blocks when
+scenery object lies on the line of fire** (`NextObjectOnLine`,: buildings, walls, trees). An object blocks when
 `min(Δ, 512 − Δ) < trunc(asin(radius / d) × 256 / π)`, with `d = trunc(distance)` below the range and Δ the difference
-between the line's direction and the object's bearing `trunc(256 − 256 × atan2(dx, dy) / π)` (`ObjectOnLine`,
-the game); a firer inside an object's circle is never blocked by it.
+between the line's direction and the object's bearing `trunc(256 − 256 × atan2(dx, dy) / π)` (`ObjectOnLine`); a firer inside an object's circle is never blocked by it.
 Horizontal motion is linear over a fixed flight time; height follows an arc (bows apex ≈ 180 units,
 crossbows ≈ 45, cannon low, mortar and rock lobber high). Holding Ctrl only changes the projectile graphic.
 
-**In flight** the projectile is tested against map objects every tick (`StepProjectile`, the game);
+**In flight** the projectile is tested against map objects every tick (`StepProjectile`);
 all missile weapons stop at their first hit. An arrow flying into a unit wounds one random model; a **blast
 projectile flying into a unit's footprint hits every model at full S** (the flight test passes the radius
 negated). Low trajectories (crossbows, cannon) can therefore hit intervening units; high arcs (mortar, rock
@@ -2295,7 +2289,7 @@ against buildings, saves, magical, flags, messages. For every map object at dist
 - **Units** (height test passed, flying units only between their base and top):
   - `d < footprint radius` (`GMTXT 2004` "Direct hit on the %s!"): radius 0 → **one random model**;
     radius ≠ 0 → **every model**. Each: `TO_WOUND[S][T]`, armour save if allowed (the leader with its armour
-    items), `MagicResistent` 50% if magical, then `rand() % wound_die + 1` wounds.
+    items), `MagicResistent` 50% if magical, then `rand % wound_die + 1` wounds.
   - `d < footprint + radius` (blast margin, `GMTXT 2005` "The %s have been hit!"):
     `n = (footprint + radius − d) × size / (footprint + radius)`, at least 1, random models (with repetition)
     at **S/2 for exactly 1 wound**.
@@ -2310,31 +2304,31 @@ against buildings, saves, magical, flags, messages. For every map object at dist
 
 Before every artillery shot: D6; on 1–5 nothing happens and the result becomes the die *d* used for the
 scatter. On a **6** a second D6 is rolled: on **1** the machine explodes: every crewman takes a wound on an
-even `rand()`, and if any crew survive they take a Leadership test or rout (`GMTXT 2018` "The %s has misfired
+even `rand`, and if any crew survive they take a Leadership test or rout (`GMTXT 2018` "The %s has misfired
 and been destroyed."). On 2–6 the shot is lost (`GMTXT 2019` "The %s has misfired."). The warpfire thrower
 never misfires.
 
 ### Special weapons ✅
 
-These reuse the **spell effect engine** (`LaunchEffect`, the game, innate casting) and are magical
+These reuse the **spell effect engine** (`LaunchEffect`, innate casting) and are magical
 (`MagicResistent` ignores half the hits).
 
 | Code / routine | Targeting | Shots | Per shot |
 |---|---|---|---|
-| 13 Doomwheel warp lightning (behaviour 0x1A, `DoomwheelBolt` the game) | reload on the leader block | 3 bolts: ahead, right, left; distance `D6 × D6 × D6 × 12`; nearest unit **of either side** near that point | fails on a 6 (`GMTXT 2021`); S5, D6 wounds, no save |
-| 14 Dragon breath (the game) | target in the front 180° | D6+3 flames around the target | S8, 1 wound, no save, **every unit hit routs** (flags `0x41`) |
-| 15 warpfire thrower (the game) | needs crew | D6 flames around the target | S4, 1 wound, no save; no misfire |
-| 16 (Wyvern shaman) | – | – | not a weapon: marks a monster-class unit as a **spellcaster** (`CanCastSpells`, the game) |
-| 17 Gyrocopter steam gun (the game, Infantry-class files) | range 144 (6") | 1, passes through units | S4, 1 wound, no save, hits one model of each unit it crosses |
-| 17 Gyrocopter bomb (the game, Archers-class files) | Ctrl + command, only while flying (`GMTXT 2020`) | 1, dropped | radius 72, S4, 1 wound, saves; artillery misfire roll |
-| Pestilent Breath (behaviour 0x1B, the game) | scripted units | 1 near the unit | S3, 1 wound, no save, passes through |
+| 13 Doomwheel warp lightning (behaviour 0x1A, `DoomwheelBolt`) | reload on the leader block | 3 bolts: ahead, right, left; distance `D6 × D6 × D6 × 12`; nearest unit **of either side** near that point | fails on a 6 (`GMTXT 2021`); S5, D6 wounds, no save |
+| 14 Dragon breath | target in the front 180° | D6+3 flames around the target | S8, 1 wound, no save, **every unit hit routs** (flags `0x41`) |
+| 15 warpfire thrower | needs crew | D6 flames around the target | S4, 1 wound, no save; no misfire |
+| 16 (Wyvern shaman) | – | – | not a weapon: marks a monster-class unit as a **spellcaster** (`CanCastSpells`) |
+| 17 Gyrocopter steam gun (Infantry-class files) | range 144 (6") | 1, passes through units | S4, 1 wound, no save, hits one model of each unit it crosses |
+| 17 Gyrocopter bomb (Archers-class files) | Ctrl + command, only while flying (`GMTXT 2020`) | 1, dropped | radius 72, S4, 1 wound, saves; artillery misfire roll |
+| Pestilent Breath (behaviour 0x1B) | scripted units | 1 near the unit | S3, 1 wound, no save, passes through |
 
 The doom diver is an ordinary artillery shot (`0x4C` is only its graphic; no steering found). On landing
 the game places a dead-diver corpse decal (the ordinary 32-entry corpse ring, random facing): no game effect.
 
 ### Night Goblin Fanatics ✅ / 🟡
 
-Behaviour 0x12 (`FanaticUpdate`, the game). While hidden (object flag `0x400`) the fanatic waits until
+Behaviour 0x12 (`FanaticUpdate`). While hidden (object flag `0x400`) the fanatic waits until
 no model of its parent unit (`+0x224`) is within reach, then is out. Each update afterwards:
 - every model of an Infantry, Cavalry, Archers, Wizard or Monster unit within **12 units (18 against
   cavalry, 24 against monsters)** takes an **S5 wound roll: 1 wound, no save**; the fanatic survives;
@@ -2352,9 +2346,9 @@ WFB: D6 S5 hits per unit touched, 2D6" moves, dies on a double; here damage scal
 
 - **Power**: one pool per side, 0–8 (player `battle+0x32BA0+0x528`, enemy `+0x52C`; allies use the player's).
   No per-wizard power, no wizard levels. the game replaces each pool every **50 s of unpaused real time**
-  by `Wind(current)` (the game): an empty pool becomes 1–7, otherwise `current − 4 … current + 3`, at least
-  1. (Count and Fixed = 8 modes are debug options behind Ctrl/Shift clicks on the magic panel.) Each pool **starts at `rand() % 8 + 1` (1–8)**, set by the battle
-  window's create handler the game.
+  by `Wind(current)`: an empty pool becomes 1–7, otherwise `current − 4 … current + 3`, at least
+  1. (Count and Fixed = 8 modes are debug options behind Ctrl/Shift clicks on the magic panel.) Each pool **starts at `rand % 8 + 1` (1–8)**, set by the battle
+  window's create handler.
 - **Spell/item table** the relevant data, 24-byte records `{GMTXT id, effect code, name, kind (1 spell, 2 item),
   cost, flags}`; costs: 1 Dispel Magic, Azure Blades, Lightning, Fireball, Flying Bower, Mork Save Uz,
   Skitterleap, Pestilent Breath; 2 Wind Blast, Sapphire Arch, Piercing Bolts, Burning Head, Hunting Spear,
@@ -2370,7 +2364,7 @@ WFB: D6 S5 hits per unit touched, 2D6" moves, dies on a double; here damage scal
   engaged wizard cannot turn, so a target outside the arc cancels the spell (op 0xAA). Outside combat the wizard
   first turns ("Turning Wizard to cast spell.", script 141: instant quarter/half turn beyond 45°, then a wheel);
   the arc is not re-tested after the turn.
-- **Checks** (`LaunchEffect`, the game): fewer than 64 active effects; the caster can cast (class Wizard,
+- **Checks** (`LaunchEffect`): fewer than 64 active effects; the caster can cast (class Wizard,
   or a leader with `S_BalWeap` 16, e.g. the Orc shaman on a Wyvern); target point within `EffectRange` of the
   unit centre and within **±50° of facing**; unit-target spells need a unit under the point. **No line of
   sight, no casting roll, no miscast, no reload**; on failure `GMTXT 2021` "…attempted to cast … but failed" and
@@ -2420,7 +2414,7 @@ overlapping Ere We Go casts would restore a wrong I, 🟡). No spell passes the 
 
 ### Dispel and anti-magic ✅
 
-`DispelAura` (the game): each tick of its schedule, every other dispellable effect within **80 units** of
+`DispelAura`: each tick of its schedule, every other dispellable effect within **80 units** of
 the protected unit is removed on a percentage roll (`GMTXT 2006` "…has been dispelled by…"). Innate effects,
 other dispels and effects cast by or on the protected unit are skipped; **there is no side test**, so friendly
 spells nearby are dispelled too.
@@ -2449,7 +2443,7 @@ spells nearby are dispelled too.
 ### AI casting ✅
 
 Library scripts (opcodes 147–175 named in the report): a computer wizard picks the nearest enemy and the first
-spell of its list that it can afford and whose rule passes (`AIChooseSpell`, the game), turns to face and
+spell of its list that it can afford and whose rule passes (`AIChooseSpell`), turns to face and
 casts. The same scripts run for player wizards given an attack order, so they cast automatically from the
 player's pool. Wind Blast and Sapphire Arch are never chosen. The area-spell rule (Conflagration, Flying Bower, Tangling Thorn, Flock of Doom, Da Krunch) is **inverted**:
 `NonFriendNearPoint` returns 1 whenever a non-friendly unit is within the radius of the point, and the target unit
@@ -2530,7 +2524,7 @@ research unless marked Wine.
 | R32 | **Charge and pursuit orders** | ✅ order table and flag setters (Player orders). | — | done |
 | R33 | **Charging monster keeps +1 S** | ✅ confirmed; engine decision (reproduce or fix). | Owner decision. | decision |
 | R34 | **Early release of reserves** | ✅ set by every model death, so gaps in the line refill at once. | — | done |
-| R35 | **Grid edge cases** | ✅ `s_side & 0xE0 == 0x20` = fake units for placed buildings/furniture (Madness keeps it); formation flag 0x80 = furniture footprint bit. ✅ resolved further: per-tick placement bounds-checks to 0..16 and defers overflow to later ticks (section 5.7); 🟡 initial grid-footprint creation (`CreateGridTroops`/`CreateGridBlock`) has no such clamp — an out-of-range write is possible for frontage/ranks > ~16, reachability from real formation caps unconfirmed. | Grep formation-size caps, or Wine session with an oversized formation. | low |
+| R35 | **Grid edge cases** | ✅ `s_side & 0xE0 == 0x20` = fake units for placed buildings/furniture (Madness keeps it); formation flag 0x80 = furniture footprint bit. ✅ resolved further: per-tick placement bounds-checks to 0..16 and defers overflow to later ticks (section 5.7); 🟡 initial grid-footprint creation has no such clamp — an out-of-range write is possible for frontage/ranks > ~16, reachability from real formation caps unconfirmed. | Grep formation-size caps, or Wine session with an oversized formation. | low |
 | R36 | **Models fighting in practice** | 🟡 wrap-around completes within 2–4 segments; limited by free cells (section 5.7). ✅ resolved: cell ownership is per side not per unit (allied units on one grid share one undivided cell pool); pile-on rank/direction bonuses are strictly additive with no cap; separate grids never check proximity to each other and can freely overlap in world space with no interaction; grid placement/pairing never consults terrain or map-boundary code, only the generic always-on per-unit boundary repel applies, uncoordinated with grid cells (section 5.7). | Simulate or observe under Wine for real fight-population numbers. | low |
 
 ### Combat resolution and morale
@@ -2575,7 +2569,7 @@ research unless marked Wine.
 
 | # | Open point | What is known | How to resolve | Priority |
 |---|---|---|---|---|
-| R28 | **Remaining stat bytes** | ✅ `s_wdth`/`s_rkmd`/`s_spar` = frontage, ranks, full-frontage front ranks (recomputed); `s_rlmv` recomputed from a float at set-up; `s_cmdr`, `s_armname`, `s_banner` always 0; `s_rnks` is the script's rank count used by the formation code; second stat block at `+0x95` read for leaders/artillery. | Trace the float for `s_rlmv` in the game; where `+0x95` is copied from the leader. | low |
+| R28 | **Remaining stat bytes** | ✅ `s_wdth`/`s_rkmd`/`s_spar` = frontage, ranks, full-frontage front ranks (recomputed); `s_rlmv` recomputed from a float at set-up; `s_cmdr`, `s_armname`, `s_banner` always 0; `s_rnks` is the script's rank count used by the formation code; second stat block at `+0x95` read for leaders/artillery. | Trace the float for `s_rlmv` in; where `+0x95` is copied from the leader. | low |
 | R29 | **Movement** | ✅ `s_rlmv` from M and I, speed factors, turning, charge reach, no terrain effect (section 4). | — | done |
 | R30 | **Magic** | ✅ resolved: power pools, casting, every spell, dispel, AI (sections 8.8–8.12). | — | done |
 | R31 | **`the original front end` copy** | ✅ dead code: its battle dispatcher has no callers; only the army writer is used by the front end. | — | done |
@@ -2603,7 +2597,7 @@ research unless marked Wine.
 | # | Open point (engagement lifecycle, September 2026) | What is known | How to resolve | Priority |
 |---|---|---|---|---|
 | R70 | **Cannot-engage flag** | A unit with this flag refuses engagement outright; its source and full effects remain unknown. | Verify with a unit that cannot be engaged. | medium |
-| R71 | **Opcode 0x57 `LeaveSharedGrid`** | The first instruction of pursuit script 164; it materially affects the lifecycle. Behaviour is not yet independently verified. | Verify this behaviour directly. | medium |
+| R71 | **Opcode 0x57 leaving a shared grid** | The first instruction of pursuit script 164; it materially affects the lifecycle. Behaviour is not yet independently verified. | Verify this behaviour directly. | medium |
 | R72 | **Bounding radius formula** | The evidence is consistent with `sqrt((frontage×6)² + (ranks×6)²)`. Inferred, not verified. | Verify with known frontage/rank combinations. | low |
 | R73 | **Rally inside an enemy footprint** | `0x400` is cleared by any re-form, so a rallied unit is immediately engageable; whether one that rallies while still overlapping an enemy re-engages on the very next tick or is pushed out first depends on the order of the game and the collision pass within that frame. | Wine session. | low |
 | R74 | **Grid-ordering behaviour in practice** | The "another enemy on this grid" choice is the first match in **the unit's own model-list order**, with no distance or threat tiebreak, so a reimplementation that pairs models in a different order picks a different next opponent without being wrong about the rule. | Accept, or match the original pairing order. | low |

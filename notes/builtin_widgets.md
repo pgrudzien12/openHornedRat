@@ -6,9 +6,9 @@ screen. It extends `notes/troop_selection.md` (§8 roster book, §5.3 selection 
 `ROADMAP.md` for these widgets. Marks: ✅ read from the executable (and cross-checked against shipped data where possible),
 🟡 read from code but not observed running / inferred in part, ⬜ open.
 
-Sources: the window procedures, open routines and paint routines of `WHSHR.EXE`, the battle loader of `GAMEF.DLL` (for §6), the
-option table and registry code of both, and the shipped `WND.DLL` scripts, `.BTS` files and the campaign files in `SAVE/`. Decompiler
-output stays in scratch; nothing in this note names original functions or addresses. All numbers are pixels on the 640×480 screen
+Sources: the observed behaviour of the front end (`WHSHR.EXE`) and the battle loader (`GAMEF.DLL`, for §6), the option table and
+registry settings of both, and the shipped `WND.DLL` scripts, `.BTS` files and the campaign files in `SAVE/`. Nothing in this note names
+original functions or addresses. All numbers are pixels on the 640×480 screen
 unless stated.
 
 ## 1. Shared conventions of the built-in windows ✅

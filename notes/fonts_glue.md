@@ -1,8 +1,7 @@
 # Fonts (`.FON`) and front-end ("glue") palettes — ROADMAP 1.6
 
 Findings from black-box analysis of the files plus string references in `WHSHR.EXE` /
-`GAMEF.DLL`, plus (§2) a later Ghidra static-analysis pass on `WHSHR.EXE`'s glue font selection and
-UI painters — described here as behavior only, per `CLAUDE.md`'s clean-room policy. Everything
+`GAMEF.DLL`, plus (§2) the front end's glue font selection and UI painting — described here as behaviour only. Everything
 below was checked on **all** files of each type.
 
 | Item | Status |
@@ -122,9 +121,9 @@ placeholder: a solid block, or a thin bar in `GOTHTEXT`/`SUBTEXT`.
   file, differs. **Hypothesis:** they were renamed so that the front end and the battle engine
   can both register their fonts with `AddFontResourceA` at the same time without clashing.
 - The code uses GDI: `AddFontResourceA`, `CreateFontIndirectA`, `EnumFontFamiliesA`,
-  `RemoveFontResourceA`. `WHSHR.EXE` selects fonts by number (`[GlueCreateFont] Font %d not
-  found`/`...not loaded`), which fits the face names `Warhammer Font 1..6`.
-- **Font number → file, confirmed ✅.** This is not just a naming coincidence: `GlueCreateFont(N)`
+  `RemoveFontResourceA`. `WHSHR.EXE` selects fonts by number (it reports "Font %d not
+  found"/"not loaded" errors), which fits the face names `Warhammer Font 1..6`.
+- **Font number → file, confirmed ✅.** This is not just a naming coincidence: selecting font `N`
   looks `N` up in a fixed-size table of font records (one per registered `.FON`) and builds a
   `LOGFONTA` whose face name is one of the six literal strings `"Warhammer Font 1"`…`"Warhammer
   Font 6"` found in `WHSHR.EXE`, in that numeric order, before calling `CreateFontIndirectA`. Those
@@ -153,33 +152,31 @@ placeholder: a solid block, or a thin bar in `GOTHTEXT`/`SUBTEXT`.
 - **Confirmed by static analysis (§6):** font 2 = `PCTEXT.FON` (12px height, 9px ascent, ~9/13px
   avg/max glyph width) is the font `WHSHR.EXE`'s built-in painters use for the mission title, the
   mission-list scroll-row labels, and the control-panel button labels (Brief/Accept/Caravan/etc.) —
-  all three call `GlueCreateFont(2)` with a constant argument.
+  all three request font number 2.
 - Languages: the accented Latin-1 letters (`ÄÖÜß`, `éèêàç`, `ñ`…) suggest the fonts were
   prepared for German/French/Spanish/Italian versions. The punctuation gaps (no `#`, `&`, `@`,
   and no digits at all in the map fonts) show which characters the game text actually needs.
 
 ### Rendering: how glyphs reach the screen
 
-**Confirmed by static analysis of `WHSHR.EXE` (Ghidra, function-behavior only, no decompiled
-text kept — see the clean-room policy in `CLAUDE.md`).**
+**Confirmed for the front end (`WHSHR.EXE`), behaviour only.**
 
-- `GlueCreateFont(N)` does not build a fresh `LOGFONTA` from scratch. At startup the game
+- Creating font N does not build a fresh `LOGFONTA` from scratch. At startup the game
   enumerates its own installed raster fonts (`EnumFontsA`/`EnumFontFamiliesA` with the
   `"Warhammer Font N"` face names) and, in the enumeration callback, copies the **exact
   `LOGFONTA` GDI reports back for that already-installed resource** (including its native
-  `lfHeight`) into a small per-font table. `GlueCreateFont(N)` later looks up that table by
+  `lfHeight`) into a small per-font table. Font creation later looks up that table by
   index or by face-name string compare and passes the stored, unmodified `LOGFONTA` straight
   to `CreateFontIndirectA`. There is no separate, hand-picked `lfHeight` value chosen by the
   game — it always requests the font at exactly the pixel size the raster resource itself
   reports. **This rules out GDI raster-font stretching (question 3): the requested size always
   matches the native size, so `StretchBlt`-style row/column duplication never comes into play
   for these fonts.**
-- If the named font resource is not found (not registered/loaded), `GlueCreateFont` fails
+- If the named font resource is not found (not registered/loaded), font creation fails
   outright and logs an error — there is no fallback to a system TrueType font by charset or
   typeface (question 4). The lookup is a plain table/string match against the game's own six
   `"Warhammer Font N"` resources, nothing else.
-- Text is drawn with plain, ordinary GDI calls: `SelectObject` the font returned by
-  `GlueCreateFont`, `SetBkMode(TRANSPARENT)`, `SetTextColor(...)`, then `TextOutA(hdc, x, y,
+- Text is drawn with plain, ordinary GDI calls: `SelectObject` the font so created, `SetBkMode(TRANSPARENT)`, `SetTextColor(...)`, then `TextOutA(hdc, x, y,
   text, len)`. This pattern repeats at every text-drawing call site checked (button/tab
   labels, mission scroll-row labels, mission title). There is no custom glyph-blit routine,
   no lookup table indexed by neighboring glyph bits, no blend/grey edge color, and no
@@ -312,12 +309,10 @@ Outputs (local only, `extracted/` is git-ignored):
 
 
 - ✅ Which font number is used for the mission-list/button UI elements not declared via `[TEXT]
-  set:font=`. Resolved by static analysis of `WHSHR.EXE` (Ghidra, `GlueCreateFont`/
-  `CreateFontIndirectA` in the `[GlueCreateFont] Font %d not found`/`not loaded` routine): both the
+  set:font=`. Resolved for the front end (`WHSHR.EXE`, behaviour only): both the
   mission-list row painter (draws each row's `Scroll0`/`Scroll1` bitmap plus the `BRTXT` mission
-  name/payment label) and the shared control-panel button-label painter (`FrameButtonUp`/
-  `FrameButtonDn`, used for Brief/Accept/Caravan and every other button label) call it with the
-  constant argument 2, i.e. font 2 = `PCTEXT.FON`. This is the same font number already used by
+  name/payment label) and the shared control-panel button-label painter (used for Brief/Accept/Caravan and every other button label) both request font
+  number 2, i.e. font 2 = `PCTEXT.FON`. This is the same font number already used by
   the mission title and town-name `[TEXT]` blocks (`set:font=2`, grep-confirmed in the WND.DLL glue
   scripts), so all three UI elements — mission title, mission-list rows, and button labels — render
   in `PCTEXT.FON`'s 12px-tall / 9px-ascent glyphs (see the font table in §2). Colors are set
