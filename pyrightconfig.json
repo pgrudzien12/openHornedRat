@@ -1,0 +1,25 @@
+{
+  "include": [
+    "whshr",
+    "tests",
+    "scripts"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "extracted",
+    "samples",
+    "battles",
+    "logs",
+    "saves"
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "off",
+  "reportUndefinedVariable": "error",
+  "reportAttributeAccessIssue": "none",
+  "reportCallIssue": "error",
+  "reportIndexIssue": "error",
+  "reportMissingImports": "error",
+  "reportOptionalMemberAccess": "none"
+}
