@@ -12,6 +12,7 @@ from pathlib import Path
 from . import legacy
 from . import audio, battle2d, battle3d, battle_replay, behaviour, campaign, catalog, engine, glue_spec, pbx, rules, si, viewer_web
 from .paths import Installation
+from .user_dirs import resolve_save_dir
 
 # Battle logs and saves default to the git-ignored logs//saves/ of this checkout, wherever the
 # engine is started from. Saves never go into the original installation (GEI7e): the engine keeps
@@ -24,7 +25,6 @@ _FROZEN = getattr(sys, "frozen", False)
 _USER_DATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "ohr" if sys.platform == "win32" else Path.home() / ".ohr"
 _STATE_ROOT = _USER_DATA if _FROZEN else Path(__file__).resolve().parents[1]
 REPOSITORY_LOGS = _STATE_ROOT / "logs"
-REPOSITORY_SAVES = _STATE_ROOT / "saves"
 
 
 def _check(name: str, callback: Callable[[], object]) -> bool:
@@ -131,9 +131,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     engine_parser.add_argument("--no-campaign-log", action="store_true", help="disable campaign session logging")
     engine_parser.add_argument("--seed", type=int, default=engine.DEFAULT_SEED,
                                help=f"battle RNG seed (default: {engine.DEFAULT_SEED})")
-    engine_parser.add_argument("--save-dir", type=Path, default=REPOSITORY_SAVES,
-                               help="directory for engine saves, e.g. ARMY.MRC/MARCH.MRC "
-                                    "(default: saves/; never the original installation's SAVE/)")
+    engine_parser.add_argument("--save-dir", type=Path, default=None,
+                               help="directory for engine saves (default: $OSH_SAVE_DIR, else the per-user data "
+                                    "directory, e.g. ~/.local/share/ohr/saves; never the original installation's SAVE/)")
     engine_parser.add_argument("--no-battle", action="store_true",
                                help="skip battle simulation: every battle settles as an immediate, "
                                     "lossless win, so campaign progression can be walked through quickly")
@@ -248,7 +248,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         log_dir = None if args.no_battle_log else args.battle_log
         result = app.run(args.installation, (args.width, args.height), args.skip_intro, args.hidden,
                          args.frames, args.screenshot, args.frame_time, args.battle, args.camera,
-                         log_dir, args.seed, args.glue_program, args.save_dir, args.no_battle,
+                         log_dir, args.seed, args.glue_program, resolve_save_dir(args.save_dir), args.no_battle,
                          None if args.no_campaign_log else args.campaign_log)
         print(f"{result['frames']} frames, {result['ticks']} ticks, final scene {result['scene']}")
         return 0

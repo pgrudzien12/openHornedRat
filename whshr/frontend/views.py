@@ -11,11 +11,13 @@ from ..campaign_scenes import (
     ArmyRecordsScene, TroopSelectScene, TroopSelectionScene,
 )
 from ..glue_scene import GlueScene
+from ..load_save_scene import LoadSaveScene
 from ..result_scene import ResultScene
 from .battle_view import BattleView
 from .movie_view import MovieView
 from .briefing_view import BriefingView
 from .glue_view import GlueView
+from .load_save_view import LoadSaveView
 from .menu_view import MainMenuView
 from .mission_map_view import MissionMapView
 from .opening_view import OpeningNarrationView
@@ -34,6 +36,7 @@ VIEWS: dict[type[Scene], type[SceneView[Any]]] = {
     ArmyRecordsScene: ArmyRecordsView,
     BriefingScene: BriefingView,
     GlueScene: GlueView,
+    LoadSaveScene: LoadSaveView,
     BattleScene: BattleView,
     ResultScene: ResultView,
 }

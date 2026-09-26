@@ -113,7 +113,16 @@ def load_company(installation: Installation | str | PathLike[str], roster: Mappi
     """
     game = installation if isinstance(installation, Installation) else Installation(installation)
     roster = roster if roster is not None else static_roster(game)
-    root = script.parse(str(game.file_dir(*path)))
+    return regiments_of(script.parse(str(game.file_dir(*path))), roster)
+
+
+def parse_company(text: str, roster: Mapping[int, RosterRow]) -> tuple[Regiment, ...]:
+    """The regiments of company ``.MRC`` text (as :func:`company_text` writes it); ``roster`` supplies the static rows."""
+    return regiments_of(script.parse_text(text, "company"), roster)
+
+
+def regiments_of(root: script.Node, roster: Mapping[int, RosterRow]) -> tuple[Regiment, ...]:
+    """The ``Regiment`` records of a parsed company script tree."""
     regiments: list[Regiment] = []
     for node in script.units_of(root):
         unit = script.unit_view(node)
@@ -207,6 +216,12 @@ def write_company(save_dir: str | PathLike[str], regiments: Iterable[Regiment], 
     units = [_with_hired(regiment.raw, True) for regiment in regiments
              if regiment.raw is not None and hired.get(regiment.whoami, regiment.hired)]
     _write_units_file(save_dir, filename, units, "Mercenary Army")
+
+
+def company_text(regiments: Iterable[Regiment]) -> str:
+    """The whole company as ``.MRC`` text, unhired regiments included; the inverse of :func:`parse_company`."""
+    return script.write(_unit_section([regiment.raw for regiment in regiments if regiment.raw is not None],
+                                      "Mercenary Army"))
 
 
 def write_army(save_dir: str | PathLike[str], regiments: Iterable[Regiment], filename: str = "ARMY.MRC") -> None:

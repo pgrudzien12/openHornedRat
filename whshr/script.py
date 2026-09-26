@@ -87,13 +87,18 @@ def parse(path: StrPath) -> Node:
     """
     with open(path, 'rb') as handle:
         text = handle.read().decode('latin-1')
+    return parse_text(text, os.path.basename(path))
+
+
+def parse_text(text: str, source: str = "<text>") -> Node:
+    """:func:`parse` for script text already in memory; ``source`` names it in error messages."""
     root: Node | None = None
     stack: list[Node] = []
     for no, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
         if not line:
             continue
-        where = f"{os.path.basename(path)}:{no}"
+        where = f"{source}:{no}"
         if line.startswith(';'):
             cur = stack[-1] if stack else None
             if (cur and cur['kind'] == 'section' and cur['label'] is None
@@ -141,9 +146,9 @@ def parse(path: StrPath) -> Node:
         else:
             cur['cmds'].append((key, value))
     if stack:
-        raise ParseError(f"{os.path.basename(path)}: unclosed: {[n['kind'] + ':' + n['name'] for n in stack]}")
+        raise ParseError(f"{source}: unclosed: {[n['kind'] + ':' + n['name'] for n in stack]}")
     if root is None:
-        raise ParseError(f"{os.path.basename(path)}: empty file")
+        raise ParseError(f"{source}: empty file")
     return root
 
 

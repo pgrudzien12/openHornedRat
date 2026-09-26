@@ -279,6 +279,11 @@ main menu.
 Slots: 0-4 are player slots, **slot 5 is the automatic save** written by `autosave:` (and by `testmission:`) with description "Last Game";
 it is listed in Load only, so the player can never overwrite it by hand.
 
+**Engine implementation (deviations).** A failed load or save keeps the dialog open with a message instead of resetting to the
+main menu (load) or closing (save); the save file is the engine's own JSON, not `savegame.N` (`notes/glue_engine_integration.md`
+GEI14). The key events are: click a slot to select it, OK or Enter to confirm, Cancel or Esc to close (in the description
+prompt, Cancel returns to the dialog); typing and Backspace edit the description. The main menu's Load is also bound to `L`.
+
 ## 7. Options dialog ✅
 
 Opened by the `OptionsDialog` built-in (caravan `CaravanCommon1`, `MainMenu*`, and panel 9's Options button). It opens the glue window

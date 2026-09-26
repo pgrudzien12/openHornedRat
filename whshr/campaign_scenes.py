@@ -175,6 +175,9 @@ class MainMenuScene(Scene):
                                                          save_dir=getattr(context, "save_dir", None))
                 )
             return Transition(GlueScene(campaign=self.campaign, window="STARTCARAVAN"), "new campaign started")
+        if event == "load_game":
+            from .load_save_scene import LOAD, LoadSaveScene
+            return Transition(LoadSaveScene(LOAD, self), "load dialog opened")
         if event == "quit":
             return Quit("player quit from the main menu")
         return None

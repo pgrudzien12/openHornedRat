@@ -209,6 +209,8 @@ class GlueScene(Scene):
             if event.kind == "hotspot-release" and self.window == "STARTCARAVAN" and event.target:
                 if event.target.casefold() == "armybook":
                     return self._open_army_book(hire_only=False)
+                if event.target.casefold() == "loadsavewindow":
+                    return self._open_save_dialog()
                 if event.target.casefold() == "abortgame":
                     from .campaign_scenes import MainMenuScene
                     return Transition(MainMenuScene(), "generic caravan exited")
@@ -285,6 +287,8 @@ class GlueScene(Scene):
         mode = pending.mode
         if name in ("armybook", "hireonlyarmybook"):
             return self._open_army_book(hire_only=name == "hireonlyarmybook")
+        if name == "loadsavewindow":
+            return self._open_save_dialog()
         if name not in ("unwindmission", "popandresume"):
             self._queue((Diagnostic("caravan", f"hotspot {target!r} is not yet implemented"),))
             return None
@@ -299,6 +303,15 @@ class GlueScene(Scene):
                     parent.caravan_return = (self, mode)
                 return Transition(parent, "mission released")
         return None
+
+    def _open_save_dialog(self) -> Transition | None:
+        """The caravan's Save button (notes/builtin_widgets.md §6): the dialog returns to this scene."""
+        from .load_save_scene import SAVE, LoadSaveScene
+
+        if self.campaign is None:
+            self._queue((Diagnostic("caravan", "saving needs a campaign"),))
+            return None
+        return Transition(LoadSaveScene(SAVE, self, self.campaign), "save dialog opened")
 
     def _open_army_book(self, hire_only: bool) -> Transition | None:
         """The caravan's Army Records (notes/builtin_widgets.md §2.1): ``HireOnlyArmyBook`` charges the coffers

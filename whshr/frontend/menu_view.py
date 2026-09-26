@@ -39,8 +39,9 @@ class MainMenuView(NativeScreenView[MainMenuScene]):
     # Only the campaign flow's New Campaign and Exit actions have scene
     # implementations today.  The other original controls still react visually.
     SHORTCUTS: dict[int, str] = {pygame.K_n: "new_campaign", pygame.K_RETURN: "new_campaign",
-                 pygame.K_KP_ENTER: "new_campaign", pygame.K_q: "quit", pygame.K_ESCAPE: "quit"}
-    TARGET_ACTIONS: dict[str, str] = {"newgame": "new_campaign", "exitprocess": "quit"}
+                 pygame.K_KP_ENTER: "new_campaign", pygame.K_l: "load_game", pygame.K_q: "quit", pygame.K_ESCAPE: "quit"}
+    TARGET_ACTIONS: dict[str, str] = {"newgame": "new_campaign", "loadsavewindow2": "load_game",
+                                      "exitprocess": "quit"}
 
     def __init__(self, gpu: Gpu, scene: MainMenuScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)

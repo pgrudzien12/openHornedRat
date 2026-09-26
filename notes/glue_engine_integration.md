@@ -122,6 +122,19 @@ renumber later work.
 
 - [ ] **GEI14 — Persistent save/load.** (issue #128) Define save/load semantics, then replace the in-memory
   autosave snapshot with durable persistence.
+  **Done so far (player saves):** the Load/Save dialog of `notes/builtin_widgets.md` §6 (`whshr/load_save_scene.py`,
+  `whshr/frontend/load_save_view.py`), reached from the main menu (Load) and the start caravan (Save), and the engine's own
+  save format (`whshr/savegame.py`). One JSON file per slot (`slot0.json`..`slot5.json`) in the save directory, written
+  atomically (temporary file, then rename). It stores the *campaign* only: flow chain and step, mission window, taken and
+  completed missions, coffers, army/march sets, reinforcements, book pages, bonus counter, objective results and the company
+  as `.MRC` text (experience, hired flag and model counts included). A load rebuilds a fresh campaign of the installation,
+  overwrites it with the saved fields and opens the start caravan; the flow chain replays from there, exactly as when
+  the caravan's map button is used (`GlueScene._map_program`). Not saved: the interpreter's window/script stacks
+  (the original resumes a parked script; the engine always resumes at the caravan).
+  **Still open:** `autosave:`/`testmission` still keep only the in-memory snapshot and never write slot 5 ("Last Game"),
+  so the Load dialog lists that slot but it stays empty; saving from a script-launched caravan
+  (`GlueScene._leave_caravan`) is wired but resumes at the start caravan, not at that caravan; the caption texts of the
+  dialog ("Empty", "Enter Save Description", default description) are engine-supplied (`PROVISIONAL` in `load_save_scene.py`).
 
 - [ ] **GEI15 — Retire legacy map and briefing code.** (issue #129) Delete `MissionMapScene`,
   `MissionMapView`, `BriefingScene`, and `BriefingView` after their generic equivalents cover
@@ -235,8 +248,8 @@ renumber later work.
   calls `roster.write_company`/`write_march` only when `self.save_dir` is set, so tests and other
   save-dir-less callers stay a pure in-memory commit.
 - Engine saves never go into the original installation (owner decision, not a spec finding): they
-  write to the engine's own directory (`SceneAssets.save_dir`, default git-ignored `saves/`,
-  `python3 -m whshr engine --save-dir`), threaded from `app.run`/`game.scene_context` down to
+  write to the engine's own directory (`SceneAssets.save_dir`: `--save-dir`, else `OSH_SAVE_DIR`, else the
+  per-user data directory of the platform, `whshr/user_dirs.py`), threaded from `app.run`/`game.scene_context` down to
   `CampaignState.save_dir`. The engine keeps no save-format compatibility promise toward the
   original either; the `.MRC` text grammar is reused in `write_company`/`write_march` because it
   is already required for reading, not as a compatibility commitment (CLAUDE.md "Engine rule:

@@ -25,6 +25,7 @@
   "disableTaggedHints": true,
   "strict": [
     "whshr/paths.py",
+    "whshr/user_dirs.py",
     "whshr/battle_events.py",
     "whshr/clock.py",
     "whshr/script.py",
