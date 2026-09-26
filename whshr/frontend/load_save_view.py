@@ -11,17 +11,11 @@ from typing import Any
 
 import pygame
 
-from ..glue_palette import AppPalette
 from ..load_save_scene import EMPTY_SLOT_LABEL, PROMPT_CAPTION, LoadSaveScene
 from ..savegame import AUTOSAVE_SLOT
 from ..scenes import SceneEvent
-from .bitmap_font import BitmapFont
-from .glue_bitmap import load_optional_bitmap
-from .gpu import Gpu, ScreenQuad, TextLabel
-from .scene_view import NativeScreenView
-
-Point = tuple[int, int]
-Rgb = tuple[int, int, int]
+from .dialog_view import DialogView, Point
+from .gpu import Gpu
 
 BACKDROP, PALETTE_INDEX = "Map", 2
 DIALOG_X, DIALOG_HEIGHT = 194, {"save": 212, "load": 254}
@@ -34,15 +28,9 @@ YELLOW, GREY, WHITE, RED = (255, 255, 0), (192, 192, 192), (255, 255, 255), (255
 OK_LABEL, CANCEL_LABEL = 163, 164  # GMTXT "OK" / "CANCEL"
 
 
-class LoadSaveView(NativeScreenView[LoadSaveScene]):
+class LoadSaveView(DialogView[LoadSaveScene]):
     def __init__(self, gpu: Gpu, scene: LoadSaveScene, options: dict[str, Any] | None = None) -> None:
-        super().__init__(gpu, scene, options)
-        self.content = scene.glue_content()
-        self.font = BitmapFont(scene.font(2))
-        self.palette = AppPalette.select(PALETTE_INDEX, self.content.palette_tables())
-        self.quads: list[tuple[ScreenQuad, Point]] = []
-        self.labels: list[tuple[TextLabel, Point]] = []
-        self.buttons: list[tuple[pygame.Rect, str]] = []
+        super().__init__(gpu, scene, scene.glue_content(), scene.font(2), PALETTE_INDEX, options)
         self.pressed: str | None = None
         self.state: tuple[Any, ...] | None = None
         self.refresh()
@@ -114,14 +102,6 @@ class LoadSaveView(NativeScreenView[LoadSaveScene]):
 
     # -- input --------------------------------------------------------------------------------
 
-    def _native_point(self, position: Sequence[float]) -> tuple[float, float]:
-        left, top, scale = self._layout()
-        return (position[0] - left) / scale, (position[1] - top) / scale
-
-    def _action_at(self, position: Sequence[float]) -> str | None:
-        point = self._native_point(position)
-        return next((action for rect, action in reversed(self.buttons) if rect.collidepoint(point)), None)
-
     def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
@@ -149,39 +129,3 @@ class LoadSaveView(NativeScreenView[LoadSaveScene]):
 
     def status(self) -> Sequence[str]:
         return (f"{self.scene.mode} dialog, slot {self.scene.selected}",)
-
-    # -- drawing helpers ----------------------------------------------------------------------
-
-    def _bitmap(self, name: str, position: Point) -> None:
-        surface = load_optional_bitmap(self.content, name, app_palette=self.palette)
-        if surface is not None:
-            self._append(surface, position)
-
-    def _append(self, surface: pygame.Surface, position: Point) -> None:
-        quad = ScreenQuad(self.gpu, surface.get_size())
-        quad.write(pygame.image.tobytes(surface, "RGBA"))
-        self.quads.append((quad, position))
-
-    def _center(self, value: str, y: int, colour: Rgb, *, x: int, width: int) -> None:
-        label = self.gpu.text((width, self.font.font.height), self.font, color=colour, background=None,
-                              padding=0, align="center", fixed_width=True)
-        label.set_lines((value,))
-        self.labels.append((label, (x, y)))
-
-    def draw(self) -> None:
-        super().draw()
-        left, top, scale = self._layout()
-        for quad, (x, y) in self.quads:
-            quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
-        for label, (x, y) in self.labels:
-            label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
-
-    def _release_contents(self) -> None:
-        for quad, _ in self.quads:
-            quad.release()
-        for label, _ in self.labels:
-            label.release()
-        self.quads, self.labels, self.buttons = [], [], []
-
-    def release(self) -> None:
-        self._release_contents()

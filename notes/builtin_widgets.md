@@ -181,6 +181,8 @@ Abort exists in open mode 0 only (id `0x103`, art `BrownATab`). Sequence: if any
 title "Warhammer"; No = stay); then destroy the window, free the company, set palette 2 and `PopContext(show)`. The **context that Accept
 pushed** is popped, so the destination is whatever was parked when Accept was pressed:
 
+**Engine implementation:** the question box is `whshr/confirm_scene.py` (Yes/No; No returns to the screen it came from, Yes carries on). It is used here (`BRTXT 308`, only when something is selected; otherwise Abort leaves silently) and for the caravan's `AbortGame` (`GMTXT 36070`, Yes goes to the main menu, see `notes/activity_results.md` §6). The Yes/No captions are engine-supplied, and the box is drawn on a plain dark screen rather than over the calling screen.
+
 - from the **map's Accept**: the flow script was current with kind `RUN`, so the pushed context holds the script frame and the whole
   window set; Abort restores the **map window with its mission list and selected row**, and the script stays parked in
   `waitforrelease` (its `parked` flag is still 1, so nothing resumes it). ✅

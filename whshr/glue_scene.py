@@ -212,8 +212,7 @@ class GlueScene(Scene):
                 if event.target.casefold() == "loadsavewindow":
                     return self._open_save_dialog()
                 if event.target.casefold() == "abortgame":
-                    from .campaign_scenes import MainMenuScene
-                    return Transition(MainMenuScene(), "generic caravan exited")
+                    return self._confirm_abort_game()
                 if event.target.casefold() not in {"armybook", "encyclopediabook", "loadsavewindow", "magicbook",
                                                    "optionsdialog"}:
                     return Transition(GlueScene(self._map_program(event.target), self.campaign),
@@ -290,13 +289,7 @@ class GlueScene(Scene):
         if name == "loadsavewindow":
             return self._open_save_dialog()
         if name == "abortgame":
-            # notes/mission_selection.md §8.1: Yes/No confirmation, Yes abandons the campaign toward the
-            # main menu. No confirm dialog is built anywhere in the engine yet (troop selection's own
-            # documented Abort confirm is the same open gap), so this goes straight to the main menu, matching
-            # the direct STARTCARAVAN abortgame hotspot below.
-            self._queue(self.require_runtime().stop_speech())
-            from .campaign_scenes import MainMenuScene
-            return Transition(MainMenuScene(), "caravan aborted")
+            return self._confirm_abort_game()
         if name not in ("unwindmission", "popandresume"):
             self._queue((Diagnostic("caravan", f"hotspot {target!r} is not yet implemented"),))
             return None
@@ -311,6 +304,19 @@ class GlueScene(Scene):
                     parent.caravan_return = (self, mode)
                 return Transition(parent, "mission released")
         return None
+
+    def _confirm_abort_game(self) -> Transition:
+        """AbortGame asks "Are you sure you want quit the campaign?" (notes/activity_results.md section 6);
+        Yes abandons the campaign for the main menu, No comes back to this caravan."""
+        from .campaign_scenes import MainMenuScene
+        from .confirm_scene import ConfirmScene
+
+        def leave() -> None:
+            if self.runtime is not None:
+                self._queue(self.runtime.stop_speech())  # Dietrich does not go on talking over the menu
+
+        return Transition(ConfirmScene(self, MainMenuScene(), ("GMTXT", 36070), on_yes=leave, reason="caravan aborted"),
+                          "abort confirmation opened")
 
     def _open_save_dialog(self) -> Transition | None:
         """The caravan's Save button (notes/builtin_widgets.md §6): the dialog returns to this scene."""

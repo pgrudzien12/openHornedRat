@@ -446,7 +446,11 @@ class TroopSelectionScene(Scene):
         model = self.selection_model()
         campaign = self.campaign
         if event == "abort":
-            return Transition(self.glue_scene, "troop selection aborted")
+            if not model.selection:  # nothing selected: aborts silently (notes/builtin_widgets.md section 4.1)
+                return Transition(self.glue_scene, "troop selection aborted")
+            from .confirm_scene import ConfirmScene
+            return Transition(ConfirmScene(self, self.glue_scene, ("BRTXT", 308), reason="troop selection aborted"),
+                              "abort confirmation opened")
         if event == "page:next" and self.phase == "select":
             self.page = min(self.page + 1, self.page_count - 1)
             return None

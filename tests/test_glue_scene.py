@@ -460,15 +460,27 @@ class GlueSceneTests(unittest.TestCase):
         self.assertIsInstance(machine.active, GlueScene)
         self.assertEqual(machine.active.program, "FLOW")
 
-    def test_generic_start_caravan_abort_returns_to_main_menu(self):
+    def test_generic_start_caravan_abort_asks_first_and_yes_returns_to_main_menu(self):
         from whshr.campaign_scenes import MainMenuScene
+        from whshr.confirm_scene import ConfirmScene
 
+        caravan = GlueScene(window="STARTCARAVAN")
+        caravan.enter(self.context)
+
+        asked = caravan.handle(GlueInput("hotspot-release", "AbortGame"), self.context)
+        self.assertIsInstance(asked.scene, ConfirmScene)
+        left = asked.scene.handle("yes", self.context)
+
+        self.assertIsInstance(left.scene, MainMenuScene)
+
+    def test_generic_start_caravan_abort_declined_stays_on_the_caravan(self):
         caravan = GlueScene(window="STARTCARAVAN")
         machine = SceneMachine(caravan, self.context)
 
-        transition = caravan.handle(GlueInput("hotspot-release", "AbortGame"), self.context)
+        machine.handle(GlueInput("hotspot-release", "AbortGame"))
+        machine.handle("no")
 
-        self.assertIsInstance(transition.scene, MainMenuScene)
+        self.assertIs(machine.active, caravan)
 
 
 if __name__ == "__main__":

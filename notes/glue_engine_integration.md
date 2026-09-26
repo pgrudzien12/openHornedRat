@@ -222,10 +222,11 @@ renumber later work.
 - [x] **GEI7h — `AbortGame` from any `gocaravan`-opened caravan.** Only the caravan opened directly from
   `STARTCARAVAN` had a working Abort hotspot; every caravan a mission script opens with `gocaravan:` (recruit,
   the after-mission/after-encounter and every `info*` caravan) queued an "is not yet implemented" diagnostic and
-  stayed open. `GlueScene._leave_caravan` now handles `AbortGame` there too, matching the direct path: straight
-  to the main menu (`notes/mission_selection.md` §8.1: "abandons the campaign toward the main menu", 🟡 the
-  original's Yes/No confirmation is not built anywhere in the engine yet, the same open gap as troop selection's
-  own documented Abort confirm, notes/troop_selection.md §4.4). Save (`LoadSaveWindow`) and the roster book
+  stayed open. `GlueScene._leave_caravan` now handles `AbortGame` there too, matching the direct path: after a
+  Yes/No confirmation (`whshr/confirm_scene.py`; Yes goes to the main menu, `notes/mission_selection.md` §8.1: "abandons
+  the campaign toward the main menu"; No returns to the caravan). Troop selection's Abort uses the same box
+  (`notes/troop_selection.md` §4.4). The question text is `GMTXT 36070` ("quit the campaign"); `mission_selection.md` §8.1
+  names `BRTXT 308` ("Are you sure?") for this box, which fits troop selection's Abort but is the less specific text. Save (`LoadSaveWindow`) and the roster book
   (`ArmyBook`/`HireOnlyArmyBook`) already worked from a `gocaravan`-opened caravan; `EncyclopediaBook`,
   `MagicBook` and `OptionsDialog` still queue that diagnostic and stay open (no screen built for them yet).
 - GEI7g (issue #145): `CampaignState` now carries a **master roster** (`master`, the fresh-campaign content of

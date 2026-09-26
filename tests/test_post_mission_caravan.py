@@ -85,16 +85,30 @@ class PostMissionCaravanTests(DirectMissionRouteTests):
 
         self.assertEqual(self._names(machine.active), ["INFOCARAVANABC"])
 
-    def test_given_a_gocaravan_opened_caravan_when_aborted_then_it_goes_straight_to_the_main_menu(self):
+    def test_given_a_gocaravan_opened_caravan_when_abort_is_confirmed_then_it_goes_to_the_main_menu(self):
         """The player got stuck with no working Abort in an info/mid-mission caravan (issue: reported
-        after the Nuln `gomissionselect` fix)."""
+        after the Nuln `gomissionselect` fix); the original asks Yes/No first (GMTXT 36070)."""
         from whshr.campaign_scenes import MainMenuScene
+        from whshr.confirm_scene import ConfirmScene
 
         machine = SceneMachine(GlueScene("INFOSCRIPT"), self.context)
 
         machine.handle(GlueInput("hotspot-release", "AbortGame"))
+        self.assertIsInstance(machine.active, ConfirmScene)
+        self.assertEqual(machine.active.string, ("GMTXT", 36070))
+        machine.handle("yes")
 
         self.assertIsInstance(machine.active, MainMenuScene)
+
+    def test_given_a_gocaravan_opened_caravan_when_abort_is_declined_then_the_same_caravan_stays(self):
+        caravan = GlueScene("INFOSCRIPT")
+        machine = SceneMachine(caravan, self.context)
+
+        machine.handle(GlueInput("hotspot-release", "AbortGame"))
+        machine.handle("no")
+
+        self.assertIs(machine.active, caravan)
+        self.assertEqual(caravan.runtime.state.pending.kind, "caravan")
 
     def test_given_an_unknown_caravan_name_when_requested_then_the_script_goes_on_at_once(self):
         machine = SceneMachine(GlueScene("UNKNOWNSCRIPT"), self.context)
