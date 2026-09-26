@@ -4,7 +4,7 @@ import unittest
 
 from whshr.glue_content import GlueContent
 from whshr.glue_render import build_render_model
-from whshr.glue_runtime import GlueInput, GlueRuntime, HotspotSpeech, WindowInstance
+from whshr.glue_runtime import GlueInput, GlueRuntime, HotspotSpeech, PlaySpeech, WindowInstance
 
 WINDOW = """[WINDOW]
 [POSITION]
@@ -54,7 +54,7 @@ class HotspotSpeechTests(unittest.TestCase):
     def test_given_click_speech_data_when_the_window_is_built_then_click_text_is_kept_apart_from_the_hint(self):
         talk, reaction, exit_ = self._hotspots()
 
-        self.assertEqual((talk.hint_id, talk.click_text, talk.click_count), (160, 955, 2))
+        self.assertEqual((talk.hint_id, talk.click_text, talk.click_count), (160, 955, 3))  # clickrescnt=2 counts the lines after the first
         self.assertEqual((reaction.hint_id, reaction.click_text, reaction.click_count), (None, 155, 1))
         self.assertEqual((exit_.hint_id, exit_.click_text), (150, None))
 
@@ -74,7 +74,7 @@ class HotspotSpeechTests(unittest.TestCase):
 
         effects = runtime.handle(GlueInput("hotspot-speech", "955:2"))
 
-        self.assertEqual(effects, (HotspotSpeech(955, 2),))
+        self.assertEqual(effects, (HotspotSpeech(955, 2), PlaySpeech(955)))
         self.assertEqual(runtime.state.dialogue_text, "Line one")
         seen = []
         for _ in range(400):
@@ -84,13 +84,16 @@ class HotspotSpeechTests(unittest.TestCase):
         self.assertEqual(seen[-1], "")
         self.assertFalse(runtime.state.speech_active)
 
-    def test_given_a_speech_in_progress_when_clicked_again_then_it_is_ignored(self):
+    def test_given_a_speech_in_progress_when_clicked_again_then_it_is_skipped_not_restarted(self):
         runtime = GlueRuntime(self.content)
         runtime.start("FLOW")
         runtime.handle(GlueInput("hotspot-speech", "955:1"))
 
-        self.assertEqual(runtime.handle(GlueInput("hotspot-speech", "155:1")), ())
-        self.assertEqual(runtime.state.dialogue_text, "Line one")
+        effects = runtime.handle(GlueInput("hotspot-speech", "155:1"))
+
+        self.assertNotIn(HotspotSpeech(155, 1), effects)  # no new speech starts; the click only ends the running one
+        self.assertFalse(runtime.state.speech_active)
+        self.assertEqual(runtime.state.dialogue_text, "")
 
 
 if __name__ == "__main__":

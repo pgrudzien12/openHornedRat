@@ -63,7 +63,7 @@ class PostMissionCaravanTests(DirectMissionRouteTests):
     def test_given_the_caravan_when_an_unimplemented_hotspot_is_released_then_it_stays_open(self):
         machine, map_scene, campaign = self._play(("missionawindow.0",), False)
 
-        machine.handle(GlueInput("hotspot-release", "ArmyBook"))
+        machine.handle(GlueInput("hotspot-release", "MagicBook"))
 
         self.assertEqual(self._names(machine.active), ["CARAVANAFTERMISSION"])
         self.assertEqual(campaign.completed, set())

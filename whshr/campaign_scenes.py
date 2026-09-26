@@ -19,6 +19,7 @@ from .cache import Loader
 from .glue import MissionRecord, MissionRef
 from .scenes import Quit, Scene, SceneAssets, SceneEvent, SceneManifest, Transition
 from .si import load_si, walk_objects
+from .roster_book import BookModel
 from .troop_selection import TroopSelection
 
 INTRO_CUTSCENE = AssetId("vanilla", "cutscene", "a1")
@@ -384,7 +385,8 @@ class TroopSelectionScene(Scene):
         forced = _unit_ids(self.record, "forceunits")
         excluded = _unit_ids(self.record, "excludeunits")
         self.model = TroopSelection(self.campaign.company, forced=forced, excluded=excluded,
-                                    coffers=self.campaign.coffers, prepaid=_prepaid_payment(self.record))
+                                    coffers=self.campaign.coffers, prepaid=_prepaid_payment(self.record),
+                                    reinforcements=self.campaign.reinforcements)
         if self.model.bankrupt:
             self.phase = "bankrupt"
 
@@ -526,20 +528,32 @@ class TroopSelectionScene(Scene):
 
 
 class ArmyRecordsScene(Scene):
-    """One-regiment-per-page Army Records screen for troop selection (§8).
+    """One-regiment-per-page Army Records screen (notes/builtin_widgets.md §2, notes/troop_selection.md §8).
 
-    It owns only book page and stat/info presentation mode.  Hiring and marching
-    selection continue to belong to the parked :class:`TroopSelectionScene` model.
+    Two parents open it: the troop-selection screen (Ctrl+click; the book edits that screen's model) and
+    a caravan (``ArmyBook`` / ``HireOnlyArmyBook`` hotspots; the caller passes a
+    :class:`~whshr.roster_book.RosterBook`). The scene owns only the page and the Stat/Info mode; hiring,
+    the reinforcement offer and the coffers belong to the model, and Done/Abort hand the outcome to the
+    campaign state.
     """
 
-    def __init__(self, selection_scene: TroopSelectionScene, whoami: int) -> None:
-        self.selection_scene = selection_scene
+    def __init__(self, parent: "TroopSelectionScene | GlueScene", whoami: int, model: BookModel | None = None) -> None:
+        self.parent = parent
         self.whoami = whoami
-        self.hired_at_open = dict(selection_scene.selection_model().hired)
+        if model is None:
+            if not isinstance(parent, TroopSelectionScene):
+                raise ValueError("a caravan book needs its own roster model")
+            model = parent.selection_model()
+        self.model: BookModel = model
+        self.hired_at_open = dict(self.model.hired)
 
     @property
-    def model(self) -> TroopSelection:
-        return self.selection_scene.selection_model()
+    def glue_scene(self) -> GlueScene:
+        return self.parent.glue_scene if isinstance(self.parent, TroopSelectionScene) else self.parent
+
+    @property
+    def campaign(self) -> CampaignState | None:
+        return self.parent.campaign
 
     @property
     def company_ids(self) -> tuple[int, ...]:
@@ -551,12 +565,27 @@ class ArmyRecordsScene(Scene):
 
     def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         if event == "book:done":
-            return Transition(self.selection_scene, "army records closed")
+            if self.campaign is not None:
+                self.campaign.apply_army_book(self.model)
+            return Transition(self.parent, "army records closed")
         if event == "book:abort":
             self.model.restore_book_hired(self.hired_at_open)
-            return Transition(self.selection_scene, "army records aborted")
+            self.model.ledger.revert()
+            if self.campaign is not None:
+                self.campaign.abort_army_book(self.model)
+            return Transition(self.parent, "army records aborted")
         if event == "book:hire-fire":
-            self.model.set_hired_from_book(self.whoami, not self.model.hired[self.whoami])
+            self.model.toggle_hired(self.whoami)
+            return None
+        ledger = self.model.ledger
+        if event == "reinf:up":
+            ledger.increase(self.whoami)
+            return None
+        if event == "reinf:down":
+            ledger.decrease(self.whoami)
+            return None
+        if event == "reinf:take":
+            ledger.take(self.whoami)
             return None
         if event in ("book:previous", "book:first", "book:last", "book:next"):
             if event == "book:first":

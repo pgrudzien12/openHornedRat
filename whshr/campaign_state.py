@@ -18,10 +18,11 @@ from .glue_content import GlueContent
 from .paths import Installation
 from . import roster
 from .portraits import first_leader_speaker
-from .roster import Regiment, load_company
+from .roster import Regiment, load_company, load_master, with_hired
 
 if TYPE_CHECKING:
     from .payments import CashTerms
+    from .roster_book import BookModel
     from .troop_selection import Deployment
 
 Mission = dict[str, Any]  # one mission record of a mission window (campaign.parse_mission_windows)
@@ -40,14 +41,27 @@ CARAVAN_MODE_WINDOWS: dict[str, str] = {
 }
 
 
-def caravan_window(mode: str) -> str | None:
+RECRUIT_VARIANTS = {"CARAVANAFTERMISSION": "CARAVANAFTERMISSIONWITHRECRUIT",
+                    "CARAVANAFTERENCOUNTER": "CARAVANAFTERENCOUNTERWITHRECRUIT"}
+
+
+def is_caravan_window(name: str) -> bool:
+    """Is ``name`` one of the caravan windows (``StartCaravan``, ``Caravan…``, ``InfoCaravan…`` and their variants)?"""
+    return name.upper().startswith(("STARTCARAVAN", "CARAVAN", "INFOCARAVAN"))
+
+
+def caravan_window(mode: str, recruitable: bool = False) -> str | None:
     """The caravan window a ``gocaravan:<mode>`` request names, or ``None`` for an unknown name
     (notes/glue_interpreter.md section 7.3: ``info<letters>`` names ``InfoCaravan<letters>``; an
-    unknown name is resumed at once).  The window may still be missing from a given installation."""
+    unknown name is resumed at once).  ``select`` and ``resume`` open their ``WithRecruit`` variant (Dietrich announces
+    the new troops) when regiments are recruitable (notes/glue_interpreter.md section 7.3).  The window may still be
+    missing from a given installation."""
     mode = str(mode).casefold()
     name = CARAVAN_MODE_WINDOWS.get(mode)
     if name is None and mode.startswith("info") and len(mode) > 4:
         name = "INFOCARAVAN" + mode[4:].upper()
+    if recruitable and name in RECRUIT_VARIANTS:
+        name = RECRUIT_VARIANTS[name]
     return name
 
 
@@ -145,6 +159,9 @@ class CampaignState:
     hints: dict[int, str] = field(default_factory=dict)
     content: GlueContent | None = field(default=None, repr=False, compare=False)
     company: tuple[Regiment, ...] = field(default_factory=tuple[Regiment, ...])
+    # Every regiment of the campaign in its fresh state (``PLAY.MRC``'s starting content): the source that
+    # ``addunit``/``unitjoinmission`` copy a regiment from into the company (notes/campaign.md §2.4, §4.4).
+    master: tuple[Regiment, ...] = field(default_factory=tuple[Regiment, ...], repr=False, compare=False)
     # The engine's own save directory (never the original installation's SAVE/, GEI7e); None
     # (e.g. focused tests, --glue-program runs) means troop selection stays in-memory only.
     save_dir: str | PathLike[str] | None = field(default=None, repr=False, compare=False)
@@ -195,10 +212,101 @@ class CampaignState:
         self.reinforcements[unit_id] = self.reinforcements.get(unit_id, 0) + int(count)
 
     def join_mission(self, unit_id: int) -> None:
-        self.march_units.add(int(unit_id))
+        """``unitjoinmission``: the regiment is copied into the company (always hired) and marches."""
+        unit_id = int(unit_id)
+        self.march_units.add(unit_id)
+        joined = self._join_company(unit_id, hired=True)
+        if joined:
+            self._sync_army()
 
     def leave_mission(self, unit_id: int) -> None:
-        self.march_units.discard(int(unit_id))
+        """``unitleavemission``: the regiment leaves the company and the march; its master record stays."""
+        unit_id = int(unit_id)
+        self.march_units.discard(unit_id)
+        if any(regiment.whoami == unit_id for regiment in self.company):
+            self.company = tuple(regiment for regiment in self.company if regiment.whoami != unit_id)
+            self._sync_army()
+
+    def _join_company(self, unit_id: int, hired: bool) -> bool:
+        """Copy ``unit_id`` from the master roster into the company; only a hired flag is updated when it is
+        already there. Returns whether the company changed."""
+        present = next((regiment for regiment in self.company if regiment.whoami == unit_id), None)
+        if present is not None:
+            if hired and not present.hired:
+                self.company = tuple(with_hired(regiment, True) if regiment.whoami == unit_id else regiment
+                                     for regiment in self.company)
+                return True
+            return False
+        source = next((regiment for regiment in self.master if regiment.whoami == unit_id), None)
+        if source is None:
+            return False
+        joined = with_hired(source, hired)
+        self.company = tuple(sorted((*self.company, joined), key=lambda regiment: regiment.whoami))
+        return True
+
+    def _sync_army(self) -> None:
+        self.army_units = {regiment.whoami for regiment in self.company if regiment.hired}
+
+    def merge_pending_joins(self) -> tuple[int, ...]:
+        """The after-mission caravan copies every ``addunit`` regiment into the company (notes/campaign.md §2.4):
+        hired at once unless the roster marks it *for hire*, in which case it waits in the recruit book.
+        Ids the master roster does not know stay pending."""
+        merged: list[int] = []
+        for unit_id in sorted(self.pending_join):
+            source = next((regiment for regiment in self.master if regiment.whoami == unit_id), None)
+            if source is None:
+                continue
+            self._join_company(unit_id, hired=not source.row.for_hire)
+            self.pending_join.discard(unit_id)
+            merged.append(unit_id)
+        if merged:
+            self._sync_army()
+            self._persist_company()
+        return tuple(merged)
+
+    def recruitable(self) -> bool:
+        """Is a regiment for hire waiting in the company? It decides only whether ``select``/``resume`` open their
+        ``WithRecruit`` window (Dietrich announcing the men seeking work); reinforcements that replace losses are
+        irrelevant to it. 🟡 the original's exact test is not recorded (notes/glue_interpreter.md section 7.3)."""
+        return any(not regiment.hired and regiment.row.for_hire for regiment in self.company)
+
+    def leave_caravan(self) -> None:
+        """Leaving a recruit caravan drops every regiment that was not hired and clears unused reinforcements
+        (notes/campaign.md §2.4)."""
+        self.company = tuple(regiment for regiment in self.company if regiment.hired)
+        self.reinforcements.clear()
+        self._sync_army()
+        self._persist_company()
+
+    def apply_army_book(self, model: "BookModel") -> None:
+        """Army Records Done: the hired flags, men taken as reinforcements and (money variant) the coffers and
+        marching list are kept; the company file is rewritten when anything changed (notes/builtin_widgets.md §2.3)."""
+        if model.dirty:
+            self.company = tuple(with_hired(regiment, model.hired[whoami]) for whoami, regiment in model.company.items())
+            self.reinforcements = dict(model.ledger.available)
+            self._sync_army()
+            self._persist_company()
+        if model.pays:
+            self.coffers = model.coffers
+            self.march_units = set(model.selection)
+            self._persist_march()
+
+    def abort_army_book(self, model: "BookModel") -> None:
+        """Army Records Abort: nothing is written, but a paying book already charged every click, so its coffers
+        stay (notes/builtin_widgets.md §2.3 quirk)."""
+        if model.pays:
+            self.coffers = model.coffers
+
+    def _persist_company(self) -> None:
+        if self.save_dir is not None:
+            roster.write_army(self.save_dir, self.company)
+
+    def _persist_march(self) -> None:
+        if self.save_dir is not None:
+            roster.write_march(self.save_dir, sorted(self.march_units, key=self._march_rank), self.company)
+
+    def _march_rank(self, whoami: int) -> int:
+        return next((index for index, regiment in enumerate(self.company) if regiment.whoami == whoami), len(self.company))
 
     def mark_pending_join(self, unit_id: int) -> None:
         self.pending_join.add(int(unit_id))
@@ -228,14 +336,16 @@ class CampaignState:
         self.coffers += deployment.money_delta
         self.march_units = set(deployment.units)
         self.army_units = set(deployment.hired)
+        # Point 5: regiments that were not hired leave the company, unused reinforcements are cleared.
+        self.company = tuple(with_hired(regiment, True) for regiment in self.company if regiment.whoami in deployment.hired)
+        self.reinforcements.clear()
         if self.save_dir is not None:
             # notes/troop_selection.md §5.3 points 3, 5: durable ARMY.MRC/MARCH.MRC, written to
             # the engine's own save directory, never the original installation
-            # (notes/glue_engine_integration.md GEI7e). Reinforcements have no standalone-file
-            # home in the original either (only the savegame.N RIFF's RMYI chunk carries them,
-            # notes/campaign.md §4.5), so they stay in-memory until GEI14 defines that writer.
-            hired = {whoami: whoami in self.army_units for whoami in {r.whoami for r in self.company}}
-            roster.write_company(self.save_dir, self.company, hired)
+            # (notes/glue_engine_integration.md GEI7e). The reinforcement pool has no standalone-file
+            # home in the original either (only the savegame.N RIFF's RMYI chunk carries it,
+            # notes/campaign.md §4.5), so it stays in-memory until GEI14 defines that writer.
+            roster.write_army(self.save_dir, self.company)
             roster.write_march(self.save_dir, deployment.units, self.company)
         by_whoami = {regiment.whoami: regiment for regiment in self.company}
         self.refresh_speaker([by_whoami[whoami] for whoami in deployment.units if whoami in by_whoami])
@@ -367,9 +477,13 @@ class CampaignState:
         except (FileNotFoundError, OSError, ValueError):
             # Focused scene tests can supply a minimal installation without STRTARMY.MRC/WHSHR.EXE.
             company = ()
+        try:
+            master = load_master(game)
+        except (FileNotFoundError, OSError, ValueError):
+            master = ()
         return cls(build_campaign_graph(str(game.root), wnd=wnd, string_tables=tables),
                    flow=initial_flow(hotspots), hints=hints, content=content, company=company,
-                   save_dir=save_dir)
+                   master=master, save_dir=save_dir)
 
     @classmethod
     def single_mission(cls, briefing: Any) -> "CampaignState":

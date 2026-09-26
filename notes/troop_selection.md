@@ -408,5 +408,5 @@ money delta and marks the mission taken; abort with something selected requires 
 - ⬜ Use of the `MarchOrderMove` / `MarchOrderMoveDone` names. (Resolved: `tactical.mid` loops, §1.3.)
 - ⬜ Open mode 1 (P1 alone) and the destination after Done on P5.
 - ⬜ Whether list order affects initial deployment positions in the battle.
-- ⬜ Layout of the reinforcements sub-window (only its bitmaps and strings are known).
+- ✅ Layout of the reinforcements sub-window: `notes/builtin_widgets.md` §2.4 (implemented, `notes/glue_engine_integration.md` GEI7g).
 - ✅ Panels 6, 7, 10 (Accept starts the mission script, or the battle, without this screen) are **never opened by any shipped script**; details in `notes/mission_selection.md` §4.2 / §9.4. Nothing to implement for the campaign.

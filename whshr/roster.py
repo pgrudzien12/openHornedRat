@@ -14,17 +14,18 @@ save/load design).
 """
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from os import PathLike
 from pathlib import Path
 
 from .paths import Installation
-from .rules import PeImage, StatFields, stat_fields, stat_int
+from .rules import EXPECTED_STATS, PeImage, StatFields, stat_fields, stat_int
 from . import script
 
 # WHSHR.EXE .data VA of the 39-record RMYI table (record 38 is the -1 terminator); notes/campaign.md §4.5.
 RMYI_VA, RMYI_COUNT, RMYI_STRIDE = 0x5B95F0, 39, 0x34
 STARTING_COMPANY = ("SCRIPT", "STRTARMY.MRC")
+MASTER_ROSTER = ("SCRIPT", "MAXARMY.MRC")  # all 38 regiments; the fresh-campaign PLAY.MRC (notes/campaign.md §4.4)
 ALWAYS_FORCED_WHOAMI = 2  # Grudgebringer Cavalry (the commander); notes/campaign.md §2.3, §3.3
 
 
@@ -146,6 +147,12 @@ def load_company(installation: Installation | str | PathLike[str], roster: Mappi
     return tuple(regiments)
 
 
+def load_master(installation: Installation | str | PathLike[str],
+                roster: Mapping[int, RosterRow] | None = None) -> tuple[Regiment, ...]:
+    """The master roster of a fresh campaign (all regiments, ``PLAY.MRC``'s starting content)."""
+    return load_company(installation, roster, MASTER_ROSTER)
+
+
 def _unit_section(units: Sequence[script.Node], label: str) -> script.Node:
     """A [MERCARMY]/[UNITS] root wrapping ``units`` (raw addunit nodes); notes/campaign.md §4.4."""
     units_section: script.Node = {'kind': 'section', 'name': 'UNITS', 'line': 0, 'label': label,
@@ -162,6 +169,31 @@ def _with_hired(node: script.Node, hired: bool) -> script.Node:
     return copy
 
 
+def _with_models(node: script.Node, models: int) -> script.Node:
+    """A copy of ``node`` whose ``s_size`` stat is ``models``; never mutates ``node``."""
+    position = EXPECTED_STATS.index("s_size")
+    index = {name.lower(): i for i, name in enumerate(EXPECTED_STATS)}
+    copy = node.copy()
+    copy["stats"] = {key: list(values) for key, values in node["stats"].items()}
+    for key, values in copy["stats"].items():
+        start = index.get(key.lower())
+        if start is not None and start <= position < start + len(values):
+            values[position - start] = models
+    return copy
+
+
+def with_hired(regiment: Regiment, hired: bool) -> Regiment:
+    """The same regiment with its hired flag changed (the raw node included, so writes stay in step)."""
+    raw = None if regiment.raw is None else _with_hired(regiment.raw, hired)
+    return replace(regiment, hired=hired, raw=raw)
+
+
+def with_models(regiment: Regiment, models: int) -> Regiment:
+    """The same regiment with a new current model count (the raw node included)."""
+    raw = None if regiment.raw is None else _with_models(regiment.raw, models)
+    return replace(regiment, models=models, raw=raw)
+
+
 def write_company(save_dir: str | PathLike[str], regiments: Iterable[Regiment], hired: Mapping[int, bool],
                   filename: str = "ARMY.MRC") -> None:
     """Write the company roster (notes/troop_selection.md §5.3 point 5: hired regiments only).
@@ -174,6 +206,12 @@ def write_company(save_dir: str | PathLike[str], regiments: Iterable[Regiment], 
     """
     units = [_with_hired(regiment.raw, True) for regiment in regiments
              if regiment.raw is not None and hired.get(regiment.whoami, regiment.hired)]
+    _write_units_file(save_dir, filename, units, "Mercenary Army")
+
+
+def write_army(save_dir: str | PathLike[str], regiments: Iterable[Regiment], filename: str = "ARMY.MRC") -> None:
+    """Write the whole company, unhired regiments included (they wait in the recruit book with ``hired=0``)."""
+    units = [regiment.raw for regiment in regiments if regiment.raw is not None]
     _write_units_file(save_dir, filename, units, "Mercenary Army")
 
 

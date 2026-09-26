@@ -8,6 +8,7 @@ view, the bankruptcy page's presentation, and the roster book are deferred to GE
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
+from .reinforcements import ReinforcementLedger
 from .roster import ALWAYS_FORCED_WHOAMI, Regiment
 
 DEFAULT_LIMIT = 13
@@ -45,7 +46,8 @@ class TroopSelection:
     """Pure P0/P1 state; notes/troop_selection.md §4 (P0), §5 (P1)."""
 
     def __init__(self, company: Iterable[Regiment], forced: Iterable[int] = (), excluded: Iterable[int] = (),
-                 limit: int = DEFAULT_LIMIT, coffers: int = 0, prepaid: int = 0) -> None:
+                 limit: int = DEFAULT_LIMIT, coffers: int = 0, prepaid: int = 0,
+                 reinforcements: Mapping[int, int] | None = None) -> None:
         self.company: dict[int, Regiment] = {regiment.whoami: regiment for regiment in company}
         # a forced regiment that is not in the company file (it has not joined yet) cannot be selected or paid for
         self.forced = (frozenset(forced) | {ALWAYS_FORCED_WHOAMI}) & self.company.keys()
@@ -53,6 +55,8 @@ class TroopSelection:
         self.limit = max(LIMIT_RANGE[0], min(LIMIT_RANGE[1], limit))
         self.coffers = coffers
         self.prepaid = prepaid
+        self.ledger = ReinforcementLedger(self.company, reinforcements or {})
+        self.pays = False  # the selection book never touches the coffers (notes/troop_selection.md §4.3)
         # notes/troop_selection.md §4.1: forced regiments become hired; selected unless destroyed.
         self.hired = {whoami: regiment.hired or whoami in self.forced
                       for whoami, regiment in self.company.items()}
@@ -101,6 +105,18 @@ class TroopSelection:
             return True
         self.selection.append(whoami)
         return False
+
+    def hire_fire_enabled(self, whoami: int) -> bool:
+        """notes/troop_selection.md §4.3: only the roster's ``forHire`` flag matters in this variant."""
+        return self.company[whoami].row.for_hire
+
+    def toggle_hired(self, whoami: int) -> bool:
+        return self.set_hired_from_book(whoami, not self.hired[whoami])
+
+    @property
+    def dirty(self) -> bool:
+        return self.ledger.changed or any(self.hired[whoami] != regiment.hired
+                                          for whoami, regiment in self.company.items())
 
     def set_hired_from_book(self, whoami: int, hired: bool) -> bool:
         """Apply the selection-variant Army Records Hire/Fire action (§4.3, §8).

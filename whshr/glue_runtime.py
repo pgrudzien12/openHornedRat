@@ -16,6 +16,7 @@ from .campaign_state import caravan_window
 from .glue_animation import GlueBitmapAnimator
 from .glue import AnimRecord, BitmapRecord, GlueInstruction, MissionRecord, MissionRef
 from .glue_content import GlueContent
+from .speech import clip_milliseconds
 from .portraits import PORTRAIT_SPRITES, SPEAKER_INDEX, PortraitAnimator
 
 # notes/briefing_dialogue.md §3.5, "no speech / no audio device" fallback path (§7 point 9): the
@@ -23,6 +24,7 @@ from .portraits import PORTRAIT_SPRITES, SPEAKER_INDEX, PortraitAnimator
 # following a speech clip's playback position.
 DIALOGUE_CHAR_MILLISECONDS = 50  # 1 character / 2 ticks at the nominal 25 ms tick
 DIALOGUE_HOLD_MILLISECONDS = 750  # 30 ticks held after typing completes, no speech
+DIALOGUE_SPEECH_HOLD_MILLISECONDS = 200  # 8 ticks held after the clip ends (notes/briefing_dialogue.md §3.5)
 
 # Glue's gettentpos position table; notes/campaign_tent.md §3.
 TENT_POSITIONS: tuple[tuple[int, int], ...] = ((405, 332), (405, 332), (405, 332), (452, 316), (405, 332), (410, 346), (415, 349),
@@ -111,6 +113,13 @@ class HotspotSpeech:
 
 
 @dataclass(frozen=True)
+class PlaySpeech:
+    """Start the recording of one text line (``B<string_id>.WAV``), replacing any clip still playing
+    (notes/briefing_dialogue.md §3.2)."""
+    string_id: int
+
+
+@dataclass(frozen=True)
 class StopMusic:
     pass
 
@@ -140,8 +149,15 @@ class Diagnostic:
     message: str
 
 
+@dataclass(frozen=True)
+class MissionSelectRequested:
+    """The run ended with the ``gomissionselect`` flag raised: the host performs the mission release step
+    (notes/glue_interpreter.md §9.3) instead of falling back to a blank map."""
+
+
 GlueEffect = (OpenWindow | CloseWindow | UpdateWindow | StartMovie | StartBattle | StartDialogue |
-              EnterCaravan | StartDebrief | PlayMusic | HotspotSpeech | StopMusic | StopSpeech | Autosave | EndGame | Diagnostic)
+              EnterCaravan | StartDebrief | PlayMusic | HotspotSpeech | PlaySpeech | StopMusic | StopSpeech |
+              Autosave | EndGame | MissionSelectRequested | Diagnostic)
 
 
 @dataclass
@@ -227,6 +243,8 @@ class GlueRuntimeState:
     dialogue_line_colour: str = "black"  # colour the current line was queued under
     dialogue_typed: int = 0
     dialogue_ms: float = 0
+    dialogue_clip_ms: float = 0.0  # length of the current line's recording; 0 = none, the line is paced by its text
+    gomissionselect_pending: bool = False  # raised by ``gomissionselect``; notes/glue_interpreter.md §9.3
     dialogue_colour: str = "black"  # live settextcolor value, applies to the *next* queued line
     speech_lines: tuple[int, ...] = ()  # string ids still to speak after the current hotspot speech line
     speech_active: bool = False  # a hotspot click speech is typing or holding its current line
@@ -321,34 +339,66 @@ class GlueRuntime:
         if self.state.pending is not None and self.state.pending.kind == "dialogue":
             effects.extend(self._advance_dialogue(milliseconds))
         elif self.state.speech_active:
-            self._advance_speech(milliseconds)
+            effects.extend(self._advance_speech(milliseconds))
         return tuple(effects)
 
-    def _advance_speech(self, milliseconds: float) -> None:
+    def _speech_effects(self, string_id: int) -> tuple[GlueEffect, ...]:
+        return (PlaySpeech(string_id),) if self.speech_enabled else ()
+
+    def _advance_speech(self, milliseconds: float) -> tuple[GlueEffect, ...]:
         """Type and hold the current hotspot speech line, then the next one, then clear the box."""
-        text = self.state.dialogue_text
-        self.state.dialogue_ms += milliseconds
-        if self.state.dialogue_typed < len(text):
-            while self.state.dialogue_typed < len(text) and self.state.dialogue_ms >= DIALOGUE_CHAR_MILLISECONDS:
-                self.state.dialogue_ms -= DIALOGUE_CHAR_MILLISECONDS
-                self.state.dialogue_typed += 1
-            if self.state.dialogue_typed < len(text):
-                return
-            self.state.dialogue_ms = min(self.state.dialogue_ms, DIALOGUE_HOLD_MILLISECONDS)
-        if self.state.dialogue_ms < DIALOGUE_HOLD_MILLISECONDS:
-            return
+        if not self._step_line(milliseconds):
+            return ()
+        return self._skip_speech_line()
+
+    def stop_speech(self) -> tuple[GlueEffect, ...]:
+        """Cut off a hotspot speech that is still running (its clip and its text), e.g. when the caravan is left."""
+        if not self.state.speech_active:
+            return ()
+        self.state.speech_active = False
+        self.state.speech_lines = ()
+        self._clear_dialogue()
+        return (StopSpeech(),)
+
+    def _skip_speech_line(self) -> tuple[GlueEffect, ...]:
+        """The player clicked through the current hotspot speech line: its clip stops and the next line starts at once
+        (its recording and its text), or the box clears after the last one."""
         if self.state.speech_lines:
             (next_id, *rest) = self.state.speech_lines
             self.state.speech_lines = tuple(rest)
             self._queue_dialogue_line(next_id)
-        else:
-            self.state.speech_active = False
-            self._clear_dialogue()
+            return self._speech_effects(next_id)
+        self.state.speech_active = False
+        self._clear_dialogue()
+        return (StopSpeech(),)
+
+    def _step_line(self, milliseconds: float) -> bool:
+        """Advance the line on screen; True once it has been typed and held and the next thing may start.
+
+        With a recording the typed part follows the playback (notes/briefing_dialogue.md §3.5) and the line ends
+        a short hold after the clip, so a following line never cuts the clip off; without one the text sets the pace."""
+        state = self.state
+        text = state.dialogue_text
+        state.dialogue_ms += milliseconds
+        clip = state.dialogue_clip_ms
+        if clip > 0:
+            state.dialogue_typed = max(state.dialogue_typed, min(len(text), int(len(text) * state.dialogue_ms / clip)))
+            return state.dialogue_ms >= clip + DIALOGUE_SPEECH_HOLD_MILLISECONDS
+        if state.dialogue_typed < len(text):
+            while state.dialogue_typed < len(text) and state.dialogue_ms >= DIALOGUE_CHAR_MILLISECONDS:
+                state.dialogue_ms -= DIALOGUE_CHAR_MILLISECONDS
+                state.dialogue_typed += 1
+            if state.dialogue_typed < len(text):
+                return False
+            state.dialogue_ms = min(state.dialogue_ms, DIALOGUE_HOLD_MILLISECONDS)
+        return state.dialogue_ms >= DIALOGUE_HOLD_MILLISECONDS
 
     def _hotspot_speech(self, argument: str | None) -> tuple[GlueEffect, ...]:
         """Speak a clicked hotspot's ``clickres`` lines (``"<first id>:<count>"``); ignored while a
         script dialogue or an earlier click speech is still on screen."""
-        if self.state.speech_active or (self.state.pending is not None and self.state.pending.kind == "dialogue"):
+        if self.state.speech_active:
+            return self._skip_speech_line()  # a click while he speaks moves on, like a click on the empty window
+        if self.state.pending is not None and self.state.pending.kind == "dialogue":
             return ()
         try:
             first, count = (int(part) for part in str(argument).split(":"))
@@ -356,23 +406,16 @@ class GlueRuntime:
             return ()
         if count < 1:
             return ()
+        if self.state.pending is not None and self.state.pending.kind == "caravan":
+            self.state.dialogue_colour = "red"  # Dietrich's colour, as in the scripts' dialogues (notes/briefing_dialogue.md §3.4)
         self.state.speech_active = True
         self.state.speech_lines = tuple(range(first + 1, first + count))
         self._queue_dialogue_line(first)
-        return (HotspotSpeech(first, count),)
+        return (HotspotSpeech(first, count), *self._speech_effects(first))
 
     def _advance_dialogue(self, milliseconds: float) -> tuple[GlueEffect, ...]:
         """Type the pending line, hold it, then resolve the dialogue and resume (§3.5)."""
-        text = self.state.dialogue_text
-        self.state.dialogue_ms += milliseconds
-        if self.state.dialogue_typed < len(text):
-            while self.state.dialogue_typed < len(text) and self.state.dialogue_ms >= DIALOGUE_CHAR_MILLISECONDS:
-                self.state.dialogue_ms -= DIALOGUE_CHAR_MILLISECONDS
-                self.state.dialogue_typed += 1
-            if self.state.dialogue_typed < len(text):
-                return ()
-            self.state.dialogue_ms = min(self.state.dialogue_ms, DIALOGUE_HOLD_MILLISECONDS)
-        if self.state.dialogue_ms < DIALOGUE_HOLD_MILLISECONDS:
+        if not self._step_line(milliseconds):
             return ()
         self.state.dialogue_ms = 0
         self.state.pending = None
@@ -394,6 +437,8 @@ class GlueRuntime:
             self.state.dialogue_ms = 0
             self.state.pending = None
             return (StopSpeech(), *self.step_until_blocked())
+        if input_.kind == "dialogue-drain" and self.state.speech_active:
+            return self._skip_speech_line()
         if input_.kind == "hotspot-speech":
             return self._hotspot_speech(input_.target)
         if input_.kind == "panel-action":
@@ -690,6 +735,8 @@ class GlueRuntime:
             if self.campaign is not None:
                 self.campaign.autosave(self.snapshot())
             effects.append(Autosave())
+        elif command == "gomissionselect":
+            self.state.gomissionselect_pending = True
         elif command in ("testforunitinarmy", "testforunitinmarch"):
             self._test_unit_membership(command, argument, effects)
         elif command in ("addcash", "iftrueaddcash"):
@@ -756,6 +803,12 @@ class GlueRuntime:
 
     def _finish_frame(self, effects: list[GlueEffect]) -> None:
         self.state.current = None
+        if self.state.gomissionselect_pending:
+            # The flag only fires the mission release step once the run truly ends (no window, wait or
+            # pending request left to resume it); a resource load clears it first (quirk 3), but shipped
+            # scripts always put the command last, so this is where it fires.
+            self.state.gomissionselect_pending = False
+            effects.append(MissionSelectRequested())
 
     def _return(self, effects: list[GlueEffect]) -> None:
         if self.state.call_stack:
@@ -941,6 +994,7 @@ class GlueRuntime:
             return
         self._queue_dialogue_line(string_id)
         self._request("dialogue", effects, string_id=string_id, queued=queued)
+        effects.extend(self._speech_effects(string_id))
 
     def _queue_dialogue_line(self, string_id: int) -> None:
         """Scroll the previous line into history and start typing the next one (§3.3 ring buffer).
@@ -964,6 +1018,7 @@ class GlueRuntime:
         self.state.dialogue_lines = history
         self.state.dialogue_window_name = self.state.current_window_name
         self.state.dialogue_text = text
+        self.state.dialogue_clip_ms = clip_milliseconds(getattr(self.content, "installation", None), string_id) if self.speech_enabled else 0.0
         self.state.dialogue_line_colour = self.state.dialogue_colour
         self.state.dialogue_typed = 0
         self.state.dialogue_ms = 0
@@ -1010,14 +1065,23 @@ class GlueRuntime:
         elif kind == "dialogue":
             effects.append(StartDialogue(request_id, details["string_id"], details["queued"]))
         elif kind == "caravan":
-            window = (caravan_window(details["mode"]) or "") if restore_context else ""
+            merge = getattr(self.campaign, "merge_pending_joins", None)
+            if callable(merge):
+                merge()  # the caravan picks up the regiments ``addunit`` flagged (notes/campaign.md §2.4)
+            recruitable = bool(getattr(self.campaign, "recruitable", lambda: False)())
+            window = (caravan_window(details["mode"], recruitable) or "") if restore_context else ""
             try:
                 self.content.window(window)
             except (KeyError, TypeError):
-                window = ""  # the installation lacks this window: the host resolves the request at once
+                window = (caravan_window(details["mode"]) or "") if window else ""  # no WithRecruit variant: the plain one
+                try:
+                    self.content.window(window)
+                except (KeyError, TypeError):
+                    window = ""  # the installation lacks this window: the host resolves the request at once
             effects.append(EnterCaravan(request_id, details["mode"], window))
             if window:  # the parked runtime stays below; the caravan window is on top
                 self._open_window(f"res={window}", False, effects)
+                self.state.current_window_name = window  # its text (Dietrich's speech) belongs to it; the pop restores the script's
         elif kind == "debrief":
             effects.append(StartDebrief(request_id, details["mode"], details["debrief_index"], details["summary"]))
 

@@ -11,7 +11,7 @@ from whshr.glue_content import GlueContent
 from whshr.glue_runtime import GlueRuntime
 from whshr.paths import Installation
 from whshr.portraits import PORTRAIT_SPRITES, first_leader_speaker, speaker_position
-from whshr.roster import Regiment
+from whshr.roster import Regiment, RosterRow
 
 WINDOWS = {
     "SPEAKERWINDOW": "[WINDOW]\n[POSITION]\nset:x=10\nset:y=20\n[END]\n"
@@ -22,8 +22,9 @@ WINDOWS = {
 SETS = {"commander": "COMM", "scribe": "SCRI", "gotrek": "GOTR"}
 
 
-def regiment(leader_portrait):
-    return SimpleNamespace(whoami=1, leader_portrait=leader_portrait)
+def regiment(leader_portrait, whoami=1):
+    row = RosterRow(whoami, keep=False, for_hire=False, wizard=False, artillery=False, base_price=10)
+    return Regiment(whoami, f"Unit {whoami}", True, 10, 10, 0, row, leader_portrait=leader_portrait)
 
 
 class SpeakerSelectionTests(unittest.TestCase):
@@ -60,8 +61,7 @@ class SpeakerStateTests(unittest.TestCase):
 
     def test_given_troop_selection_is_committed_then_the_first_marching_leader_is_the_speaker(self):
         campaign = self._campaign()
-        campaign.company = (regiment("VoidType"), regiment("Gotrek"), regiment("Commander"))
-        campaign.company[0].whoami, campaign.company[1].whoami, campaign.company[2].whoami = 1, 2, 3
+        campaign.company = (regiment("VoidType", 1), regiment("Gotrek", 2), regiment("Commander", 3))
 
         campaign.commit_troop_selection(SimpleNamespace(money_delta=0, units=(3, 1, 2), hired=(1, 2, 3)))
 

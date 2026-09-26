@@ -269,9 +269,9 @@ class GlueSceneTests(unittest.TestCase):
         recruit = Regiment(5, "Recruit", False, 10, 10, 13,
                            RosterRow(5, keep=False, for_hire=True, wizard=False, artillery=False, base_price=10),
                            experience=77)
-        model = type("Model", (), {"hired": {5: False}})()
+        model = type("Model", (), {"hired": {5: False}, "pays": False})()
         view = ArmyRecordsView.__new__(ArmyRecordsView)
-        view.scene = type("Scene", (), {"model": model})()
+        view.scene = type("Scene", (), {"model": model, "hired_at_open": {5: False}})()
         view.body_font = type("Body", (), {"font": type("Font", (), {"height": 12})()})()
         view.heading_font = object()
         calls = []
@@ -355,6 +355,28 @@ class GlueSceneTests(unittest.TestCase):
         self.assertIs(returned.scene, selection)
         self.assertEqual(selection.page, 1)
         self.assertFalse(selection.model.hired[8])
+
+    def test_given_reinforcements_when_taken_from_the_selection_book_then_the_price_and_the_campaign_follow(self):
+        row = RosterRow(5, keep=False, for_hire=True, wizard=False, artillery=False, base_price=10)
+        commander = Regiment(2, "Commander", True, 10, 10, 0,
+                             RosterRow(2, keep=False, for_hire=False, wizard=False, artillery=False, base_price=10))
+        campaign = CampaignState({"flow_scripts": {}, "mission_windows": {}}, mission_window="MAP", coffers=1000,
+                                 company=(commander, Regiment(5, "Pikes", True, 8, 12, 0, row)))
+        campaign.add_reinforcements(5, 3)
+        parked = GlueScene("BRIEFING", campaign, accept_battle="bf001")
+        parked.enter(self.context)
+        selection = TroopSelectionScene(campaign, MissionRef("MAP", 0), "bf001", parked)
+        selection.enter(self.context)
+
+        book = selection.handle("book:5", self.context).scene
+        for event in ("reinf:up", "reinf:up", "reinf:take"):
+            book.handle(event, self.context)
+
+        self.assertEqual(selection.model.company[5].models, 10)
+        self.assertEqual(selection.model.row(5).price, 100)
+        book.handle("book:done", self.context)
+        self.assertEqual(next(r for r in campaign.company if r.whoami == 5).models, 10)
+        self.assertEqual(campaign.reinforcements, {5: 1})
 
     def test_aborting_army_records_restores_hired_flags_and_removes_cancelled_hires_from_selection(self):
         commander = Regiment(2, "Commander", True, 10, 10, 0,

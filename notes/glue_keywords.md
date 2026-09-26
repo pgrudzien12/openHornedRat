@@ -125,7 +125,7 @@ Accepted keys: `set:x`, `set:y`, `set:vx`, `set:vy`, `set:res`, `set:count`, `se
 | `setupbitmap:<Name>`, `setdownbitmap:<Name>` | button picture up / pressed | ✅ used (20 each) | `MAINMENU` | - |
 | `set:upsfx=N`, `set:downsfx=N` | sound-effect numbers for release and press | 🟡 used (20 each; 3 and 4) | `MAINMENU` | - |
 | `set:linkid=N`, `set:count=N` | multi-state option button: `count` states, linked to `[TEXT]` blocks with `linked:` and `res = linkid` | ✅ code, used (8) | `OPTIONWINDOW` | - |
-| `set:clickres=N`, `set:clickrescnt=N` | speech text id and line count played when the hotspot is clicked (Dietrich's "Hey, stop that!" type lines) | 🟡 used (14) | `CARAVANAFTERENCOUNTERWITHRECRUIT` | - |
+| `set:clickres=N`, `set:clickrescnt=N` | speech text id and *extra* line count played when the hotspot is clicked (`clickrescnt` counts the lines after the first: `clickres=933`, `clickrescnt=3` is the four lines 933-936; no count is one line) (Dietrich's "Hey, stop that!" type lines) | 🟡 used (14) | `CARAVANAFTERENCOUNTERWITHRECRUIT` | - |
 | `set:textx`, `set:texty` | text position for the hotspot | ⬜ parsed, unused | - | - |
 | `setmask:<Name>` | stored; use by the hit test not traced | ⬜ (comment only in `MAPWINDOW`) | - | `pe_resources.md` |
 | `settextcolor:<name>` | hotspot text colour | ⬜ parsed, unused | - | - |

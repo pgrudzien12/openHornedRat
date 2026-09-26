@@ -59,7 +59,7 @@ def complete_debrief(campaign: "CampaignState | None", effect: "StartDebrief", l
         _log_payment(log, "final", 0, campaign, [], skipped)
     pending = sorted(getattr(campaign, "pending_join", ()))
     if pending:
-        skipped.append(f"pending-join units {pending}: merged when the after-mission caravan opens (not implemented)")
+        skipped.append(f"pending-join units {pending}: merged into the company when the next caravan opens")
     return applied, skipped
 
 

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from .campaign_log import GlueWatcher
 from .glue import MissionRef
 from .glue_runtime import (ActivityResult, Diagnostic, EnterCaravan, GlueEffect, GlueInput, GlueRuntime, GlueRuntimeState,
-                           StartBattle, StartDebrief, StartMovie)
+                           MissionSelectRequested, StartBattle, StartDebrief, StartMovie)
 from .glue_fonts import glue_font_asset
 from .scenes import Quit, Scene, SceneAssets, SceneEvent, Transition
 
@@ -91,6 +91,13 @@ class GlueScene(Scene):
     def take_debrief_effect(self) -> StartDebrief | None:
         for index, effect in enumerate(self._effects):
             if isinstance(effect, StartDebrief):
+                del self._effects[index]
+                return effect
+        return None
+
+    def take_mission_select_effect(self) -> MissionSelectRequested | None:
+        for index, effect in enumerate(self._effects):
+            if isinstance(effect, MissionSelectRequested):
                 del self._effects[index]
                 return effect
         return None
@@ -200,6 +207,8 @@ class GlueScene(Scene):
             if event.kind == "hotspot-release" and self._caravan_open():
                 return self._leave_caravan(event.target)
             if event.kind == "hotspot-release" and self.window == "STARTCARAVAN" and event.target:
+                if event.target.casefold() == "armybook":
+                    return self._open_army_book(hire_only=False)
                 if event.target.casefold() == "abortgame":
                     from .campaign_scenes import MainMenuScene
                     return Transition(MainMenuScene(), "generic caravan exited")
@@ -274,9 +283,14 @@ class GlueScene(Scene):
             return None
         name = (target or "").casefold()
         mode = pending.mode
+        if name in ("armybook", "hireonlyarmybook"):
+            return self._open_army_book(hire_only=name == "hireonlyarmybook")
         if name not in ("unwindmission", "popandresume"):
             self._queue((Diagnostic("caravan", f"hotspot {target!r} is not yet implemented"),))
             return None
+        if name == "popandresume" and self.campaign is not None:
+            self.campaign.leave_caravan()  # notes/activity_results.md §6: unhired regiments go, unused reinforcements are cleared
+        self._queue(self.require_runtime().stop_speech())  # Dietrich does not go on talking over the next screen
         self.complete_activity(ActivityResult(pending.request_id, "caravan"))
         if name == "unwindmission":
             parent = self.release_mission()
@@ -285,6 +299,20 @@ class GlueScene(Scene):
                     parent.caravan_return = (self, mode)
                 return Transition(parent, "mission released")
         return None
+
+    def _open_army_book(self, hire_only: bool) -> Transition | None:
+        """The caravan's Army Records (notes/builtin_widgets.md §2.1): ``HireOnlyArmyBook`` charges the coffers
+        for a hire, ``ArmyBook`` does not. Both list the company in file order and open on regiment 0."""
+        from .campaign_scenes import ArmyRecordsScene
+        from .roster_book import RosterBook
+
+        campaign = self.campaign
+        if campaign is None or not campaign.company:
+            self._queue((Diagnostic("caravan", "the army book needs a company"),))
+            return None
+        model = RosterBook(campaign.company, coffers=campaign.coffers, reinforcements=campaign.reinforcements,
+                           pays=hire_only)
+        return Transition(ArmyRecordsScene(self, campaign.company[0].whoami, model), "army records opened")
 
     def _map_program(self, target: str) -> str:
         """The flow program the caravan's map hotspot opens.

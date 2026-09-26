@@ -1,8 +1,9 @@
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
-"""Army Records presentation used by Ctrl-click from troop selection.
+"""Army Records presentation: Ctrl-click from troop selection and the caravan's army books.
 
 The native-screen constants below are deliberately local to this built-in front-end
-screen (not WND.DLL data); see notes/troop_selection.md §8 and §8.1.
+screen (not WND.DLL data); see notes/troop_selection.md §8 and §8.1 and
+notes/builtin_widgets.md §2.
 """
 
 from collections.abc import Sequence
@@ -49,14 +50,22 @@ DESCRIPTIONS: tuple[str, ...] = (
 )
 
 # §8 buttons: logical action, x, resource tab base, BRTXT label.
+Point = tuple[int, int]
+Rgb = tuple[int, int, int]
 BUTTONS: tuple[tuple[str, int, str, int | None], ...] = (
     ("book:stat-info", 14, "PurpleATab", 321), ("book:hire-fire", 104, "VioletATab", None),
     ("book:abort", 194, "BrownBTab", 307), ("book:done", 350, "GreenATab", 304),
     ("book:previous", 440, "BlueATab", 301), ("book:next", 530, "RedATab", 300),
 )
 BUTTON_Y, BUTTON_SIZE = 448, (84, 32)
-Rgb = tuple[int, int, int]
-Point = tuple[int, int]
+# notes/builtin_widgets.md §2.4: the reinforcement sub-window is 144x134, centred in the book; the buttons are
+# (action, offset in the window, size, bitmap): Take/Hire 116x20, +1 arrow (up) and -1 arrow (down) 11x13.
+REINF_ORIGIN, REINF_SIZE = (248, 173), (144, 134)
+REINF_BUTTONS: tuple[tuple[str, Point, Point, str], ...] = (
+    ("reinf:take", (12, 110), (116, 20), "reinfButton"),
+    ("reinf:up", (29, 85), (11, 13), "reinfArrowUp"),
+    ("reinf:down", (104, 85), (11, 13), "reinfArrowDown"),
+)
 BLACK, GREY, YELLOW = (0, 0, 0), (127, 127, 127), (255, 255, 0)
 # Content text is inset from each page's painted frame/spine (§8).  These are
 # native ArmyBook presentation constants, not WND.DLL layout data.
@@ -65,13 +74,13 @@ RIGHT_PAGE = (350, 590)
 
 
 class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
-    """Render the selection-variant book and translate its page controls."""
+    """Render either variant of the book (selection or caravan) and translate its page controls."""
 
     def __init__(self, gpu: Gpu, scene: ArmyRecordsScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
-        self.content = scene.selection_scene.glue_scene.require_runtime().content
-        self.body_font = BitmapFont(scene.selection_scene.glue_scene.font(2))
-        self.heading_font = BitmapFont(scene.selection_scene.glue_scene.font(4))
+        self.content = scene.glue_scene.require_runtime().content
+        self.body_font = BitmapFont(scene.glue_scene.font(2))
+        self.heading_font = BitmapFont(scene.glue_scene.font(4))
         self.palette = AppPalette.select(9, self.content.palette_tables())
         self.quads: list[tuple[ScreenQuad, Point]] = []
         self.labels: list[tuple[TextLabel, Point]] = []
@@ -87,7 +96,11 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
         self.refresh()
 
     def refresh(self) -> None:
-        state = (self.scene.whoami, self.info, tuple(sorted(self.scene.model.hired.items())), self.pressed_button)
+        model = self.scene.model
+        ledger = model.ledger
+        state = (self.scene.whoami, self.info, tuple(sorted(model.hired.items())), self.pressed_button,
+                 tuple(sorted((whoami, regiment.models) for whoami, regiment in model.company.items())),
+                 tuple(sorted(ledger.offered.items())), tuple(sorted(ledger.taken.items())), model.dirty)
         if state == self.state:
             return
         self.state = state
@@ -97,14 +110,19 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
         self._left_page(regiment)
         self._right_page(regiment)
         self._buttons(regiment)
+        self._reinforcement_window(regiment)
 
     def _left_page(self, regiment: Regiment) -> None:
         height = self.body_font.font.height
         cost_y = 410 - height
-        # The selection variant always uses the normal cost/retainer line;
-        # BKTXT 509 belongs only to the caravan's hire-only mode (§8).
-        self._center(self._string("BKTXT", 501, regiment.price, regiment.retainer), cost_y, BLACK,
-                     x=LEFT_PAGE[0], width=240)
+        # The selection variant always uses the normal cost/retainer line; a regiment that was not hired when
+        # the hire-only caravan book opened shows only its fee (BKTXT 509, notes/builtin_widgets.md §2.2).
+        model = self.scene.model
+        if model.pays and not self.scene.hired_at_open[regiment.whoami]:
+            cost = self._string("BKTXT", 509, regiment.price)
+        else:
+            cost = self._string("BKTXT", 501, regiment.price, regiment.retainer)
+        self._center(cost, cost_y, BLACK, x=LEFT_PAGE[0], width=240)
         self._center(self._string("BKTXT", 500, regiment.experience), cost_y - height, BLACK,
                      x=LEFT_PAGE[0], width=240)
         # The regiment illustration occupies the upper left page; its name is
@@ -157,6 +175,32 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
             self._label(self._string("BRTXT", 701 + index * 2), 538, row_y, BLACK)
             self._label(str(value), 573, row_y, BLACK)
 
+    def _reinforcement_window(self, regiment: Regiment) -> None:
+        """The reinforcement sub-window shown over the book while the regiment has an offer
+        (notes/builtin_widgets.md §2.4). Geometry is the documented native layout."""
+        ledger = self.scene.model.ledger
+        if not ledger.has_offer(regiment.whoami):
+            return
+        x0, y0 = REINF_ORIGIN
+        h = self.body_font.font.height
+        self._bitmap("reinfScroll", REINF_ORIGIN)
+        self._center(self._string("BKTXT", 505), y0 + 16, BLACK, x=x0, width=REINF_SIZE[0])
+        self._center(self._string("BKTXT", 507, ledger.offer_left(regiment.whoami)), y0 + 46, BLACK,
+                     x=x0, width=REINF_SIZE[0])
+        self._center(self._string("BKTXT", 508, ledger.taken_count(regiment.whoami)), y0 + 46 + h + 2, BLACK,
+                     x=x0, width=REINF_SIZE[0])
+        for action, offset, size, art in REINF_BUTTONS:
+            if art == "reinfButton":  # only the Take button has a pressed picture
+                name = art + ("Down" if self.pressed_button == action else "Up")
+            else:
+                name = art
+            position = (x0 + offset[0], y0 + offset[1])
+            self._bitmap(name, position)
+            if action == "reinf:take":
+                y = position[1] + (size[1] - h) // 2
+                self._center(self._string("BRTXT", 319), y, YELLOW, x=position[0], width=size[0])
+            self.buttons.append((pygame.Rect(*position, *size), action))
+
     def _equipment_block(self, armour: int, weapon: int, x: int, y: int) -> None:
         """Information-page regiment or commander equipment (§2.2)."""
         h = self.body_font.font.height
@@ -188,7 +232,9 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
 
     def _enabled(self, action: str, regiment: Regiment) -> bool:
         if action == "book:hire-fire":
-            return regiment.row.for_hire
+            return self.scene.model.hire_fire_enabled(regiment.whoami)
+        if action == "book:abort":
+            return self.scene.model.dirty  # nothing to abort until a hire, fire or reinforcement changed something
         if action == "book:previous":
             return self.scene.index > 0
         if action == "book:next":

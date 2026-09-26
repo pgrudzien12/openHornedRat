@@ -6,21 +6,23 @@ shared now; text, portraits and executable-owned widgets remain separate
 adapters until their renderer rules are moved out of compatibility views.
 """
 
+import io
 import sys
 from collections.abc import Iterable, Sequence
 from typing import Any
 
 import pygame
 
-from ..campaign_state import CARAVAN_MODE_WINDOWS, CampaignState, offered_refs
+from ..campaign_state import CampaignState, is_caravan_window, offered_refs
 from ..glue import MissionRecord, MissionRef
 from ..glue_content import GlueContent
 from ..glue_scene import GlueScene
 from ..scenes import SceneEvent
+from ..speech import load_speech
 from ..controlpanel import button_y, control_panel
 from ..glue_animation import GlueBitmapAnimator
 from ..glue_render import GlueRenderModel, RenderBitmap, RenderHotspot, RenderText, build_render_model
-from ..glue_runtime import Diagnostic, GlueInput, GlueRuntimeState, PlayMusic, StopMusic
+from ..glue_runtime import Diagnostic, GlueInput, GlueRuntimeState, PlayMusic, PlaySpeech, StopMusic, StopSpeech
 from ..glue_palette import AppPalette
 from .bitmap_font import BitmapFont
 from .glue_bitmap import load_optional_bitmap
@@ -75,6 +77,7 @@ class GlueView(NativeScreenView[GlueScene]):
         self.bitmap_animators: dict[tuple[str, int], GlueBitmapAnimator] = {}
         self.music_name: str | None = None
         self._music_ok = _ensure_mixer()
+        self._speech_sound: pygame.mixer.Sound | None = None
         self.pressed: RenderHotspot | None = None
         self._pressed_button: str | None = None
         # Change fingerprints of the refresh groups (see `refresh`).
@@ -151,6 +154,10 @@ class GlueView(NativeScreenView[GlueScene]):
                     pygame.mixer.music.play(loops=-1)
                 except (FileNotFoundError, AttributeError, pygame.error):
                     pass
+            elif isinstance(effect, PlaySpeech):
+                self._play_speech(effect.string_id)
+            elif isinstance(effect, StopSpeech):
+                self._stop_speech()
             elif isinstance(effect, StopMusic):
                 self.music_name = None
                 if self._music_ok:
@@ -158,6 +165,27 @@ class GlueView(NativeScreenView[GlueScene]):
                         pygame.mixer.music.stop()
                     except pygame.error:
                         pass
+
+    def _play_speech(self, string_id: int) -> None:
+        """Play the recording of a text line, replacing the previous clip (notes/briefing_dialogue.md §3.2);
+        a missing or unreadable clip leaves the line as text only."""
+        self._stop_speech()
+        installation = self.scene.require_runtime().content.installation
+        if not self._music_ok or installation is None:
+            return
+        data = load_speech(installation, string_id)
+        if data is None:
+            return
+        try:
+            self._speech_sound = pygame.mixer.Sound(io.BytesIO(data))
+            self._speech_sound.play()
+        except pygame.error:
+            self._speech_sound = None
+
+    def _stop_speech(self) -> None:
+        if self._speech_sound is not None:
+            self._speech_sound.stop()
+            self._speech_sound = None
 
     def _refresh_bitmaps(self, models: Models, frames: Frames, palette: AppPalette) -> None:
         if (models, frames, palette) == (self._bitmap_models, self.frames, self.palette):
@@ -588,7 +616,7 @@ def _bitmap_visible(bitmap: RenderBitmap, campaign: CampaignState | None) -> boo
 def _caravan_hint(campaign: CampaignState | None, models: Iterable[GlueRenderModel],
                   hotspot: RenderHotspot | None) -> str | None:
     """Resolve a caravan hotspot hint, including the coffer value placeholder."""
-    if campaign is None or hotspot is None or not any(model.name in CARAVAN_MODE_WINDOWS.values() for model in models):
+    if campaign is None or hotspot is None or not any(is_caravan_window(model.name) for model in models):
         return None
     hint_id = 402 if hotspot.hint_id == -1 else hotspot.hint_id
     if hint_id is None:

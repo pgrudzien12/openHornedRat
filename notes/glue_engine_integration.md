@@ -74,6 +74,12 @@ renumber later work.
   §5.3 points 3, 5) on troop-selection Done. Reinforcements still have no standalone-file home in the
   original (only `savegame.N`'s `RMYI` chunk carries them) and stay in-memory pending GEI14's writer.
 
+- [x] **GEI7g — Caravan roster book, hiring and reinforcements.** (issue #145) The caravan's `ArmyBook` and
+  `HireOnlyArmyBook` hotspots open the Army Records screen on the caravan's company; hiring in the paying
+  variant charges the coffers, and the reinforcement sub-window (notes/builtin_widgets.md §2.4) is available in
+  every hire-capable variant. Regiments join the company from a master roster (see the findings). Persisting the
+  reinforcement pool is still GEI14's.
+
 - [x] **GEI7f — Troop sel ection view carried-item tracking.** The picked-up P1 regiment visually
   follows the cursor (`notes/troop_selection.md` §5.2: "the strip... follows the cursor"). The
   interaction itself stays click-to-pick-up/click-to-drop, matching the original's own hint text
@@ -90,8 +96,15 @@ renumber later work.
   *Implemented:* the request pushes the parked script, opens the mode's caravan window (`select`, `resume`,
   `recruit*`, `info<letters>`; unknown names resume at once) and the hotspot's own `res` decides the exit
   (`UnwindMission` finishes the script and releases the mission on the map, `PopAndResume` resumes it);
-  other hotspots stay inert with a diagnostic. The `...WithRecruit` variants are not chosen yet (no
-  recruitable-regiment test).
+  other hotspots stay inert with a diagnostic. `select`/`resume` open their `...WithRecruit` window when
+  `CampaignState.recruitable()` holds (GEI7g: an unhired regiment for hire waits in the company; reinforcements that
+  replace losses play no part; 🟡 the original's exact test is not recorded), falling back to the plain
+  window when the installation lacks the variant. Dietrich speaks only when clicked (the `DietrichSpeech` hotspot's `clickres` lines, in red; `clickrescnt` counts the
+  lines after the first); the caravan is the current window while open so its text is drawn. Spoken lines (click speech and script
+  `playtext`) now play their recording (`B<id>.WAV`, `whshr/speech.py`): the runtime emits `PlaySpeech` per line when speech
+  is on, the view plays it and a new line replaces the previous clip. The originals' RIFF size fields are wrong, so the PCM is
+  rewritten with correct headers. Text still advances on its own timer, not on the clip length (a middle line can be cut
+  short by up to about 0.3 s; the notes say the original follows the audio).
 
 - [x] **GEI10 — Campaign mission progression.** (issue #124) Apply `depend` and `inactivedepend` to generic
   mission rows; advance the campaign for release and replacement paths; rebuild the offered list
@@ -192,7 +205,24 @@ renumber later work.
   permits, fire deselects, and a full selection leaves a newly hired regiment unselected without
   a refusal sound or coffer change. Done keeps the in-memory changes; Abort restores the book-open
   hired snapshot and removes any cancelled hire from the selection. Caravan economy and
-  reinforcement UI were not added; ARMY/MARCH file writes are GEI7e.
+  reinforcement UI were not added here (GEI7g); ARMY/MARCH file writes are GEI7e.
+- GEI7g (issue #145): `CampaignState` now carries a **master roster** (`master`, the fresh-campaign content of
+  `SCRIPT/MAXARMY.MRC`, i.e. the original's `PLAY.MRC`) next to the company (`ARMY.MRC`). Without it there was
+  nothing to hire: the starting company holds two regiments. `addunit` flags a regiment and the next caravan
+  request (any `gocaravan`) copies it in, hired at once unless its roster row says *for hire* (then it waits in
+  the recruit book, `hired = 0`; 🟡 the exact moment of the merge is inferred from notes/campaign.md §2.4);
+  `unitjoinmission` copies a regiment in (hired) and adds it to the march, `unitleavemission` removes it.
+  Leaving a recruit caravan by `PopAndResume` drops unhired regiments and clears unused reinforcements;
+  troop-selection Done does the same (notes/troop_selection.md §5.3 point 5).
+  The caravan book is a `RosterBook` model (pure, `whshr/roster_book.py`); the selection book keeps using
+  `TroopSelection`; both expose the same small interface (`BookModel`) and share the `ReinforcementLedger`
+  (`whshr/reinforcements.py`). Done applies hired flags, model counts, the pool, and (paying variant) the coffers
+  and the marching list to the campaign and rewrites the company file (unhired regiments included, `hired=0`);
+  Abort applies only the coffers of a paying book (the documented quirk). Two engine choices the specification
+  leaves open: Abort also **reverts** men taken as reinforcements and the pool (the notes only say the hired
+  flags are restored), and the offer counts only present models because wounded/away men are not tracked yet
+  (GEI8). The paying variant's marching list starts as the always-forced commander only and Done rewrites the
+  march from it, as documented; troop selection rebuilds the selection anyway.
 - GEI7e added `script.write()`, a generic inverse of `script.parse()` (any `.BTS`/`.MRC` node
   tree back to text), rather than a roster-specific serializer: round-tripped against all 87
   shipped `.BTS`/`.MRC` files plus the real `SAVE/ARMY.MRC`/`PLAY.MRC`/`MARCH.MRC`, byte-for-byte

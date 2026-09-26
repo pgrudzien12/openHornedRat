@@ -218,6 +218,21 @@ class SceneMachine:
         self._start_glue_battle()
         self._start_glue_movie()
         self._start_glue_caravan()
+        self._start_glue_mission_select()
+
+    def _start_glue_mission_select(self) -> None:
+        """A run that ended with ``gomissionselect`` raised performs the mission release step
+        (notes/glue_interpreter.md §9.3), instead of the generic blank-run fallback to a fresh map."""
+        from .glue_scene import GlueScene
+
+        if not isinstance(self.active, GlueScene):
+            return
+        scene = self.active
+        if scene.take_mission_select_effect() is None:
+            return
+        parent = scene.release_mission()
+        if parent is not None:
+            self._apply(Transition(parent, "mission released"))
 
     def _start_glue_debrief(self) -> None:
         """A debrief request has no screen yet: it completes at once, applying what the engine can

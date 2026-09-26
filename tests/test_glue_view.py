@@ -84,6 +84,19 @@ class GlueViewTests(unittest.TestCase):
 
         self.assertEqual(_caravan_hint(campaign, (model,), hotspot), "402:(500,)")
 
+    def test_every_caravan_variant_shows_its_hotspot_hints_but_other_windows_do_not(self):
+        from whshr.frontend.glue_view import _caravan_hint
+        campaign = type("Campaign", (), {"coffers": 500, "hint": lambda self, hint, *args: f"hint{hint}"})()
+        talk = RenderHotspot(0, 0, 1, 1, 160, "DietrichSpeech", None, None, None)
+        for name, shown in (("STARTCARAVAN", True), ("CARAVANAFTERMISSION", True), ("CARAVANAFTERMISSIONWITHRECRUIT", True),
+                            ("CARAVANAFTERENCOUNTERWITHRECRUIT", True), ("CARAVANRECRUITANDRESUME", True),
+                            ("INFOCARAVANBPC", True), ("CARAVANSELECTMISSION", True), ("MAPWINDOW", False),
+                            ("SCRIBE5WINDOWTL", False)):
+            with self.subTest(window=name):
+                model = GlueRenderModel(name, 0, 0, 640, 480, 0, (), (), (), (), ())
+
+                self.assertEqual(_caravan_hint(campaign, (model,), talk), "hint160" if shown else None)
+
     def test_format_1_text_centres_in_vx_and_uses_vy_as_a_y_offset_not_a_box_height(self):
         from whshr.frontend.glue_view import _place_text
 
