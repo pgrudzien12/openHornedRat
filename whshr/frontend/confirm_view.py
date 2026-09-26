@@ -20,7 +20,7 @@ PANEL_SIZE = (360, 120)
 PANEL_ORIGIN = ((640 - PANEL_SIZE[0]) // 2, (480 - PANEL_SIZE[1]) // 2)
 BUTTON_SIZE, BUTTON_Y = (116, 20), PANEL_ORIGIN[1] + PANEL_SIZE[1] - 34
 BUTTONS = (("yes", YES_LABEL, PANEL_ORIGIN[0] + 40), ("no", NO_LABEL, PANEL_ORIGIN[0] + PANEL_SIZE[0] - 40 - 116))
-YELLOW, WHITE = (255, 255, 0), (255, 255, 255)
+BLACK, YELLOW, WHITE = (0, 0, 0), (255, 255, 0), (255, 255, 255)
 MARGIN = 20
 
 
@@ -59,7 +59,7 @@ class ConfirmView(DialogView[ConfirmScene]):
             pressed = self.pressed == action
             self._bitmap("LoadSaveBtn0" + ("Dn" if pressed else "Up"), (x, BUTTON_Y))
             offset = 1 if pressed else 0
-            self._center(label, BUTTON_Y + (BUTTON_SIZE[1] - height) // 2 + offset, YELLOW,
+            self._center(label, BUTTON_Y + (BUTTON_SIZE[1] - height) // 2 + offset, BLACK,
                          x=x + offset, width=BUTTON_SIZE[0])
             self.buttons.append((pygame.Rect(x, BUTTON_Y, *BUTTON_SIZE), action))
 

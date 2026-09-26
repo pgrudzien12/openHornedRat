@@ -24,7 +24,8 @@ SLOT_SIZE, SLOT_X, SLOT_Y, SLOT_PITCH, AUTOSAVE_Y = (232, 36), 8, 8, 36, 194
 BUTTON_SIZE, BUTTON_Y = (116, 20), {"save": 188, "load": 230}
 OK_X, CANCEL_X = 8, 124
 PROMPT_ORIGIN, PROMPT_SIZE = (172, 214), (296, 58)  # the edit box, over the dialog
-YELLOW, GREY, WHITE, RED = (255, 255, 0), (192, 192, 192), (255, 255, 255), (255, 96, 96)
+BLACK, DISABLED = (0, 0, 0), (127, 127, 127)  # text on the tan slot and button art
+YELLOW, WHITE, RED = (255, 255, 0), (255, 255, 255), (255, 96, 96)  # text on the dark prompt panel and errors
 OK_LABEL, CANCEL_LABEL = 163, 164  # GMTXT "OK" / "CANCEL"
 
 
@@ -72,7 +73,7 @@ class LoadSaveView(DialogView[LoadSaveScene]):
             return
         info = self.scene.slots[slot]
         label = info.description if info else EMPTY_SLOT_LABEL
-        self._center(label, y + (SLOT_SIZE[1] - self.font.font.height) // 2, YELLOW if info else GREY,
+        self._center(label, y + (SLOT_SIZE[1] - self.font.font.height) // 2, BLACK,
                      x=ox + SLOT_X, width=SLOT_SIZE[0])
         if not self.scene.editing:
             self.buttons.append((rect, f"slot:{slot}"))
@@ -86,7 +87,7 @@ class LoadSaveView(DialogView[LoadSaveScene]):
             label = action.upper()
         offset = 1 if pressed else 0
         self._center(label, y + (BUTTON_SIZE[1] - self.font.font.height) // 2 + offset,
-                     YELLOW if enabled else GREY, x=x + offset, width=BUTTON_SIZE[0])
+                     BLACK if enabled else DISABLED, x=x + offset, width=BUTTON_SIZE[0])
         if enabled:
             self.buttons.append((pygame.Rect(x, y, *BUTTON_SIZE), action))
 
