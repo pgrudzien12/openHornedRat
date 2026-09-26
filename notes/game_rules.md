@@ -6,6 +6,9 @@ This is a behavioural specification for the original game. Findings are based on
   data table matches a known chart, and/or the data agrees across all units;
 - 🟡 **hypothesis**: consistent with the code or data but not fully traced, with the reason given.
 
+Pre-battle rules and the complete regiment-action availability table are maintained in
+[deployment.md](deployment.md).
+
 ## Key findings
 
 1. **Stat layout** ✅ Each `setstats` value is one byte of a fixed block (consecutive in token order);
@@ -310,7 +313,7 @@ and at most 32 models, usually in 4 ranks (3–5).
   (octagonal distance), so re-forming moves each soldier to the closest position. The model walking rule
   then walks each model towards its slot every tick — at a **rank-dependent** rate, described in
   "Models chase the unit, they are not carried by it" below.
-- **Ranks** (orders 0x0F/0x10 and the deployment buttons): refused while fleeing,
+- **Ranks** (orders 0x0F/0x10): refused while fleeing,
   held (Tangling Thorn) or charging; the request is clamped to `[min, models / min]` with
   `min = max(1, trunc(0.75 × √models))` (constants 1.5 × 0.5 at the relevant data/the relevant data). Examples: 8 models
   2–4 ranks, 18 models 3–6, 24 models 3–8, 32 models 4–8. Re-forming (`HaltAndReform`) restores the script's
@@ -327,10 +330,6 @@ and at most 32 models, usually in 4 ranks (3–5).
   (team and wagon), footprint 2 × 4 cells, facing snapped to 45° steps.
 - **Script opcodes**: `ScatterModelsAtNode` (0x48) spreads a unit's models around a node, `PlaceAndReformAtNode`
   (0x4A) re-forms at a node.
-- **On screen**: the BF001 deployment screenshot shows exactly this layout (16 infantry in 3 ranks as 6, 5, 5,
-  the two rear ranks offset by half a spacing; 12 crossbows as 4 × 3). In both units the model spacing is about
-  1.43 times the on-screen sprite width, so one troop sprite pixel covers about **0.45 world units** (measured,
-  not traced; R68). `whshr/formation.py` implements the block layout for both battle viewers.
 
 ### Models chase the unit, they are not carried by it ✅
 
@@ -525,15 +524,11 @@ machine's crew therefore re-settle around the machine at their own varied rates 
 flat-speed shuffle of a regiment. **The war machine layout also inverts the model search** ✅: the machine
 model itself is placed directly at the front-rank-centre slot with no search (if the machine is gone, every
 slot is searched), and every **crew** slot then takes the **farthest** unplaced model (same octagonal
-distance, greedy slot by slot, the last slot getting whoever is left) instead of the nearest. The condition is
-global: the battle keeps one phase value (0 no battle, 1 deployment, 2 the battle proper; pausing does not
-change it), and the layout takes the nearest only while that phase is **deployment**. The phase is 2 from the
-moment a mission starts loading, becomes deployment only if the mission script requests it, returns to 2 when
-the player starts the battle, and is 0 after the battle. Wagons, monsters and blocks never invert. In practice
-artillery cannot be moved or re-ranked during deployment and crews cannot die there, so **a war machine layout is
-always "farthest"**: after crew casualties the survivors are sent to the slots furthest from them and scramble
-across the machine on the slow rank-dependent walk. An engine with no deployment phase should always use
-farthest.
+distance, greedy slot by slot, the last slot getting whoever is left) instead of the nearest. During normal battle play, crew slots use this farthest-model rule.
+The pre-battle exception
+is documented in [deployment.md §4.2](deployment.md#42-formation-layout-during-deployment).
+Wagons, monsters and blocks never invert. After crew casualties the surviving crew can
+therefore scramble across the machine on the slow rank-dependent walk.
 
 A formation change **costs no time of its own** — the only delay is the walking. Requested rank counts are
 clamped to `[min, models / min]` with `min = max(1, trunc(0.75 × √models))`, and a re-form is refused outright
@@ -644,7 +639,7 @@ rear rank trailing, converging again once the facing settles.
   the leader model as the machine). This is a property of being a war machine, decided at set-up — not a
   mission script or AI choice — so an engine has to implement it as a rule. 🟡 Their crew placement also
   inverts the slot search (taking the **farthest** eligible model rather than the nearest) depending on a
-  global phase flag, which appears to distinguish the deployment phase from the battle proper.
+  battle phase; the pre-battle rules are documented in [deployment.md](deployment.md).
 
 **When a unit breaks and turns to run**, every model that is currently at rest is given a pause of
 `(per-model stagger value & 7) × 3 + 6` — **6 to 27 ticks** — with its timed-pause flag set, and is scattered
@@ -821,8 +816,8 @@ attached light/effect. There are 59 such operations in total.
 
 The key visibility constants are recorded here for implementers.
 
-- **Waypoints**: `ExecuteGoto` replaces and shift-click appends to a queue of
-  **at most 8 waypoints**; a point within 17 units of the queue head or tail is ignored. Moving
+- **Waypoints**: `ExecuteGoto` replaces and Ctrl-click appends to a queue of
+  **at most 9 manual waypoints**; a point within 17 units of the queue head or tail is ignored. Moving
   onto the unit's own position just halts and re-forms.
 - **Routing is not pathfinding**: a unit walks straight towards its current waypoint. When `ObjectsOnPath`
   finds the first blocking map object on the line (scenery, spell area objects **or another
@@ -836,7 +831,7 @@ The key visibility constants are recorded here for implementers.
 - **Region masks**: `InRegion`/`NotInRegion`/`RegionCrossings`
   scan the 40-byte boundary records whose flags are active and match the mask; `INVSOLID`
   inverts containment (the outside of `BattleEdge` is solid); crossings snap to the boundary so movers slide
-  along it. `0xB0` routes and fanatic jumps, `0x100` deployment, `0x200` `SightEdge` (spotting only), `8`
+  along it. `0xB0` routes and fanatic jumps, `0x200` `SightEdge` (spotting only), `8`
   `ViewEdge` and `0x40` `CameraEdge` (camera only), `0x20` leaving the table, `0x90` the rout probe.
 - **Collisions** (`ResolveUnitCollisions`, once per tick): every overlapping pair of footprints
   or objects is resolved. **Friendly units and solid scenery push apart** by half the overlap each
@@ -1018,10 +1013,8 @@ Per-battle detail and the BF001 walkthrough are retained in private research not
   animated terrain such as `U_WATER`, `LAVA*`, `TORFLAM`, `BFK_*`, `N_FIRE`, `BEAM`). The player army's sprites come
   from the permanent `BINARY/` set. **No extra troops are spawned**; the old "20 of 44 battles" mismatch counted
   `loadspr` terrain animations.
-- **Deployment**: `DeployTroops:` battles hide all player units; placement is a UI action, not bytecode. `NS_END`
-  nodes match the player unit count (BF001: 3). 🟡 Units with holding positions outside the field (BF001's crossbowmen
-  at x = 1814) are placed by the player during deployment; 🟡 the `ns_startpos` chain probably outlines the
-  deployment area for the UI. AI armies start at their `.BTS` positions.
+- **Pre-battle deployment**: all phase rules, default slot allocation, marching-order effects,
+  placement constraints, controls and open questions are in [deployment.md](deployment.md).
 - **BF001**: patrol and attack scripts for Hiln's Guard and Sleaquit, Otto Hiln with a short threat range and a
   scripted flight towards node 5 (🟡 exact trigger chain), the delayed Clanrat wave, and standard interrupt
   handlers; nothing beyond the general interpreter and library scripts is needed to run it.
@@ -1129,13 +1122,13 @@ The battle window maps panel buttons (records at the relevant data, icons = fram
 `ICONS.BOP`; there are no tooltip strings) to a global order code (`runtime state`, cleared every tick).
 `ExecuteOrder`, run from the behaviour script, applies it to **player units** only: to every
 selected unit (unit flag bit 25), otherwise to the unit's own pending order (`pending_order`); orders 0x17 and 0x1B act
-only on the focused unit. In deployment (`runtime state == 1`) only placing and waypoints run.
-The panel shows a button set by class and state (idle, attack sub-panel, broken/pursuing, melee, charging: none,
-deployment).
+only on the focused unit. The panel shows a button set by class and state (idle, attack
+sub-panel, broken/pursuing, melee, charging: none). Pre-battle order handling and panel
+variants are documented in [deployment.md §3–4](deployment.md#3-player-interaction).
 
 | Order | Button (icon) | Effect |
 |---|---|---|
-| 1 / 2 | Move (boots) + click / shift-click | go to point / add waypoint; queued while busy |
+| 1 / 2 | Move (boots) + click / Ctrl-click | go to point / add waypoint; queued while busy |
 | 3 | Attack (crossed swords) + click | event 0x04: approach and attack a unit (not `CantMelee`) or building |
 | 0x0B–0x0E | face point, turn left/right 90°, about face | facing ∓0x80 / +0x100 (increasing facing = clockwise) |
 | 0x0F / 0x10 | ranks up / down | re-form with ±1 rank |
@@ -1145,7 +1138,7 @@ deployment).
 | 0x16 | Fire (crossed bow) + click; Ctrl = Gyrocopter bomb | `OrderFire` (section 8.1) |
 | 0x17 | Magic (chaos star) + spell + click | cast (focused unit) |
 | 0x19 | Halt (open hand) | halt and re-form, "Hold!" |
-| 0x1A | **Independent** (head in profile; idle and deployment panels) | toggles unit flag bit 27 |
+| 0x1A | **Independent** (head in profile; idle panel) | toggles unit flag bit 27 |
 | 0x1B | **Fight harder** (flexed arm; melee panels only) | sets unit flag bit 30 on the focused unit |
 
 Orders other than 0x13, 0x14, 0x17, 0x19–0x1B are ignored while the unit is charging, in melee, broken or
@@ -1167,7 +1160,9 @@ pursuing.
 - Behaviour bytecode sets only unit flags `0x100`, `0x4000000` and `0x20000000`; `unit_flags2` bit 0 anchors war machines,
   bit 3 ("hold fire") is tested but never set; `unit_flags & 0x80000` marks hidden units.
 
-### Battle HUD layout ✅ (readout and deployment 🟡)
+### Battle HUD layout ✅ (readout 🟡)
+
+The deployment HUD variant is documented in [deployment.md §8](deployment.md#8-deployment-hud-reference).
 
 The battle screen is a 640×480 client area made of independent child windows (nothing here is drawn procedurally
 except text; all chrome is frames of the `ICONS` sheet, 225 frames, indexed as in `notes/sprite_names.md`).
@@ -1195,7 +1190,7 @@ while the mouse button is held and the command fires on release):
 |---|---|---|---|
 | (11, 8) | 42/43 | 52×52 | rotate camera (left/right mouse button) |
 | (11, 63) | 44/45 | 52×52 | zoom / tilt camera |
-| (11, 118) | 46/47 | 52×52 | pause / resume; in deployment it is replaced by 48/49 (flag, **start the battle**); 50/51 (tent) opens the in-battle menu |
+| (11, 118) | 46/47 | 52×52 | pause / resume; 50/51 (tent) opens the in-battle menu |
 | (448, 13) | 58/59 | 44×44 | options |
 | (448, 75) | 60/61 | 44×44 | select previous player regiment and centre on it |
 | (448, 121) | 62/63 | 44×44 | select next player regiment |
@@ -1210,12 +1205,11 @@ Move 0/1, Attack 2/3, Fire 4/5, Magic 6/7, Items 8/9 (opens the unit's item list
 cancel and return to the idle set, or back to the Move set), Turn right 12/13, Turn left 14/15, About face 16/17, Ranks sub-set
 18/19, Ranks up 20/21, Ranks down 22/23, Ranks-decoration 24 (no action), Facing sub-set 25/26, Face point 35/36, Halt 37/38
 and Rally 37/38 (same art), Withdraw 39/40, Independent 52/53, Charge 54/55, Fight harder 56/57. Frames 27–34 (numerals) and
-41 are not used by any command button. In deployment the Ranks up/down buttons change the formation directly (no order)
-and Move sets a placement mode.
+41 are not used by any command button.
 
 **Panel state** is chosen from the selected unit (the panel switches only when state or unit class changes):
 no selected unit, or unit charging → none / idle set (below); fighting in close combat → melee set (caster variant if the unit
-has spells or items, else non-caster); broken or pursuing → Rally set; deployment (game mode 1) → deployment set; otherwise idle.
+has spells or items, else non-caster); broken or pursuing → Rally set; otherwise idle.
 Sub-sets are entered by buttons: Move → move set; Ranks → ranks set; Facing → facing set; Attack → attack set (caster or
 non-caster variant). Fire and Magic keep the set and start a pending order with their own cursor. Any completed order or
 Back returns to idle. The panel background never changes; only the buttons do.
@@ -1246,9 +1240,6 @@ Button sets by unit class and state. "Inf" = infantry and cavalry, "Arch" = arch
 | Melee, caster | Wiz | – | Withdraw | Items | Magic | Fight harder |
 | Melee, non-caster | Inf, Arch, Art, Mon | – | Withdraw | – | – | Fight harder |
 | Melee, non-caster | Wiz | – | Withdraw | – | Magic | Fight harder |
-| Deployment | Inf, Arch | Ranks up | Move | Independent | Ranks down | decoration |
-| Deployment | Wiz, Mon | – | Move | Independent | – | – |
-| Deployment | Art | – | – | Independent | – | – |
 | Charging | all | none | | | | |
 
 **Selected-unit readout** (🟡 parts marked): the window has **no stat text**. It draws, in order: the battle's own
@@ -1264,8 +1255,8 @@ and 104 (216×64 bottom decoration, at (0, 233)); the map area is 184×216 at (1
 by an offset that is clamped to the map (right mouse drag pans). Four 44×20 tabs at (63, 241), (110, 241), (63, 264),
 (110, 264) (frames 72/73, 74/75, 76/77, 78/79) and a 40×40 book at (162, 242) (frames 80/81) sit on the decoration. The tabs select
 one of four marker display modes: 0 every unit has banner and dot; 1 selected units banner and dot, others dot; 2 friendly
-banner and dot, enemy dot; 3 friendly banner and dot only in deployment, else dots (tab-to-mode icon order 🟡).
-Drawing order: plan map, deployment zone squares (frame 160, 8×8, deployment only), the selected unit's waypoints (numbered
+banner and dot, enemy dot; 3 friendly dots during normal play (tab-to-mode icon order 🟡).
+Drawing order: plan map, the selected unit's waypoints (numbered
 dots 161–169, end marker 159), all regiments, the selected regiment again, the camera marker (frames 170–177, 8 orientations).
 A regiment is an 8×8 dot centred on its position (fighting/charging base 119 friendly, 111 enemy; normal 135 / 127;
 broken 151 / 143; plus one of 8 facing frames) and, if the mode allows, its banner frame anchored 8 px left and 24 px above
@@ -1275,7 +1266,7 @@ there; it never issues a direct move.
 
 **Feedback**: four custom cursors (default, attack, fire, magic) — Attack selects the attack cursor, Fire the fire cursor,
 Magic the magic cursor, every other action and Back the default. A click sound plays on button press. There are no tooltips
-and no hover highlight; buttons only have up and down frames. Deployment placement rules (allowed zone) were not read ⬜.
+and no hover highlight; buttons only have up and down frames.
 
 **Implemented** in `whshr/frontend/hud.py` (`whshr/engine.py` adds a `Regiment.hud_class` field for
 the class column, derived from the `s_side` race/type byte since this note's own numeric class
@@ -1287,8 +1278,8 @@ exact original camera behaviour); the minimap always fits the whole battlefield 
 scrolled native-scale viewport (no pan yet); message/scroll text windows and the click sound are
 not wired (their content/resource is not specified here); `whshr.engine.Regiment` has one
 `target_x`/`target_y`, not a waypoint queue, so only the end marker is drawn, never numbered
-waypoints; there is no deployment phase yet, so deployment zone squares and the deployment panel
-state are unreachable; the spell/item list window at (200, 64) is left as background-only chrome
+waypoints; pre-battle implementation scope is tracked in [deployment.md](deployment.md);
+the spell/item list window at (200, 64) is left as background-only chrome
 for the same no-spell/item-system reason. The HUD's own two chrome pieces (the command panel and
 the minimap) are each designed at their documented native size and scaled with the same
 integer-snap factor as `NativeScreenView._layout` (`scene_view.py`), since `BattleView` itself
@@ -2587,10 +2578,10 @@ research unless marked Wine.
 | R59 | **Duplicate opcode names** | 0x3A, 0x88 and 0xAF share the name `TakeEventTarget` (same helper, different arguments). | Give distinct names in `whshr/behaviour.py`. | low |
 | R60 | **Objective index 7 and leaving the battle** | ✅ letter G "Inside the gates!" in the siege battles BF015/BF017 (Missions and objectives). | — | done |
 | R61 | **Visibility details** | Unit flag bit 3 (`0x8`) also doubles the view cone together with melee (`0x208`); the shooting/effect region behaviour is not fully confirmed; mode 1 of the "attack the n-th nearest" opcodes uses a signed-axis metric (🟡). | Verify the behaviour in a controlled play session. | low |
-| R62 | **AI deployment** | ✅ none: AI armies start at their `.BTS` positions (Missions and objectives). | — | done |
+| R62 | **AI deployment** | See [deployment.md §1](deployment.md#1-mission-entry-and-default-positions). | — | done |
 | R63 | **Objective evaluators** | ✅ resolved: all 26 letter evaluators read (Missions and objectives). S "Capture Hiln" and several others (T, V, W) turn out to be unconditional stubs rather than real checks; Y mirrors a shared flag rather than computing anything itself. | — | done |
 | R64 | **Win/loss dialog codes** | The game opens dialog 9 or 0xF depending on battle state; which is which is not yet confirmed. | Verify both outcomes in a play session. | low |
-| R65 | **Deployment nodes** | 🟡 the `ns_startpos` chain outlines the deployment area for the placement UI; units held outside the field are placed by the player. | Verify the placement behaviour in a play session. | low |
+| R65 | **Deployment** | Default slots and zone rules established in [deployment.md](deployment.md); remaining interaction checks are listed there. | [Remaining checks](deployment.md#7-remaining-checks-for-full-original-parity). | low |
 | R66 | **Footprint box and anchor** | ✅ resolved: for blocks the map object centre is `(ranks − 1) × 6` behind the unit position, the middle of the block; other kinds keep it at the unit position (section 4, Formations). | — | done |
 | R67 | **Formation spacing on screen** | ✅ resolved: both viewers use the traced 12-unit block (`whshr/formation.py`); the BF001 screenshot matches its rank sizes and offsets (section 4, Formations). | — | done |
 | R68 | **Troop sprite and scenery scale** | One troop sprite pixel ≈ 0.45 world units, measured on a screenshot and used by both viewers but not traced; against it, PBX pines in the 3D viewer look about twice as large as the trees in the screenshot. | Find the billboard scale in the 3D sprite renderer; compare scenery sizes with more screenshots. | low |
