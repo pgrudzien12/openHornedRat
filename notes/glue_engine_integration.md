@@ -132,8 +132,12 @@ renumber later work.
   the caravan's map button is used (`GlueScene._map_program`). Not saved: the interpreter's window/script stacks
   (the original resumes a parked script; the engine always resumes at the caravan).
   **Still open:** `autosave:`/`testmission` still keep only the in-memory snapshot and never write slot 5 ("Last Game"),
-  so the Load dialog lists that slot but it stays empty; saving from a script-launched caravan
-  (`GlueScene._leave_caravan`) is wired but resumes at the start caravan, not at that caravan; the caption texts of the
+  so the Load dialog lists that slot but it stays empty; a save made from a mission script's caravan still resumes at the start
+  caravan, so from the after-mission caravans (`select`/`resume`) it records the campaign as already released (the
+  mission completed and the flow advanced, in the saved copy only), and from any other caravan of a mission script
+  the dialog refuses ("cannot be saved in the middle of a mission"). A load also finishes a mission that a save
+  kept taken but unreleased (`CampaignState.repair_stalled_flow`): the first version of the dialog saved that state
+  and the map came back with nothing to offer; the caption texts of the
   dialog ("Empty", "Enter Save Description", default description) are engine-supplied (`PROVISIONAL` in `load_save_scene.py`).
 
 - [ ] **GEI15 — Retire legacy map and briefing code.** (issue #129) Delete `MissionMapScene`,

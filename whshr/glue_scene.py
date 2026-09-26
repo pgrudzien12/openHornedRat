@@ -325,7 +325,23 @@ class GlueScene(Scene):
         if self.campaign is None:
             self._queue((Diagnostic("caravan", "saving needs a campaign"),))
             return None
-        return Transition(LoadSaveScene(SAVE, self, self.campaign), "save dialog opened")
+        release, unavailable = self._save_release()
+        return Transition(LoadSaveScene(SAVE, self, self.campaign, release=release, unavailable=unavailable),
+                          "save dialog opened")
+
+    def _save_release(self) -> tuple[MissionRef | None, str]:
+        """(mission to record as released, reason saving is refused) for a save made from this scene.
+
+        A load resumes on the start caravan, so a save made while a mission's caravan is open must record the
+        campaign as it will be after leaving it. The after-mission caravans (``select``/``resume``) are the
+        finished mission: it is released in the saved copy. Any other caravan of a mission script sits in the
+        middle of the mission (a load could not resume it), so saving there is refused."""
+        if self.accept_mission is None or self._mission_released:
+            return None, ""
+        pending = self.require_runtime().state.pending
+        if pending is not None and pending.kind == "caravan" and pending.mode in ("select", "resume"):
+            return self.accept_mission, ""
+        return None, "The game cannot be saved in the middle of a mission."
 
     def _open_army_book(self, hire_only: bool) -> Transition | None:
         """The caravan's Army Records (notes/builtin_widgets.md §2.1): ``HireOnlyArmyBook`` charges the coffers

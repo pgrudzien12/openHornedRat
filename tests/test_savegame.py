@@ -18,6 +18,22 @@ ROWS = {
 GRAPH = {"flow_scripts": {}, "mission_windows": {}}
 
 
+TWO_WINDOWS = {
+    "flow_scripts": {"F": ({"action": "add_window", "window": "W1"}, {"action": "add_window", "window": "W2"})},
+    "mission_windows": {"W1": [{"name_id": 601, "mission_ref": MissionRef("W1", 0)}],
+                        "W2": [{"name_id": 602, "mission_ref": MissionRef("W2", 0)}]},
+}
+FIRST = MissionRef("W1", 0)
+
+
+def committed_campaign():
+    """The state after troop selection confirmed the only mission of W1: taken, but not yet released."""
+    state = CampaignState(TWO_WINDOWS, flow="F", company=roster.parse_company(MRC, ROWS))
+    state.taken_missions.add(FIRST)
+    state.selected_mission = FIRST
+    return state
+
+
 def campaign(**fields):
     company = roster.parse_company(MRC, ROWS)
     return CampaignState(GRAPH, mission_window="MAP", company=company, master=company, **fields)
@@ -114,6 +130,35 @@ class SaveStoreTests(unittest.TestCase):
             self.store.load_into(0, fresh)
 
         self.assertEqual((fresh.flow, fresh.coffers), ("OTHER", 77))
+
+    def test_given_a_finished_mission_when_saved_with_its_release_then_the_save_is_advanced_and_the_live_game_is_not(self):
+        live = committed_campaign()
+        self.store.write(0, "after the mission", live, release=FIRST)
+
+        self.assertEqual((live.mission_window, live.completed), ("W1", set()))  # the caravan is still open
+        loaded = CampaignState(TWO_WINDOWS, flow="F", company=live.company)
+        self.store.load_into(0, loaded)
+        self.assertEqual(loaded.mission_window, "W2")
+        self.assertEqual([m["name_id"] for m in loaded.missions], [602])
+
+    def test_given_a_save_that_kept_a_mission_taken_but_unreleased_then_loading_finishes_it(self):
+        """The reported stall: a save from the after-mission caravan left the map with nothing to offer."""
+        self.store.write(0, "old style", committed_campaign())
+        loaded = CampaignState(TWO_WINDOWS, flow="F", company=committed_campaign().company)
+
+        self.store.load_into(0, loaded)
+
+        self.assertEqual(loaded.mission_window, "W2")
+        self.assertTrue(loaded.missions)
+
+    def test_given_a_mission_still_on_offer_then_loading_changes_nothing(self):
+        state = CampaignState(TWO_WINDOWS, flow="F", company=roster.parse_company(MRC, ROWS))
+        self.store.write(0, "fresh", state)
+        loaded = CampaignState(TWO_WINDOWS, flow="F", company=state.company)
+
+        self.store.load_into(0, loaded)
+
+        self.assertEqual((loaded.mission_window, loaded.completed), ("W1", set()))
 
     def test_given_a_slot_number_outside_the_six_then_it_is_refused(self):
         with self.assertRaises(ValueError):

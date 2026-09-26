@@ -26,7 +26,14 @@ def campaign(save_dir=None, **fields):
     return CampaignState(GRAPH, mission_window="MAP", company=company, master=company, save_dir=save_dir, **fields)
 
 
-class LoadSaveTests(unittest.TestCase):
+MISSION_RESOURCES = {
+    "CARAVANAFTERMISSION": CARAVAN, "INFOCARAVANTLK": CARAVAN,
+    "SELECTSCRIPT": "[RUN]\n[START]\ngocaravan:select\n[END]",
+    "TALKSCRIPT": "[RUN]\n[START]\ngocaravan:infoTLK\n[END]",
+}
+
+
+class LoadSaveFixture(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -37,9 +44,12 @@ class LoadSaveTests(unittest.TestCase):
             path.write_bytes(b"data")
         self.save_dir = root / "saves"
         self.context = SceneAssets(AssetLocator(root), build(root), AssetCache(), {}, save_dir=self.save_dir)
-        self.context.glue = GlueContent.from_data(resources={"STARTCARAVAN": CARAVAN, "MAINMENU": "[WINDOW]\n[END]"})
+        self.context.glue = GlueContent.from_data(resources={"STARTCARAVAN": CARAVAN, "MAINMENU": "[WINDOW]\n[END]",
+                                                             **MISSION_RESOURCES})
         self.store = SaveStore(self.save_dir)
 
+
+class LoadSaveTests(LoadSaveFixture):
     def _dialog(self, mode, state=None):
         """(machine, parent): Save is reached through the caravan's hotspot, Load is the machine's first scene."""
         parent = GlueScene(window="STARTCARAVAN", campaign=state)
@@ -219,6 +229,42 @@ class LoadSaveTests(unittest.TestCase):
         self.assertFalse(machine.active.editing)
         machine.handle("cancel")
         self.assertIs(machine.active, caravan)
+
+
+class MissionCaravanSaveTests(LoadSaveFixture):
+    """Saving from a mission's caravans: the finished mission is recorded released; a mid-mission caravan refuses."""
+
+    def _mission_caravan(self, script):
+        from tests.test_savegame import FIRST, committed_campaign
+
+        state = committed_campaign()
+        state.save_dir = self.save_dir
+        scene = GlueScene(script, state, accept_mission=FIRST)
+        machine = SceneMachine(scene, self.context)
+        machine.handle(GlueInput("hotspot-release", "LoadSaveWindow"))
+        return machine, state
+
+    def test_given_the_after_mission_caravan_when_saved_then_the_slot_records_the_mission_released(self):
+        from tests.test_savegame import TWO_WINDOWS
+
+        machine, state = self._mission_caravan("SELECTSCRIPT")
+        for event in ("slot:0", "ok", "ok"):
+            machine.handle(event)
+
+        loaded = CampaignState(TWO_WINDOWS, flow="F", company=state.company)
+        self.store.load_into(0, loaded)
+        self.assertEqual(loaded.mission_window, "W2")
+        self.assertEqual(state.mission_window, "W1")  # the open caravan's own campaign is not advanced by saving
+
+    def test_given_a_mid_mission_caravan_when_saving_then_the_dialog_refuses_with_a_message(self):
+        machine, _ = self._mission_caravan("TALKSCRIPT")
+
+        machine.handle("slot:0")
+        machine.handle("ok")
+
+        self.assertIn("middle of a mission", machine.active.error)
+        self.assertFalse(machine.active.editing)
+        self.assertIsNone(self.store.info(0))
 
 
 if __name__ == "__main__":

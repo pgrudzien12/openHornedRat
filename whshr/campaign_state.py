@@ -423,7 +423,7 @@ class CampaignState:
                 records = None
             if records is not None:
                 return bool(self.offered_missions(records))
-        return bool(self.missions)
+        return any(mission.get("mission_ref") not in self.taken_missions for mission in self.missions)
 
     def complete(self, mission: Mission) -> tuple[str | None, bool]:
         """Record a chosen mission and say how the flow continues.
@@ -446,6 +446,24 @@ class CampaignState:
             self._open_next_window(self.flow_step + 1)
             return None, True
         return None, False
+
+    def repair_stalled_flow(self) -> bool:
+        """Finish a mission that was committed to but never released, when that leaves the map with nothing to offer.
+
+        A save made in an after-mission caravan before the fix kept the mission hidden (taken) while the flow had
+        not moved on, so a load stalled on an empty map. Completing the taken mission is exactly what leaving
+        that caravan would have done. Returns True when something was completed."""
+        if self._anything_offered():
+            return False
+        for mission in self.graph["mission_windows"].get(self.mission_window, ()):
+            reference = mission.get("mission_ref")
+            if reference in self.taken_missions and mission.get("name_id") not in self.completed:
+                try:
+                    self.complete(mission)
+                except ValueError:  # no later window: nothing to advance to
+                    return False
+                return True
+        return False
 
     def complete_mission(self, mission_ref: MissionRef) -> tuple[str | None, bool]:
         """Complete the mission a glue ``MissionRef`` names (the mission release step,

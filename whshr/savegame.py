@@ -9,6 +9,7 @@ and a load resumes on the start caravan, from where the flow replays up to the s
 (``notes/builtin_widgets.md`` section 6). Files are written atomically (temporary file, then rename).
 """
 
+import copy
 import json
 import os
 import tempfile
@@ -53,8 +54,24 @@ def _unref(data: Mapping[str, Any]) -> MissionRef:
     return MissionRef(str(data["window"]), int(data["record_index"]))
 
 
-def campaign_to_dict(campaign: "CampaignState") -> dict[str, Any]:
-    """The persistent part of a campaign as JSON-ready data."""
+def _released(campaign: "CampaignState", mission: MissionRef) -> "CampaignState":
+    """A copy of ``campaign`` with ``mission``'s release step applied (the live campaign is left alone)."""
+    snapshot = copy.copy(campaign)
+    snapshot.completed = set(campaign.completed)
+    snapshot.taken_missions = set(campaign.taken_missions)
+    snapshot.flow_history = list(campaign.flow_history)
+    snapshot.complete_mission(mission)
+    return snapshot
+
+
+def campaign_to_dict(campaign: "CampaignState", release: MissionRef | None = None) -> dict[str, Any]:
+    """The persistent part of a campaign as JSON-ready data.
+
+    ``release`` names a finished mission whose caravan is still open: a load resumes on the start caravan, so the
+    save records the campaign as it will be once that caravan is left (the mission released, the flow advanced).
+    """
+    if release is not None:
+        campaign = _released(campaign, release)
     order = {regiment.whoami: index for index, regiment in enumerate(campaign.company)}
     return {
         "flow": campaign.flow,
@@ -111,6 +128,7 @@ def restore_campaign(campaign: "CampaignState", data: Mapping[str, Any]) -> None
     company = values["company"]
     # Per-mission state that a save between missions never carries.
     campaign.mission_cash, campaign.mission_paid = None, False
+    campaign.repair_stalled_flow()  # saves made before releases were recorded (see repair_stalled_flow)
     campaign.refresh_speaker([regiment for regiment in company if regiment.whoami in campaign.march_units])
 
 
@@ -136,10 +154,11 @@ class SaveStore:
     def slots(self) -> dict[int, SlotInfo | None]:
         return {slot: self.info(slot) for slot in ALL_SLOTS}
 
-    def write(self, slot: int, description: str, campaign: "CampaignState") -> None:
+    def write(self, slot: int, description: str, campaign: "CampaignState",
+              release: MissionRef | None = None) -> None:
         payload = {"version": SAVE_VERSION, "description": description[:DESCRIPTION_LIMIT],
                    "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                   "campaign": campaign_to_dict(campaign)}
+                   "campaign": campaign_to_dict(campaign, release)}
         target = self.path(slot)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
