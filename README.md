@@ -1,6 +1,8 @@
 # Open Horned Rat
 
-**Open Horned Rat** is an early, reimplementation of *Warhammer: Shadow of the Horned Rat* (Mindscape, 1995). Our aim is to make the original campaign playable on modern systems—Linux included—without emulation or the original engine's crashes and sound problems.
+**Open Horned Rat** is an open-source engine that runs *Warhammer: Shadow of the Horned Rat* (Mindscape, 1995) on modern systems, Linux included, without emulation and without the original program's crashes and sound problems.
+
+**What it is not:** it is not a game, and it is not a standalone or replacement copy of one. It contains no original game content, and it does nothing without your own legally owned copy of the original, from which it reads every asset at runtime. It is also not the original executable, and it does not run that executable.
 
 > **Early playtest build — source only.** This is not yet a replacement for the original game. It is useful for testing the opening campaign flow and the first battle, and we especially need reports from people who can spend time with it. The first packaged playable release is targeted for **the end of October 2026**.
 
@@ -17,18 +19,23 @@ Once the repository is public, please [open an issue](../../issues) for a reprod
 
 ## What you can play today
 
-Start a new campaign and the build plays the opening prologue and intro, shows the main menu, and takes you through the early campaign screens into the first battle (`BF001`). In battle you can select regiments, move, charge, shoot, and finish with a victory or defeat result. It is a development prototype: saves, a complete campaign, faithful rules, and broad platform testing are still in progress.
+With your own copy of the game, a new campaign plays the prologue and intro, shows the main menu, and takes you through the campaign screens (the caravan, army records, troop selection, reinforcements, and mission selection) into a battle. In battle you deploy your regiments, then select them, move, charge, shoot, and finish with a victory or defeat result. This is a development prototype: the rules are simplified and a full campaign has not been played through to the end. The first battle is the most tested; expect rough edges in later ones.
 
 | Area | Status | What to expect |
 |---|---|---|
 | Original game data | Works | Reads assets from your own installation; no game data is included here. |
-| Opening and menu | Works | Prologue, intro movie, main menu, and first mission briefing are playable. |
-| Campaign screens | In progress | The early campaign flow is implemented; many screens and choices still need validation. |
-| First battle (`BF001`) | Playable | Movement, selection, charges, ranged attacks, basic morale/routing, enemy AI, and a result screen. |
-| Battle rules and missions | In progress | Rules and AI are simplified; original mission behaviour is not yet fully reproduced. |
-| Full campaign and saves | Not ready | Do not expect to complete or save a campaign yet. |
-| Audio and presentation | In progress | Some original presentation is used; expect gaps and rough edges. |
+| Opening and menu | Works | Prologue, intro movie, main menu, and mission briefings. |
+| Campaign screens | In progress | Caravan, army records, troop selection, reinforcements, and mission select work; many screens and choices still need validation. |
+| Saving and loading | In progress | Load/Save dialog and an automatic slot, written to the engine's own save directory (never your game installation). Saves are not compatible with the original game's, and may change between versions. |
+| Battles | In progress | Deployment, movement, charges, ranged attacks, morale and routing, magic, and enemy AI. The first battle is the most tested; later ones are largely untested. |
+| Battle rules and mission scripts | In progress | Rules follow the original's behaviour where it has been reverse-engineered, but some are still simplified, and mission scripting is not yet fully reproduced. |
+| Complete campaign | Not verified | Nobody has yet played a full campaign start to finish. |
+| Audio and presentation | In progress | Speech, effects, and cutscenes are used; expect gaps and rough edges. |
 | Packaged downloads | Not available | Run from source for now. |
+
+## Chat
+
+Questions, playtest reports, or just want to talk about the game? Join us on [Discord](https://discord.gg/CPHBNFmwJ).
 
 ## Run it from source
 
