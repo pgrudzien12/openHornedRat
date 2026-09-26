@@ -4,7 +4,7 @@
 
 **What it is not:** it is not a game, and it is not a standalone or replacement copy of one. It contains no original game content, and it does nothing without your own legally owned copy of the original, from which it reads every asset at runtime. It is also not the original executable, and it does not run that executable.
 
-> **Early playtest build — source only.** It is useful for testing the opening campaign flow and the first battle, and we especially need reports from people who can spend time with it. The first packaged playable release is targeted for **the end of October 2026**.
+> **Early playtest build — source only.** It is useful for testing the opening campaign flow and some battles, and we especially need reports from people who can spend time with it. The first packaged playable release is targeted for **the end of October 2026**.
 
 ## Help us test
 
