@@ -184,6 +184,89 @@ def instruction(name):
 
 
 class DeploymentLifecycleTests(unittest.TestCase):
+    def test_given_route_when_appending_near_endpoints_or_more_than_nine_then_extra_destinations_are_ignored(self):
+        battle = Battle.from_script(source(1))
+        battle.append_waypoint("player0", 100, 100)
+        battle.append_waypoint("player0", 200, 100)
+        battle.append_waypoint("player0", 110, 100)
+        battle.append_waypoint("player0", 210, 100)
+        self.assertEqual(battle.regiments["player0"].waypoints, [(100, 100), (200, 100)])
+        for x in range(300, 1100, 100):
+            battle.append_waypoint("player0", x, 100)
+        self.assertEqual(len(battle.regiments["player0"].waypoints), 9)
+        self.assertEqual(battle.regiments["player0"].waypoints[-1], (900, 100))
+
+    def test_given_prepared_route_when_direct_drag_begins_then_it_is_cleared(self):
+        battle = Battle.from_script(source(1))
+        battle.append_waypoint("player0", 100, 100)
+        battle.begin_deployment_drag("player0", *battle.formation_centre(battle.regiments["player0"]))
+        self.assertEqual(battle.regiments["player0"].waypoints, [])
+
+    def test_given_allied_wagon_when_dragging_then_authored_position_is_preserved(self):
+        data = source(1)
+        wagon = unit("wagon", 65)
+        wagon["stats"]["s_side"] = [65, 2, 2, 1]
+        wagon["stats"]["s_race"] = [56]
+        data["armies"] = [{"count": 1, "units": [wagon]}]
+        battle = Battle.from_script(data)
+        regiment = battle.regiments["wagon"]
+        self.assertTrue(regiment.is_wagon)
+        before = (regiment.x, regiment.y, regiment.direction)
+        with self.assertRaises(ValueError):
+            battle.begin_deployment_drag("wagon", regiment.x, regiment.y)
+        self.assertEqual((regiment.x, regiment.y, regiment.direction), before)
+
+    def test_given_hidden_regiment_when_script_clears_hidden_flag_then_it_becomes_pickable_during_deployment(self):
+        data = source(1)
+        data["merc"]["armies"][0]["units"][0]["hidden"] = True
+        words = [instruction("ClearUnitFlags"), 0x80000, instruction("WaitForBattleStart"), behaviour.END]
+        battle = Battle.from_script(data, script_dll=ScriptData(words))
+        self.assertTrue(battle.regiments["player0"].hidden)
+        battle.tick()
+        self.assertFalse(battle.regiments["player0"].hidden)
+        centre = battle.formation_centre(battle.regiments["player0"])
+        self.assertEqual(battle.regiment_at(*centre), "player0")
+
+    def test_given_reached_timer_at_start_barrier_then_each_deployment_update_consumes_it_once(self):
+        words = [instruction("SetWait"), 20, instruction("WaitForBattleStart"), instruction("Yield"), behaviour.END]
+        battle = Battle.from_script(source(1), script_dll=ScriptData(words))
+        for _ in range(5):
+            battle.tick()
+        state = battle.event_bus.unit_states["player0"]
+        self.assertEqual(state.wait_remaining, 16)
+        battle.start_battle()
+        battle.tick()
+        self.assertEqual(state.wait_remaining, 15)
+
+    def test_given_nearest_enemy_attack_attempts_then_deployment_refuses_them_and_start_allows_them(self):
+        words = [instruction("PushPC"), instruction("AttackNearestEnemy"), instruction("Yield"), instruction("Loop")]
+        data = source(1)
+        enemy = unit("enemy", 129)
+        enemy["set"].update(x=600, y=700)
+        data["armies"] = [{"count": 1, "units": [enemy]}]
+        battle = Battle.from_script(data, script_dll=ScriptData(words))
+        for _ in range(5):
+            battle.tick()
+        self.assertIsNone(battle.regiments["enemy"].attack_target)
+        self.assertEqual(battle.event_bus.unit_states["enemy"].cond_flags, 0)
+        battle.start_battle()
+        battle.tick()
+        self.assertEqual(battle.regiments["enemy"].attack_target, "player0")
+
+    def test_given_mission_state_changes_then_they_do_not_start_battle_or_release_its_barrier(self):
+        words = [instruction("SetBattleState"), 2, instruction("IfBattleState"), 2,
+                 instruction("WaitForBattleStart"), instruction("Yield"), behaviour.END]
+        battle = Battle.from_script(source(1), script_dll=ScriptData(words))
+        battle.tick()
+        self.assertEqual(battle.mission_state, 2)
+        self.assertEqual(battle.phase, "deployment")
+        self.assertEqual(battle.tick_count, 0)
+        self.assertEqual(battle.event_bus.unit_states["player0"].pc, 4)
+        self.assertEqual(battle.event_bus.unit_states["player0"].cond_flags, 1)
+        battle.start_battle()
+        battle.tick()
+        self.assertEqual(battle.mission_state, 2)
+
     def test_given_hidden_enemy_in_view_when_started_then_it_is_revealed_permanently_and_spotting_events_are_posted(self):
         data = source(1)
         data["nodes"] = []
@@ -313,6 +396,15 @@ def source(size=3, deploy=True):
 
 
 class StartingSlotTests(unittest.TestCase):
+    def test_given_player_roster_without_coordinates_when_slots_exist_then_regiments_receive_default_slots(self):
+        data = source(2)
+        for item in data["merc"]["armies"][0]["units"]:
+            item["set"].pop("x")
+            item["set"].pop("y")
+        battle = Battle.from_script(data)
+        self.assertEqual(self.positions(battle, ["player0", "player1"]),
+                         [(400, 500, 67), (500, 600, 68)])
+
     def positions(self, battle, identifiers):
         return [(battle.regiments[key].x, battle.regiments[key].y,
                  battle.regiments[key].direction) for key in identifiers]

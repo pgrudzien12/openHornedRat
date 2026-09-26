@@ -2,14 +2,17 @@
 """Presentation-independent scene lifecycle and transition coordination."""
 
 from abc import ABC
+from collections.abc import Callable
+from copy import copy
 from collections.abc import Hashable
 from dataclasses import dataclass, field
 from os import PathLike
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .assets import AssetId
 from .cache import AssetCache, Loader
-from .catalog import AssetCatalog
+from .catalog import AssetCatalog, AssetRecord
 from .assets import AssetLocator
 from .glue_content import GlueContent
 
@@ -70,6 +73,24 @@ class SceneAssets:
     no_battle: bool = False
     # Optional whshr.campaign_log.CampaignLogger; observation only, never changes behaviour.
     campaign_log: "CampaignLogger | None" = None
+    battle_loader: Callable[[AssetRecord, Path, dict[str, Any]], Any] | None = None
+
+    def load_battle(self, identifier: AssetId, player_army: dict[str, Any] | None = None) -> Any:
+        """Decode dynamic army assets before rendering; never reuse a previous marching army."""
+        if player_army is None:
+            return self.load(identifier)
+        record = self.catalog.get(identifier)
+        self.cache.release(identifier)
+
+        def loader(battle_record: AssetRecord, path: Path) -> Any:
+            if self.battle_loader is not None:
+                return self.battle_loader(battle_record, path, player_army)
+            # Custom/headless loaders can supply just the normalized script.
+            field = copy(self.loaders[battle_record.decoder](battle_record, path))
+            field.script = {**field.script, "merc": player_army}
+            return field
+
+        return self.cache.get(self.locator, self.catalog, record.identifier, loader)
 
     def _record_failure(self, identifier: AssetId | str, error: BaseException) -> None:
         log = self.campaign_log

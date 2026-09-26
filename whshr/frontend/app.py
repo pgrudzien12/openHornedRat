@@ -155,8 +155,12 @@ def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), 
                         running = False
 
             seconds = elapsed if frame_time is None else frame_time
-            for _ in range(clock.advance(seconds)):
-                machine.update(clock.step)
+            steps = clock.advance(seconds)
+            # Battle updates follow the frame's elapsed time once, so a slow frame
+            # cannot turn into several deployment/script updates through the UI clock.
+            updates = (seconds,) if isinstance(machine.active, BattleScene) else (clock.step,) * steps
+            for update_seconds in updates:
+                machine.update(update_seconds)
                 view = synchronise(view)
                 view.refresh()
                 if machine.quit is not None:

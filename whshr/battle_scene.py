@@ -8,6 +8,7 @@ from .assets import AssetId
 from .battlefield import Battlefield, sprite_files
 from .clock import FixedStepClock
 from .engine import Battle, DEFAULT_SEED
+from .script import View
 from .skirmish_log import SkirmishLogger
 from .result_scene import ResultScene
 from .glue_scene import GlueScene
@@ -32,10 +33,12 @@ class BattleScene(Scene):
     initial_models: dict[str, int]
 
     def __init__(self, battle: AssetId = FIRST_BATTLE, log_dir: str | PathLike[str] | None = None, seed: int = DEFAULT_SEED,
-                 glue_scene: GlueScene | None = None, request_id: int | None = None) -> None:
+                 glue_scene: GlueScene | None = None, request_id: int | None = None,
+                 player_army: View | None = None) -> None:
         self.battle_id = battle
-        self.manifest = SceneManifest(immediate=(battle,))
-        self.clock = FixedStepClock(BATTLE_TICK_SECONDS)
+        self.manifest = SceneManifest(immediate=(battle,) if glue_scene is None and player_army is None else ())
+        self.player_army = player_army
+        self.clock = FixedStepClock(BATTLE_TICK_SECONDS, max_steps=1)
         self.selected_id: str | None = None  # identifier of the player regiment currently selected, if any
         self.log_dir = log_dir
         self.seed = seed
@@ -47,7 +50,9 @@ class BattleScene(Scene):
         self.no_battle = False
 
     def enter(self, context: SceneAssets) -> None:
-        self.field = context.load(self.battle_id)
+        if self.player_army is None and self.glue_scene is not None and self.glue_scene.campaign is not None:
+            self.player_army = self.glue_scene.campaign.marching_army()
+        self.field = context.load_battle(self.battle_id, self.player_army)
         script_dll = self._load_script_dll(context)
         # The logger must exist before Battle.from_script so ScriptInterpreter can be handed it
         # directly (script_logger=); WHSHR_TRACE_SCRIPTS=1 turns on its per-opcode trace records
@@ -72,6 +77,7 @@ class BattleScene(Scene):
             self.logger.write_header(
                 battle_asset=str(self.battle_id), bts_path=self.field.script.get("file"), seed=self.seed,
                 width=self.battle.width, height=self.battle.height,
+                player_army=self.player_army,
                 regiments=battle_log.regiment_header_rows(self.battle, sprite_bases))
 
     def _load_script_dll(self, context: SceneAssets) -> behaviour.ScriptDll | None:

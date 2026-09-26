@@ -446,6 +446,7 @@ class Battle:
         self.update_count = 0  # monotonic input/replay time, including deployment
         self.phase: Literal["deployment", "battle"] = "deployment" if deploy else "battle"
         self.paused = False
+        self.mission_state = 0  # script choreography, independent of the player-visible phase
         self.deployment_regions = deployment.regions(boundaries)
         self.deployment_region: deployment.Region | None = None
         self.deployment_drag: deployment.Drag | None = None
@@ -539,8 +540,6 @@ class Battle:
             skip_slots = len(start_nodes) - declared_count
             for unit in army["units"]:
                 position = unit["set"]
-                if "x" not in position or "y" not in position:
-                    continue
                 identifier, suffix = unit["id"], 2
                 while identifier in used:
                     identifier, suffix = f"{unit['id']}#{suffix}", suffix + 1
@@ -552,16 +551,19 @@ class Battle:
                 else:
                     fields, _conflicts = stat_fields(unit.get("stats") or {})
                     side = side_of_code(stat_int(fields, "s_side"))
-                x, y = float(position["x"]), float(position["y"])
+                x_value, y_value = position.get("x"), position.get("y")
                 direction = int(position.get("dir") or 0) % 512
                 if side == Side.PLAYER and skip_slots >= 0:
                     available = [index for index in range(len(start_nodes)) if index not in reserved_slots]
                     if skip_slots < len(available):
                         slot_index = available[skip_slots]
                         slot = start_nodes[slot_index]
-                        x, y = float(slot["x"]), float(slot["y"])
+                        x_value, y_value = slot["x"], slot["y"]
                         direction = int(slot.get("dir") or 0) % 512
                         reserved_slots.add(slot_index)
+                if x_value is None or y_value is None:
+                    continue
+                x, y = float(x_value), float(y_value)
                 regiments.append(Regiment(
                     identifier, unit["name"], x, y, direction, side, models=models, ranks=ranks,
                     sprite=resource_name(unit.get("sprites")),

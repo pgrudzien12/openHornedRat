@@ -328,8 +328,8 @@ class BF001ScenarioTests(unittest.TestCase):
         self.assertEqual(state.wait_duration, 80)
 
         # After 80 TestWait calls, wait should be done
-        for _ in range(80):
-            interp.op_TestWait(state, None, [], "enemy_2", 0, battle.rng)
+        for update in range(80):
+            interp.op_TestWait(state, None, [], "enemy_2", update, battle.rng)
         self.assertEqual(state.wait_remaining, 0.0)
         self.assertEqual(state.cond_flags, 0)  # wait is done
 

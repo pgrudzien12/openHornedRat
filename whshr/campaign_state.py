@@ -16,7 +16,7 @@ from .campaign import build_campaign_graph, parse_window_ui
 from .glue import MissionRecord, MissionRef
 from .glue_content import GlueContent
 from .paths import Installation
-from . import roster
+from . import roster, script
 from .portraits import first_leader_speaker
 from .roster import Regiment, load_company, load_master, with_hired
 
@@ -150,6 +150,7 @@ class CampaignState:
     coffers: int = INITIAL_COFFERS
     army_units: set[int] = field(default_factory=set)
     march_units: set[int] = field(default_factory=set)
+    march_order: tuple[int, ...] = ()
     reinforcements: dict[int, int] = field(default_factory=dict)
     selected_mission: MissionRef | None = None
     taken_missions: set[MissionRef] = field(default_factory=set)
@@ -302,8 +303,24 @@ class CampaignState:
             roster.write_army(self.save_dir, self.company)
 
     def _persist_march(self) -> None:
+        self.march_order = self.ordered_march_units
         if self.save_dir is not None:
-            roster.write_march(self.save_dir, sorted(self.march_units, key=self._march_rank), self.company)
+            roster.write_march(self.save_dir, self.march_order, self.company)
+
+    @property
+    def ordered_march_units(self) -> tuple[int, ...]:
+        retained = tuple(dict.fromkeys(whoami for whoami in self.march_order if whoami in self.march_units))
+        additions = sorted(self.march_units - set(retained), key=lambda whoami: (self._march_rank(whoami), whoami))
+        return (*retained, *additions)
+
+    def marching_army(self) -> script.View | None:
+        """Current selected regiments in marching order, with no writes to the installation."""
+        by_whoami = {regiment.whoami: regiment for regiment in self.company}
+        units = [script.unit_view(regiment.raw) for whoami in self.ordered_march_units
+                 if (regiment := by_whoami.get(whoami)) is not None and regiment.raw is not None]
+        if not units:
+            return None
+        return {"armies": [{"label": "Player marching army", "count": len(units), "units": units}]}
 
     def _march_rank(self, whoami: int) -> int:
         return next((index for index, regiment in enumerate(self.company) if regiment.whoami == whoami), len(self.company))
@@ -335,6 +352,7 @@ class CampaignState:
         """Apply a confirmed troop_selection.Deployment; notes/troop_selection.md §5.3."""
         self.coffers += deployment.money_delta
         self.march_units = set(deployment.units)
+        self.march_order = tuple(deployment.units)
         self.army_units = set(deployment.hired)
         # Point 5: regiments that were not hired leave the company, unused reinforcements are cleared.
         self.company = tuple(with_hired(regiment, True) for regiment in self.company if regiment.whoami in deployment.hired)

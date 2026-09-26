@@ -3,6 +3,7 @@ notes/engine_architecture.md, "Battle logs and replay". Uses small synthetic ins
 scripts only; the real installation is a manual regression check, not a committed fixture.
 """
 from pathlib import Path
+from copy import deepcopy
 from types import SimpleNamespace
 import json
 import tempfile
@@ -55,6 +56,48 @@ class SyntheticInstallation(unittest.TestCase):
 
 
 class RecordAndReplayTests(SyntheticInstallation):
+    def test_given_deployment_drag_route_and_pause_when_replayed_then_phase_clocks_and_settings_match(self):
+        data = deepcopy(MOVEMENT_SCRIPT)
+        data["mission"] = {"deploy_troops": True}
+        data["merc"]["armies"][0]["units"][0]["stats"] = {"s_side": [1, 12, 12, 3]}
+        data["boundaries"] = [{"status": ["bnd_ACTIVE", "bnd_DEPLOYMENT"],
+                               "lines": [[0, 0, 1000, 0], [1000, 0, 1000, 1000],
+                                         [1000, 1000, 0, 1000], [0, 1000, 0, 0]]}]
+        context = self._context(data)
+        scene = BattleScene(log_dir=self.log_dir, seed=1, player_army=data["merc"])
+        machine = SceneMachine(scene, context)
+        machine.handle(("begin_drag", "Player_Cav", 100, 100))
+        machine.handle(("drag_to", 200, 200, False))
+        for _ in range(20):
+            machine.update(BATTLE_TICK_SECONDS)
+        machine.handle(("drag_to", 300, 200, True))
+        machine.update(BATTLE_TICK_SECONDS)
+        machine.handle(("end_drag",))
+        machine.handle(("ranks_up",))
+        machine.handle(("independent",))
+        machine.handle(("move_to", 600, 600))
+        machine.handle(("append_waypoint", 800, 800))
+        for _ in range(20):
+            machine.update(BATTLE_TICK_SECONDS)
+        self.assertEqual(scene.battle.tick_count, 0)
+        machine.handle(("start_battle",))
+        for _ in range(10):
+            machine.update(BATTLE_TICK_SECONDS)
+        machine.handle(("pause",))
+        for _ in range(10):
+            machine.update(BATTLE_TICK_SECONDS)
+        self.assertEqual(scene.battle.tick_count, 10)
+        machine.handle(("pause",))
+        for _ in range(10):
+            machine.update(BATTLE_TICK_SECONDS)
+        scene.exit(context)
+        replayed, header, divergence, _ = battle_replay.replay(self.root, scene.logger.path, context=self._context(data))
+        self.assertIsNone(divergence)
+        self.assertEqual(header["player_army"], data["merc"])
+        self.assertEqual(replayed.battle.snapshot(), scene.battle.snapshot())
+        self.assertEqual(replayed.battle.tick_count, 20)
+        self.assertEqual(replayed.battle.update_count, 71)
+
     def test_given_a_battle_with_orders_when_recorded_and_replayed_then_snapshots_match_and_it_reports_identical(self):
         context = self._context()
         scene = BattleScene(log_dir=self.log_dir, seed=7)

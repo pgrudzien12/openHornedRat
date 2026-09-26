@@ -102,7 +102,7 @@ def replay(installation: Installation | PathArg, log_path: PathArg, until: int |
     battle_id = AssetId.parse(header["battle_asset"])
     if context is None:
         context = scene_context(installation)
-    scene = BattleScene(battle_id, log_dir=None, seed=header["seed"])
+    scene = BattleScene(battle_id, log_dir=None, seed=header["seed"], player_army=header.get("player_army"))
     scene.enter(context)
 
     orders_by_tick: dict[int, list[tuple[Any, ...]]] = {}
@@ -129,9 +129,15 @@ def replay(installation: Installation | PathArg, log_path: PathArg, until: int |
             scene.handle(event, context)
             timeline.append({"tick": tick, "kind": "order", "event": list(event)})
         if tick in snapshots_by_tick:
-            mismatch = _compare_snapshot(snapshots_by_tick[tick]["regiments"], scene.battle.snapshot())
+            record = snapshots_by_tick[tick]
+            mismatch = _compare_snapshot(record["regiments"], scene.battle.snapshot())
             if mismatch is not None and divergence is None:
                 divergence = {"tick": tick, **mismatch}
+            for field_name, actual in (("phase", scene.battle.phase), ("combat_tick", scene.battle.tick_count),
+                                       ("paused", scene.battle.paused)):
+                if field_name in record and record[field_name] != actual and divergence is None:
+                    divergence = {"tick": tick, "regiment": None, "field": field_name,
+                                  "recorded": record[field_name], "replayed": actual}
         if scene.battle.result is not None or tick >= max_tick:
             break
         scene.update(BATTLE_TICK_SECONDS, context)  # exactly one recorded tick, never wall-clock time

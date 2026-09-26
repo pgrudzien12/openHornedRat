@@ -9,6 +9,8 @@ from whshr.campaign_state import CampaignState
 from whshr.glue import MissionRef
 from whshr.roster import RosterRow
 from whshr.savegame import AUTOSAVE_SLOT, SaveError, SaveStore
+from whshr.savegame import campaign_to_dict, restore_campaign
+from whshr.troop_selection import Deployment
 from tests.test_roster import MRC
 
 ROWS = {
@@ -16,6 +18,17 @@ ROWS = {
     14: RosterRow(14, keep=False, for_hire=True, wizard=False, artillery=True, base_price=33),
 }
 GRAPH = {"flow_scripts": {}, "mission_windows": {}}
+
+
+class MarchingOrderSaveTests(unittest.TestCase):
+    def test_given_confirmed_marching_order_when_saved_and_restored_then_order_survives(self):
+        campaign = CampaignState(GRAPH, mission_window="MAP", company=roster.parse_company(MRC, ROWS))
+        campaign.commit_troop_selection(Deployment((14, 2), 0, frozenset((14, 2))))
+        saved = campaign_to_dict(campaign)
+        restored = CampaignState(GRAPH, mission_window="MAP", company=roster.parse_company(MRC, ROWS))
+        restore_campaign(restored, saved)
+        self.assertEqual(restored.ordered_march_units, (14, 2))
+        self.assertEqual([item["set"]["whoami"] for item in restored.marching_army()["armies"][0]["units"]], [14, 2])
 
 
 TWO_WINDOWS = {

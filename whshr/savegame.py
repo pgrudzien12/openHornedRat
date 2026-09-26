@@ -65,7 +65,6 @@ def _unref(data: Mapping[str, Any]) -> MissionRef:
 
 def campaign_to_dict(campaign: "CampaignState") -> dict[str, Any]:
     """The persistent part of a campaign as JSON-ready data."""
-    order = {regiment.whoami: index for index, regiment in enumerate(campaign.company)}
     return {
         "flow": campaign.flow,
         "flow_history": list(campaign.flow_history),
@@ -74,7 +73,7 @@ def campaign_to_dict(campaign: "CampaignState") -> dict[str, Any]:
         "completed": sorted(campaign.completed),
         "coffers": campaign.coffers,
         "army_units": sorted(campaign.army_units),
-        "march_units": sorted(campaign.march_units, key=lambda whoami: order.get(whoami, len(order))),
+        "march_units": list(campaign.ordered_march_units),
         "reinforcements": {str(whoami): count for whoami, count in campaign.reinforcements.items()},
         "selected_mission": None if campaign.selected_mission is None else _ref(campaign.selected_mission),
         "taken_missions": [_ref(mission) for mission in sorted(campaign.taken_missions)],
@@ -107,6 +106,7 @@ def restore_campaign(campaign: "CampaignState", data: Mapping[str, Any]) -> None
             "coffers": int(data["coffers"]),
             "army_units": {int(value) for value in data["army_units"]},
             "march_units": {int(value) for value in data["march_units"]},
+            "march_order": tuple(int(value) for value in data["march_units"]),
             "reinforcements": {int(whoami): int(count) for whoami, count in data["reinforcements"].items()},
             "selected_mission": None if data["selected_mission"] is None else _unref(data["selected_mission"]),
             "taken_missions": {_unref(item) for item in data["taken_missions"]},

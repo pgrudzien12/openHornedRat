@@ -39,6 +39,17 @@ class LeaveScene(Scene):
 
 
 class BattleSceneTests(unittest.TestCase):
+    def test_given_deployment_when_a_frame_stalls_then_only_one_update_runs_without_catchup(self):
+        from tests.test_deployment import source
+        self.context.loaders["battle-script"] = lambda _, path: SimpleNamespace(script=source(1))
+        scene = BattleScene()
+        machine = SceneMachine(scene, self.context)
+        machine.update(2.0)
+        self.assertEqual(scene.battle.update_count, 1)
+        self.assertEqual(scene.battle.tick_count, 0)
+        machine.update(0)
+        self.assertEqual(scene.battle.update_count, 1)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)

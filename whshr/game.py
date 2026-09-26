@@ -29,6 +29,7 @@ def scene_context(installation: Installation | str | PathLike[str], loaders: dic
     locator = AssetLocator(installation)
     locator.validate()
     glue = GlueContent(locator.installation)
+    default_loaders = loaders is None
     if loaders is None:
         def load_glue(record: AssetRecord, _path: Path) -> Any:
             kind, name = record.identifier.kind, record.identifier.name
@@ -51,5 +52,8 @@ def scene_context(installation: Installation | str | PathLike[str], loaders: dic
             ),
             "glue-content": load_glue,
         }
-    return SceneAssets(locator, build(locator.installation), AssetCache(), loaders, glue=glue, save_dir=save_dir,
-                       no_battle=no_battle)
+    context = SceneAssets(locator, build(locator.installation), AssetCache(), loaders, glue=glue, save_dir=save_dir,
+                          no_battle=no_battle)
+    if default_loaders:
+        context.battle_loader = lambda _record, path, army: load_battlefield(locator.installation, path, player_army=army)
+    return context

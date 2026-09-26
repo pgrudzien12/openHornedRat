@@ -299,7 +299,7 @@ class BF003OpcodeTests(unittest.TestCase):
 
         # Simulate: decrement wait counter 60 times
         for tick in range(60):
-            self.interp.op_TestWait(state, None, [], "test", 0, None)
+            self.interp.op_TestWait(state, None, [], "test", tick, None)
 
         # After 60 ticks, wait should be done
         self.assertEqual(state.wait_remaining, 0.0)

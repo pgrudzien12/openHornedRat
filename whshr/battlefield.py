@@ -18,7 +18,7 @@ from typing import Any
 from . import legacy, pbx
 from .image import load_rgb_palette
 from .paths import Installation
-from .script import load_battle, resource_name
+from .script import View, load_battle, resource_name
 from .sprites import colormap_indices, decode_frame
 
 Vec3 = tuple[float, float, float]
@@ -319,13 +319,16 @@ def _sprite_file(game: Installation, bundled: Mapping[str, bytes], filename: str
 
 
 def load_battlefield(installation: Installation | str | PathLike[str], battle_file: str | PathLike[str],
-                     ambient: float = DEFAULT_AMBIENT, light: Sequence[float] = DEFAULT_LIGHT) -> Battlefield:
+                     ambient: float = DEFAULT_AMBIENT, light: Sequence[float] = DEFAULT_LIGHT,
+                     player_army: View | None = None) -> Battlefield:
     """Load a battle script and decode its terrain, scenery and troop sprites (per-battle bundle, then BINARY)."""
     game = installation if isinstance(installation, Installation) else Installation(installation)
     path = Path(battle_file)
     if not path.is_file():
         path = game.file_dir("SCRIPT", str(battle_file))
     script = load_battle(str(path))
+    if player_army is not None:
+        script["merc"] = player_army
     ground, scenery, sprites, terrain = mesh_assets(game.file_dir("MESH", script["field"]["mesh"]))
 
     size = (max(texture["w"] for texture in ground["textures"] + scenery["textures"]),

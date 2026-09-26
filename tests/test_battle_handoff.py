@@ -39,6 +39,25 @@ RESOURCES = {
 
 
 class BattleHandoffTests(unittest.TestCase):
+    def test_given_confirmed_campaign_march_when_battle_loads_then_current_army_and_order_determine_slots(self):
+        from whshr import roster
+        from whshr.troop_selection import Deployment
+        from tests.test_roster import MRC
+        from tests.test_savegame import ROWS
+        from tests.test_deployment import source
+        self.campaign.company = roster.parse_company(MRC, ROWS)
+        self.campaign.commit_troop_selection(Deployment((14, 2), 0, frozenset((14, 2))))
+        data = source(3)
+        context = SceneAssets(self.context.locator, self.context.catalog, AssetCache(),
+                              {"battle-script": lambda _, path: SimpleNamespace(script=data)})
+        scene = BattleScene(glue_scene=self.map_scene)
+        scene.enter(context)
+        self.assertEqual(list(scene.battle.regiments), ["Cannon<Crew", "Grudgebringer<Cavalry"])
+        self.assertEqual([(r.x, r.y) for r in scene.battle.regiments.values()], [(400, 500), (500, 600)])
+        self.assertEqual(len(scene.field.script["merc"]["armies"][0]["units"]), 2)
+        self.assertEqual(len(data["merc"]["armies"][0]["units"]), 3)
+        scene.exit(context)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

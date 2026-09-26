@@ -102,6 +102,7 @@ class UnitScriptState:
     wait_remaining: float = 0.0  # ticks left in current Wait
     wait_duration: float = 0.0  # saved duration for TestWait checks
     waiting_for_start: bool = False
+    wait_last_update: int | None = None
 
     # Current order and target (set by FindTarget*, AttackTarget, etc.)
     current_target: Target | None = None  # (regiment_id, unit_id) for attack/movement orders
@@ -284,6 +285,10 @@ class ScriptInterpreter:
             state.unit_flags |= IN_MELEE_FLAG
         else:
             state.unit_flags &= ~IN_MELEE_FLAG
+        if regiment.hidden:
+            state.unit_flags |= 0x80000
+        else:
+            state.unit_flags &= ~0x80000
 
     def raise_charge_events(self) -> None:
         """Queue event 0x07 ("you are being charged") to any regiment an attacker has closed to
@@ -361,6 +366,7 @@ class ScriptInterpreter:
 
         Returns the state after execution. Modifies state in-place.
         """
+        self._advance_wait_timer(state, tick_count)
         self._update_arrival_flag(unit_id, state)
         self._mirror_engine_flags(unit_id, state)
 
@@ -685,6 +691,10 @@ class ScriptInterpreter:
         """SetUnitFlags N: set bits in unit_flags (+0xB4)."""
         if operand is not None:
             state.unit_flags |= operand
+            if operand & 0x80000:
+                regiment = self.battle.regiments.get(unit_id)
+                if regiment is not None:
+                    regiment.hidden = True
         return state.pc + 1
 
     def op_ClearUnitFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -692,6 +702,10 @@ class ScriptInterpreter:
         """ClearUnitFlags N: clear bits in unit_flags."""
         if operand is not None:
             state.unit_flags &= ~operand
+            if operand & 0x80000:
+                regiment = self.battle.regiments.get(unit_id)
+                if regiment is not None:
+                    regiment.hidden = False
         return state.pc + 1
 
     def op_TestUnitFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -931,16 +945,20 @@ class ScriptInterpreter:
         if operand is not None:
             state.wait_duration = operand
             state.wait_remaining = operand
+            state.wait_last_update = None
         return state.pc + 1
+
+    @staticmethod
+    def _advance_wait_timer(state: UnitScriptState, update: int) -> None:
+        if state.wait_remaining > 0 and state.wait_last_update != update:
+            state.wait_remaining = max(0.0, state.wait_remaining - 1)
+            state.wait_last_update = update
 
     def op_TestWait(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """TestWait: decrement wait_remaining; set cond_flags if still waiting."""
-        if state.wait_remaining > 0:
-            state.wait_remaining -= 1.0
-            state.cond_flags = 1 if state.wait_remaining > 0 else 0
-        else:
-            state.cond_flags = 0
+        self._advance_wait_timer(state, tick_count)
+        state.cond_flags = 1 if state.wait_remaining > 0 else 0
         return state.pc + 1
 
     def op_Wait(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -949,8 +967,8 @@ class ScriptInterpreter:
         if operand is not None:
             if state.wait_remaining == 0:
                 state.wait_remaining = operand
+        self._advance_wait_timer(state, tick_count)
         if state.wait_remaining > 0:
-            state.wait_remaining -= 1.0
             self._should_yield = True  # yield to let other units run
             return state.pc
         return state.pc + 1
@@ -1028,6 +1046,9 @@ class ScriptInterpreter:
         return self._attack_nearest(state, unit_id, n=operand or 1)
 
     def _attack_nearest(self, state: UnitScriptState, unit_id: str, n: int, side: Side | None = None) -> int | None:
+        if self.battle.phase == "deployment":
+            state.cond_flags = 0
+            return state.pc + 1
         regiment = self.battle.regiments.get(unit_id)
         search_range = state.threat_range if state.threat_range > 0 else DEFAULT_ATTACK_SEARCH_RANGE
         if regiment is None:
@@ -1687,9 +1708,7 @@ class ScriptInterpreter:
     def op_IfBattleState(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """IfBattleState N: test current battle state."""
-        # TODO: track battle state (0=initial, 4=in progress, 5=gate reached, etc.)
-        # For now, assume state 4 (in progress)
-        if operand is not None and operand == 4:
+        if operand is not None and operand == self.battle.mission_state:
             state.cond_flags = 1
         else:
             state.cond_flags = 0
@@ -1698,7 +1717,8 @@ class ScriptInterpreter:
     def op_SetBattleState(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """SetBattleState N: set current battle state."""
-        # TODO: update global battle state
+        if operand is not None:
+            self.battle.mission_state = operand
         return state.pc + 1
 
     def op_EnemyRouted(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
