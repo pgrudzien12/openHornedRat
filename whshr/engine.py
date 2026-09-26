@@ -601,7 +601,7 @@ class Battle:
             if not target.hidden or not target.active:
                 continue
             for looker in self.regiments.values():
-                if not looker.active or looker.hidden or looker.side == target.side:
+                if not looker.active or looker.side == target.side:
                     continue
                 cone = 142 if looker.in_melee else 71
                 if visibility.visible(self.formation_centre(looker), looker.direction,
@@ -991,6 +991,8 @@ class Battle:
             self.tick_count += 1
             return
         scale = seconds / TICK_SECONDS
+        if self.phase == "battle":
+            self.refresh_visibility()
         # Run behaviour scripts via the bytecode interpreter (issue #3); a mission-less/synthetic
         # battle has no interpreter and so no automatic orders (only explicit Battle.order_* calls).
         if self.interpreter:

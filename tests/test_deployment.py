@@ -184,6 +184,28 @@ def instruction(name):
 
 
 class DeploymentLifecycleTests(unittest.TestCase):
+    def test_given_hidden_observer_and_hidden_enemy_when_facing_changes_during_battle_then_enemy_is_spotted(self):
+        data = source(1)
+        data["nodes"] = []
+        own = data["merc"]["armies"][0]["units"][0]
+        own["hidden"] = True
+        own["set"].update(x=100, y=100, dir=256)
+        enemy = unit("enemy", 129)
+        enemy["hidden"] = True
+        enemy["set"].update(x=100, y=900, dir=0)
+        data["armies"] = [{"count": 1, "units": [enemy]}]
+        battle = Battle.from_script(data)
+        battle.start_battle()
+        self.assertTrue(battle.regiments["enemy"].hidden)
+        battle.regiments["player0"].direction = 0
+        battle.tick()
+        self.assertFalse(battle.regiments["enemy"].hidden)
+        self.assertTrue(battle.regiments["player0"].hidden)
+        self.assertEqual([e.code for e in battle.event_bus.unit_states["enemy"].event_queue], [0x1C])
+        battle.regiments["player0"].direction = 256
+        battle.tick()
+        self.assertFalse(battle.regiments["enemy"].hidden)
+
     def test_given_hidden_player_when_initialized_selected_and_dragged_then_flag_is_preserved(self):
         data = source(1)
         data["boundaries"] = [region()]

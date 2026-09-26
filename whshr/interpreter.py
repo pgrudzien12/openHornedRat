@@ -20,7 +20,7 @@ import random
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from . import behaviour
+from . import behaviour, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import Side
@@ -44,17 +44,6 @@ WAIT_OPCODE = 0x1C  # Wait: blocking ticks are not traced (see ScriptInterpreter
 # game_rules.md, unit flags: 0x200 is "in melee" -- Otto Hiln's script tests it (`TestUnitFlags 512`) and
 # the wizard casting scripts refuse to cast while it is set. Mirrored from `Regiment.in_melee`.
 IN_MELEE_FLAG = 0x200
-
-# PROVISIONAL: the search radius of the `Attack*Enemy` opcode family for a unit that never ran
-# `SetThreatRange`. The units that gate a mission on "an enemy came close" (BF001's Hiln's Guard) all
-# set their own range, which is used instead; the fallback is a project decision, not an observed value.
-DEFAULT_ATTACK_SEARCH_RANGE = 300
-
-
-def _octagonal_distance(first: "Regiment", second: "Regiment") -> float:
-    """The game's cheap distance (game_rules.md, threat score): larger axis delta + half the smaller."""
-    dx, dy = abs(first.x - second.x), abs(first.y - second.y)
-    return max(dx, dy) + min(dx, dy) / 2
 
 
 @dataclass
@@ -503,31 +492,19 @@ class ScriptInterpreter:
         return None
 
     def _nearest_enemy_id(self, regiment: "Regiment", n: int = 1, side: Side | None = None,
-                          max_distance: float | None = None) -> str | None:
-        """The n-th nearest active regiment identifier to `regiment` (1 = nearest), or None if fewer
-        than n candidates remain. Euclidean distance; shared by the Target*/Attack* opcode families
-        (TargetNearestEnemy, AttackNearestEnemy, AttackNthNearestEnemy, ...).
-
-        `side`, when given, restricts candidates to that exact `rules.Side` (used by
-        AttackNearestFlag40Unit for the neutral side flag 0x40, notes/neutral_units.md); otherwise any
-        regiment of a different side than `regiment` is a candidate, matching this opcode family's
-        original two-sided "not my side" search generalised to three sides.
-
-        This does not model "visible" (line-of-sight) any differently from a plain nearest-enemy
-        search -- the engine has no visibility/fog system -- so the *Visible* opcode variants are
-        implemented identically to their non-visible counterparts, a documented simplification.
-        """
-        if side is not None:
-            candidates = (other for other in self.battle.regiments.values()
-                          if other.active and not other.hidden and other.side == side)
-        else:
-            candidates = (other for other in self.battle.regiments.values()
-                          if other.active and not other.hidden and other.side != regiment.side)
-        if max_distance is not None:
-            candidates = (other for other in candidates
-                          if _octagonal_distance(regiment, other) <= max_distance)
-        enemies = sorted(candidates, key=lambda other: math.hypot(other.x - regiment.x, other.y - regiment.y))
-        return enemies[n - 1].identifier if len(enemies) >= n else None
+                          visible_only: bool = False) -> str | None:
+        """Whole-field nearest search; positive n wraps through eligible units (game_rules.md)."""
+        candidates = [other for other in self.battle.regiments.values()
+                      if other.active and not (other.hidden or other.routing or other.held)
+                      and (other.side == side if side is not None else other.side != regiment.side)]
+        if visible_only:
+            candidates = [other for other in candidates if visibility.visible(
+                self.battle.formation_centre(regiment), regiment.direction,
+                self.battle.formation_centre(other), other.bounding_radius(),
+                142 if regiment.in_melee else 71, self.battle.boundaries, self.battle.objects)]
+        enemies = sorted(candidates, key=lambda other: math.trunc(math.hypot(
+            other.x - regiment.x, other.y - regiment.y)))
+        return enemies[(max(1, n) - 1) % len(enemies)].identifier if enemies else None
 
     @staticmethod
     def _unit_worth(regiment: "Regiment") -> int:
@@ -1030,9 +1007,8 @@ class ScriptInterpreter:
 
     def op_AttackNearestVisibleEnemy(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """AttackNearestVisibleEnemy: as AttackNearestEnemy (no visibility model, see
-        _nearest_enemy_id)."""
-        return self._attack_nearest(state, unit_id, n=1)
+        """Whole-field nearest search restricted by the view cone and unobstructed sight."""
+        return self._attack_nearest(state, unit_id, n=1, visible_only=True)
 
     def op_AttackNearestFlag40Unit(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
@@ -1045,20 +1021,26 @@ class ScriptInterpreter:
         """AttackNthNearestEnemy N: find the N-th nearest enemy (1-based) and attack it."""
         return self._attack_nearest(state, unit_id, n=operand or 1)
 
-    def _attack_nearest(self, state: UnitScriptState, unit_id: str, n: int, side: Side | None = None) -> int | None:
+    def op_AttackNthNearestVisibleEnemy(self, state: UnitScriptState, operand: int | None, script_words: Words,
+                                      unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """Select a wrapped n-th target among enemies passing sight checks."""
+        return self._attack_nearest(state, unit_id, n=operand or 1, visible_only=True)
+
+    def _attack_nearest(self, state: UnitScriptState, unit_id: str, n: int, side: Side | None = None,
+                        visible_only: bool = False) -> int | None:
         if self.battle.phase == "deployment":
             state.cond_flags = 0
             return state.pc + 1
         regiment = self.battle.regiments.get(unit_id)
-        search_range = state.threat_range if state.threat_range > 0 else DEFAULT_ATTACK_SEARCH_RANGE
         if regiment is None:
             state.cond_flags = 0
             return state.pc + 1
-        target_id = self._nearest_enemy_id(regiment, n, side=side, max_distance=search_range)
+        target_id = self._nearest_enemy_id(regiment, n, side=side, visible_only=visible_only)
         if target_id:
             state.current_target = (target_id, 0)
             if not regiment.anchored:
                 regiment.attack_target = target_id
+            self.event_bus.queue_event(unit_id, Event(code=0x04, source=target_id), route="self")
             state.cond_flags = 1
         else:
             state.cond_flags = 0

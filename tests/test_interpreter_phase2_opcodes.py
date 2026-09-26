@@ -46,10 +46,11 @@ class TargetSelectionTests(unittest.TestCase):
         self.assertEqual(self.enemy.attack_target, "player_near")
         self.assertEqual(state.cond_flags, 1)
 
-    def test_attack_nearest_visible_enemy_behaves_like_attack_nearest_enemy(self):
+    def test_attack_nearest_visible_enemy_fails_when_candidates_are_outside_view_cone(self):
         state = self.battle.event_bus.unit_states["enemy_1"]
         self.interp.op_AttackNearestVisibleEnemy(state, None, [], "enemy_1", 0, None)
-        self.assertEqual(self.enemy.attack_target, "player_near")
+        self.assertIsNone(self.enemy.attack_target)
+        self.assertEqual(state.cond_flags, 0)
 
     def test_attack_nearest_flag40_unit_targets_the_neutral_side_specifically(self):
         # notes/neutral_units.md: side flag 0x40 is the neutral/NPC side, now a real third Side value
@@ -72,20 +73,53 @@ class TargetSelectionTests(unittest.TestCase):
 
     def test_attack_nth_nearest_enemy_picks_the_second_closest(self):
         state = self.battle.event_bus.unit_states["enemy_1"]
-        state.threat_range = 500  # the far regiment is 400 away, beyond the fallback range
         self.interp.op_AttackNthNearestEnemy(state, 2, [], "enemy_1", 0, None)
         self.assertEqual(self.enemy.attack_target, "player_far")
 
-    def test_attack_nth_nearest_enemy_fails_when_fewer_than_n_enemies_exist(self):
+    def test_attack_nth_nearest_enemy_wraps_when_n_exceeds_candidate_count(self):
         state = self.battle.event_bus.unit_states["enemy_1"]
         self.interp.op_AttackNthNearestEnemy(state, 5, [], "enemy_1", 0, None)
-        self.assertEqual(state.cond_flags, 0)
+        self.assertEqual(state.cond_flags, 1)
+        self.assertEqual(self.enemy.attack_target, "player_near")
+
+    def test_given_distant_target_then_threat_and_weapon_ranges_do_not_limit_nearest_search(self):
+        self.near.models = 0
+        self.far.x, self.far.y = 900, 100
+        state = self.battle.event_bus.unit_states["enemy_1"]
+        state.threat_range = 10
+        self.enemy.missile_range = 20
+        self.interp.op_AttackNearestEnemy(state, None, [], "enemy_1", 0, None)
+        self.assertEqual(state.current_target, ("player_far", 0))
+        self.assertEqual([(e.code, e.source) for e in state.event_queue], [(0x04, "player_far")])
+        self.assertEqual((self.enemy.x, self.enemy.y), (100, 100))
+
+    def test_given_only_hidden_routing_or_excluded_targets_then_search_fails_without_attack_event(self):
+        self.far.models = 0
+        for flag in ("hidden", "routing", "held"):
+            with self.subTest(flag=flag):
+                setattr(self.near, flag, True)
+                state = interpreter.UnitScriptState()
+                self.interp.op_AttackNearestEnemy(state, None, [], "enemy_1", 0, None)
+                self.assertEqual(state.cond_flags, 0)
+                self.assertIsNone(self.enemy.attack_target)
+                setattr(self.near, flag, False)
+
+    def test_given_distant_visible_target_then_visible_search_succeeds_but_sight_edge_blocks_it(self):
+        self.near.models = 0
+        self.far.x, self.far.y = 100, 900
+        state = self.battle.event_bus.unit_states["enemy_1"]
+        self.interp.op_AttackNearestVisibleEnemy(state, None, [], "enemy_1", 0, None)
+        self.assertEqual(self.enemy.attack_target, "player_far")
+        self.battle.boundaries = [{"status": ["bnd_ACTIVE", "bnd_SIGHTEDGE"],
+                                   "lines": [[0, 500, 1000, 500]]}]
+        self.enemy.attack_target = None
+        self.interp.op_AttackNearestVisibleEnemy(state, None, [], "enemy_1", 1, None)
         self.assertIsNone(self.enemy.attack_target)
+        self.assertEqual(state.cond_flags, 0)
 
     def test_attack_nearest_enemy_ignores_destroyed_regiments(self):
         self.near.models = 0  # destroyed: no longer .active
         state = self.battle.event_bus.unit_states["enemy_1"]
-        state.threat_range = 500  # the far regiment is 400 away, beyond the fallback range
         self.interp.op_AttackNearestEnemy(state, None, [], "enemy_1", 0, None)
         self.assertEqual(self.enemy.attack_target, "player_far")
 
@@ -366,9 +400,7 @@ class EventHandlerFrameTests(unittest.TestCase):
 
 
 class AttackSearchRangeTests(unittest.TestCase):
-    """`Attack*Enemy` only sees enemies within the unit's own SetThreatRange (300 if it set none), so a
-    script's `AttackNearestEnemy; ...IfTrue; LoopIfFalse` gate waits until an enemy comes close (BF001's
-    Hiln's Guard, whose event 17 wakes the reinforcements)."""
+    """Nearest-enemy search is independent of threat-scoring range (game_rules.md)."""
 
     def _attack(self, distance, threat_range):
         guard = Regiment("guard", "Guard", 0, 0, 0, Side.ENEMY, models=5, ranks=1)
@@ -383,23 +415,23 @@ class AttackSearchRangeTests(unittest.TestCase):
     def test_enemy_inside_the_units_own_range_is_attacked(self):
         self.assertEqual(self._attack(distance=200, threat_range=240), (1, "player"))
 
-    def test_enemy_beyond_the_units_own_range_is_not(self):
-        self.assertEqual(self._attack(distance=300, threat_range=240), (0, None))
+    def test_enemy_beyond_the_units_own_range_is_attacked(self):
+        self.assertEqual(self._attack(distance=1000, threat_range=240), (1, "player"))
 
-    def test_a_unit_without_a_threat_range_falls_back_to_the_default(self):
+    def test_a_unit_without_a_threat_range_has_no_default_distance_cutoff(self):
         self.assertEqual(self._attack(distance=290, threat_range=0), (1, "player"))
-        self.assertEqual(self._attack(distance=310, threat_range=0), (0, None))
+        self.assertEqual(self._attack(distance=1000, threat_range=0), (1, "player"))
 
-    def test_distance_is_octagonal(self):
-        # 200 along each axis is 300 octagonal (200 + 100), though only 283 Euclidean.
+    def test_nearest_ranking_is_euclidean_rather_than_octagonal(self):
         guard = Regiment("guard", "Guard", 0, 0, 0, Side.ENEMY, models=5, ranks=1)
         player = Regiment("player", "Player", 200, 200, 0, Side.PLAYER, models=5, ranks=1)
-        battle = Battle(2000, 2000, [guard, player], seed=1995)
+        axis = Regiment("axis", "Axis", 290, 0, 0, Side.PLAYER, models=5, ranks=1)
+        battle = Battle(2000, 2000, [guard, player, axis], seed=1995)
         interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
         state = battle.event_bus.unit_states["guard"]
         state.threat_range = 290
         interp.op_AttackNearestEnemy(state, None, [], "guard", 0, None)
-        self.assertEqual(state.cond_flags, 0)
+        self.assertEqual(guard.attack_target, "player")
 
 
 class MeleeFlagMirrorTests(unittest.TestCase):
