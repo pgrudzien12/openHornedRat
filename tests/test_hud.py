@@ -69,6 +69,41 @@ def _hud(selected="player", regiments=None, **overrides):
 
 
 class PanelStateTests(unittest.TestCase):
+    def test_given_deployment_then_each_class_has_only_its_documented_controls(self):
+        expected = {
+            "inf": {"TL": "ranks_up", "TR": "move", "BR": "independent", "BL": "ranks_down", "C": "ranks_decoration"},
+            "arch": {"TL": "ranks_up", "TR": "move", "BR": "independent", "BL": "ranks_down", "C": "ranks_decoration"},
+            "wiz": {"TR": "move", "BR": "independent"},
+            "mon": {"TR": "move", "BR": "independent"},
+            "art": {"BR": "independent"}, None: {},
+        }
+        for unit_class, slots in expected.items():
+            with self.subTest(unit_class=unit_class):
+                hud = _hud()
+                hud.battle.phase = "deployment"
+                hud.battle.regiments["player"].hud_class = unit_class
+                self.assertEqual(hud.slots(), slots)
+                for name in ("attack", "halt", "charge", "fire", "magic", "items", "rally",
+                             "withdraw", "fight_harder", "turn_left", "face_point", "ranks_subset"):
+                    self.assertIsNone(hud.press(name))
+                self.assertEqual(hud.slots(), slots)
+
+    def test_given_deployment_without_selection_then_start_is_available_and_no_unit_controls_are_shown(self):
+        hud = _hud(selected=None)
+        hud.battle.phase = "deployment"
+        self.assertEqual(hud.slots(), {})
+        self.assertEqual(hud.hit_test((25, 435)), "start_battle")
+        self.assertEqual(hud.press("start_battle"), "start_battle")
+        hud.battle.start_battle()
+        self.assertEqual(hud.hit_test((25, 435)), "pause")
+
+    def test_given_deployment_move_targeting_then_the_deployment_panel_does_not_open_battle_subpanels(self):
+        hud = _hud()
+        hud.battle.phase = "deployment"
+        hud.press("move")
+        self.assertEqual(hud.panel_state(), ("deployment", "inf"))
+        self.assertEqual(hud.pending_order, "move")
+
     def test_given_nothing_selected_then_the_idle_no_selection_layout_is_used(self):
         hud = _hud(selected=None)
 
@@ -513,6 +548,52 @@ class HudClassTests(unittest.TestCase):
 
 
 class BattleViewHudInputTests(unittest.TestCase):
+    def _deployment_view(self, marker="player"):
+        hud = self._hud_mock(minimap_regiment_at=lambda pos: marker,
+                             minimap_position=lambda pos: (float(pos[0]), float(pos[1])) if pos[0] >= 0 else None)
+        view = self._view(hud)
+        view.scene.battle = Battle(1000, 1000, [Regiment("player", "P", 100, 100, 0, Side.PLAYER, hud_class="inf"),
+                                              Regiment("enemy", "E", 800, 800, 0, Side.ENEMY)], deploy=True)
+        return view
+
+    def test_given_deployment_minimap_press_then_drag_ctrl_rotation_and_release_use_placement_intents(self):
+        view = self._deployment_view()
+        down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100), mod=pygame.KMOD_SHIFT)
+        self.assertEqual(view.events(down), (("select", "player"), ("begin_drag", "player", 100.0, 100.0)))
+        motion = SimpleNamespace(type=pygame.MOUSEMOTION, buttons=(1, 0, 0), pos=(200, 200), mod=pygame.KMOD_CTRL)
+        self.assertEqual(view.events(motion), (("drag_to", 200.0, 200.0, True),))
+        motion.mod = 0
+        self.assertEqual(view.events(motion), (("drag_to", 200.0, 200.0, False),))
+        self.assertEqual(view.events(SimpleNamespace(type=pygame.MOUSEBUTTONUP, button=1)), (("end_drag",),))
+
+    def test_given_minimap_drag_when_pointer_leaves_then_drag_ends(self):
+        view = self._deployment_view()
+        view.events(SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100)))
+        self.assertEqual(view.events(SimpleNamespace(type=pygame.MOUSEMOTION, buttons=(1, 0, 0), pos=(-1, 100))),
+                         (("end_drag",),))
+
+    def test_given_enemy_press_during_deployment_then_it_is_inspected_without_dragging(self):
+        view = self._deployment_view("enemy")
+        self.assertEqual(view.events(SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))),
+                         (("select", "enemy"),))
+
+    def test_given_move_targeting_then_ctrl_appends_and_plain_click_replaces_and_ends_targeting(self):
+        view = self._deployment_view()
+        view.order_mode = "move"
+        down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(300, 300), mod=pygame.KMOD_CTRL)
+        self.assertEqual(view.events(down), (("append_waypoint", 300.0, 300.0),))
+        self.assertEqual(view.order_mode, "move")
+        down.mod = 0
+        self.assertEqual(view.events(down), (("move_to", 300.0, 300.0),))
+        self.assertIsNone(view.order_mode)
+
+    def test_given_deployment_then_right_click_enter_and_space_cannot_issue_orders_or_start(self):
+        view = self._deployment_view()
+        for key in (pygame.K_RETURN, pygame.K_SPACE):
+            self.assertEqual(view.events(SimpleNamespace(type=pygame.KEYDOWN, key=key)), ())
+        self.assertEqual(view.events(SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=3, pos=(100, 100))), ())
+        self.assertEqual(view.events(SimpleNamespace(type=pygame.MOUSEBUTTONUP, button=3, pos=(100, 100))), ())
+
     def _view(self, hud, selected_id="player"):
         view = BattleView.__new__(BattleView)
         view.hud = hud

@@ -81,7 +81,7 @@ COMMAND_FRAMES: dict[str, tuple[int, int]] = {
 # Commands whshr.engine.Battle can actually carry out today; everything else in COMMAND_FRAMES
 # renders (and, where it is a set-entry button, still navigates the panel) but is disabled.
 ORDER_SUPPORTED: set[str] = {"move", "attack", "halt", "ranks_up", "ranks_down",
-                   "turn_left", "turn_right", "about_face", "face_point"}
+                   "turn_left", "turn_right", "about_face", "face_point", "independent"}
 # Buttons that only change which sub-panel is shown (pure HUD state, always clickable when present).
 SET_ENTRY: dict[str, str] = {"move": "move", "attack": "attack", "ranks_subset": "ranks", "facing_subset": "facing",
             "back": "idle"}
@@ -143,7 +143,7 @@ MINIMAP_BOOK_POS, MINIMAP_BOOK_FRAMES, MINIMAP_BOOK_SIZE = (162, 242), (80, 81),
 # Tab-to-mode order is not confirmed (notes/game_rules.md marks it 🟡); this assumes the tabs
 # appear left to right in the documented mode order 0-3.
 MARKER_MODES = (0, 1, 2, 3)
-DEPLOYMENT_ZONE_FRAME = 160  # not drawn yet: no deployment phase (see _draw_minimap)
+DEPLOYMENT_ZONE_FRAME = 160
 # Numbered waypoint dots for a queued multi-stop order; whshr.engine.Regiment has only one
 # target_x/target_y (no queue), so only WAYPOINT_END_FRAME is ever drawn today.
 WAYPOINT_FRAMES = tuple(range(161, 170))
@@ -342,6 +342,10 @@ class Hud:
     def panel_state(self) -> tuple[str | None, str | None]:
         """(state, unit_class) selecting a row of PANEL_LAYOUT, per notes/game_rules.md."""
         regiment = self._regiment(self.selected)
+        if self.battle is not None and self.battle.phase == "deployment":
+            if regiment is None or regiment.side != Side.PLAYER or regiment.hidden:
+                return "deployment", None
+            return "deployment", regiment.hud_class
         if regiment is None:
             return "idle", None
         unit_class = regiment.hud_class
@@ -367,6 +371,8 @@ class Hud:
         return PANEL_LAYOUT.get((state, unit_class), {})
 
     def _button_enabled(self, name: str, regiment: "Regiment | None") -> bool:
+        if self.battle is not None and self.battle.phase == "deployment" and name not in self.slots().values():
+            return False
         if name not in ORDER_SUPPORTED and name not in SET_ENTRY:
             return False  # rendered per spec, but nothing in the engine can carry it out yet
         if name == "back":
@@ -382,7 +388,8 @@ class Hud:
     def _fixed_button_rects(self) -> Iterator[tuple[str, pygame.Rect]]:
         for name, (pos, _frames, size) in FIXED_BUTTONS.items():
             yield name, pygame.Rect(pos[0], pos[1], *size)
-        yield "pause", pygame.Rect(PAUSE_POS[0], PAUSE_POS[1], *PAUSE_SIZE)
+        action = "start_battle" if self.battle is not None and self.battle.phase == "deployment" else "pause"
+        yield action, pygame.Rect(PAUSE_POS[0], PAUSE_POS[1], *PAUSE_SIZE)
 
     def _slot_rects(self) -> Iterator[tuple[str, pygame.Rect]]:
         sub_x, sub_y = COMMAND_SUBWINDOW[0], COMMAND_SUBWINDOW[1]
@@ -416,7 +423,11 @@ class Hud:
 
     def press(self, name: str) -> str | None:
         """Apply a clicked command's panel-navigation effect; returns the order to issue, if any."""
-        if name in SET_ENTRY:
+        if name in {"start_battle", "pause", "next_regiment", "prev_regiment"}:
+            return name
+        if self.battle is not None and self.battle.phase == "deployment" and name not in self.slots().values():
+            return None
+        if name in SET_ENTRY and not (self.battle is not None and self.battle.phase == "deployment"):
             self.panel_set = SET_ENTRY[name]
         if name in ("move", "attack", "face_point"):
             self.pending_order = name
@@ -464,6 +475,11 @@ class Hud:
         y = (1 - (native[1] - map_top) / (height - 1)) * self.field.height
         return (x, y)
 
+    def minimap_delta(self, delta: Sequence[float]) -> tuple[float, float]:
+        _, _, width, height = self._map_scale()
+        return (delta[0] * self.field.width / (width - 1) / self._scale(),
+                -delta[1] * self.field.height / (height - 1) / self._scale())
+
     def _world_to_map_pixel(self, x: float, y: float) -> tuple[int, int]:
         map_left, map_top, width, height = self._map_scale()
         px = map_left + round(x / self.field.width * (width - 1))
@@ -482,7 +498,7 @@ class Hud:
         order[:] = [identifier for identifier in order if identifier in battle.regiments]
         order.extend(identifier for identifier in identifiers if identifier not in order)
         return [battle.regiments[identifier] for identifier in order
-                if battle.regiments[identifier].active]
+                if battle.regiments[identifier].active and not battle.regiments[identifier].hidden]
 
     def _battle(self) -> "Battle":
         if self.battle is None:
@@ -590,7 +606,21 @@ class Hud:
             return regiment.identifier == self.selected
         if self.marker_mode == 2:
             return regiment.side == Side.PLAYER
-        return False  # mode 3: banners only in deployment, which this engine does not model yet
+        return self._battle().phase == "deployment" and regiment.side == Side.PLAYER
+
+    def deployment_markers(self) -> list[tuple[int, int]]:
+        """Boundary marker positions derived from geometry at minimap pixel scale."""
+        if self.battle is None or self.battle.phase != "deployment":
+            return []
+        points: list[tuple[int, int]] = []
+        for region in self.battle.deployment_regions:
+            for x1, y1, x2, y2 in region.lines:
+                a, b = self._world_to_map_pixel(x1, y1), self._world_to_map_pixel(x2, y2)
+                steps = max(1, math.ceil(math.hypot(b[0] - a[0], b[1] - a[1]) / 8))
+                points.extend(self._world_to_map_pixel(x1 + (x2 - x1) * i / steps,
+                                                      y1 + (y2 - y1) * i / steps)
+                              for i in range(steps + 1))
+        return list(dict.fromkeys(points))
 
     def _draw_minimap(self, regiment: "Regiment | None", camera: "BattleCamera | None" = None) -> None:
         for index, position, _size in MINIMAP_LAYERS:
@@ -603,16 +633,16 @@ class Hud:
             # Drawn right above the plan map and nothing else, so every other minimap element
             # (waypoints, regiments, tabs) paints over it.
             self._draw_camera_target(camera)
-        # Deployment zone squares (ICONS frame 160) are skipped: this engine has no deployment
-        # phase yet (battles start already deployed, whshr.engine.Battle.from_battle_file), so the
-        # "deployment only" condition never holds.
+        for x, y in self.deployment_markers():
+            self._draw_map(self._icon(DEPLOYMENT_ZONE_FRAME), x - 4, y - 4, 8, 8)
         if self.battle is not None:
             if regiment is not None and self.selected is not None:
-                waypoint = None
-                if regiment.target_x is not None and regiment.target_y is not None:
-                    waypoint = (regiment.target_x, regiment.target_y)
-                if waypoint is not None:
-                    quad = self._icon(WAYPOINT_END_FRAME)
+                waypoints = list(regiment.waypoints)
+                if not waypoints and regiment.target_x is not None and regiment.target_y is not None:
+                    waypoints = [(regiment.target_x, regiment.target_y)]
+                for index, waypoint in enumerate(waypoints):
+                    frame = WAYPOINT_END_FRAME if index == len(waypoints) - 1 else WAYPOINT_FRAMES[min(index, 8)]
+                    quad = self._icon(frame)
                     if quad:
                         px, py = self._world_to_map_pixel(*waypoint)
                         self._draw_map(quad, px - quad.size[0] // 2, py - quad.size[1] // 2)
@@ -698,9 +728,10 @@ class Hud:
             pressed = self.pressed == name
             quad = self._icon(frames[1] if pressed else frames[0])
             self._draw_panel(quad, pos[0], pos[1], *size)
-        deployment = self.panel_state()[0] == "deployment"
-        pause_frames = PAUSE_FRAMES["deployment" if deployment else "battle"]
-        pressed = self.pressed == "pause"
+        deployment = self.battle is not None and self.battle.phase == "deployment"
+        context = "deployment" if deployment else "paused" if self.battle is not None and self.battle.paused else "battle"
+        pause_frames = PAUSE_FRAMES[context]
+        pressed = self.pressed == ("start_battle" if deployment else "pause")
         quad = self._icon(pause_frames[1] if pressed else pause_frames[0])
         self._draw_panel(quad, PAUSE_POS[0], PAUSE_POS[1], *PAUSE_SIZE)
 
@@ -712,7 +743,7 @@ class Hud:
             if not frames:
                 continue
             enabled = self._button_enabled(command, regiment)
-            pressed = self.pressed == command
+            pressed = self.pressed == command or command == "independent" and regiment is not None and regiment.independent
             frame_index = frames[1] if pressed and frames[1] != frames[0] else frames[0]
             quad = self._icon(frame_index)
             self._draw_panel(quad, sub_x + x, sub_y + y, *SLOT_SIZE,

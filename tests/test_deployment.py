@@ -8,6 +8,165 @@ import unittest
 from whshr.engine import Battle
 from whshr.script import load_battle
 from whshr import behaviour, interpreter
+from whshr import formation
+from whshr.rules import Side
+from whshr.deployment import Region
+
+
+def region(x1=0, y1=0, x2=1000, y2=1000, extra=()):
+    return {"name": "UnrelatedName", "status": ["bnd_ACTIVE", "bnd_DEPLOYMENT", *extra],
+            "lines": [[x1, y1, x2, y1], [x2, y1, x2, y2],
+                      [x2, y2, x1, y2], [x1, y2, x1, y1]]}
+
+
+class DeploymentPlacementTests(unittest.TestCase):
+    def test_given_equally_near_segments_then_clipping_uses_first_and_truncates_projected_coordinates(self):
+        polygon = Region(((0, 0, 10, 0), (10, 0, 10, 10), (10, 10, 0, 10), (0, 10, 0, 0)), inverted=True)
+        self.assertEqual(polygon.clip((5, 5)), (5, 0))
+        slope = Region(((-10, -10, 10, 10),), inverted=True)
+        self.assertEqual(slope.clip((-3, -2)), (-2, -2))
+    def battle(self, boundaries=None, artillery=False):
+        data = source(1)
+        data["nodes"] = []
+        data["merc"]["armies"][0]["units"][0]["set"].update(x=100, y=100, dir=0)
+        if artillery:
+            data["merc"]["armies"][0]["units"][0]["stats"]["s_side"] = [15, 3, 3, 1]
+        data["boundaries"] = [region()] if boundaries is None else boundaries
+        return Battle.from_script(data)
+
+    def centre(self, regiment):
+        return formation.footprint_frame(*regiment.block())[:2]
+
+    def test_given_first_drag_then_acquisition_overshoots_and_later_updates_use_half_steps(self):
+        battle = self.battle()
+        r = battle.regiments["player0"]
+        battle.begin_deployment_drag("player0", 100, 100)
+        battle.update_deployment_drag(300, 300)
+        battle.tick()
+        self.assertEqual(self.centre(r), (400, 400))
+        battle.tick()
+        self.assertEqual(self.centre(r), (350, 350))
+        battle.end_deployment_drag()
+        battle.tick()
+        self.assertEqual(self.centre(r), (350, 350))
+
+    def test_given_off_centre_grab_then_drag_keeps_offset_and_release_retains_position(self):
+        battle = self.battle()
+        r = battle.regiments["player0"]
+        battle.begin_deployment_drag("player0", 105, 107)
+        battle.update_deployment_drag(125, 127)
+        battle.tick()
+        self.assertEqual(self.centre(r), (130, 130))
+        battle.end_deployment_drag()
+        before = self.centre(r)
+        battle.tick()
+        self.assertEqual(self.centre(r), before)
+
+    def test_given_ctrl_drag_then_centre_stays_while_front_anchor_rotates(self):
+        battle = self.battle()
+        r = battle.regiments["player0"]
+        r.models, r.ranks = 12, 3
+        centre = self.centre(r)
+        before_anchor = (r.x, r.y)
+        battle.begin_deployment_drag("player0", *centre)
+        battle.update_deployment_drag(centre[0] + 100, centre[1], rotate=True)
+        battle.tick()
+        self.assertEqual(r.direction, 128)
+        self.assertEqual(self.centre(r), centre)
+        self.assertNotEqual((r.x, r.y), before_anchor)
+
+    def test_given_missing_zone_then_translation_waits_but_rotation_still_works(self):
+        battle = self.battle([])
+        r = battle.regiments["player0"]
+        battle.begin_deployment_drag("player0", 100, 100)
+        battle.update_deployment_drag(300, 100)
+        battle.tick()
+        self.assertEqual(self.centre(r), (100, 100))
+        battle.update_deployment_drag(300, 100, rotate=True)
+        battle.tick()
+        self.assertEqual(r.direction, 128)
+
+    def test_given_remembered_zone_then_outside_target_clips_centre_not_all_soldiers(self):
+        battle = self.battle([region(0, 0, 200, 200)])
+        r = battle.regiments["player0"]
+        r.models, r.ranks = 12, 3
+        battle.begin_deployment_drag("player0", *self.centre(r))
+        battle.update_deployment_drag(110, 100)
+        battle.tick()
+        battle.update_deployment_drag(600, 100)
+        battle.tick()
+        self.assertEqual(self.centre(r)[0], 200)
+        self.assertTrue(any(x > 200 for x, _ in r.model_positions()))
+
+    def test_given_released_drag_then_remembered_region_is_shared_by_later_drags(self):
+        battle = self.battle([region(0, 0, 200, 200), region(300, 300, 500, 500)])
+        r = battle.regiments["player0"]
+        battle.begin_deployment_drag("player0", 100, 100)
+        battle.update_deployment_drag(120, 120)
+        battle.tick()
+        battle.end_deployment_drag()
+        battle.begin_deployment_drag("player0", *self.centre(r))
+        battle.update_deployment_drag(250, 250)
+        battle.tick()
+        self.assertEqual(self.centre(r), (190, 190))
+        battle.update_deployment_drag(400, 400)
+        battle.tick()
+        self.assertEqual(self.centre(r), (500, 500))
+
+    def test_given_one_unit_drag_delta_then_neither_position_nor_facing_changes(self):
+        battle = self.battle()
+        r = battle.regiments["player0"]
+        battle.begin_deployment_drag("player0", 100, 100)
+        battle.update_deployment_drag(101, 101, rotate=True)
+        battle.tick()
+        self.assertEqual((r.x, r.y, r.direction), (100, 100, 0))
+
+    def test_given_artillery_then_direct_translation_and_rotation_are_allowed_but_move_is_refused(self):
+        battle = self.battle(artillery=True)
+        r = battle.regiments["player0"]
+        old = self.centre(r)
+        battle.begin_deployment_drag("player0", *old)
+        battle.update_deployment_drag(old[0] + 100, old[1])
+        battle.tick()
+        self.assertNotEqual(self.centre(r), old)
+        battle.update_deployment_drag(r.x + 100, r.y, rotate=True)
+        battle.tick()
+        self.assertNotEqual(r.direction, 0)
+        self.assertEqual(len(r.model_positions()), 3)
+        with self.assertRaises(ValueError):
+            battle.order_move("player0", 500, 500)
+
+    def test_given_enemy_or_hidden_regiment_then_direct_drag_is_refused(self):
+        battle = self.battle()
+        r = battle.regiments["player0"]
+        for field, value in (("hidden", True), ("side", Side.ENEMY)):
+            original = getattr(r, field)
+            setattr(r, field, value)
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                battle.begin_deployment_drag("player0", 100, 100)
+            setattr(r, field, original)
+
+    def test_given_collision_at_zone_edge_then_correction_can_push_centre_outside_without_final_clamp(self):
+        from whshr.engine import Regiment
+        battle = self.battle([region(0, 0, 200, 200)])
+        r = battle.regiments["player0"]
+        battle.regiments["other"] = Regiment("other", "Other", 199, 100, 0, Side.PLAYER)
+        battle.begin_deployment_drag("player0", 100, 100)
+        battle.update_deployment_drag(190, 100)
+        battle.tick()
+        self.assertGreater(self.centre(r)[0], 200)
+
+    def test_given_inverted_region_then_outside_is_allowed_and_inside_target_is_clipped(self):
+        battle = self.battle([region(200, 200, 400, 400, ["bnd_INVSOLID"])])
+        r = battle.regiments["player0"]
+        battle.begin_deployment_drag("player0", 100, 100)
+        battle.update_deployment_drag(120, 100)
+        battle.tick()
+        self.assertEqual(self.centre(r), (130, 100))
+        battle.update_deployment_drag(300, 300)
+        for _ in range(10):
+            battle.tick()
+        self.assertFalse(200 < r.x < 400 and 200 < r.y < 400)
 
 
 class ScriptData:
@@ -25,6 +184,38 @@ def instruction(name):
 
 
 class DeploymentLifecycleTests(unittest.TestCase):
+    def test_given_hidden_enemy_in_view_when_started_then_it_is_revealed_permanently_and_spotting_events_are_posted(self):
+        data = source(1)
+        data["nodes"] = []
+        data["merc"]["armies"][0]["units"][0]["set"].update(x=100, y=100, dir=0)
+        enemy = unit("enemy", 129)
+        enemy["set"].update(x=100, y=900, dir=0)
+        enemy["hidden"] = True
+        data["armies"] = [{"count": 1, "units": [enemy]}]
+        battle = Battle.from_script(data)
+        self.assertFalse(battle.regiments["player0"].hidden)
+        self.assertTrue(battle.regiments["enemy"].hidden)
+        battle.start_battle()
+        self.assertFalse(battle.regiments["enemy"].hidden)
+        self.assertEqual(battle.event_bus.unit_states["enemy"].event_queue[0].code, 0x1C)
+        battle.regiments["player0"].direction = 256
+        battle.refresh_visibility()
+        self.assertFalse(battle.regiments["enemy"].hidden)
+
+    def test_given_sight_boundary_between_armies_when_started_then_hidden_enemy_remains_hidden(self):
+        data = source(1)
+        data["nodes"] = []
+        data["merc"]["armies"][0]["units"][0]["set"].update(x=100, y=100, dir=0)
+        enemy = unit("enemy", 129)
+        enemy["set"].update(x=100, y=900, dir=0)
+        enemy["hidden"] = True
+        data["armies"] = [{"count": 1, "units": [enemy]}]
+        data["boundaries"] = [{"status": ["bnd_ACTIVE", "bnd_SIGHTEDGE"], "lines": [[0, 500, 1000, 500]]}]
+        battle = Battle.from_script(data)
+        battle.start_battle()
+        self.assertTrue(battle.regiments["enemy"].hidden)
+        with self.assertRaises(ValueError):
+            battle.order_attack("player0", "enemy")
     def test_given_deployment_when_updates_run_then_combat_clock_and_results_wait_for_start(self):
         data = source(1)
         data["armies"] = [{"count": 1, "units": [unit("enemy", 129)]}]

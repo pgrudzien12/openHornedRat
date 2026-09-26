@@ -124,14 +124,33 @@ class BattleScene(Scene):
                     self.battle.append_waypoint(self.selected_id, *args)
                 except ValueError:
                     pass
+        elif kind == "begin_drag":
+            identifier, x, y = args
+            try:
+                self.battle.begin_deployment_drag(identifier, x, y)
+                self.selected_id = identifier
+            except (ValueError, KeyError):
+                pass
+        elif kind == "drag_to":
+            x, y, rotate = args
+            self.battle.update_deployment_drag(x, y, rotate)
+        elif kind == "end_drag":
+            self.battle.end_deployment_drag()
+        elif kind == "prepare_move":
+            if self.selected_id is not None and self.battle.phase == "deployment":
+                self.battle.prepare_deployment_move(self.selected_id)
         elif kind == "select":
             # An enemy regiment can be selected too, for its readout/banner/stats only: the
             # order handlers below all refuse a non-player identifier (ValueError, caught), so
             # selecting one never grants it orders.
             (identifier,) = args
-            if identifier in self.battle.regiments:
+            if identifier in self.battle.regiments and not self.battle.regiments[identifier].hidden:
+                self.battle.end_deployment_drag()
                 self.selected_id = identifier
+                if self.battle.phase == "deployment":
+                    self.battle.refresh_visibility()
         elif kind == "deselect":
+            self.battle.end_deployment_drag()
             self.selected_id = None
         elif kind == "move_to":
             x, y = args

@@ -26,6 +26,7 @@ from ..battle3d import SPRITE_DEPTH_BIAS
 from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, sprite_direction, view_angle
 from ..camera import BattleCamera
 from ..formation import SPRITE_PIXEL_WORLD_UNITS
+from ..rules import Side
 from ..battle_scene import BattleScene
 from ..battle3d import Projection
 from ..battlefield import SpriteSheet
@@ -193,6 +194,9 @@ class BattleView(SceneView[BattleScene]):
         self.soldiers = 0
         self._right_down: Point | None = None  # screen position of an unreleased right-button press, for click detection
         self.order_mode: str | None = None  # a HUD Move/Attack click changes how the next battlefield click is interpreted
+        self._drag_surface: str | None = None
+        self._drag_pixel: tuple[float, float] | None = None
+        self._right_minimap = False
         self.event_log: deque[str] = deque(maxlen=EVENT_LOG_LINES)  # recent whshr.engine.Battle.events, newest last
         self._banner_order: list[str] = []  # promoted selection order; persists after deselect like the original battle view
         self.battle_log: deque[tuple[str, str]] = deque(maxlen=100)  # full react-message history for the HUD log panel
@@ -255,9 +259,25 @@ class BattleView(SceneView[BattleScene]):
 
     def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
         camera = self.camera
+        deploying = getattr(self.scene.battle, "phase", "battle") == "deployment"
+        if deploying and getattr(self, "_drag_surface", None) is not None:
+            if event.type == pygame.MOUSEMOTION and event.buttons[0]:
+                return self._drag_events(event.pos, self._control_held(event))
+            if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                self._drag_surface = None
+                self.hud.set_pressed(None)
+                return (("end_drag",),)
+            if event.type in {pygame.KEYDOWN, pygame.KEYUP} and event.key in {pygame.K_LCTRL, pygame.K_RCTRL}:
+                if self._drag_pixel is not None:
+                    return self._drag_events(self._drag_pixel, self._control_held(event))
         if event.type == pygame.MOUSEWHEEL:
             camera.zoom(WHEEL_ZOOM ** event.y)
         elif event.type == pygame.MOUSEMOTION and event.buttons[2]:
+            if deploying and getattr(self, "_right_minimap", False):
+                dx, dy = self.hud.minimap_delta(event.rel)
+                camera.target_x -= dx
+                camera.target_y -= dy
+                return ()
             # Drag the ground: one screen pixel at the target covers this many BTS world units.
             height = self.gpu.target.size[1]
             scale = 2 * camera.distance * math.tan(math.radians(camera.fov) / 2) / height * WORLD_PER_MESH
@@ -271,7 +291,8 @@ class BattleView(SceneView[BattleScene]):
             self._set_cursor("default")
             self.hud.set_pressed(None)
             self.hud.order_completed()
-            return (("deselect",),)
+            self._drag_surface = None
+            return (("end_drag",), ("deselect",)) if deploying else (("deselect",),)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.hud.set_pressed(None)
             if self.hud.click_minimap_tab(event.pos):
@@ -283,7 +304,7 @@ class BattleView(SceneView[BattleScene]):
             # through to hit_test()/occupies() below and is silently swallowed as HUD chrome.
             if (self.hud.minimap_position(event.pos) is not None
                     or self.hud.minimap_regiment_at(event.pos) is not None):
-                return self._minimap_click(event.pos)
+                return self._minimap_click(event.pos, append=deploying and self._control_held(event))
             action = self.hud.hit_test(event.pos)
             if action is not None:
                 self.hud.set_pressed(action)
@@ -293,11 +314,13 @@ class BattleView(SceneView[BattleScene]):
                 if action == "scroll_down":
                     self.log_scroll = max(0, self.log_scroll - 1)
                     return ()
+                if action in {"next_regiment", "prev_regiment"}:
+                    return self._cycle_regiment(1 if action == "next_regiment" else -1)
                 order = self.hud.press(action)
                 if action in {"move", "attack", "face_point"}:
                     self.order_mode = action
                     self._set_cursor(action if action != "face_point" else "move")
-                    return ()
+                    return (("prepare_move",),) if deploying and action == "move" else ()
                 if order is not None:
                     self.order_mode = None
                     self._set_cursor("default")
@@ -309,19 +332,65 @@ class BattleView(SceneView[BattleScene]):
                 return ()
             if self.hud.occupies(event.pos):
                 return ()
-            return self._ground_click(event.pos)
+            return self._ground_click(event.pos, append=True) if deploying and self._control_held(event) else self._ground_click(event.pos)
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             self.hud.set_pressed(None)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+            self._right_minimap = deploying and self.hud.minimap_position(event.pos) is not None
             self._right_down = None if self.hud.occupies(event.pos) else event.pos
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 3:
             start, self._right_down = self._right_down, None
-            if (start is not None and not self.hud.occupies(event.pos)
+            if (not deploying and start is not None and not self.hud.occupies(event.pos)
                     and math.dist(start, event.pos) <= CLICK_DRAG_THRESHOLD):
                 return self._ground_click(event.pos, direct=True)
         return ()
 
-    def _ground_click(self, pixel: Sequence[float], direct: bool = False) -> Sequence[SceneEvent]:
+    @staticmethod
+    def _control_held(event: pygame.event.Event) -> bool:
+        modifiers = getattr(event, "mod", pygame.key.get_mods() if pygame.display.get_init() else 0)
+        return bool(modifiers & pygame.KMOD_CTRL)
+
+    def _cycle_regiment(self, step: int) -> Sequence[SceneEvent]:
+        candidates = [r for r in self.scene.battle.regiments.values()
+                      if r.side == Side.PLAYER and r.active and not r.hidden]
+        if not candidates:
+            return ()
+        current = next((i for i, r in enumerate(candidates) if r.identifier == self.scene.selected_id), -1 if step > 0 else 0)
+        regiment = candidates[(current + step) % len(candidates)]
+        self.camera.target_x, self.camera.target_y = regiment.x, regiment.y
+        return (("select", regiment.identifier),)
+
+    def _deployment_press(self, identifier: str | None, world: tuple[float, float] | None,
+                          pixel: Sequence[float], surface: str) -> Sequence[SceneEvent]:
+        if identifier is None:
+            return ()
+        regiment = self.scene.battle.regiments[identifier]
+        if regiment.side == Side.PLAYER and world is not None and not regiment.hidden:
+            self._drag_surface = surface
+            self._drag_pixel = (float(pixel[0]), float(pixel[1]))
+            return (("select", identifier), ("begin_drag", identifier, *world))
+        return (("select", identifier),)
+
+    def _drag_events(self, pixel: Sequence[float], rotate: bool) -> Sequence[SceneEvent]:
+        self._drag_pixel = (float(pixel[0]), float(pixel[1]))
+        if self._drag_surface == "minimap":
+            point = self.hud.minimap_position(pixel)
+            if point is None:
+                self._drag_surface = None
+                return (("end_drag",),)
+        else:
+            field = self.scene.field
+            width, height = self.gpu.target.size
+            projection = self.camera.projection(width, height, field.width, field.height,
+                                                field.ground_height(self.camera.target_x, self.camera.target_y))
+            ground = picking.pick_ground(projection, pixel[0], pixel[1],
+                                         lambda x, z: field.ground_height(x * WORLD_PER_MESH, z * WORLD_PER_MESH))
+            if ground is None:
+                return ()
+            point = (ground[0] * WORLD_PER_MESH, ground[1] * WORLD_PER_MESH)
+        return (("drag_to", *point, rotate),)
+
+    def _ground_click(self, pixel: Sequence[float], direct: bool = False, append: bool = False) -> Sequence[SceneEvent]:
         """Translate a screen click into a ("select", id), ("attack", id) or ("move_to", x, y)
         scene event, if it hits ground.
 
@@ -356,11 +425,17 @@ class BattleView(SceneView[BattleScene]):
             # screen-space hit test against each regiment's actual rendered sprite block.
             regiment_id = self._sprite_pick(pixel, projection)
         if direct:
+            if self.scene.battle.phase == "deployment":
+                return ()
             if self.scene.selected_id is None:
                 return ()
             return (("attack", regiment_id),) if regiment_id is not None else (("move_to", x, y),)
         if self.order_mode is None:
+            if self.scene.battle.phase == "deployment":
+                return self._deployment_press(regiment_id, (x, y), pixel, "main")
             return (("select", regiment_id),) if regiment_id is not None else ()
+        if append and self.order_mode == "move":
+            return (("append_waypoint", x, y),)
         mode, self.order_mode = self.order_mode, None
         self._set_cursor("default")
         self.hud.order_completed()
@@ -386,7 +461,7 @@ class BattleView(SceneView[BattleScene]):
         best_id: str | None = None
         best_depth: float | None = None
         for regiment in self.scene.battle.regiments.values():
-            if not regiment.active:
+            if not regiment.active or regiment.hidden:
                 continue
             mesh_x, mesh_z = regiment.x / WORLD_PER_MESH, regiment.y / WORLD_PER_MESH
             ground_height = field.ground_height(regiment.x, regiment.y)  # already mesh-space
@@ -402,13 +477,15 @@ class BattleView(SceneView[BattleScene]):
                 best_id, best_depth = regiment.identifier, depth
         return best_id
 
-    def _minimap_click(self, pixel: Sequence[float]) -> Sequence[SceneEvent]:
+    def _minimap_click(self, pixel: Sequence[float], append: bool = False) -> Sequence[SceneEvent]:
         """A minimap click behaves like a 3D-view ground click (notes/game_rules.md "Battle HUD
         layout": "a left click on the minimap is handled exactly like a click in the 3D view"),
         sourced from the HUD's own marker hit-testing instead of 3D picking - see _ground_click's
         own docstring for why a plain click (no pending order) always just selects."""
         if self.order_mode is None:
             regiment_id = self.hud.minimap_regiment_at(pixel)
+            if getattr(self.scene.battle, "phase", "battle") == "deployment":
+                return self._deployment_press(regiment_id, self.hud.minimap_position(pixel), pixel, "minimap")
             return (("select", regiment_id),) if regiment_id is not None else ()
         world = self.hud.minimap_position(pixel)
         # An attack target is always whatever is topmost at the click point, ignoring current
@@ -417,6 +494,8 @@ class BattleView(SceneView[BattleScene]):
         target_id = self.hud.minimap_target_at(pixel)
         if (world is None and target_id is None) or self.scene.selected_id is None:
             return ()
+        if append and self.order_mode == "move":
+            return (("append_waypoint", *world),) if world is not None else ()
         mode, self.order_mode = self.order_mode, None
         self._set_cursor("default")
         self.hud.order_completed()
@@ -473,6 +552,8 @@ class BattleView(SceneView[BattleScene]):
         field, yaw, selected_id, data = self.scene.field, self.camera.yaw, self.scene.selected_id, bytearray()
         banner_instances: list[tuple[str, bytes]] = []
         for regiment in self.scene.battle.regiments.values():
+            if regiment.hidden:
+                continue
             sheet = field.sprite_sheet(regiment.sprite)
             selected = 1.0 if regiment.identifier == selected_id else 0.0
             # The anchor (regiment.x/y) can visibly outrun the models during a charge (they only

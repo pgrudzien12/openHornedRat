@@ -6,7 +6,7 @@ import math
 import random
 from typing import Any, Literal
 
-from . import animation, battle_grid, behaviour, combat, formation, interpreter
+from . import animation, battle_grid, behaviour, combat, deployment, formation, interpreter, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import (EXPECTED_WEAPON_BONUS, MISSILE_RANGES, MOUNT_PROFILES, Side, may_engage, side_of_code,
@@ -431,7 +431,7 @@ class Battle:
     def __init__(self, width: float, height: float, regiments: Sequence[Regiment], seed: int = DEFAULT_SEED,
                  script_dll: behaviour.ScriptDll | None = None, script_ids: Mapping[str, int] | None = None,
                  script_logger: BattleLogger | None = None, nodes: Mapping[int, Point] | None = None,
-                 deploy: bool = False) -> None:
+                 deploy: bool = False, boundaries: Sequence[View] = (), objects: Sequence[View] = ()) -> None:
         if width <= 0 or height <= 0:
             raise ValueError("battle dimensions must be positive")
         self.width = width
@@ -446,6 +446,11 @@ class Battle:
         self.update_count = 0  # monotonic input/replay time, including deployment
         self.phase: Literal["deployment", "battle"] = "deployment" if deploy else "battle"
         self.paused = False
+        self.deployment_regions = deployment.regions(boundaries)
+        self.deployment_region: deployment.Region | None = None
+        self.deployment_drag: deployment.Drag | None = None
+        self.boundaries = list(boundaries)
+        self.objects = list(objects)
         # Camera rotation in 1/512 turns, set by the frontend; wagons snap to it (see set_view_angle).
         self.view_angle: float | None = None
         self._snapped_view_angle: float | None = None
@@ -573,16 +578,119 @@ class Battle:
         mission: View = source.get("mission") or {}
         return cls(field_data["width"], field_data["height"], regiments, seed=seed,
                    script_dll=script_dll, script_ids=script_ids, script_logger=script_logger, nodes=nodes,
-                   deploy=bool(mission.get("deploy_troops")))
+                   deploy=bool(mission.get("deploy_troops")), boundaries=source.get("boundaries") or (),
+                   objects=source.get("objects") or ())
 
     def start_battle(self) -> None:
         """Confirm deployment once, retaining placements and prepared orders (§5)."""
         if self.phase == "deployment":
+            self.end_deployment_drag()
             self.phase = "battle"
+            self.refresh_visibility()
+
+    def refresh_visibility(self) -> None:
+        """Reveal individually hidden regiments permanently when another army spots them."""
+        for target in self.regiments.values():
+            if not target.hidden or not target.active:
+                continue
+            for looker in self.regiments.values():
+                if not looker.active or looker.hidden or looker.side == target.side:
+                    continue
+                cone = 142 if looker.in_melee else 71
+                if visibility.visible(self.formation_centre(looker), looker.direction,
+                                      self.formation_centre(target), target.bounding_radius(),
+                                      cone, self.boundaries, self.objects):
+                    target.hidden = False
+                    self.event_bus.queue_event(target.identifier, interpreter.Event(code=0x1C, source=looker.identifier))
+                    self.event_bus.queue_event(looker.identifier, interpreter.Event(code=0x1D, source=target.identifier))
+                    self.events.append(BattleEvent(f"{target.name} is spotted.", "spotted", regiment=target.identifier,
+                                                  spotter=looker.identifier))
+                    break
+
+    @staticmethod
+    def formation_centre(regiment: Regiment) -> Point:
+        frame = formation.footprint_frame(*regiment.block())
+        return frame[0], frame[1]
+
+    def begin_deployment_drag(self, identifier: str, x: float, y: float) -> None:
+        regiment = self.regiments[identifier]
+        if (self.phase != "deployment" or regiment.side != Side.PLAYER or not regiment.active
+                or regiment.hidden or regiment.routing or regiment.held):
+            raise ValueError("regiment cannot be dragged during deployment")
+        centre = self.formation_centre(regiment)
+        regiment.target_x = regiment.target_y = None
+        regiment.attack_target = regiment.charge_started_target = None
+        regiment.turn_order_key = regiment.turn_mode = None
+        regiment.waypoints.clear()
+        self._begin_reform(regiment, regiment.ranks)
+        self.deployment_drag = deployment.Drag(identifier, (x - centre[0], y - centre[1]), centre)
+
+    def update_deployment_drag(self, x: float, y: float, rotate: bool = False) -> None:
+        if self.deployment_drag is not None:
+            drag = self.deployment_drag
+            drag.target = (float(x) - drag.offset[0], float(y) - drag.offset[1])
+            drag.rotate = rotate
+
+    def end_deployment_drag(self) -> None:
+        self.deployment_drag = None
+
+    def _step_deployment_drag(self) -> None:
+        drag = self.deployment_drag
+        if drag is None:
+            return
+        regiment = self.regiments[drag.regiment_id]
+        if not regiment.active or regiment.hidden:
+            self.end_deployment_drag()
+            return
+        old = self.formation_centre(regiment)
+        dx, dy = drag.target[0] - old[0], drag.target[1] - old[1]
+        half_x, half_y = math.trunc(dx / 2), math.trunc(dy / 2)
+        if half_x == 0 and half_y == 0:
+            return
+        if drag.rotate:
+            goal = round(math.atan2(dx, dy) * 512 / math.tau) % 512
+            shift_x, shift_y = formation.turn_pivot_shift(regiment.direction, goal, regiment.models, regiment.ranks)
+            regiment.direction = goal
+            regiment.x += shift_x
+            regiment.y += shift_y
+        else:
+            matching = next((region for region in self.deployment_regions if region.contains(drag.target)), None)
+            switched = matching is not None and matching is not self.deployment_region
+            if matching is not None:
+                self.deployment_region = matching
+            if self.deployment_region is not None:
+                base = drag.target if switched else old
+                proposed = self.deployment_region.clip((base[0] + half_x, base[1] + half_y))
+                regiment.x += proposed[0] - old[0]
+                regiment.y += proposed[1] - old[1]
+        # Correction deliberately follows clipping, without a final zone clamp (§2).
+        for _ in range(10):
+            before = (regiment.x, regiment.y)
+            self._resolve_collisions(deployment_id=regiment.identifier)
+            if (regiment.x, regiment.y) == before:
+                break
+        self._begin_reform(regiment, regiment.ranks)
+        self._snap_deployment_layout(regiment)
+        self.refresh_visibility()
+
+    @staticmethod
+    def _snap_deployment_layout(regiment: Regiment) -> None:
+        slots = regiment.reform_slots or formation.block_slots(regiment.models, regiment.ranks)
+        regiment.positions = formation.place(regiment.x, regiment.y, regiment.direction, slots)
+        regiment.reforming = False
+        regiment.reform_slots = []
 
     def _require_battle_order(self) -> None:
         if self.phase == "deployment":
             raise ValueError("this order is unavailable during deployment")
+
+    def prepare_deployment_move(self, identifier: str) -> None:
+        regiment = self.regiments[identifier]
+        if regiment.side == Side.PLAYER and regiment.hud_class in {"inf", "arch", "wiz", "mon"}:
+            regiment.target_x = regiment.target_y = None
+            regiment.attack_target = None
+            regiment.turn_order_key = regiment.turn_mode = None
+            self._begin_reform(regiment, regiment.ranks)
 
     def toggle_independent(self, identifier: str) -> None:
         regiment = self.regiments[identifier]
@@ -651,6 +759,8 @@ class Battle:
         target = self.regiments.get(target_id)
         if target is None or target.side == Side.PLAYER:
             raise ValueError("attack target must not be a player regiment")
+        if target.hidden:
+            raise ValueError("attack target is hidden")
         if not target.active:
             raise ValueError(f"{target_id} is no longer on the field")
         regiment.target_x = regiment.target_y = None
@@ -706,6 +816,9 @@ class Battle:
         if regiment.attack_target is not None or regiment.in_melee:
             raise ValueError(f"{identifier} is charging or in melee and cannot be ordered")
         self._begin_reform(regiment, formation.clamp_ranks(regiment.models, ranks))
+        if self.phase == "deployment":
+            self._snap_deployment_layout(regiment)
+            self.refresh_visibility()
 
     def _check_turn_order(self, identifier: str) -> Regiment:
         """Shared guard for all standalone turn orders (game_rules.md "Turning, wheeling and reversing")."""
@@ -813,6 +926,8 @@ class Battle:
             identifier: {
                 "x": regiment.x, "y": regiment.y, "direction": regiment.direction,
                 "models": regiment.models, "corpses": len(regiment.corpses),
+                "ranks": regiment.ranks, "independent": regiment.independent,
+                "hidden": regiment.hidden, "waypoints": [list(point) for point in regiment.waypoints],
                 "walking": regiment.walking, "routing": regiment.routing, "fled": regiment.fled,
                 "in_melee": regiment.in_melee, "melee_group": regiment.melee_group,
                 "reforming": regiment.reforming,
@@ -834,7 +949,7 @@ class Battle:
         best_id: str | None = None
         best_distance: float | None = None
         for regiment in self.regiments.values():
-            if not regiment.active:
+            if not regiment.active or regiment.hidden:
                 continue
             if player_only and regiment.side != Side.PLAYER:
                 continue
@@ -883,6 +998,7 @@ class Battle:
                     and regiment.target_x is None):
                 regiment.target_x, regiment.target_y = regiment.waypoints[0]
         if self.phase == "deployment":
+            self._step_deployment_drag()
             self._advance_regiments(scale, seconds)
             return
         combat.refresh_melee_state(self)
@@ -1414,7 +1530,7 @@ class Battle:
                 "Defeat! Your army is destroyed.", "result",
                 result="defeat", counts=self.side_counts()))
 
-    def _resolve_collisions(self) -> None:
+    def _resolve_collisions(self, deployment_id: str | None = None) -> None:
         """Push regiments under orders out of the regiments they overlap (a simplified push-apart;
         game_rules.md, "Routes, collisions and visibility"), not the polygon obstruction routing (`Nav*`).
 
@@ -1426,7 +1542,7 @@ class Battle:
             for second in regiments[i + 1:]:
                 if first.in_melee or second.in_melee:
                     continue
-                if may_engage(first, second):
+                if may_engage(first, second) and deployment_id is None:
                     # A pair that can actually fight never pushes apart: a charging regiment must be
                     # free to close all the way to footprint contact (combat.resolve_contacts), not
                     # stop at circle distance (see combat.resolve_contacts: contact needs real
@@ -1434,8 +1550,10 @@ class Battle:
                     # exception rules.can_fight documents) still pushes apart like same-side
                     # regiments always did, so e.g. peasants don't sit interpenetrating the player.
                     continue
-                first_yields = first.moving or first.routing or first.attack_target is not None
-                second_yields = second.moving or second.routing or second.attack_target is not None
+                first_yields = (first.identifier == deployment_id if deployment_id is not None else
+                                first.moving or first.routing or first.attack_target is not None)
+                second_yields = (second.identifier == deployment_id if deployment_id is not None else
+                                 second.moving or second.routing or second.attack_target is not None)
                 yielding = first_yields + second_yields
                 if not yielding:
                     continue

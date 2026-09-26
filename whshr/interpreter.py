@@ -185,6 +185,7 @@ class LibraryBehaviors:
         battle = self.interpreter.battle
         if battle.phase == "deployment":
             return
+        battle.refresh_visibility()
         regiment = battle.regiments.get(unit_id)
         if not regiment or regiment.side == Side.PLAYER or not regiment.active:
             return
@@ -512,10 +513,10 @@ class ScriptInterpreter:
         """
         if side is not None:
             candidates = (other for other in self.battle.regiments.values()
-                          if other.active and other.side == side)
+                          if other.active and not other.hidden and other.side == side)
         else:
             candidates = (other for other in self.battle.regiments.values()
-                          if other.active and other.side != regiment.side)
+                          if other.active and not other.hidden and other.side != regiment.side)
         if max_distance is not None:
             candidates = (other for other in candidates
                           if _octagonal_distance(regiment, other) <= max_distance)

@@ -384,7 +384,7 @@ def resolve_contacts(battle: "Battle") -> None:
     specifically (NPCs never fight the player, even by bumping into them), while still allowing
     Enemy-Neutral so a mission's own scripted threat against neutrals plays out physically."""
     _, turn, segment = segment_state(battle.tick_count)
-    active = [r for r in battle.regiments.values() if r.active and not r.routing]
+    active = [r for r in battle.regiments.values() if r.active and not r.hidden and not r.routing]
     by_id = {r.identifier: r for r in active}
     touching: dict[str, set[str]] = {r.identifier: set() for r in active}
     old_touching = {r.identifier: r.melee_touching for r in active}
@@ -878,7 +878,7 @@ def resolve_shooting(battle: "Battle") -> None:
     for regiment in battle.regiments.values():
         if regiment.reload_ticks > 0:
             regiment.reload_ticks = max(0.0, regiment.reload_ticks - 1)
-        if not regiment.missile_range or not regiment.active or regiment.in_melee or regiment.routing:
+        if not regiment.missile_range or not regiment.active or regiment.hidden or regiment.in_melee or regiment.routing:
             continue
         # Reload, moving and charging only gate STARTING a volley; a volley already in flight keeps
         # its posted events (game_rules.md 8.1: a posted launch event always fires its projectile).
@@ -957,7 +957,7 @@ def _shooting_target(battle: "Battle", regiment: "Regiment") -> "Regiment | None
     best: "Regiment | None" = None
     best_distance = math.inf
     for enemy in battle.regiments.values():
-        if enemy.side not in hostile_sides(regiment.side) or not enemy.active or enemy.routing:
+        if enemy.side not in hostile_sides(regiment.side) or not enemy.active or enemy.hidden or enemy.routing:
             continue
         dx, dy = enemy.x - regiment.x, enemy.y - regiment.y
         distance = math.hypot(dx, dy)

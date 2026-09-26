@@ -30,6 +30,8 @@
     "whshr/clock.py",
     "whshr/script.py",
     "whshr/formation.py",
+    "whshr/deployment.py",
+    "whshr/visibility.py",
     "whshr/rules.py",
     "whshr/animation.py",
     "whshr/engine.py",
