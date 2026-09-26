@@ -341,7 +341,8 @@ def load_battle(path: StrPath, with_merc: bool = True) -> View:
         scenery.append({'name': name, 'x': x, 'y': y, 'dir': d})
 
     bnd = _section(root, 'BOUNDARIES')
-    boundaries = [{'name': b['name'], 'lines': [_nums(v) for v in _cmds(b, 'AddLine')]}
+    boundaries = [{'name': b['name'], 'status': flag_names(_sets(b).get('status')),
+                   'lines': [_nums(v) for v in _cmds(b, 'AddLine')]}
                   for b in (bnd['children'] if bnd else []) if b['kind'] == 'addboundary']
 
     nodes: list[View] = []

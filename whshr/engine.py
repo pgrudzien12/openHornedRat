@@ -515,7 +515,16 @@ class Battle:
         armies: list[tuple[View, Side | None]] = [(army, None) for army in source["armies"]]
         merc: View = source["merc"] or {}
         armies.extend((army, Side.PLAYER) for army in merc.get("armies", []))
+        # Deployment defaults apply even without DeployTroops (notes/deployment.md §1).
+        # Keep the authored candidate order and reserve only occupied slots. Skipped
+        # candidates remain available to subsequent units and army sections.
+        start_nodes: list[View] = [node for node in source.get("nodes") or ()
+                                  if {"ns_active", "ns_startpos"}.issubset(
+                                      str(flag).casefold() for flag in node.get("status") or ())]
+        reserved_slots: set[int] = set()
         for army, forced_side in armies:
+            declared_count = int(army.get("count", len(army["units"])))
+            skip_slots = len(start_nodes) - declared_count
             for unit in army["units"]:
                 position = unit["set"]
                 if "x" not in position or "y" not in position:
@@ -531,9 +540,18 @@ class Battle:
                 else:
                     fields, _conflicts = stat_fields(unit.get("stats") or {})
                     side = side_of_code(stat_int(fields, "s_side"))
+                x, y = float(position["x"]), float(position["y"])
+                direction = int(position.get("dir") or 0) % 512
+                if side == Side.PLAYER and skip_slots >= 0:
+                    available = [index for index in range(len(start_nodes)) if index not in reserved_slots]
+                    if skip_slots < len(available):
+                        slot_index = available[skip_slots]
+                        slot = start_nodes[slot_index]
+                        x, y = float(slot["x"]), float(slot["y"])
+                        direction = int(slot.get("dir") or 0) % 512
+                        reserved_slots.add(slot_index)
                 regiments.append(Regiment(
-                    identifier, unit["name"], float(position["x"]), float(position["y"]),
-                    int(position.get("dir") or 0) % 512, side, models=models, ranks=ranks,
+                    identifier, unit["name"], x, y, direction, side, models=models, ranks=ranks,
                     sprite=resource_name(unit.get("sprites")),
                     banner=resource_name(unit.get("banner")),
                     portrait=resource_name(leader.get("portrait")),
