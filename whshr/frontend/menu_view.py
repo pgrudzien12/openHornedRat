@@ -41,7 +41,8 @@ class MainMenuView(NativeScreenView[MainMenuScene]):
     SHORTCUTS: dict[int, str] = {pygame.K_n: "new_campaign", pygame.K_RETURN: "new_campaign",
                  pygame.K_KP_ENTER: "new_campaign", pygame.K_l: "load_game", pygame.K_q: "quit", pygame.K_ESCAPE: "quit"}
     TARGET_ACTIONS: dict[str, str] = {"newgame": "new_campaign", "loadsavewindow2": "load_game",
-                                      "exitprocess": "quit"}
+                                      "exitprocess": "quit",
+                                      "credits": "credits"}
 
     def __init__(self, gpu: Gpu, scene: MainMenuScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)

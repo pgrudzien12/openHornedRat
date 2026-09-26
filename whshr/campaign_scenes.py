@@ -178,6 +178,9 @@ class MainMenuScene(Scene):
         if event == "load_game":
             from .load_save_scene import LOAD, LoadSaveScene
             return Transition(LoadSaveScene(LOAD, self), "load dialog opened")
+        if event == "credits":
+            from .credits_scene import CreditsScene
+            return Transition(CreditsScene(self), "credits opened")
         if event == "quit":
             return Quit("player quit from the main menu")
         return None
