@@ -131,16 +131,6 @@ class SaveStoreTests(unittest.TestCase):
 
         self.assertEqual((fresh.flow, fresh.coffers), ("OTHER", 77))
 
-    def test_given_a_finished_mission_when_saved_with_its_release_then_the_save_is_advanced_and_the_live_game_is_not(self):
-        live = committed_campaign()
-        self.store.write(0, "after the mission", live, release=FIRST)
-
-        self.assertEqual((live.mission_window, live.completed), ("W1", set()))  # the caravan is still open
-        loaded = CampaignState(TWO_WINDOWS, flow="F", company=live.company)
-        self.store.load_into(0, loaded)
-        self.assertEqual(loaded.mission_window, "W2")
-        self.assertEqual([m["name_id"] for m in loaded.missions], [602])
-
     def test_given_a_save_that_kept_a_mission_taken_but_unreleased_then_loading_finishes_it(self):
         """The reported stall: a save from the after-mission caravan left the map with nothing to offer."""
         self.store.write(0, "old style", committed_campaign())

@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Any
 
 from .glue_content import GlueContent
 from .glue_fonts import glue_font_asset
-from .glue import MissionRef
 from .glue_scene import GlueScene
 from .savegame import ALL_SLOTS, AUTOSAVE_SLOT, DESCRIPTION_LIMIT, PLAYER_SLOTS, SaveError, SaveStore, SlotInfo
 from .scenes import Scene, SceneAssets, SceneEvent, Transition
@@ -47,8 +46,7 @@ def _campaign_from_installation(context: SceneAssets, save_dir: Path) -> "Campai
 class LoadSaveScene(Scene):
     def __init__(self, mode: str, parent: Scene, campaign: "CampaignState | None" = None,
                  save_dir: str | PathLike[str] | None = None,
-                 new_campaign: "Callable[[SceneAssets, Path], CampaignState] | None" = None,
-                 release: MissionRef | None = None, unavailable: str = "") -> None:
+                 new_campaign: "Callable[[SceneAssets, Path], CampaignState] | None" = None) -> None:
         if mode not in (SAVE, LOAD):
             raise ValueError(f"unknown load/save mode: {mode!r}")
         if mode == SAVE and campaign is None:
@@ -57,8 +55,6 @@ class LoadSaveScene(Scene):
         self.parent = parent
         self.campaign = campaign
         self.save_dir = save_dir
-        self.release = release  # a finished mission whose caravan is open: saved as already released
-        self.unavailable = unavailable  # why saving is refused right now (the dialog opens disabled)
         self.new_campaign = new_campaign or _campaign_from_installation
         self.store: SaveStore | None = None
         self.slots: dict[int, SlotInfo | None] = dict.fromkeys(ALL_SLOTS)
@@ -97,9 +93,6 @@ class LoadSaveScene(Scene):
 
     def enter(self, context: SceneAssets) -> None:
         self.context = context
-        if self.unavailable:
-            self.store, self.error = None, self.unavailable
-            return
         save_dir = self.save_dir if self.save_dir is not None else context.save_dir
         if save_dir is None:
             self.store, self.error = None, "No save directory is configured."
@@ -146,7 +139,7 @@ class LoadSaveScene(Scene):
     def _save(self, context: SceneAssets) -> Transition | None:
         assert self.store is not None and self.selected is not None and self.campaign is not None
         try:
-            self.store.write(self.selected, self.text.strip() or DEFAULT_DESCRIPTION, self.campaign, self.release)
+            self.store.write(self.selected, self.text.strip() or DEFAULT_DESCRIPTION, self.campaign, self.parent)
         except SaveError as error:
             self.error, self.editing = str(error), False
             return None
@@ -157,7 +150,9 @@ class LoadSaveScene(Scene):
         try:
             campaign = self.new_campaign(context, self.store.directory)
             self.store.load_into(self.selected, campaign)
+            scene = self.store.load_scene(self.selected, campaign, context.glue_content())
         except SaveError as error:
             self.error = str(error)
             return None
-        return Transition(GlueScene(campaign=campaign, window="STARTCARAVAN"), "game loaded")
+        # A save with no scene chain (an older one) resumes on the start caravan.
+        return Transition(scene or GlueScene(campaign=campaign, window="STARTCARAVAN"), "game loaded")
