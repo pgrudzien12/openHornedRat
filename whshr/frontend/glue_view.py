@@ -25,6 +25,7 @@ from ..glue_render import GlueRenderModel, RenderBitmap, RenderHotspot, RenderTe
 from ..glue_runtime import Diagnostic, GlueInput, GlueRuntimeState, PlayMusic, PlaySpeech, StopMusic, StopSpeech
 from ..glue_palette import AppPalette
 from .bitmap_font import BitmapFont
+from .cursors import CursorController
 from .glue_bitmap import load_optional_bitmap
 from .gpu import Gpu, ScreenQuad, TextLabel
 from .scene_view import NativeScreenView
@@ -80,6 +81,7 @@ class GlueView(NativeScreenView[GlueScene]):
         self._speech_sound: pygame.mixer.Sound | None = None
         self.pressed: RenderHotspot | None = None
         self._pressed_button: str | None = None
+        self.cursors = CursorController(scene.require_runtime().content.installation)
         # Change fingerprints of the refresh groups (see `refresh`).
         self._bitmap_models: Models = ()
         self.frames: Frames = {}
@@ -444,6 +446,7 @@ class GlueView(NativeScreenView[GlueScene]):
             hotspot = self.hotspot_at(self.models, self._native_point(event.pos))
             self.hover_hint = _caravan_hint(self.scene.campaign, self.models, hotspot)
             self._refresh_hint()
+            self.cursors.update(hotspot, self.pressed)
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             point = self._native_point(event.pos)
             mission = self._mission_at(point)
@@ -453,10 +456,12 @@ class GlueView(NativeScreenView[GlueScene]):
                 return (GlueInput("mission-select", mission.key),)
             self._pressed_button = self._panel_button_at(point)
             self.pressed = None if self._pressed_button is not None else self.hotspot_at(self.models, point)
+            self.cursors.update(self.hotspot_at(self.models, point), self.pressed)
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             point = self._native_point(event.pos)
             pressed_button, self._pressed_button = self._pressed_button, None
             pressed, self.pressed = self.pressed, None
+            self.cursors.update(self.hotspot_at(self.models, point), None)
             released_button = self._panel_button_at(point)
             if pressed_button is not None and pressed_button == released_button:
                 return (GlueInput("panel-action", pressed_button),)
@@ -499,6 +504,7 @@ class GlueView(NativeScreenView[GlueScene]):
                                  self.hint_label.size[0] * scale, self.hint_label.size[1] * scale)
 
     def release(self) -> None:
+        self.cursors.release()
         for quad, _ in self.quads:
             quad.release()
         for quad, _ in self.portrait_quads:

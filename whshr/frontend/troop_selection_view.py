@@ -17,7 +17,7 @@ from ..scenes import SceneEvent
 from ..script import resource_name
 from ..troop_selection import TroopRow, TroopSelection, STATUS_AVAILABLE, STATUS_DESTROYED, STATUS_EXCLUDED, STATUS_NOT_HIRED
 from .bitmap_font import BitmapFont
-from .cursors import GameCursors
+from .cursors import CursorController
 from .glue_bitmap import load_optional_bitmap
 from .gpu import Gpu, ScreenQuad, TextLabel
 from .scene_view import NativeScreenView
@@ -33,6 +33,13 @@ BUTTONS: tuple[tuple[str, int, str, int], ...] = (
 )
 BUTTON_Y, BUTTON_SIZE = 448, (84, 32)
 P0_ROWS, P1_ROWS = 6, 7
+# notes/troop_selection.md §2: the named cursor groups of the game's executable (loaded at runtime, never copied).
+CURSORS: dict[str, str] = {
+    "default": "SWORDCURSOR", "help": "HELPCURSOR", "toggle": "PENCILCURSOR", "no_toggle": "NOPENCILCURSOR",
+    "scroll_up": "UPARROWCURSOR", "scroll_down": "DOWNARROWCURSOR", "grab_open": "HANDOPENCURSOR",
+    "grab_closed": "HANDCLOSECURSOR",
+}
+
 STATUS_TEXT: dict[str, int] = {STATUS_NOT_HIRED: 415, STATUS_EXCLUDED: 416, STATUS_DESTROYED: 417}
 
 
@@ -65,8 +72,8 @@ class TroopSelectionView(NativeScreenView[TroopSelectionScene]):
         self.banner_files: dict[str, str] | None = None
         if self.content.installation is None:
             raise RuntimeError("troop selection needs an installation")
-        self.cursors = GameCursors(self.content.installation)
-        self._set_cursor("SWORDCURSOR")
+        self.cursors = CursorController(self.content.installation, default=CURSORS["default"])
+        self.cursors.show(None)
         self.refresh()
 
     def _model(self) -> TroopSelection:
@@ -356,7 +363,7 @@ class TroopSelectionView(NativeScreenView[TroopSelectionScene]):
                 for rect, value in self.rows:
                     if rect.collidepoint(point):
                         picking_up = self.scene.picked_whoami is None
-                        self._set_cursor("HANDCLOSECURSOR" if picking_up else "HANDOPENCURSOR")
+                        self._set_cursor("grab_closed" if picking_up else "grab_open")
                         return (f"pickup:{value}" if picking_up else f"drop:{value}",)
             return ()
         if event.type != pygame.MOUSEBUTTONUP or event.button != 1:
@@ -384,25 +391,25 @@ class TroopSelectionView(NativeScreenView[TroopSelectionScene]):
 
     def _set_cursor_at(self, point: tuple[float, float]) -> None:
         if pygame.key.get_mods() & pygame.KMOD_CTRL:
-            self._set_cursor("HELPCURSOR")
+            self._set_cursor("help")
             return
         if self.scene.phase == "select":
             whoami = next((whoami for rect, whoami in self.rows if rect.collidepoint(point)), None)
             if whoami is not None:
-                self._set_cursor("PENCILCURSOR" if self._model().toggleable(whoami) else "NOPENCILCURSOR")
+                self._set_cursor("toggle" if self._model().toggleable(whoami) else "no_toggle")
                 return
         elif self.scene.phase == "march_order":
             direction = self._scroll_direction_at(point)
             if direction is not None:
-                self._set_cursor("UPARROWCURSOR" if direction == "up" else "DOWNARROWCURSOR")
+                self._set_cursor("scroll_up" if direction == "up" else "scroll_down")
                 return
             if any(rect.collidepoint(point) for rect, _ in self.rows):
-                self._set_cursor("HANDCLOSECURSOR" if self.scene.picked_whoami is not None else "HANDOPENCURSOR")
+                self._set_cursor("grab_closed" if self.scene.picked_whoami is not None else "grab_open")
                 return
-        self._set_cursor("SWORDCURSOR")
+        self._set_cursor("default")
 
     def _set_cursor(self, name: str) -> None:
-        self.cursors.set(name)
+        self.cursors.show(CURSORS[name])
 
     def _update_march_hover(self, point: tuple[float, float]) -> None:
         self.scroll_direction = self._scroll_direction_at(point)
@@ -469,7 +476,4 @@ class TroopSelectionView(NativeScreenView[TroopSelectionScene]):
     def release(self) -> None:
         self._release_contents()
         if hasattr(self, "cursors"):
-            try:
-                pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_ARROW)
-            except pygame.error:
-                pass
+            self.cursors.release()

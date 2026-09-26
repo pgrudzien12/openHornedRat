@@ -235,6 +235,14 @@ renumber later work.
   names `BRTXT 308` ("Are you sure?") for this box, which fits troop selection's Abort but is the less specific text. Save (`LoadSaveWindow`) and the roster book
   (`ArmyBook`/`HireOnlyArmyBook`) already worked from a `gocaravan`-opened caravan; `EncyclopediaBook`,
   `MagicBook` and `OptionsDialog` still queue that diagnostic and stay open (no screen built for them yet).
+- [x] **GEI7i — Hotspot cursors on glue screens.** (issue #150) `RenderHotspot` now keeps `altcursor` next to
+  `cursor`; `CursorController` (`whshr/frontend/cursors.py`) owns one `GameCursors` and applies the rule of
+  `notes/glue_keywords.md` §3.5 (pure function `cursor_for_hotspots`, tested headless); `GlueView` feeds it from
+  mouse move, press and release and restores the arrow when the view is released. A cursor that cannot be loaded
+  falls back to the system arrow (also in `GameCursors.set`, which used to leave the previous cursor).
+  Troop selection uses the same controller with its cursor names in one table (`CURSORS`, notes/troop_selection.md
+  §2). Battle keeps its own numbered `GMCUR.DLL` groups; the other native screens (main menu, Army Records,
+  dialogs) can now take a `CursorController` but show the arrow, as no cursor is specified for them.
 - GEI7g (issue #145): `CampaignState` now carries a **master roster** (`master`, the fresh-campaign content of
   `SCRIPT/MAXARMY.MRC`, i.e. the original's `PLAY.MRC`) next to the company (`ARMY.MRC`). Without it there was
   nothing to hire: the starting company holds two regiments. `addunit` flags a regiment and the next caravan

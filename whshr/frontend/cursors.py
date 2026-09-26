@@ -7,7 +7,7 @@ cursor groups, IDs 100-103 (``notes/pe_resources.md``, ``notes/game_rules.md`` "
 """
 
 import struct
-from typing import Any
+from typing import Any, Protocol
 
 import pygame
 
@@ -32,11 +32,11 @@ class GameCursors:
             except (FileNotFoundError, IndexError, OSError, StopIteration, ValueError, struct.error, pygame.error):
                 self._cursors[key] = False
         cursor = self._cursors[key]
-        if isinstance(cursor, pygame.cursors.Cursor):
-            try:
-                pygame.mouse.set_cursor(cursor)
-            except pygame.error:
-                pass
+        try:
+            # A cursor that cannot be loaded leaves the system arrow rather than the previous, unrelated one.
+            pygame.mouse.set_cursor(cursor if isinstance(cursor, pygame.cursors.Cursor) else pygame.SYSTEM_CURSOR_ARROW)
+        except pygame.error:
+            pass
 
     def _load(self, key: str | int) -> pygame.cursors.Cursor:
         if self._resources is None:
@@ -94,3 +94,66 @@ def _cursor_from_dib(data: bytes) -> pygame.cursors.Cursor:
             else:
                 surface.set_at((x, y), (*palette[xor_bit], 255))
     return pygame.cursors.Cursor((min(hotspot_x, width - 1), min(hotspot_y, height - 1)), surface)
+
+
+class HotspotCursors(Protocol):
+    """The cursor data of a glue hotspot (``whshr.glue_render.RenderHotspot``)."""
+
+    @property
+    def cursor(self) -> str | None: ...
+
+    @property
+    def alt_cursor(self) -> str | None: ...
+
+
+def cursor_for_hotspots(hovered: HotspotCursors | None, pressed: HotspotCursors | None) -> str | None:
+    """Which named cursor a glue screen shows (issue #150; notes/glue_keywords.md §3.5): the pressed hotspot's
+    ``altcursor``, else the hovered hotspot's ``cursor``, else ``None`` (the normal arrow). Pure data, no pygame."""
+    if pressed is not None and pressed.alt_cursor:
+        return pressed.alt_cursor
+    if hovered is not None and hovered.cursor:
+        return hovered.cursor
+    return None
+
+
+_UNSET = object()
+
+
+class CursorController:
+    """The one owner of a screen's mouse cursor: shows the game's own named cursors, remembers what is shown so
+    a screen can call it on every mouse event cheaply, and puts the arrow back when the screen goes away.
+
+    ``default`` is the cursor of the screen's plain state (``None``: the system arrow). Without an installation
+    (or when a named cursor cannot be loaded) the system arrow is used."""
+
+    def __init__(self, installation: Installation | None, default: str | None = None, dll: str = "WHSHR.EXE") -> None:
+        self.default = default
+        self.cursors = GameCursors(installation, dll) if installation is not None else None
+        self._shown: object = _UNSET
+
+    def show(self, name: str | None) -> None:
+        """Show ``name`` (``None``: the default cursor)."""
+        name = name or self.default
+        if name == self._shown:
+            return
+        self._shown = name
+        if name is not None and self.cursors is not None:
+            self.cursors.set(name)
+        else:
+            self._arrow()
+
+    def update(self, hovered: HotspotCursors | None, pressed: HotspotCursors | None) -> None:
+        """Apply the glue hotspot rule of :func:`cursor_for_hotspots`."""
+        self.show(cursor_for_hotspots(hovered, pressed))
+
+    def release(self) -> None:
+        """The screen is going away: do not leak its cursor into the next scene."""
+        self._shown = _UNSET
+        self._arrow()
+
+    @staticmethod
+    def _arrow() -> None:
+        try:
+            pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_ARROW)
+        except pygame.error:
+            pass
