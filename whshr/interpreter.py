@@ -101,6 +101,7 @@ class UnitScriptState:
     # Timing (SetWait, TestWait, Wait)
     wait_remaining: float = 0.0  # ticks left in current Wait
     wait_duration: float = 0.0  # saved duration for TestWait checks
+    waiting_for_start: bool = False
 
     # Current order and target (set by FindTarget*, AttackTarget, etc.)
     current_target: Target | None = None  # (regiment_id, unit_id) for attack/movement orders
@@ -182,6 +183,8 @@ class LibraryBehaviors:
         Distance metric: octagonal (max(|dx|, |dy|) + min(|dx|, |dy|) / 2).
         """
         battle = self.interpreter.battle
+        if battle.phase == "deployment":
+            return
         regiment = battle.regiments.get(unit_id)
         if not regiment or regiment.side == Side.PLAYER or not regiment.active:
             return
@@ -906,7 +909,7 @@ class ScriptInterpreter:
 
     def op_WaitForBattleStart(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """WaitForBattleStart: hold until battle has started (tick_count > 0).
+        """WaitForBattleStart: hold until the deployment phase is explicitly confirmed.
 
         Must yield like Wait/WaitUntilUnitFlags while blocked -- a prior version returned the same
         pc without setting _should_yield, so the dispatch loop just re-executed this instruction
@@ -915,7 +918,8 @@ class ScriptInterpreter:
         alone. Not fatal (state.pc still ends up in the right place once tick_count > 0), but wildly
         wasteful and made the opcode trace nearly unusable for actually debugging anything else.
         """
-        if tick_count == 0:
+        state.waiting_for_start = self.battle.phase == "deployment"
+        if state.waiting_for_start:
             self._should_yield = True
             return state.pc  # wait (don't advance)
         return state.pc + 1  # resume
@@ -1673,9 +1677,7 @@ class ScriptInterpreter:
     def op_IfGameMode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """IfGameMode N: test current game mode (1=deployment, 2=real time)."""
-        # TODO: check battle's game mode
-        # For now, assume real-time mode (2)
-        if operand is not None and operand == 2:
+        if operand == (1 if self.battle.phase == "deployment" else 2):
             state.cond_flags = 1
         else:
             state.cond_flags = 0

@@ -68,6 +68,7 @@ class WaitForBattleStartIterationTests(unittest.TestCase):
         self.script_dll = _FakeScriptDll({0: words})
 
     def test_blocked_at_tick_zero_dispatches_exactly_once(self):
+        self.battle.phase = "deployment"
         import json
         import tempfile
         from pathlib import Path

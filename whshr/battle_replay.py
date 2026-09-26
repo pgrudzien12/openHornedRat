@@ -137,7 +137,7 @@ def replay(installation: Installation | PathArg, log_path: PathArg, until: int |
         scene.update(BATTLE_TICK_SECONDS, context)  # exactly one recorded tick, never wall-clock time
         for battle_event in scene.battle.events:
             timeline.append({"tick": tick, "kind": "event", "text": str(battle_event)})
-        tick = scene.battle.tick_count
+        tick = scene.battle.update_count
     if divergence is None and result is not None and scene.battle.result != result["result"]:
         divergence = {"tick": tick, "regiment": None, "field": "result",
                       "recorded": result["result"], "replayed": scene.battle.result}

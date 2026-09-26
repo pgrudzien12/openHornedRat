@@ -7,6 +7,102 @@ import unittest
 
 from whshr.engine import Battle
 from whshr.script import load_battle
+from whshr import behaviour, interpreter
+
+
+class ScriptData:
+    """Synthetic script data, never loaded from an original executable."""
+
+    def __init__(self, words):
+        self.words = words
+
+    def scripts(self, ids):
+        return {i: self.words for i in ids}
+
+
+def instruction(name):
+    return behaviour.OPCODE_FLAG | next(i for i, label in behaviour.OPCODE_NAMES.items() if label == name)
+
+
+class DeploymentLifecycleTests(unittest.TestCase):
+    def test_given_deployment_when_updates_run_then_combat_clock_and_results_wait_for_start(self):
+        data = source(1)
+        data["armies"] = [{"count": 1, "units": [unit("enemy", 129)]}]
+        battle = Battle.from_script(data)
+        battle.regiments["enemy"].models = 0
+        for _ in range(20):
+            battle.tick()
+        self.assertEqual(battle.phase, "deployment")
+        self.assertEqual(battle.tick_count, 0)
+        self.assertEqual(battle.update_count, 20)
+        self.assertIsNone(battle.result)
+        battle.start_battle()
+        battle.tick()
+        self.assertEqual(battle.phase, "battle")
+        self.assertEqual(battle.tick_count, 1)
+        self.assertEqual(battle.result, "victory")
+
+    def test_given_no_deployment_keyword_when_loaded_then_normal_play_begins_directly(self):
+        battle = Battle.from_script(source(deploy=False))
+        self.assertEqual(battle.phase, "battle")
+        battle.tick()
+        self.assertEqual(battle.tick_count, 1)
+
+    def test_given_setup_wait_before_start_barrier_when_deploying_then_setup_finishes_but_later_wait_stays_pending(self):
+        words = [instruction("SetWait"), 2, instruction("Wait"),
+                 instruction("WaitForBattleStart"), instruction("SetWait"), 3,
+                 instruction("Wait"), behaviour.END]
+        battle = Battle.from_script(source(1), script_dll=ScriptData(words))
+        state = battle.event_bus.unit_states["player0"]
+        for _ in range(8):
+            battle.tick()
+        self.assertEqual(state.pc, 3)
+        self.assertEqual(state.wait_remaining, 0)
+        battle.start_battle()
+        battle.tick()
+        self.assertEqual(state.pc, 6)
+        self.assertGreater(state.wait_remaining, 0)
+
+    def test_given_prepared_route_when_waiting_for_start_then_it_is_retained_and_runs_after_start(self):
+        words = [instruction("WaitForBattleStart"), instruction("Yield"), behaviour.END]
+        battle = Battle.from_script(source(1), script_dll=ScriptData(words))
+        regiment = battle.regiments["player0"]
+        before = (regiment.x, regiment.y)
+        battle.order_move("player0", 800, 800)
+        battle.append_waypoint("player0", 900, 900)
+        for _ in range(5):
+            battle.tick()
+        self.assertEqual((regiment.x, regiment.y), before)
+        self.assertEqual(regiment.waypoints, [(800, 800), (900, 900)])
+        battle.start_battle()
+        battle.tick()
+        self.assertNotEqual((regiment.x, regiment.y), before)
+        self.assertEqual(regiment.waypoints, [(800, 800), (900, 900)])
+
+    def test_given_deployment_when_combat_or_facing_orders_are_requested_then_they_are_rejected(self):
+        data = source(1)
+        data["armies"] = [{"count": 1, "units": [unit("enemy", 129)]}]
+        battle = Battle.from_script(data)
+        for order in (lambda: battle.order_attack("player0", "enemy"),
+                      lambda: battle.order_halt("player0"),
+                      lambda: battle.order_turn_left("player0"),
+                      lambda: battle.order_turn_right("player0"),
+                      lambda: battle.order_about_face("player0"),
+                      lambda: battle.order_face_point("player0", 900, 900)):
+            with self.subTest(order=order), self.assertRaises(ValueError):
+                order()
+
+    def test_given_deployment_settings_when_started_then_positions_ranks_and_independent_are_preserved(self):
+        battle = Battle.from_script(source(1))
+        regiment = battle.regiments["player0"]
+        regiment.models = 12
+        battle.order_reform("player0", 3)
+        battle.toggle_independent("player0")
+        before = (regiment.x, regiment.y, regiment.direction, regiment.ranks, regiment.independent,
+                  list(regiment.positions))
+        battle.start_battle()
+        self.assertEqual((regiment.x, regiment.y, regiment.direction, regiment.ranks, regiment.independent,
+                          regiment.positions), before)
 
 
 def unit(identifier, side=1):

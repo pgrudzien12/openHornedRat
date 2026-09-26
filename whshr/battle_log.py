@@ -130,6 +130,7 @@ class BattleLogger:
     def write_snapshot(self, tick: int, battle: "Battle") -> None:
         self._write({
             "type": "snapshot", "tick": tick, "result": battle.result,
+            "phase": battle.phase, "combat_tick": battle.tick_count, "paused": battle.paused,
             "side_counts": battle.side_counts(), "regiments": battle.snapshot(),
         })
 

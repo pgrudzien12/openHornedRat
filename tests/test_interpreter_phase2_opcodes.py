@@ -121,6 +121,7 @@ class WaitForBattleStartYieldTests(unittest.TestCase):
         self.state = self.battle.event_bus.unit_states["t"]
 
     def test_blocking_at_tick_zero_sets_should_yield(self):
+        self.battle.phase = "deployment"
         self.interp._should_yield = False
         result = self.interp.op_WaitForBattleStart(self.state, None, [], "t", 0, None)
         self.assertEqual(result, self.state.pc)  # same pc: still blocked

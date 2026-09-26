@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import math
 import random
-from typing import Any
+from typing import Any, Literal
 
 from . import animation, battle_grid, behaviour, combat, formation, interpreter
 from .battle_events import BattleEvent
@@ -136,6 +136,9 @@ class Regiment:
     # A regiment used on its own (tests) keeps a private one, created on first use.
     stagger_counter: "StaggerCounter | None" = None
     walking: bool = False  # true while the anchor or any model is still travelling
+    independent: bool = False
+    hidden: bool = False
+    waypoints: list[Point] = field(default_factory=list[Point])
 
     # Combat profile (game_rules.md section 3, section 5-8), decoded from the script's setstats lines.
     ws: int = DEFAULT_PROFILE["WS"]
@@ -238,7 +241,7 @@ class Regiment:
         wheeling and reversing"): the artillery class always carries the anchor flag, until an
         artillery misfire explosion clears it (`clear_anchor`; there is no limbering).
 
-        The flag refuses move orders (including deployment placement), every turn type, charge
+        The flag refuses marching orders, every normal battle turn type, charge
         orders and internal charge starts, pursuit and script-initiated melee contact. It does not
         stop shooting/reloading, halting, being attacked or engaged, being pushed by collisions,
         rank changes, flight movement or the Independent/rally toggles."""
@@ -427,7 +430,8 @@ class Battle:
 
     def __init__(self, width: float, height: float, regiments: Sequence[Regiment], seed: int = DEFAULT_SEED,
                  script_dll: behaviour.ScriptDll | None = None, script_ids: Mapping[str, int] | None = None,
-                 script_logger: BattleLogger | None = None, nodes: Mapping[int, Point] | None = None) -> None:
+                 script_logger: BattleLogger | None = None, nodes: Mapping[int, Point] | None = None,
+                 deploy: bool = False) -> None:
         if width <= 0 or height <= 0:
             raise ValueError("battle dimensions must be positive")
         self.width = width
@@ -439,6 +443,9 @@ class Battle:
         for regiment in regiments:
             regiment.stagger_counter = self.stagger_counter
         self.tick_count = 0
+        self.update_count = 0  # monotonic input/replay time, including deployment
+        self.phase: Literal["deployment", "battle"] = "deployment" if deploy else "battle"
+        self.paused = False
         # Camera rotation in 1/512 turns, set by the frontend; wagons snap to it (see set_view_angle).
         self.view_angle: float | None = None
         self._snapped_view_angle: float | None = None
@@ -555,6 +562,7 @@ class Battle:
                     sprite=resource_name(unit.get("sprites")),
                     banner=resource_name(unit.get("banner")),
                     portrait=resource_name(leader.get("portrait")),
+                    hidden=bool(unit.get("hidden", False)),
                     **_decode_combat_profile(unit),
                 ))
                 script_value = position.get("script")
@@ -562,8 +570,43 @@ class Battle:
                     script_ids[identifier] = behaviour.PLAYER_SCRIPT
                 elif isinstance(script_value, (int, float)):
                     script_ids[identifier] = int(script_value)
+        mission: View = source.get("mission") or {}
         return cls(field_data["width"], field_data["height"], regiments, seed=seed,
-                   script_dll=script_dll, script_ids=script_ids, script_logger=script_logger, nodes=nodes)
+                   script_dll=script_dll, script_ids=script_ids, script_logger=script_logger, nodes=nodes,
+                   deploy=bool(mission.get("deploy_troops")))
+
+    def start_battle(self) -> None:
+        """Confirm deployment once, retaining placements and prepared orders (§5)."""
+        if self.phase == "deployment":
+            self.phase = "battle"
+
+    def _require_battle_order(self) -> None:
+        if self.phase == "deployment":
+            raise ValueError("this order is unavailable during deployment")
+
+    def toggle_independent(self, identifier: str) -> None:
+        regiment = self.regiments[identifier]
+        if regiment.side != Side.PLAYER or not regiment.active:
+            raise ValueError("regiment is not player-controlled and active")
+        if self.phase == "deployment" and regiment.hud_class not in {"inf", "arch", "wiz", "mon", "art"}:
+            raise ValueError("this class has no deployment Independent control")
+        regiment.independent = not regiment.independent
+
+    def append_waypoint(self, identifier: str, x: float, y: float) -> None:
+        """Ctrl Move targeting: retain up to nine manual destinations (§3)."""
+        regiment = self.regiments[identifier]
+        if regiment.side != Side.PLAYER or not regiment.active or regiment.routing or regiment.anchored:
+            raise ValueError("regiment cannot receive a move order")
+        if not 0 <= x <= self.width or not 0 <= y <= self.height:
+            raise ValueError("destination is outside the battlefield")
+        if self.phase == "deployment" and regiment.hud_class not in {"inf", "arch", "wiz", "mon"}:
+            raise ValueError("this class has no deployment Move control")
+        if len(regiment.waypoints) >= 9:
+            return
+        if regiment.waypoints and any(math.hypot(x - px, y - py) < 17
+                                      for px, py in (regiment.waypoints[0], regiment.waypoints[-1])):
+            return
+        regiment.waypoints.append((float(x), float(y)))
 
     def order_move(self, identifier: str, x: float, y: float) -> None:
         regiment = self.regiments[identifier]
@@ -577,6 +620,15 @@ class Battle:
             raise ValueError(f"{identifier} is anchored and cannot be ordered to move")
         if not 0 <= x <= self.width or not 0 <= y <= self.height:
             raise ValueError("destination is outside the battlefield")
+        if self.phase == "deployment":
+            if regiment.hud_class not in {"inf", "arch", "wiz", "mon"}:
+                raise ValueError("this class has no deployment Move control")
+            regiment.waypoints.clear()
+            regiment.target_x = regiment.target_y = None
+            if math.hypot(x - regiment.x, y - regiment.y) >= 17:
+                self.append_waypoint(identifier, x, y)
+            return
+        regiment.waypoints.clear()
         regiment.attack_target = None
         regiment.charge_started_target = None
         regiment.turn_order_key = None
@@ -586,6 +638,7 @@ class Battle:
         """Order a player regiment to charge a non-player regiment into contact (game_rules.md,
         "Charge"): the target may be an enemy or a neutral regiment (notes/neutral_units.md documents
         neutral units as ordinary battle units, not automatically off-limits to a deliberate order)."""
+        self._require_battle_order()
         regiment = self.regiments[identifier]
         if regiment.side != Side.PLAYER:
             raise ValueError(f"{identifier} is not player-controlled")
@@ -606,6 +659,7 @@ class Battle:
 
     def order_halt(self, identifier: str) -> None:
         """Cancel the selected regiment's current movement or charge order in place."""
+        self._require_battle_order()
         regiment = self.regiments[identifier]
         if regiment.side != Side.PLAYER:
             raise ValueError(f"{identifier} is not player-controlled")
@@ -617,6 +671,7 @@ class Battle:
         regiment.attack_target = None
         regiment.charge_started_target = None
         regiment.turn_order_key = None
+        regiment.waypoints.clear()
         # game_rules.md "Braced": Halt is the one order still accepted while braced, and clears it.
         regiment.braced = False
         regiment.braced_target = None
@@ -642,6 +697,8 @@ class Battle:
         regiment = self.regiments[identifier]
         if regiment.side != Side.PLAYER:
             raise ValueError(f"{identifier} is not player-controlled")
+        if self.phase == "deployment" and regiment.hud_class not in {"inf", "arch"}:
+            raise ValueError("this class has no deployment rank controls")
         if regiment.routing:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
         if regiment.held:
@@ -652,6 +709,7 @@ class Battle:
 
     def _check_turn_order(self, identifier: str) -> Regiment:
         """Shared guard for all standalone turn orders (game_rules.md "Turning, wheeling and reversing")."""
+        self._require_battle_order()
         regiment = self.regiments[identifier]
         if regiment.side != Side.PLAYER:
             raise ValueError(f"{identifier} is not player-controlled")
@@ -714,8 +772,7 @@ class Battle:
             return
         regiment.turn_mode, regiment.turn_shift = "halted", 8
 
-    @staticmethod
-    def _begin_reform(regiment: Regiment, ranks: int) -> None:
+    def _begin_reform(self, regiment: Regiment, ranks: int) -> None:
         """Recompute the shape for `ranks` and re-slot every model into it (game_rules.md, "Formation
         changes"). `leader_index` is left unset: this engine has no persistent leader-model identity
         to hand the front-rank-centre slot to directly, so `formation.reform_assignment` falls back to
@@ -735,7 +792,7 @@ class Battle:
             # filled directly (nearest fallback here); wagons use the ordinary nearest search.
             assignment = _slot_offsets(formation.reform_assignment(
                 regiment.x, regiment.y, regiment.direction, regiment.models, ranks, positions,
-                farthest=regiment.hud_class == "art"))
+                farthest=regiment.hud_class == "art" and self.phase != "deployment"))
             raster_index = {offset: index for index, offset in
                             enumerate(formation.block_slots(regiment.models, ranks))}
             order = sorted(range(len(assignment)), key=lambda i: raster_index[assignment[i]])
@@ -805,6 +862,9 @@ class Battle:
         if seconds <= 0:
             raise ValueError("tick duration must be positive")
         self.events = []
+        self.update_count += 1
+        if self.paused:
+            return
         if self.result is not None:
             self.tick_count += 1
             return
@@ -813,8 +873,18 @@ class Battle:
         # battle has no interpreter and so no automatic orders (only explicit Battle.order_* calls).
         if self.interpreter:
             for unit_id, state in self.event_bus.unit_states.items():
-                self.interpreter.run(unit_id, state, self.tick_count, self.rng)
-            self.interpreter.raise_charge_events()
+                self.interpreter.run(unit_id, state, self.update_count - 1, self.rng)
+            if self.phase == "battle":
+                self.interpreter.raise_charge_events()
+        for regiment in self.regiments.values():
+            state = self.event_bus.unit_states.get(regiment.identifier)
+            if (self.phase == "battle" and regiment.waypoints
+                    and not (state and state.waiting_for_start)
+                    and regiment.target_x is None):
+                regiment.target_x, regiment.target_y = regiment.waypoints[0]
+        if self.phase == "deployment":
+            self._advance_regiments(scale, seconds)
+            return
         combat.refresh_melee_state(self)
         self._advance_regiments(scale, seconds)
         self._resolve_collisions()
@@ -836,6 +906,14 @@ class Battle:
                 regiment.walking = False
                 continue
             regiment.model_positions()  # seed positions at the current anchor/facing before it moves
+            state = self.event_bus.unit_states.get(regiment.identifier)
+            if state is not None and state.waiting_for_start:
+                if regiment.reforming:
+                    self._advance_reforming_models(regiment, scale)
+                else:
+                    self._advance_models(regiment, scale)
+                self._step_animations(regiment)
+                continue
             if regiment.anchored and not regiment.routing:
                 # An anchored war machine never starts a move or charge, from whatever source.
                 regiment.target_x = regiment.target_y = None
@@ -881,6 +959,8 @@ class Battle:
                 moved = self._advance_toward(regiment, (regiment.target_x, regiment.target_y),
                                              regiment.speed_per_tick * move_scale, arrive=True,
                                              order_key=("move", regiment.target_x, regiment.target_y), scale=scale)
+                if not regiment.moving and regiment.waypoints:
+                    regiment.waypoints.pop(0)
             elif regiment.turn_order_key is not None and regiment.turn_order_key[0] == "turn":
                 # Standalone turn order (game_rules.md "Turning, wheeling and reversing"): speed zero,
                 # shift 8; pivot about the inner front corner like all other gradual turns.

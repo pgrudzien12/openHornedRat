@@ -60,6 +60,7 @@ class BattleScene(Scene):
         self.initial_models = {identifier: regiment.models for identifier, regiment in self.battle.regiments.items()}
         self.no_battle = bool(getattr(context, "no_battle", False))
         if self.no_battle:
+            self.battle.start_battle()
             self.battle.resolve_no_battle()
         self.skirmishes = skirmish_log.SkirmishLogger(self.log_dir, self.battle_id.name)
         self._log_closed = False
@@ -96,7 +97,7 @@ class BattleScene(Scene):
         """Write the `end` record and close the log file; idempotent, so both a normal transition and
         an early frontend shutdown (the player closing the window mid-battle) can safely call it."""
         if self.logger is not None and not self._log_closed:
-            self.logger.write_end(self.battle.tick_count, reason)
+            self.logger.write_end(self.battle.update_count, reason)
             if self.skirmishes is not None:
                 self.skirmishes.close(self.battle)
             self._log_closed = True
@@ -104,9 +105,26 @@ class BattleScene(Scene):
     def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         """Player intent from the view: select, move, attack, halt or deselect."""
         if self.logger is not None and self.logger.enabled:
-            self.logger.write_order(self.battle.tick_count, event)
+            self.logger.write_order(self.battle.update_count, event)
         kind, *args = event
-        if kind == "select":
+        if kind == "start_battle":
+            self.battle.start_battle()
+        elif kind == "pause":
+            if self.battle.phase == "battle":
+                self.battle.paused = not self.battle.paused
+        elif kind == "independent":
+            if self.selected_id is not None:
+                try:
+                    self.battle.toggle_independent(self.selected_id)
+                except ValueError:
+                    pass
+        elif kind == "append_waypoint":
+            if self.selected_id is not None:
+                try:
+                    self.battle.append_waypoint(self.selected_id, *args)
+                except ValueError:
+                    pass
+        elif kind == "select":
             # An enemy regiment can be selected too, for its readout/banner/stats only: the
             # order handlers below all refuse a non-player identifier (ValueError, caught), so
             # selecting one never grants it orders.
@@ -179,21 +197,21 @@ class BattleScene(Scene):
     def update(self, seconds: float, context: SceneAssets) -> Transition | Quit | None:
         super().update(seconds, context)
         for _ in range(self.clock.advance(seconds)):
-            tick_number = self.battle.tick_count
+            tick_number = self.battle.update_count
             self.battle.tick(BATTLE_TICK_SECONDS)
             if self.logger is not None and self.logger.enabled:
                 for battle_event in self.battle.events:
                     self.logger.write_event(tick_number, battle_event)
-                if self.battle.tick_count % combat.SEGMENT_TICKS == 0:
-                    self.logger.write_snapshot(self.battle.tick_count, self.battle)
+                if self.battle.update_count % combat.SEGMENT_TICKS == 0:
+                    self.logger.write_snapshot(self.battle.update_count, self.battle)
             if self.skirmishes is not None:
                 self.skirmishes.observe(self.battle)
             if self.battle.result is not None:
                 break
         if self.battle.result is not None:
             if self.logger is not None and self.logger.enabled:
-                self.logger.write_snapshot(self.battle.tick_count, self.battle)
-                self.logger.write_result(self.battle.tick_count, self.battle)
+                self.logger.write_snapshot(self.battle.update_count, self.battle)
+                self.logger.write_result(self.battle.update_count, self.battle)
                 self.close_log("result")
             if self.glue_scene is not None and self.no_battle:
                 # No-battle mode: the completion handler runs at once, without a result screen.

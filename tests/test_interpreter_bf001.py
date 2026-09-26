@@ -281,17 +281,18 @@ class BF001ScenarioTests(unittest.TestCase):
             models=10, ranks=2, leadership=7
         )
 
-        battle = Battle(500, 500, [enemy], seed=1995)
+        battle = Battle(500, 500, [enemy], seed=1995, deploy=True)
         interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
         state = battle.event_bus.unit_states["enemy_1"]
 
         # Simulate script: WaitForBattleStart
         state.pc = 0
         result = interp.op_WaitForBattleStart(state, None, [], "enemy_1", 0, battle.rng)
-        # tick_count=0 means wait (return same PC, don't advance)
+        # Deployment holds at the explicit start barrier.
         self.assertEqual(result, 0)
 
-        # tick_count > 0 means resume (return PC + 1)
+        battle.start_battle()
+        # Confirmation resumes the script regardless of elapsed deployment updates.
         state.pc = 0
         result = interp.op_WaitForBattleStart(state, None, [], "enemy_1", 10, battle.rng)
         self.assertEqual(result, 1)
