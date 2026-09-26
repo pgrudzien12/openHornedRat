@@ -7,6 +7,7 @@ import random
 from typing import Any, Literal
 
 from . import animation, battle_grid, behaviour, combat, deployment, formation, interpreter, visibility
+from . import nodes as node_table
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import (EXPECTED_WEAPON_BONUS, MISSILE_RANGES, MOUNT_PROFILES, Side, may_engage, side_of_code,
@@ -109,6 +110,9 @@ class ModelState:
     pending_action: int | None = None  # action queued behind a running one-shot script
     drawn_facing: float | None = None  # facing (0-511) the sprite direction is drawn from; None until first set
     fire_event: bool = False  # animation reached its fire point on this tick (whshr.animation)
+    # ScatterModelsToNode destination this model walks to instead of its formation slot, or None while
+    # in formation (notes/scatter_models_to_node.md); cleared by SnapModelsToFormation.
+    scatter_target: Point | None = None
 
 
 @dataclass
@@ -436,6 +440,7 @@ class Battle:
     def __init__(self, width: float, height: float, regiments: Sequence[Regiment], seed: int = DEFAULT_SEED,
                  script_dll: behaviour.ScriptDll | None = None, script_ids: Mapping[str, int] | None = None,
                  script_logger: BattleLogger | None = None, nodes: Mapping[int, Point] | None = None,
+                 script_nodes: Sequence[node_table.ScriptNode] | None = None,
                  deploy: bool = False, boundaries: Sequence[View] = (), objects: Sequence[View] = ()) -> None:
         if width <= 0 or height <= 0:
             raise ValueError("battle dimensions must be positive")
@@ -466,6 +471,13 @@ class Battle:
         # BTS world coordinates; read by the interpreter's MoveToNode/FaceNode/TeleportToNode/
         # PlaceAtNode opcodes (issue #3/#46). Empty for a synthetic/nodeless battle.
         self.nodes: dict[int, Point] = dict(nodes or {})
+        # The full [NODES] table in list order, with each entry's own `id`, `radius` and active status:
+        # ScatterModelsToNode names a node by that `id`, not by list position
+        # (notes/scatter_models_to_node.md). A synthetic battle without one gets `nodes` as active,
+        # radius-16 entries whose id is their key.
+        self.script_nodes: list[node_table.ScriptNode] = (
+            list(script_nodes) if script_nodes is not None
+            else [node_table.ScriptNode(x, y, key) for key, (x, y) in self.nodes.items()])
         self.fights: dict[str, combat.Fight] = {}  # group id -> {"next_test_turn", "tally": {True/False}, "breakdown": {...}}
         self.fight_seq = 0  # counter for fresh whshr.combat fight group ids
         self.result: str | None = None  # None while the battle is ongoing, else "victory" or "defeat"
@@ -523,6 +535,7 @@ class Battle:
         nodes = {index: (float(node["x"]), float(node["y"]))
                  for index, node in enumerate(source.get("nodes") or ())
                  if node.get("x") is not None and node.get("y") is not None}
+        script_nodes = node_table.from_views(source.get("nodes") or ())
         regiments: list[Regiment] = []
         script_ids: dict[str, int] = {}
         used: set[str] = set()
@@ -585,6 +598,7 @@ class Battle:
         mission: View = source.get("mission") or {}
         return cls(field_data["width"], field_data["height"], regiments, seed=seed,
                    script_dll=script_dll, script_ids=script_ids, script_logger=script_logger, nodes=nodes,
+                   script_nodes=script_nodes,
                    deploy=bool(mission.get("deploy_troops")), boundaries=source.get("boundaries") or (),
                    objects=source.get("objects") or ())
 
@@ -1293,7 +1307,11 @@ class Battle:
                 updated.append((px, py))
                 continue
             cell = battle_grid.cell_target(self, regiment, index)
-            tx, ty = cell if cell is not None else slot
+            # A scattered model walks to its own destination, not its slot (notes/scatter_models_to_node.md:
+            # the regiment position and slots do not change), unless the regiment has an order of its own.
+            busy = regiment.in_melee or regiment.routing or regiment.attack_target or regiment.moving
+            scatter = model.scatter_target if not busy else None
+            tx, ty = cell if cell is not None else scatter if scatter is not None else slot
             dx, dy = tx - px, ty - py
             distance = math.hypot(dx, dy)
             if model.freeze_ticks > 0:

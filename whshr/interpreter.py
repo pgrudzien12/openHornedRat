@@ -20,7 +20,7 @@ import random
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from . import behaviour, visibility
+from . import behaviour, nodes, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import Side
@@ -30,9 +30,6 @@ if TYPE_CHECKING:
 
 Words = list[int]  # one behaviour script's instruction words
 Target = tuple[str, int]  # (regiment identifier, unit id)
-
-SCATTER_RADIUS = 40.0  # world units: ScatterModelsToNode's wander distance from a node's exact
-# point; a documented placeholder (see op_ScatterModelsToNode), not a confirmed game value.
 
 # Hypothesis, not a confirmed public fact (see op_MoveToNode/_update_arrival_flag): unit_flags bit
 # 0x10 signals "the unit's last ordinary move order has arrived", matching the MoveToNode N;
@@ -96,7 +93,7 @@ class UnitScriptState:
     # Current order and target (set by FindTarget*, AttackTarget, etc.)
     current_target: Target | None = None  # (regiment_id, unit_id) for attack/movement orders
     current_node: int | None = None  # waypoint node for movement orders
-    pending_arrival: bool = False  # a MoveToNode/ScatterModelsToNode order is in flight; see
+    pending_arrival: bool = False  # a MoveToNode order is in flight; see
     # ScriptInterpreter._update_arrival_flag, which sets ARRIVED_FLAG on unit_flags once the
     # regiment stops moving, so a WaitUntilUnitFlags(ARRIVED_FLAG) loop can unblock
     behaviour_id: int | None = None  # declared by SetBehaviour; recorded only, not auto-run
@@ -245,7 +242,7 @@ class ScriptInterpreter:
         }
 
     def _update_arrival_flag(self, unit_id: str, state: UnitScriptState) -> None:
-        """If a MoveToNode/ScatterModelsToNode order is in flight (state.pending_arrival) and the
+        """If a MoveToNode order is in flight (state.pending_arrival) and the
         regiment is no longer moving, set ARRIVED_FLAG so a WaitUntilUnitFlags(ARRIVED_FLAG) loop
         can unblock (see the module docstring note on ARRIVED_FLAG -- a well-evidenced hypothesis,
         not a confirmed public fact).
@@ -1195,29 +1192,32 @@ class ScriptInterpreter:
 
     def op_ScatterModelsToNode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """ScatterModelsToNode N: wander to a randomized point near waypoint node N.
+        """ScatterModelsToNode N: send each model in formation to its own point around node id N.
 
-        This is the actual opcode NPC "patrol" scripts use (confirmed from a real BF003 trace: the
-        peasant regiments loop SetWait 20/Wait/ScatterModelsToNode every ~20 ticks) -- not
-        MoveToNode, which their scripts never call at all.
+        notes/scatter_models_to_node.md: N is a node `id` (Battle.script_nodes), not a list position;
+        successive models alternate between the active nodes sharing that id, each getting a
+        destination within the node's own radius (whshr.nodes.scatter_destinations). The regiment's
+        position, order and formation slots are untouched; each model walks there on its own
+        (Battle._advance_models) and stays until the next scatter or SnapModelsToFormation.
 
-        Real per-model scatter (spreading individual models out around the node, rather than moving
-        the whole regiment) is not modeled; this reuses the regiment's ordinary move order with a
-        small random jitter around the node's point instead, which is what produces the wandering
-        appearance when called repeatedly. SCATTER_RADIUS is a documented placeholder (nodes do
-        carry their own `radius` field in the parsed .BTS data, but Battle.nodes only keeps x/y
-        today, and whether that radius is even the right value for this opcode isn't confirmed).
+        Which models count as "in formation": the report leaves models that are still wandering
+        alone. A model that has reached its destination is treated as available again, because the
+        patrol scripts (e.g. BF003) snap only once, before their loop, yet are seen to wander
+        continuously -- a provisional reading, listed in the report's open points.
         Deterministic: draws from Battle.rng like every other random decision in the engine.
         """
         if operand is not None:
             state.current_node = operand
             regiment = self.battle.regiments.get(unit_id)
-            coords = self.battle.nodes.get(operand)
-            if regiment and coords and not regiment.anchored:
-                regiment.target_x = coords[0] + self.battle.rng.uniform(-SCATTER_RADIUS, SCATTER_RADIUS)
-                regiment.target_y = coords[1] + self.battle.rng.uniform(-SCATTER_RADIUS, SCATTER_RADIUS)
-                state.unit_flags &= ~ARRIVED_FLAG
-                state.pending_arrival = True
+            if regiment and not regiment.anchored:
+                regiment.model_positions()  # seed the per-model states
+                available = [model for model in regiment.melee_models
+                             if model.scatter_target is None or model.at_rest]
+                destinations = nodes.scatter_destinations(self.battle.script_nodes, operand, len(available),
+                                                          self.battle.rng)
+                for model, (_node, point) in zip(available, destinations):
+                    model.scatter_target = point
+                    model.at_rest = False
         return state.pc + 1
 
     def op_ChargeTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -1312,14 +1312,16 @@ class ScriptInterpreter:
 
     def op_SnapModelsToFormation(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """SnapModelsToFormation: re-form scattered models back into tight formation.
+        """SnapModelsToFormation: bring scattered models back into formation.
 
-        A documented no-op here, same reasoning as PlaceAtNode: this engine has no separate
-        "scattered per-model position" state to snap back from -- Regiment.model_positions() always
-        recomputes every model's slot from the regiment's current anchor/models/ranks/direction, so
-        formation is implicitly always current. Confirmed used once, right after ScatterModelsToNode,
-        in every BF003 peasant regiment's script.
+        Clears every model's ScatterModelsToNode destination (notes/scatter_models_to_node.md), so
+        each walks back to its own formation slot. Used right after the first ScatterModelsToNode in
+        every BF003 peasant regiment's script.
         """
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment:
+            for model in regiment.melee_models:
+                model.scatter_target = None
         return state.pc + 1
 
     def op_SetBehaviour(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,

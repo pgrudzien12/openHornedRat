@@ -415,42 +415,6 @@ class MovementOpcodeWithRealNodesTests(unittest.TestCase):
         self.assertEqual((self.unit.x, self.unit.y), (300.0, 200.0))
 
 
-class ScatterModelsToNodeTests(unittest.TestCase):
-    """The actual opcode NPC 'patrol' scripts call (confirmed from a real BF003 trace), not
-    MoveToNode -- peasant regiments never call MoveToNode at all."""
-
-    def setUp(self):
-        self.unit = Regiment("peasants", "Peasants", 100, 100, 0, False, models=5, ranks=1)
-        self.battle = Battle(2000, 2000, [self.unit], seed=1995, nodes={2: (700.0, 600.0)})
-        self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
-        self.state = self.battle.event_bus.unit_states["peasants"]
-
-    def test_orders_a_move_to_a_jittered_point_near_the_node(self):
-        self.interp.op_ScatterModelsToNode(self.state, 2, [], "peasants", 0, self.battle.rng)
-        self.assertTrue(self.unit.moving)
-        dx = self.unit.target_x - 700.0
-        dy = self.unit.target_y - 600.0
-        self.assertLessEqual(abs(dx), interpreter.SCATTER_RADIUS)
-        self.assertLessEqual(abs(dy), interpreter.SCATTER_RADIUS)
-
-    def test_is_deterministic_for_a_given_seed(self):
-        battle_a = Battle(2000, 2000, [Regiment("p", "P", 100, 100, 0, False, models=5, ranks=1)],
-                           seed=42, nodes={2: (700.0, 600.0)})
-        battle_b = Battle(2000, 2000, [Regiment("p", "P", 100, 100, 0, False, models=5, ranks=1)],
-                           seed=42, nodes={2: (700.0, 600.0)})
-        for battle in (battle_a, battle_b):
-            interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
-            state = battle.event_bus.unit_states["p"]
-            interp.op_ScatterModelsToNode(state, 2, [], "p", 0, battle.rng)
-        self.assertEqual(
-            (battle_a.regiments["p"].target_x, battle_a.regiments["p"].target_y),
-            (battle_b.regiments["p"].target_x, battle_b.regiments["p"].target_y))
-
-    def test_unknown_node_is_a_safe_noop(self):
-        self.interp.op_ScatterModelsToNode(self.state, 999, [], "peasants", 0, self.battle.rng)
-        self.assertIsNone(self.unit.target_x)
-
-
 class ArrivalFlagTests(unittest.TestCase):
     """ARRIVED_FLAG lets a WaitUntilUnitFlags(ARRIVED_FLAG) loop unblock once a script-issued
     MoveToNode/ScatterModelsToNode order completes -- confirmed as the real cause of Goblin

@@ -49,7 +49,7 @@ Landed against this document's "Proposed" section:
   pivot-preserving `Battle.turn_to` every other turn in the engine uses. All four fail-safe (no-op,
   never raise) for an id the battle has no node for.
 
-  Arrival feedback is now also built: `MoveToNode`/`ScatterModelsToNode` arm `pending_arrival` and
+  Arrival feedback is now also built: `MoveToNode` arms `pending_arrival` and
   clear a new `ARRIVED_FLAG` (unit_flags bit `0x10`) on the order's regiment; once the regiment
   stops moving (checked at the start of every `ScriptInterpreter.run()` call), the flag is set, so a
   `WaitUntilUnitFlags(16)` loop can unblock. `TeleportToNode`/`PlaceAtNode` set it immediately
@@ -61,9 +61,9 @@ Landed against this document's "Proposed" section:
 
   Also implemented: `ScatterModelsToNode`, the opcode NPC "patrol" scripts actually use -- a real
   trace showed peasant regiments never call `MoveToNode` at all, only this (in a
-  `SetWait 20`/`Wait`/`Loop` cycle). Reuses the ordinary move order with a small random jitter
-  around the node (`SCATTER_RADIUS`, a documented placeholder -- issue #47 tracks confirming the
-  real value, possibly the node's own unread `radius` field).
+  `SetWait 20`/`Wait`/`Loop` cycle). Implemented from `notes/scatter_models_to_node.md` (issue #162):
+  the operand is a node `id` resolved over `Battle.script_nodes` with the cycling rule, and each
+  model gets its own destination within that node's `radius` while the regiment itself stays put.
 
   Tests: `tests/test_interpreter_wiring.py` (`NodeWiringTests`),
   `tests/test_interpreter_phase3.py` (`MovementOpcodeWithRealNodesTests`, `ScatterModelsToNodeTests`,
@@ -148,10 +148,7 @@ Landed against this document's "Proposed" section:
   `SnapModelsToFormation` (every peasant regiment, right after `ScatterModelsToNode`). Implemented:
   `SetParentByTag` looks up the tag in the same `Battle._unit_tags` registry `SetTag`/`AttackTagged`
   already use and records the result on a new `UnitScriptState.parent_id`; `SnapModelsToFormation`
-  is a documented no-op for the same reason `PlaceAtNode`'s "in formation" aspect already was --
-  `Regiment.model_positions()` always recomputes every model's slot from the regiment's current
-  anchor/models/ranks/direction, so there is no separate scattered-model state to snap back from in
-  this engine. `parent_id` itself is not yet consumed by anything (`FollowParent`/
+  clears every model's scatter destination, so the models walk back to their formation slots. `parent_id` itself is not yet consumed by anything (`FollowParent`/
   `SendEventToParent` remain unimplemented/no-op stubs -- not confirmed as actually called by any
   traced BF003 script, so left alone rather than guessed at). Tests:
   `tests/test_interpreter_phase3.py` (`UnitTaggingTests`, 3 new).
