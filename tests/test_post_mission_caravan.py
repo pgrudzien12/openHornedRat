@@ -85,6 +85,17 @@ class PostMissionCaravanTests(DirectMissionRouteTests):
 
         self.assertEqual(self._names(machine.active), ["INFOCARAVANABC"])
 
+    def test_given_a_gocaravan_opened_caravan_when_aborted_then_it_goes_straight_to_the_main_menu(self):
+        """The player got stuck with no working Abort in an info/mid-mission caravan (issue: reported
+        after the Nuln `gomissionselect` fix)."""
+        from whshr.campaign_scenes import MainMenuScene
+
+        machine = SceneMachine(GlueScene("INFOSCRIPT"), self.context)
+
+        machine.handle(GlueInput("hotspot-release", "AbortGame"))
+
+        self.assertIsInstance(machine.active, MainMenuScene)
+
     def test_given_an_unknown_caravan_name_when_requested_then_the_script_goes_on_at_once(self):
         machine = SceneMachine(GlueScene("UNKNOWNSCRIPT"), self.context)
 

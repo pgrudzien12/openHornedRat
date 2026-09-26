@@ -66,6 +66,20 @@ class LoadSaveTests(unittest.TestCase):
 
         self.assertIs(machine.active, caravan)
 
+    def test_given_a_gocaravan_opened_caravan_then_its_save_hotspot_also_opens_the_dialog(self):
+        """Not just the caravan opened directly from ``STARTCARAVAN``: one a mission script opened with
+        ``gocaravan`` (issue: player report of the caravan's Save/Troop-Book/Abort review)."""
+        self.context.glue = GlueContent.from_data(resources={
+            "SCRIPT": "[RUN]\n[START]\ngocaravan:infoABC\n[END]", "INFOCARAVANABC": CARAVAN,
+            "MAINMENU": "[WINDOW]\n[END]"})
+        state = campaign()
+        machine = SceneMachine(GlueScene("SCRIPT", state), self.context)
+
+        machine.handle(GlueInput("hotspot-release", "LoadSaveWindow"))
+
+        self.assertIsInstance(machine.active, LoadSaveScene)
+        self.assertEqual(machine.active.mode, SAVE)
+
     def test_given_the_main_menu_when_load_game_then_the_load_dialog_opens(self):
         menu = MainMenuScene()
         machine = SceneMachine(menu, self.context)

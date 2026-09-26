@@ -219,6 +219,15 @@ renumber later work.
   a refusal sound or coffer change. Done keeps the in-memory changes; Abort restores the book-open
   hired snapshot and removes any cancelled hire from the selection. Caravan economy and
   reinforcement UI were not added here (GEI7g); ARMY/MARCH file writes are GEI7e.
+- [x] **GEI7h — `AbortGame` from any `gocaravan`-opened caravan.** Only the caravan opened directly from
+  `STARTCARAVAN` had a working Abort hotspot; every caravan a mission script opens with `gocaravan:` (recruit,
+  the after-mission/after-encounter and every `info*` caravan) queued an "is not yet implemented" diagnostic and
+  stayed open. `GlueScene._leave_caravan` now handles `AbortGame` there too, matching the direct path: straight
+  to the main menu (`notes/mission_selection.md` §8.1: "abandons the campaign toward the main menu", 🟡 the
+  original's Yes/No confirmation is not built anywhere in the engine yet, the same open gap as troop selection's
+  own documented Abort confirm, notes/troop_selection.md §4.4). Save (`LoadSaveWindow`) and the roster book
+  (`ArmyBook`/`HireOnlyArmyBook`) already worked from a `gocaravan`-opened caravan; `EncyclopediaBook`,
+  `MagicBook` and `OptionsDialog` still queue that diagnostic and stay open (no screen built for them yet).
 - GEI7g (issue #145): `CampaignState` now carries a **master roster** (`master`, the fresh-campaign content of
   `SCRIPT/MAXARMY.MRC`, i.e. the original's `PLAY.MRC`) next to the company (`ARMY.MRC`). Without it there was
   nothing to hire: the starting company holds two regiments. `addunit` flags a regiment and the next caravan

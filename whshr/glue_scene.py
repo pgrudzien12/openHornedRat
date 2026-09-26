@@ -289,6 +289,14 @@ class GlueScene(Scene):
             return self._open_army_book(hire_only=name == "hireonlyarmybook")
         if name == "loadsavewindow":
             return self._open_save_dialog()
+        if name == "abortgame":
+            # notes/mission_selection.md §8.1: Yes/No confirmation, Yes abandons the campaign toward the
+            # main menu. No confirm dialog is built anywhere in the engine yet (troop selection's own
+            # documented Abort confirm is the same open gap), so this goes straight to the main menu, matching
+            # the direct STARTCARAVAN abortgame hotspot below.
+            self._queue(self.require_runtime().stop_speech())
+            from .campaign_scenes import MainMenuScene
+            return Transition(MainMenuScene(), "caravan aborted")
         if name not in ("unwindmission", "popandresume"):
             self._queue((Diagnostic("caravan", f"hotspot {target!r} is not yet implemented"),))
             return None
