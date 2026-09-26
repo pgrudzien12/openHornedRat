@@ -122,23 +122,25 @@ renumber later work.
 
 - [ ] **GEI14 — Persistent save/load.** (issue #128) Define save/load semantics, then replace the in-memory
   autosave snapshot with durable persistence.
-  **Done so far (player saves):** the Load/Save dialog of `notes/builtin_widgets.md` §6 (`whshr/load_save_scene.py`,
-  `whshr/frontend/load_save_view.py`), reached from the main menu (Load) and the start caravan (Save), and the engine's own
-  save format (`whshr/savegame.py`). One JSON file per slot (`slot0.json`..`slot5.json`) in the save directory, written
-  atomically (temporary file, then rename). It stores the *campaign* only: flow chain and step, mission window, taken and
-  completed missions, coffers, army/march sets, reinforcements, book pages, bonus counter, objective results and the company
-  as `.MRC` text (experience, hired flag and model counts included). A load rebuilds a fresh campaign of the installation,
-  overwrites it with the saved fields and opens the start caravan; the flow chain replays from there, exactly as when
-  the caravan's map button is used (`GlueScene._map_program`). Not saved: the interpreter's window/script stacks
-  (the original resumes a parked script; the engine always resumes at the caravan).
-  **Still open:** `autosave:`/`testmission` still keep only the in-memory snapshot and never write slot 5 ("Last Game"),
-  so the Load dialog lists that slot but it stays empty; a save made from a mission script's caravan still resumes at the start
-  caravan, so from the after-mission caravans (`select`/`resume`) it records the campaign as already released (the
-  mission completed and the flow advanced, in the saved copy only), and from any other caravan of a mission script
-  the dialog refuses ("cannot be saved in the middle of a mission"). A load also finishes a mission that a save
-  kept taken but unreleased (`CampaignState.repair_stalled_flow`): the first version of the dialog saved that state
-  and the map came back with nothing to offer; the caption texts of the
-  dialog ("Empty", "Enter Save Description", default description) are engine-supplied (`PROVISIONAL` in `load_save_scene.py`).
+  **Done (engine's own format, `whshr/savegame.py`):** one JSON file per slot (`slot0.json`..`slot5.json`) in the save
+  directory, written atomically. A save holds (1) the *campaign* (flow chain and step, mission window, taken/completed
+  missions, coffers, army/march sets, reinforcements, book pages, bonus counter, objective results, the payment
+  terms of the mission in progress, the company as `.MRC` text) and (2) the *chain of glue scenes* the player is in
+  (`whshr/glue_scene_state.py`): the current scene, the map parked beneath it (`return_scene`) and the caravan a map's
+  Caravan button returns to (`caravan_return`), each with its complete interpreter state (script frames, windows,
+  context/call stacks, status bits, variables, request counters, animation counters; `whshr/glue_state.py`). The state is
+  encoded by a closed, whitelisted JSON codec (`whshr/state_codec.py`), never a pickle, so a damaged or hostile file
+  cannot run code. Not saved: the instruction trace, speech in progress, and the tune that was playing.
+  Saves are made from a caravan (the Save button, `notes/builtin_widgets.md` §6) and by `autosave:` / `testmission:`
+  (slot 5, "Last Game"). A load rebuilds the scenes and continues: a save made in a caravan reopens that caravan
+  (leaving it releases the mission, so a mid-mission or after-mission caravan is fine); slot 5 was taken *at* the
+  `autosave:` line, so the restored script runs on from the line after it (into the battle, the debrief and the
+  after-mission caravan), which the real first mission was played through end to end. A save with no scene chain (the first
+  version of this feature) opens the start caravan, and a mission such an old save left taken but unreleased is
+  finished on load (`CampaignState.repair_stalled_flow`).
+  **Still open:** the music that was playing is not restarted after a load; the dialog captions ("Empty", "Enter Save
+  Description", default description) are engine-supplied (`PROVISIONAL` in `load_save_scene.py`); saves are not yet
+  versioned across engine changes beyond `SAVE_VERSION` (a save of another version is refused, not migrated).
 
 - [ ] **GEI15 — Retire legacy map and briefing code.** (issue #129) Delete `MissionMapScene`,
   `MissionMapView`, `BriefingScene`, and `BriefingView` after their generic equivalents cover

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from .campaign_log import GlueWatcher
 from .glue import MissionRef
-from .glue_runtime import (ActivityResult, Diagnostic, EnterCaravan, GlueEffect, GlueInput, GlueRuntime, GlueRuntimeState,
+from .glue_runtime import (ActivityResult, Autosave, Diagnostic, EnterCaravan, GlueEffect, GlueInput, GlueRuntime, GlueRuntimeState,
                            MissionSelectRequested, StartBattle, StartDebrief, StartMovie)
 from .glue_fonts import glue_font_asset
 from .scenes import Quit, Scene, SceneAssets, SceneEvent, Transition
@@ -58,8 +58,26 @@ class GlueScene(Scene):
         """Queue runtime effects for the host and let the optional campaign log observe the change."""
         effects = tuple(effects)
         self._effects.extend(effects)
+        if any(isinstance(effect, Autosave) for effect in effects):
+            self._write_autosave()
         if self._watcher is not None and self.runtime is not None:
             self._watcher.update(self.runtime, effects)
+
+    def _write_autosave(self) -> None:
+        """``autosave:`` / ``testmission:`` write the automatic slot (notes/builtin_widgets.md section 6): the
+        campaign and this scene's chain, with this scene's interpreter state as it was at the ``autosave:`` line
+        (the script has run on since), so a load continues right after it."""
+        from .savegame import AUTOSAVE_DESCRIPTION, AUTOSAVE_SLOT, SaveError, SaveStore
+
+        save_dir = getattr(self.context, "save_dir", None)
+        campaign = self.campaign
+        state = getattr(campaign, "autosave_state", None)
+        if save_dir is None or campaign is None or state is None:
+            return
+        try:
+            SaveStore(save_dir).write(AUTOSAVE_SLOT, AUTOSAVE_DESCRIPTION, campaign, self, {id(self): state})
+        except SaveError as error:
+            self._effects.append(Diagnostic("autosave", str(error)))
 
     def take_effects(self) -> tuple[GlueEffect, ...]:
         """Return effects emitted since the previous handoff and clear the queue."""

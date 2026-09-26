@@ -25,6 +25,7 @@ RESOURCES = {
     "CARAVANAFTERMISSION": WINDOW + HOTSPOTS % "LoadSaveWindow" + HOTSPOTS % "UnwindMission",
     "INFOCARAVANTLK": WINDOW + HOTSPOTS % "LoadSaveWindow" + HOTSPOTS % "PopAndResume",
     "SELECTSCRIPT": "[RUN]\n[START]\nopenwindow:res=MAPWIN\ngocaravan:select\nopenwindow:res=MAPWIN\n[END]",
+    "AUTOSCRIPT": "[RUN]\n[START]\nopenwindow:res=MAPWIN\nautosave:\ngocaravan:select\nopenwindow:res=MAPWIN\n[END]",
     "TALKSCRIPT": "[RUN]\n[START]\ngocaravan:infoTLK\nopenwindow:res=MAPWIN\n[END]",
 }
 
@@ -107,6 +108,38 @@ class SceneChainTests(unittest.TestCase):
         self.assertEqual(loaded.active.program, "TALKSCRIPT")
         self.assertEqual([w.name for w in loaded.active.runtime.state.windows], ["MAPWIN"])
         self.assertIsNone(loaded.active.runtime.state.pending)
+
+    def test_given_an_autosave_line_then_slot_5_is_written_and_a_load_continues_the_script_right_after_it(self):
+        machine, mission, campaign = self._mission_caravan("AUTOSCRIPT")
+
+        info = self.store.info(5)
+        self.assertEqual(info.description, "Last Game")
+        self.assertEqual(mission.runtime.state.pending.kind, "caravan")  # the live script has run on to its caravan
+
+        loaded, restored = self._load(slot=5)
+
+        scene = loaded.active
+        self.assertEqual((scene.program, scene.return_scene.program), ("AUTOSCRIPT", "MAPFLOW"))
+        # The saved state was taken at the autosave line, so the script runs on from there: to the caravan again.
+        self.assertEqual(scene.runtime.state.pending.kind, "caravan")
+        self.assertEqual([w.name for w in scene.runtime.state.windows], ["CARAVANAFTERMISSION"])
+
+    def test_given_an_autosave_snapshot_taken_before_a_request_then_the_saved_state_has_no_request_yet(self):
+        import json
+
+        self._mission_caravan("AUTOSCRIPT")
+
+        saved = json.loads(self.store.path(5).read_text())["scenes"]["scenes"][0]["state"]["fields"]
+
+        self.assertIsNone(saved["pending"])
+
+    def test_given_no_save_directory_then_an_autosave_line_writes_nothing_and_does_not_fail(self):
+        self.context.save_dir = None
+
+        machine, mission, _ = self._mission_caravan("AUTOSCRIPT")
+
+        self.assertEqual(mission.runtime.state.pending.kind, "caravan")
+        self.assertFalse(self.save_dir.exists())
 
     def test_given_a_save_of_the_start_caravan_then_it_loads_as_that_caravan(self):
         campaign = committed_campaign()

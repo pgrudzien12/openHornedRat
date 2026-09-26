@@ -97,7 +97,8 @@ whshr/             - unified package and CLI: python3 -m whshr check|extract|cat
                      deterministic replay and comparison (python3 -m whshr battle-replay): battle_replay.py,
                      lossless typed WND.DLL importer and coverage inventory: glue.py,
                      shared headless campaign resource repository and indexed bitmap decoder: glue_content.py,
-                     engine save games (one JSON slot file each, atomic write): savegame.py, Load/Save dialog scene: load_save_scene.py, Yes/No confirmation: confirm_scene.py,
+                     engine save games (one JSON slot file each, atomic write): savegame.py, closed JSON codec: state_codec.py,
+                     interpreter state codec: glue_state.py, glue scene chain save/restore: glue_scene_state.py, Load/Save dialog scene: load_save_scene.py, Yes/No confirmation: confirm_scene.py,
                      per-platform save directory resolution: user_dirs.py)
   frontend/        - runtime frontend, the ONLY third-party-dependent code (pygame-ce + zengl, requirements-engine.txt,
                      local .venv/); imported solely by `engine`: app.py (window, loop, overlay), views.py (registry), dialog_view.py (shared native-dialog helpers), load_save_view.py (Load/Save dialog), confirm_view.py,

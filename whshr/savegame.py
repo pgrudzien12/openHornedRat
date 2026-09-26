@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 
 from . import roster
 from .glue import MissionRef
+from .payments import CashTerms
+from .state_codec import Codec
 
 if TYPE_CHECKING:
     from .campaign_state import CampaignState
@@ -33,7 +35,11 @@ SAVE_VERSION = 1
 PLAYER_SLOTS = (0, 1, 2, 3, 4)
 AUTOSAVE_SLOT = 5
 ALL_SLOTS = PLAYER_SLOTS + (AUTOSAVE_SLOT,)
+AUTOSAVE_DESCRIPTION = "Last Game"  # notes/builtin_widgets.md section 6: the automatic slot's description
 DESCRIPTION_LIMIT = 25  # notes/builtin_widgets.md section 6: the edit box takes 25 characters
+
+
+_CASH = Codec([CashTerms])
 
 
 class SaveError(Exception):
@@ -79,6 +85,10 @@ def campaign_to_dict(campaign: "CampaignState") -> dict[str, Any]:
         "objective_results": {letter: [met, list(values)]
                               for letter, (met, values) in campaign.objective_results.items()},
         "flawless_result": campaign.flawless_result,
+        # The payment terms of the mission being played and whether it was paid: a save made mid-mission (the
+        # automatic one, or a caravan between its phases) still has its debrief payment to make.
+        "mission_cash": _CASH.encode(campaign.mission_cash),
+        "mission_paid": campaign.mission_paid,
         "company": roster.company_text(campaign.company),
     }
 
@@ -107,14 +117,14 @@ def restore_campaign(campaign: "CampaignState", data: Mapping[str, Any]) -> None
             "objective_results": {letter: (bool(met), tuple(int(v) for v in values))
                                   for letter, (met, values) in data["objective_results"].items()},
             "flawless_result": bool(data["flawless_result"]),
+            "mission_cash": _CASH.decode(data.get("mission_cash")),
+            "mission_paid": bool(data.get("mission_paid", False)),
         }
     except (KeyError, TypeError, ValueError, AttributeError) as error:
         raise SaveError(f"damaged save: {error!r}") from error
     for name, value in values.items():  # nothing is touched unless the whole save parsed
         setattr(campaign, name, value)
     company = values["company"]
-    # Per-mission state that a save between missions never carries.
-    campaign.mission_cash, campaign.mission_paid = None, False
     campaign.repair_stalled_flow()  # saves made before releases were recorded (see repair_stalled_flow)
     campaign.refresh_speaker([regiment for regiment in company if regiment.whoami in campaign.march_units])
 

@@ -84,6 +84,29 @@ class SaveStoreTests(unittest.TestCase):
         self.assertEqual([(r.whoami, r.models, r.hired, r.experience) for r in fresh.company],
                          [(2, 7, True, 77), (14, 3, False, 0)])
 
+    def test_given_a_mission_in_progress_then_its_payment_terms_and_paid_flag_round_trip(self):
+        from whshr.payments import CashTerms
+
+        played = self._played()
+        played.mission_cash, played.mission_paid = CashTerms(1, 100, 400, 5, 6, ("A", "B")), True
+        self.store.write(0, "x", played)
+        fresh = campaign()
+
+        self.store.load_into(0, fresh)
+
+        self.assertEqual((fresh.mission_cash, fresh.mission_paid), (played.mission_cash, True))
+
+    def test_given_an_older_save_without_payment_terms_then_none_is_loaded(self):
+        self.store.write(0, "x", self._played())
+        data = json.loads(self.store.path(0).read_text())
+        del data["campaign"]["mission_cash"], data["campaign"]["mission_paid"]
+        self.store.path(0).write_text(json.dumps(data))
+        fresh = campaign()
+
+        self.store.load_into(0, fresh)
+
+        self.assertEqual((fresh.mission_cash, fresh.mission_paid), (None, False))
+
     def test_given_a_march_order_then_it_is_saved_in_company_order(self):
         played = self._played()
         self.store.write(0, "x", played)
