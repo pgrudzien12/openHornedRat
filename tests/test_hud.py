@@ -69,6 +69,17 @@ def _hud(selected="player", regiments=None, **overrides):
 
 
 class PanelStateTests(unittest.TestCase):
+    def test_given_hidden_player_then_deployment_panel_and_friendly_markers_remain_available(self):
+        hud = _hud()
+        hud.battle.phase = "deployment"
+        for regiment in hud.battle.regiments.values():
+            regiment.hidden = True
+        ally = Regiment("ally", "Ally", 200, 200, 0, Side.NEUTRAL, hidden=True)
+        hud.battle.regiments["ally"] = ally
+        self.assertEqual(hud.panel_state(), ("deployment", "inf"))
+        self.assertEqual([r.identifier for r in hud._minimap_regiments()], ["player", "ally"])
+        self.assertTrue(hud.battle.regiments["player"].hidden)
+
     def test_given_deployment_then_each_class_has_only_its_documented_controls(self):
         expected = {
             "inf": {"TL": "ranks_up", "TR": "move", "BR": "independent", "BL": "ranks_down", "C": "ranks_decoration"},
@@ -548,6 +559,15 @@ class HudClassTests(unittest.TestCase):
 
 
 class BattleViewHudInputTests(unittest.TestCase):
+    def test_given_hidden_player_then_minimap_drag_and_hud_cycle_select_it_without_revealing(self):
+        view = self._deployment_view()
+        regiment = view.scene.battle.regiments["player"]
+        regiment.hidden = True
+        down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100), mod=0)
+        self.assertEqual(view.events(down), (("select", "player"), ("begin_drag", "player", 100.0, 100.0)))
+        self.assertEqual(view._cycle_regiment(1), (("select", "player"),))
+        self.assertTrue(regiment.hidden)
+
     def _deployment_view(self, marker="player"):
         hud = self._hud_mock(minimap_regiment_at=lambda pos: marker,
                              minimap_position=lambda pos: (float(pos[0]), float(pos[1])) if pos[0] >= 0 else None)
@@ -975,6 +995,15 @@ class SpritePickTests(unittest.TestCase):
 
 
 class BattleBannerVisibilityTests(unittest.TestCase):
+    def test_given_hidden_player_or_ally_then_banner_is_drawn_without_revealing_it(self):
+        for side in (Side.PLAYER, Side.NEUTRAL, Side.ENEMY):
+            with self.subTest(side=side):
+                view = self._view_with_banner()
+                regiment = view.scene.battle.regiments["player"]
+                regiment.side, regiment.hidden = side, True
+                self.assertEqual(bool(view._instances()), side != Side.ENEMY)
+                self.assertTrue(regiment.hidden)
+
     def _view_with_banner(self, active=True):
         from whshr.battlefield import SpriteFrame, SpriteSheet
         regiment = Regiment("player", "Player", 100, 200, 0, Side.PLAYER, models=1 if active else 0,

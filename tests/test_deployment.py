@@ -136,10 +136,10 @@ class DeploymentPlacementTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             battle.order_move("player0", 500, 500)
 
-    def test_given_enemy_or_hidden_regiment_then_direct_drag_is_refused(self):
+    def test_given_enemy_or_ineligible_regiment_then_direct_drag_is_refused(self):
         battle = self.battle()
         r = battle.regiments["player0"]
-        for field, value in (("hidden", True), ("side", Side.ENEMY)):
+        for field, value in (("routing", True), ("held", True), ("side", Side.ENEMY)):
             original = getattr(r, field)
             setattr(r, field, value)
             with self.subTest(field=field), self.assertRaises(ValueError):
@@ -184,6 +184,34 @@ def instruction(name):
 
 
 class DeploymentLifecycleTests(unittest.TestCase):
+    def test_given_hidden_player_when_initialized_selected_and_dragged_then_flag_is_preserved(self):
+        data = source(1)
+        data["boundaries"] = [region()]
+        data["merc"]["armies"][0]["units"][0]["hidden"] = True
+        words = [instruction("InitUnit"), instruction("WaitForBattleStart"), behaviour.END]
+        battle = Battle.from_script(data, script_dll=ScriptData(words))
+        regiment = battle.regiments["player0"]
+        battle.tick()
+        self.assertTrue(regiment.hidden)
+        self.assertTrue(regiment.visible_to_player)
+        centre = battle.formation_centre(regiment)
+        self.assertEqual(battle.regiment_at(*centre), "player0")
+        battle.begin_deployment_drag("player0", *centre)
+        battle.update_deployment_drag(centre[0] + 100, centre[1])
+        battle.tick()
+        self.assertNotEqual(battle.formation_centre(regiment), centre)
+        self.assertTrue(regiment.hidden)
+
+    def test_given_hidden_enemy_when_ground_geometry_is_picked_then_display_remains_suppressed(self):
+        data = source(1)
+        enemy = unit("enemy", 129)
+        enemy["hidden"] = True
+        data["armies"] = [{"count": 1, "units": [enemy]}]
+        battle = Battle.from_script(data)
+        regiment = battle.regiments["enemy"]
+        self.assertFalse(regiment.visible_to_player)
+        self.assertEqual(battle.regiment_at(*battle.formation_centre(regiment), player_only=False), "enemy")
+
     def test_given_route_when_appending_near_endpoints_or_more_than_nine_then_extra_destinations_are_ignored(self):
         battle = Battle.from_script(source(1))
         battle.append_waypoint("player0", 100, 100)

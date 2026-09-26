@@ -236,6 +236,11 @@ class Regiment:
         return self.melee_camp or self.side
 
     @property
+    def visible_to_player(self) -> bool:
+        """Friendly display preserves opposing visibility (notes/deployment.md §1.3)."""
+        return self.side != Side.ENEMY or not self.hidden
+
+    @property
     def anchored(self) -> bool:
         """War machines are anchored by rule, not by AI or mission choice (game_rules.md "Turning,
         wheeling and reversing"): the artillery class always carries the anchor flag, until an
@@ -617,7 +622,7 @@ class Battle:
     def begin_deployment_drag(self, identifier: str, x: float, y: float) -> None:
         regiment = self.regiments[identifier]
         if (self.phase != "deployment" or regiment.side != Side.PLAYER or not regiment.active
-                or regiment.hidden or regiment.routing or regiment.held):
+                or regiment.routing or regiment.held):
             raise ValueError("regiment cannot be dragged during deployment")
         centre = self.formation_centre(regiment)
         regiment.target_x = regiment.target_y = None
@@ -641,7 +646,7 @@ class Battle:
         if drag is None:
             return
         regiment = self.regiments[drag.regiment_id]
-        if not regiment.active or regiment.hidden:
+        if not regiment.active:
             self.end_deployment_drag()
             return
         old = self.formation_centre(regiment)
@@ -951,7 +956,7 @@ class Battle:
         best_id: str | None = None
         best_distance: float | None = None
         for regiment in self.regiments.values():
-            if not regiment.active or regiment.hidden:
+            if not regiment.active:
                 continue
             if player_only and regiment.side != Side.PLAYER:
                 continue

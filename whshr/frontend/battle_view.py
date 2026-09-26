@@ -352,7 +352,7 @@ class BattleView(SceneView[BattleScene]):
 
     def _cycle_regiment(self, step: int) -> Sequence[SceneEvent]:
         candidates = [r for r in self.scene.battle.regiments.values()
-                      if r.side == Side.PLAYER and r.active and not r.hidden]
+                      if r.side == Side.PLAYER and r.active and not (r.routing or r.held)]
         if not candidates:
             return ()
         current = next((i for i, r in enumerate(candidates) if r.identifier == self.scene.selected_id), -1 if step > 0 else 0)
@@ -365,7 +365,9 @@ class BattleView(SceneView[BattleScene]):
         if identifier is None:
             return ()
         regiment = self.scene.battle.regiments[identifier]
-        if regiment.side == Side.PLAYER and world is not None and not regiment.hidden:
+        if not regiment.active or regiment.routing or regiment.held:
+            return ()
+        if regiment.side == Side.PLAYER and world is not None:
             self._drag_surface = surface
             self._drag_pixel = (float(pixel[0]), float(pixel[1]))
             return (("select", identifier), ("begin_drag", identifier, *world))
@@ -461,7 +463,7 @@ class BattleView(SceneView[BattleScene]):
         best_id: str | None = None
         best_depth: float | None = None
         for regiment in self.scene.battle.regiments.values():
-            if not regiment.active or regiment.hidden:
+            if not regiment.active or not regiment.visible_to_player:
                 continue
             mesh_x, mesh_z = regiment.x / WORLD_PER_MESH, regiment.y / WORLD_PER_MESH
             ground_height = field.ground_height(regiment.x, regiment.y)  # already mesh-space
@@ -552,7 +554,7 @@ class BattleView(SceneView[BattleScene]):
         field, yaw, selected_id, data = self.scene.field, self.camera.yaw, self.scene.selected_id, bytearray()
         banner_instances: list[tuple[str, bytes]] = []
         for regiment in self.scene.battle.regiments.values():
-            if regiment.hidden:
+            if not regiment.visible_to_player:
                 continue
             sheet = field.sprite_sheet(regiment.sprite)
             selected = 1.0 if regiment.identifier == selected_id else 0.0

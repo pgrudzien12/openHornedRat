@@ -150,7 +150,9 @@ class BattleScene(Scene):
             # order handlers below all refuse a non-player identifier (ValueError, caught), so
             # selecting one never grants it orders.
             (identifier,) = args
-            if identifier in self.battle.regiments and not self.battle.regiments[identifier].hidden:
+            regiment = self.battle.regiments.get(identifier)
+            if regiment is not None and regiment.active and not (
+                    self.battle.phase == "deployment" and (regiment.routing or regiment.held)):
                 self.battle.end_deployment_drag()
                 self.selected_id = identifier
                 if self.battle.phase == "deployment":
