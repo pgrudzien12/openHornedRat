@@ -118,15 +118,19 @@ def cursor_for_hotspots(hovered: HotspotCursors | None, pressed: HotspotCursors 
 
 _UNSET = object()
 
+# notes/troop_selection.md §2: ``SWORDCURSOR`` is the game window's default cursor (the arrow only when it cannot load).
+DEFAULT_CURSOR = "SWORDCURSOR"
+
 
 class CursorController:
     """The one owner of a screen's mouse cursor: shows the game's own named cursors, remembers what is shown so
     a screen can call it on every mouse event cheaply, and puts the arrow back when the screen goes away.
 
-    ``default`` is the cursor of the screen's plain state (``None``: the system arrow). Without an installation
-    (or when a named cursor cannot be loaded) the system arrow is used."""
+    ``default`` is the cursor of the screen's plain state, the game's sword (``None``: the system arrow). Without an
+    installation (or when a named cursor cannot be loaded) the system arrow is used."""
 
-    def __init__(self, installation: Installation | None, default: str | None = None, dll: str = "WHSHR.EXE") -> None:
+    def __init__(self, installation: Installation | None, default: str | None = DEFAULT_CURSOR,
+                 dll: str = "WHSHR.EXE") -> None:
         self.default = default
         self.cursors = GameCursors(installation, dll) if installation is not None else None
         self._shown: object = _UNSET
@@ -140,19 +144,19 @@ class CursorController:
         if name is not None and self.cursors is not None:
             self.cursors.set(name)
         else:
-            self._arrow()
+            self.restore_arrow()
 
     def update(self, hovered: HotspotCursors | None, pressed: HotspotCursors | None) -> None:
-        """Apply the glue hotspot rule of :func:`cursor_for_hotspots`."""
+        """Apply the glue hotspot rule of :func:`cursor_for_hotspots`; with none, the screen's default cursor."""
         self.show(cursor_for_hotspots(hovered, pressed))
 
     def release(self) -> None:
         """The screen is going away: do not leak its cursor into the next scene."""
         self._shown = _UNSET
-        self._arrow()
+        self.restore_arrow()
 
     @staticmethod
-    def _arrow() -> None:
+    def restore_arrow() -> None:
         try:
             pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_ARROW)
         except pygame.error:

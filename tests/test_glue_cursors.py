@@ -104,6 +104,20 @@ class CursorControllerTests(unittest.TestCase):
         sword.show(None)
         self.assertEqual(sword.cursors.names, ["SWORDCURSOR"])
 
+    def test_given_no_default_given_then_the_games_sword_is_the_default(self):
+        controller = self._controller_with_default_arg()
+
+        controller.show(None)
+        controller.show("HandCursor")
+        controller.update(None, None)  # leaving every hotspot
+
+        self.assertEqual(controller.cursors.names, ["SWORDCURSOR", "HandCursor", "SWORDCURSOR"])
+
+    def _controller_with_default_arg(self):
+        controller = CursorController(self.empty_installation)
+        controller.cursors = SimpleNamespace(names=[], set=lambda name: controller.cursors.names.append(name))
+        return controller
+
     def test_given_a_screen_going_away_then_the_arrow_is_restored_and_the_next_show_is_applied(self):
         controller = self._controller()
         controller.show("HandCursor")
@@ -160,7 +174,7 @@ class GlueViewCursorTests(unittest.TestCase):
         view.events(self._event(pygame.MOUSEBUTTONUP, over))
         view.events(self._event(pygame.MOUSEMOTION, (300, 300)))
 
-        self.assertEqual(view.cursors.shown, ["HandOpenCursor", "HandCloseCursor", "HandOpenCursor", None])
+        self.assertEqual(view.cursors.shown, ["HandOpenCursor", "HandCloseCursor", "HandOpenCursor", None])  # None: default
 
     def test_given_a_reaction_hotspot_then_the_hand_shows_only_while_pressed(self):
         view = self._view("REACTIONWINDOW")

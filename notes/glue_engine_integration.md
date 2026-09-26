@@ -239,10 +239,11 @@ renumber later work.
   `cursor`; `CursorController` (`whshr/frontend/cursors.py`) owns one `GameCursors` and applies the rule of
   `notes/glue_keywords.md` §3.5 (pure function `cursor_for_hotspots`, tested headless); `GlueView` feeds it from
   mouse move, press and release and restores the arrow when the view is released. A cursor that cannot be loaded
-  falls back to the system arrow (also in `GameCursors.set`, which used to leave the previous cursor).
+  falls back to the system arrow (also in `GameCursors.set`, which used to leave the previous cursor). The
+  controller's default is the game window's own sword (`DEFAULT_CURSOR`); every native 640x480 screen (glue, Army
+  Records, main menu, dialogs) starts on it, and the arrow is restored when a view is replaced.
   Troop selection uses the same controller with its cursor names in one table (`CURSORS`, notes/troop_selection.md
-  §2). Battle keeps its own numbered `GMCUR.DLL` groups; the other native screens (main menu, Army Records,
-  dialogs) can now take a `CursorController` but show the arrow, as no cursor is specified for them.
+  §2). Battle keeps its own numbered `GMCUR.DLL` groups.
 - GEI7g (issue #145): `CampaignState` now carries a **master roster** (`master`, the fresh-campaign content of
   `SCRIPT/MAXARMY.MRC`, i.e. the original's `PLAY.MRC`) next to the company (`ARMY.MRC`). Without it there was
   nothing to hire: the starting company holds two regiments. `addunit` flags a regiment and the next caravan

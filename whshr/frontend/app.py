@@ -22,6 +22,7 @@ from ..engine import DEFAULT_SEED  # noqa: E402
 from ..game import scene_context  # noqa: E402
 from ..glue_scene import GlueScene  # noqa: E402
 from ..scenes import Scene, SceneMachine  # noqa: E402
+from .cursors import CursorController  # noqa: E402
 from .gpu import Gpu  # noqa: E402
 from .scene_view import SceneView  # noqa: E402
 from .views import view_for  # noqa: E402
@@ -122,6 +123,7 @@ def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), 
         if current.scene is machine.active:
             return current
         current.release()
+        CursorController.restore_arrow()  # the next view sets its own cursor; none must leak from this one
         fade_remaining = FADE_SECONDS
         return view_for(gpu, machine.active, options)
 

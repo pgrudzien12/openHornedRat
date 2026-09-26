@@ -6,6 +6,7 @@ from typing import Any
 import pygame
 
 from ..scenes import Scene, SceneEvent
+from .cursors import CursorController
 from .gpu import Gpu
 
 
@@ -51,6 +52,13 @@ class NativeScreenView[S: Scene](SceneView[S]):
     """
 
     NATIVE_SIZE = (640, 480)
+
+    def __init__(self, gpu: Gpu, scene: S, options: dict[str, Any] | None = None) -> None:
+        super().__init__(gpu, scene, options)
+        # Every native screen starts on the game's default cursor (the sword); views with cursor rules of their own
+        # (glue hotspots, troop selection) replace this controller with theirs.
+        self.cursors = CursorController(self.options.get("installation"))
+        self.cursors.show(None)
 
     def _layout(self) -> tuple[float, float, float]:
         screen_width, screen_height = self.gpu.target.size

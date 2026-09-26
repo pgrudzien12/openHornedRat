@@ -82,6 +82,7 @@ class GlueView(NativeScreenView[GlueScene]):
         self.pressed: RenderHotspot | None = None
         self._pressed_button: str | None = None
         self.cursors = CursorController(scene.require_runtime().content.installation)
+        self.cursors.show(None)
         # Change fingerprints of the refresh groups (see `refresh`).
         self._bitmap_models: Models = ()
         self.frames: Frames = {}
