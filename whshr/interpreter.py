@@ -47,6 +47,15 @@ REPEAT_ENTRY = 0  # tag of a RepeatStart entry on the script stack: (body start,
 COND_TRUE = 4  # the bit of the condition word that holds the true/false result
 
 
+def _trunc_sin(angle: int) -> int:
+    """256 x sin of an angle in 1/512 turn, truncated towards zero (the game's sine table)."""
+    return int(256 * math.sin(math.tau * angle / 512))
+
+
+def _trunc_cos(angle: int) -> int:
+    return int(256 * math.cos(math.tau * angle / 512))
+
+
 def _signed_word(value: int) -> int:
     """Interpret a 16-bit script word as a signed number."""
     return value - 0x10000 if value & 0x8000 else value
@@ -295,6 +304,18 @@ class ScriptInterpreter:
             state.unit_flags |= 0x80000
         else:
             state.unit_flags &= ~0x80000
+        # "Halted": scripts wait on it (WaitUntilUnitFlags 16) to learn a move, turn or charge is over
+        # (notes/movement_formation.md, section 1.3). It holds while the unit has nothing to do and is
+        # dropped as soon as it travels, turns, charges or routes.
+        if self._is_idle(regiment):
+            state.unit_flags |= ARRIVED_FLAG
+        elif not regiment.in_melee:
+            state.unit_flags &= ~ARRIVED_FLAG
+
+    @staticmethod
+    def _is_idle(regiment: "Regiment") -> bool:
+        return not (regiment.moving or regiment.waypoints or regiment.attack_target is not None
+                    or regiment.turn_order_key is not None or regiment.routing or regiment.in_melee)
 
     def raise_charge_events(self) -> None:
         """Queue event 0x07 ("you are being charged") to any regiment an attacker has closed to
@@ -1201,6 +1222,222 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
+    # ===== Movement and facing (notes/movement_formation.md, Part A) =====
+
+    @staticmethod
+    def _s_rlmv(unit: "Regiment") -> float:
+        """The unit's movement stat, recovered from its free-movement speed (as Regiment.charge_reach does)."""
+        from .engine import MOVING_FREELY_K
+        return unit.speed_per_tick * 16 / MOVING_FREELY_K
+
+    @staticmethod
+    def _fold(angle: float) -> int:
+        """Absolute angular difference folded into 0..256."""
+        difference = abs(int(angle)) % 512
+        return min(difference, 512 - difference)
+
+    def _object_centre(self, unit: "Regiment") -> tuple[float, float]:
+        return self.battle.formation_centre(unit)
+
+    def _start_point_move(self, unit: "Regiment", goal: tuple[float, float]) -> None:
+        """An ordinary move to a point: a new plan replaces any charge, turn order or earlier destination.
+        A unit starting from rest first snaps 90/180 degrees towards it (game_rules.md, real time and movement)."""
+        was_moving = unit.moving
+        unit.waypoints.clear()
+        unit.attack_target = None
+        unit.charge_started_target = None
+        unit.turn_order_key = None
+        unit.target_x, unit.target_y = float(goal[0]), float(goal[1])
+        if not was_moving:
+            heading = round(math.atan2(goal[0] - unit.x, goal[1] - unit.y) * 512 / math.tau) % 512
+            self.battle.snap_move_start(unit, heading)
+
+    def op_MoveToTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """MoveToTarget: walk to the target's object centre. Refused (false) with no target, while the
+        unit is re-forming or anchored. The destination is fixed until re-issued or re-aimed by
+        IfTargetInChargeReach/ApproachTargetInReach: the unit does not track the target.
+
+        PROVISIONAL: the original never ends this move by distance (it follows a unit until contact);
+        this engine's ordinary arrival rule still applies.
+        """
+        pair = self._query_pair(state, unit_id)
+        unit = pair[0] if pair else None
+        state.cond_flags = False
+        if pair is None or unit is None or unit.reforming or unit.anchored or unit.routing:
+            return state.pc + 1
+        self._start_point_move(unit, self._object_centre(pair[1]))
+        state.cond_flags = True
+        return state.pc + 1
+
+    def op_RefreshRouteToTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """RefreshRouteToTarget: re-plans multi-leg or boundary-crossing routes only. With this engine's
+        single-destination movement there is nothing to shorten, so it does nothing and leaves the
+        condition as it was; with no target it writes false."""
+        if self._query_pair(state, unit_id) is None:
+            state.cond_flags = False
+        return state.pc + 1
+
+    def op_TurnToFaceTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """TurnToFaceTarget: a turn order towards the target; it stops any movement. False when the turn
+        needed is 16 or less, or the unit is fleeing or anchored; true when a turn started."""
+        pair = self._query_pair(state, unit_id)
+        state.cond_flags = False
+        if pair is None:
+            return state.pc + 1
+        unit, target = pair
+        goal = self._bearing(unit, target)
+        if self._fold(goal - unit.direction) <= 16 or unit.routing or unit.anchored:
+            return state.pc + 1
+        unit.target_x = unit.target_y = None
+        unit.waypoints.clear()
+        unit.attack_target = None
+        self.battle.begin_script_turn(unit, goal)
+        state.cond_flags = True
+        return state.pc + 1
+
+    def _instant_turn(self, unit: "Regiment", quarter_turns: int) -> None:
+        """An instant turn about the block centre by `quarter_turns` x 128 (the unit stops; scripts re-issue
+        a move). Refused while fleeing or anchored, and for a half turn also while re-forming."""
+        if unit.routing or unit.anchored or (abs(quarter_turns) == 2 and unit.reforming):
+            return
+        unit.target_x = unit.target_y = None
+        unit.turn_order_key = None
+        goal = (unit.direction + 128 * quarter_turns) % 512
+        if unit.turns_on_the_spot:
+            unit.direction = goal
+        else:
+            self.battle.snap_move_start(unit, goal)  # pivots about the block centre and swaps ranks and frontage
+
+    def op_QuarterTurnToTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """QuarterTurnToTarget: false when the target is within 64 of the facing; otherwise an instant
+        quarter turn (65..192 off) or half turn (more) and true, even if the turn itself was refused."""
+        pair = self._query_pair(state, unit_id)
+        state.cond_flags = False
+        if pair is None:
+            return state.pc + 1
+        unit, target = pair
+        goal = self._bearing(unit, target)
+        off = self._fold(goal - unit.direction)
+        if off <= 64:
+            return state.pc + 1
+        if off > 192:
+            self._instant_turn(unit, 2)
+        else:
+            clockwise = (goal - unit.direction) % 512 < 256
+            self._instant_turn(unit, 1 if clockwise else -1)
+        state.cond_flags = True
+        return state.pc + 1
+
+    def op_AboutFace(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """AboutFace: instant half turn; the condition is not written."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is not None:
+            self._instant_turn(unit, 2)
+        return state.pc + 1
+
+    def op_QuarterTurn(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """QuarterTurn N: instant quarter turn, clockwise for operand 0x20 and anticlockwise otherwise."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is not None:
+            self._instant_turn(unit, 1 if operand == 0x20 else -1)
+        return state.pc + 2
+
+    def op_CircleAroundTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """CircleAroundTarget: an ordinary move to the point 16/512 of a turn further round the target at the
+        unit's current range (about 11 degrees clockwise). Condition: the move was accepted."""
+        pair = self._query_pair(state, unit_id)
+        state.cond_flags = False
+        if pair is None:
+            return state.pc + 1
+        unit, target = pair
+        if unit.reforming or unit.anchored or unit.routing:
+            return state.pc + 1
+        angle = (self._bearing(target, unit) + 16) % 512
+        distance = self._distance(unit, target)
+        goal = (target.x + math.floor(_trunc_sin(angle) * distance / 256),
+                target.y + math.floor(_trunc_cos(angle) * distance / 256))
+        self._start_point_move(unit, goal)
+        state.cond_flags = True
+        return state.pc + 1
+
+    # --- charge aim point and reach ---
+
+    def _charge_aim_point(self, unit: "Regiment", target: "Regiment") -> tuple[float, float]:
+        """The point a charge aims at: the target's object centre, pushed out by its bounding radius to the
+        FAR side for block formations (war machines, monsters and wagons are aimed at their centre).
+        notes/target_queries.md section 5.1 and notes/movement_formation.md section 5."""
+        centre = self._object_centre(target)
+        if target.hud_class in ("art", "mon") or target.is_wagon:
+            return centre
+        radius = int(target.bounding_radius())
+        diagonal = int(256 * math.atan(max(target.frontage, 1) / max(target.ranks, 1)) / math.pi)
+        relative = (self._bearing_from_to((unit.x, unit.y), centre) - int(target.direction)) % 512
+        # Aim angle offset by the charger's side: behind -> the target's facing, front -> opposite,
+        # left flank -> +128, right flank -> -128 (the eight attack-direction codes collapse to four).
+        if relative < diagonal or relative > 512 - diagonal:
+            side = 1
+        elif diagonal <= relative <= 256 - diagonal:
+            side = 2
+        elif 256 - diagonal < relative < 256 + diagonal:
+            side = 0
+        else:
+            side = 3
+        aim = (int(target.direction) + (256, 0, 128, -128)[side]) % 512
+        return centre[0] + int(_trunc_sin(aim) * radius / 256), centre[1] + int(_trunc_cos(aim) * radius / 256)
+
+    @staticmethod
+    def _bearing_from_to(start: tuple[float, float], end: tuple[float, float]) -> int:
+        return int(256 - 256 * math.atan2(end[0] - start[0], -(end[1] - start[1])) / math.pi) % 512
+
+    def op_IfTargetInChargeReach(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IfTargetInChargeReach: true when the charge aim point is within 12 x s_rlmv of the target's
+        bounding circle and nothing prevents a charge now. Side effect, even when false: the unit's
+        destination becomes the aim point (not while charging, so a running charge is not hijacked).
+
+        Not modelled: route obstruction, friendly units in the way and blocked ground (no route planner).
+        """
+        pair = self._query_pair(state, unit_id)
+        state.cond_flags = False
+        if pair is None:
+            return state.pc + 1
+        unit, target = pair
+        if unit.reforming:
+            return state.pc + 1
+        aim = self._charge_aim_point(unit, target)
+        charging = unit.attack_target is not None
+        if not charging and not unit.in_melee:
+            unit.target_x, unit.target_y = float(aim[0]), float(aim[1])
+        heading = self._bearing_from_to((unit.x, unit.y), aim)
+        if (self._fold(heading - unit.direction) >= 32 or charging or unit.in_melee
+                or target.attack_target is not None):
+            return state.pc + 1
+        reach = int(math.hypot(aim[0] - unit.x, aim[1] - unit.y)) - int(target.bounding_radius())
+        state.cond_flags = reach < 12 * self._s_rlmv(unit)
+        return state.pc + 1
+
+    def op_ApproachTargetInReach(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """ApproachTargetInReach: re-aim the unit's destination at the charge aim point; the condition is
+        whether the target is within the unit's threat range (octagonal distance)."""
+        pair = self._query_pair(state, unit_id)
+        state.cond_flags = False
+        if pair is None:
+            return state.pc + 1
+        unit, target = pair
+        aim = self._charge_aim_point(unit, target)
+        unit.target_x, unit.target_y = float(aim[0]), float(aim[1])
+        dx, dy = abs(target.x - unit.x), abs(target.y - unit.y)
+        state.cond_flags = max(dx, dy) + math.ceil(min(dx, dy) / 2) < state.threat_range
+        return state.pc + 1
+
     # ===== Target and range queries (notes/target_queries.md) =====
 
     def _query_pair(self, state: UnitScriptState, unit_id: str) -> tuple["Regiment", "Regiment"] | None:
@@ -1336,13 +1573,6 @@ class ScriptInterpreter:
             rng: random.Random) -> int | None:
         """TargetGone: test if target is no longer visible/alive."""
         # For now, assume target still exists
-        state.cond_flags = 0
-        return state.pc + 1
-
-    def op_IfTargetInChargeReach(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """IfTargetInChargeReach: test if target is close enough to charge."""
-        # TODO: check distance to target (within charge reach)
         state.cond_flags = 0
         return state.pc + 1
 
@@ -1719,18 +1949,32 @@ class ScriptInterpreter:
         """FleeAhead: start a rout along the unit's current facing (game_rules.md, scripted target and
         flight opcodes). It is the rout itself, so `CantBreak` does not stop it; only an anchored war
         machine refuses. The target is always cleared; the condition is true when a rout started."""
+        self._flee_along(state, unit_id, 0)
+        return state.pc + 1
+
+    def _flee_along(self, state: UnitScriptState, unit_id: str, turn: int) -> None:
+        """Start a rout along the unit's facing plus `turn` (1/512 turn); the target is always cleared."""
         regiment = self.battle.regiments.get(unit_id)
         state.cond_flags = 0
         if regiment is None:
-            return state.pc + 1
+            return
         regiment.attack_target = None
         state.current_target = None
         if regiment.anchored or regiment.routing or not regiment.active:
-            return state.pc + 1
+            return
         from . import combat
-        angle = regiment.direction * math.tau / 512
+        heading = (regiment.direction + turn) % 512
+        angle = heading * math.tau / 512
         combat.start_rout(regiment, self.battle, flee_point=(
             regiment.x + math.sin(angle) * 1e4, regiment.y + math.cos(angle) * 1e4))
+        regiment.direction = heading  # the flight heading is taken instantly, without a pivot
+        state.cond_flags = 1
+
+    def op_FleeBackward(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FleeBackward: FleeAhead in the opposite direction (facing + 256). The condition is always true,
+        even when an anchored war machine refuses to move (notes/movement_formation.md, 3.7)."""
+        self._flee_along(state, unit_id, 256)
         state.cond_flags = 1
         return state.pc + 1
 

@@ -893,6 +893,17 @@ class Battle:
         regiment.turn_order_key = ("turn", goal)
 
     @staticmethod
+    def begin_script_turn(regiment: Regiment, goal: float) -> None:
+        """A turn order issued by a behaviour script (the same halted turn a player order starts)."""
+        Battle._plan_turn_order(regiment, goal)
+        regiment.turn_order_key = ("turn", goal)
+
+    @staticmethod
+    def snap_move_start(regiment: Regiment, goal: float) -> None:
+        """The one-time 90/180-degree snap a unit makes when a move order starts from rest."""
+        Battle._snap_order_turn(regiment, goal)
+
+    @staticmethod
     def _plan_turn_order(regiment: Regiment, goal: float) -> None:
         """Plan a standalone turn order: always halted (shift 8, zero speed) regardless of angle."""
         delta = Battle._turn_delta(regiment.direction, goal)
