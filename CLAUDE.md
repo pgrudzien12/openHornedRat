@@ -269,6 +269,12 @@ report before implementing it.
 
 Practical rules:
 
+- **Describe states, not bits.** Public reports should not specify the original's internal flag words and bit
+  values (e.g. "`unit_flags 0x2000`", "condition word bit 2") when the behaviour can be stated as named states or
+  a list of alternatives ("the unit is broken", "fails if the unit is charging, in melee or re-forming").
+  The implementer chooses their own representation. Give a bit value only when it is externally visible data
+  (a value in a `.BTS`/`.MRC` file or a script operand such as `WaitWhileUnitFlags 0x4008`); then name the meaning
+  of each bit next to it.
 - **Don't feed decompiled/assembly code to an LLM as implementation context.** A research
   agent may use it privately to produce a public hand-off report; an implementation agent
   should only ever see that report. If the only source available is private research material,
