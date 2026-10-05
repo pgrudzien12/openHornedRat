@@ -705,6 +705,70 @@ class ScriptInterpreter:
         self._should_yield = True
         return state.pc
 
+    def op_WaitWhileUnitFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """WaitWhileUnitFlags N: yield (same PC) while any bit of N is set in unit_flags, then fall through.
+
+        The mirror of WaitUntilUnitFlags. Scripts use it with 8 ("routed") to hold a formation back
+        until the unit has rallied (notes/mission_walkthroughs_BF010.md). PROVISIONAL: "any bit" vs
+        "all bits" of a multi-bit mask (the library also passes 0x4008) is not documented publicly.
+        """
+        if operand is not None and (state.unit_flags & operand):
+            self._should_yield = True
+            return state.pc
+        return state.pc + 1
+
+    def op_SetUnitFlags2(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """SetUnitFlags2 N: set bits in the secondary unit flag word (game_rules.md, control opcodes)."""
+        if operand is not None:
+            state.unit_flags2 |= operand
+        return state.pc + 1
+
+    def op_ClearUnitFlags2(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """ClearUnitFlags2 N: clear bits in the secondary unit flag word."""
+        if operand is not None:
+            state.unit_flags2 &= ~operand
+        return state.pc + 1
+
+    def op_TestUnitFlags2(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """TestUnitFlags2 N: the condition result is whether any bit of N is set in the secondary word."""
+        if operand is not None:
+            state.cond_flags = state.unit_flags2 & operand
+        return state.pc + 1
+
+    def op_WaitUntilUnitFlags2(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """WaitUntilUnitFlags2 N: yield (same PC) until a bit of N is set in the secondary word."""
+        if operand is not None and (state.unit_flags2 & operand):
+            return state.pc + 1
+        self._should_yield = True
+        return state.pc
+
+    def op_WaitWhileUnitFlags2(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """WaitWhileUnitFlags2 N: yield (same PC) while a bit of N is set in the secondary word."""
+        if operand is not None and (state.unit_flags2 & operand):
+            self._should_yield = True
+            return state.pc
+        return state.pc + 1
+
+    def op_YieldIfTrue(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """YieldIfTrue: end this unit's tick when the condition result is true; otherwise continue."""
+        if state.cond_flags:
+            self._should_yield = True
+        return state.pc + 1
+
+    def op_Nop(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """Nop: do nothing."""
+        return state.pc + 1
+
+    op_Nop1 = op_Nop
+
     def op_SetCondFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """SetCondFlags N: set bits in the persistent condition bit word (not the If/Loop result)."""
