@@ -105,12 +105,10 @@ The unit is at (0, 0) with a bow (range 576) unless stated otherwise. Facing 0 =
 Names used below follow `game_rules.md`: `move_state`, `s_rlmv` (speed stat), map object (footprint), `diag_angle`,
 `AttackDirection`, `EffectRange`. A facing `f` looks along `(sin f, cos f)`.
 
-🟡 **Conflict to resolve:** §5.1 places a block target's charge aim point on the target's **far** side for a frontal
-charge (facing + 256). `game_rules.md` ("A charge aims at the target's object centre pushed out ... along the target's
-own facing") implies the **near** side. Both readings depend on which `AttackDirection` code means "front"
-(`game_rules.md` §7: front 0/4). This report follows that code table. With the near-side reading, a head-on `reach`
-would be the centre distance − 2r instead of the centre distance. Until this is settled, test the head-on case
-against both readings.
+✅ **Aim point settled (batch 4):** for a frontal charge the aim point is on the target's **far** side (facing + 256),
+as §5.1 says. `AttackDirection` codes 0/4 are the front arc, which also agrees with the flank-test table. The
+`game_rules.md` sentence has been corrected. The worked example is in `movement_formation.md` Part A §5.
+
 ## 5. `IfTargetInChargeReach` (0x4D)
 
 **Length:** 1 word, no operand. **Target:** the unit's current target unit. The opcode does not check for a

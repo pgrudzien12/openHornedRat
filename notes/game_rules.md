@@ -260,8 +260,9 @@ Names in code font for per-unit and per-grid state below and in later sections (
   `facing_acc`, ranks, and the object's centre and facing are all restored from saved copies), then
   the game halts the unit and queues a re-form. The contact pose is simply the last pose that did not
   overlap: there is no snap to a facing, no alignment to the target's edge and no stand-off distance.
-  A charge aims at the target's object centre pushed out by the target's bounding radius along the
-  **target's own** facing (the game; the rear/flank variants add 0x100/±0x80), and is aborted without
+  A charge aims at the target's object centre pushed out by the target's bounding radius **to the far side**,
+  along the target axis nearest the line of approach (front charge: target facing + 256; rear: facing; flanks:
+  ±128; `notes/target_queries.md` §5, `notes/movement_formation.md`), and is aborted without
   engaging if it meets anything within ±45° of its front .
 - **A unit in close combat does not move or turn at all** ✅: engaging clears every `move_state` movement state
   bit, and the tick dispatcher selects a handler purely from `move_state`, so a unit whose only
@@ -2111,8 +2112,9 @@ BF001's scripted flight.
   to anyone else. Everything else comes from the surrounding script.
 - Its shipped use is the library's handler for event 0x19, "opponent gone" (sent when the unit's opponent dies or
   leaves and it has no other enemy on the grid, `notes/game_rules.md` section 5): `DropTarget`, then, if the unit
-  was pursuing, a bark and a switch to the rally script; a unit that was not pursuing just carries on with no
-  target and its ordinary script picks a new one.
+  was pursuing, a bark; **every** non-broken unit that had a target then switches to the rally / re-form script
+  163 (halt, clear charging and bracing, re-form to `s_rnks`, restart), not only pursuers
+  (`notes/movement_formation.md`, correction).
 
 **`FleeAhead` (0x51)** — start a rout along the unit's current facing.
 - It starts an ordinary **rout**, not a plain move: the unit becomes broken, leaves the combat grid, loses Frenzy,
