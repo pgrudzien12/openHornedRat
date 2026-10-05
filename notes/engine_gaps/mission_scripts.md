@@ -28,6 +28,13 @@ All of this is already public in `notes/game_rules.md` §"Unit behaviour scripts
   There is no army-level AI in the original either — `whshr/ai.py`'s simplicity is not itself the gap; the
   missing choreography is.
 
+Deployment-specific script scheduling, attack restrictions, preserved state and shipped
+mission examples are documented in [deployment.md §5](../deployment.md#5-deployment-time-and-starting-battle).
+The exact periodic AI period, countdown initialization and reload timing are published in
+[deployment.md §5.3](../deployment.md#53-periodic-ai-countdown-exact-timing-handoff).
+These rules are required when adding a deployment phase; treat mission choreography state
+separately from the screen's deployment/normal-play phase.
+
 ## Open questions
 
 - Per-mission walkthroughs (what each of the 45 DLLs' mission scripts actually choreograph) exist only as
@@ -63,20 +70,23 @@ tracks the four opcodes that are still unspecified):
    reinforcements and the assassin Sleaquit wait for.
 2. Sleaquit then hunts Otto Hiln (same side; the tag Otto sets on himself). Otto's script kills him as soon
    as he is in melee (unit flag `0x200`), which the engine mirrors from `Regiment.in_melee`.
-3. The three Clanrat regiments march to script nodes 8 and 9 and patrol between them, attacking anything
-   within their own threat range.
+3. The three Clanrat regiments march to script nodes 8 and 9 and patrol between them. Their explicit nearest-enemy searches have no search-radius
+   cutoff; periodic threat decisions separately use their configured threat range.
 
 Engine decisions (each one covered by a test):
 
-- **Condition register vs. condition bits.** `SetCondFlags`/`ClearCondFlags`/`TestCondFlags` operate on a
-  persistent bit word; `If`/`LoopIf*`/`SendEvent*If*` read a separate true/false result that `Test*`, `Find*`,
-  `Attack*` and `GetEvent` write. Mixing them made every event-handler frame (`GetEvent … ConsumeEvent;
-  LoopIfTrue; ReturnInterrupt`) loop forever once bit 16 was set.
+- **One condition word.** `SetCondFlags`/`ClearCondFlags`/`TestCondFlags` and the true/false result read by
+  `If`/`LoopIf*`/`YieldIfTrue`/`SkipIfTrue`/`IfGotoScript` are the same 16-bit word (bit 2 is the result), and the
+  condition is reset at every tick start ([unit_script_control.md](../unit_script_control.md)). An earlier
+  two-register split (result vs. bit word) is superseded; the engine's `cond_flags` is now a view of bit 2.
 - **Node numbers are positions in `[NODES]`, counted from 0.** The `id` field is 0 for almost every node and
   is not a key. Evidence for base 0: only counting from 0 gives BF001's Hiln's Guard a patrol beside its own
   camp instead of the east map edge, and the Clanrats a route from their spawn towards the player.
-- **`Attack*Enemy` search radius** = the unit's own `SetThreatRange`, else 300 (`DEFAULT_ATTACK_SEARCH_RANGE`,
-  PROVISIONAL: a project decision, not an observed value), measured octagonally.
+- **Nearest-enemy search has no radius cutoff.** The earlier provisional threat-range/300-unit
+  filter is superseded. Plain nearest ranking uses whole-unit Euclidean distance; visible
+  variants add visibility, not a radius. Hidden/broken and other excluded targets remain
+  ineligible, and deployment refuses the attack instruction. Full rules and acceptance
+  examples: [game_rules.md](../game_rules.md#scripted-nearest-enemy-search-range-and-failure-rules).
 - **Scripted same-side fights.** Same-side engagement is refused unless the target is the unit's current
   opponent (game_rules.md, engagement rules), so a scripted opponent may be a friend. The attacker fights on
   a camp of its own (`Side.DUEL`) for that fight, so tallies, break tests and the grid's adjacency check tell
@@ -95,5 +105,4 @@ Result in a headless BF001 run (player cavalry sent into Hiln's Guard's range): 
 routs at once, runs along the bearing of node 5 and leaves the field by the east edge.
 
 Still open here: the three Clanrat regiments ordered to the same node block each other around it (each is held
-off by the other two, ~35 units from a node with radius 16) and never reach it; `WaitWhileUnitFlags` (0x22) and
-`DrainEvents` (0xe2) have no handler (flag 8 is not raised by anything yet); `Query 7`.
+off by the other two, ~35 units from a node with radius 16) and never reach it; flag 8 (routed) that `WaitWhileUnitFlags` waits on is not raised by anything yet; `Query 7`.
