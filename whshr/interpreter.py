@@ -43,6 +43,11 @@ WAIT_OPCODE = 0x1C  # Wait: blocking ticks are not traced (see ScriptInterpreter
 IN_MELEE_FLAG = 0x200
 
 
+def _signed_word(value: int) -> int:
+    """Interpret a 16-bit script word as a signed number."""
+    return value - 0x10000 if value & 0x8000 else value
+
+
 @dataclass
 class Event:
     """A 14-byte behaviour event record (game_rules.md, "Unit behaviour scripts and events")."""
@@ -761,6 +766,18 @@ class ScriptInterpreter:
         if state.cond_flags:
             self._should_yield = True
         return state.pc + 1
+
+    def op_SkipIfTrue(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """SkipIfTrue N: when the condition result is true, skip the N words that follow this
+        two-word instruction (resume at pc + 2 + N); otherwise continue at pc + 2.
+
+        N counts raw words, not instructions, and is signed. The condition is neither consumed nor
+        changed. No label or end-of-script checks (notes/skip_if_true.md).
+        """
+        if operand is not None and state.cond_flags:
+            return state.pc + 2 + _signed_word(operand)
+        return state.pc + 2
 
     def op_Nop(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
