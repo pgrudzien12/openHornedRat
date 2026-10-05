@@ -64,7 +64,7 @@ class Event:
 class UnitScriptState:
     """Per-unit runtime state for behaviour script execution.
 
-    Corresponds to fields in game_rules.md "+0x..." notation: script +0x242, PC +0x244, etc.
+    Fields follow the per-unit script state described in game_rules.md (script id, PC, flags, ...).
     Each unit has exactly one live state, which the interpreter updates each tick.
     """
     # Script execution
@@ -80,8 +80,8 @@ class UnitScriptState:
     pending_switch: int | None = None  # set by SwitchScript; applied after event handling
 
     # Unit state (flags set by SetUnitFlags, SetCondFlags, etc.)
-    unit_flags: int = 0  # bit field (+0xB4 in the original)
-    unit_flags2: int = 0  # secondary flags (+0xB8)
+    unit_flags: int = 0  # primary unit flag bits (game_rules.md)
+    unit_flags2: int = 0  # secondary unit flag bits (game_rules.md)
     cond_flags: int = 0  # truth result read by If/IfNot/LoopIf*/SendEvent*If*, written by Test*/Find*/GetEvent
     cond_bits: int = 0  # persistent condition bit word: only SetCondFlags/ClearCondFlags/TestCondFlags touch it
     threat_range: int = 0  # set by SetThreatRange; used by threat scoring
@@ -667,7 +667,7 @@ class ScriptInterpreter:
 
     def op_SetUnitFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """SetUnitFlags N: set bits in unit_flags (+0xB4)."""
+        """SetUnitFlags N: set bits in unit_flags."""
         if operand is not None:
             state.unit_flags |= operand
             if operand & 0x80000:

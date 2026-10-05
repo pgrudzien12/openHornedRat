@@ -2,24 +2,10 @@
 
 import unittest
 
+from tests.script_helpers import FakeDll, word
 from whshr import behaviour, interpreter
 from whshr.engine import Battle, Regiment
 from whshr.rules import Side
-
-OPCODE_FLAG = 0x8000
-
-
-def word(name: str) -> int:
-    return OPCODE_FLAG | next(o for o in range(len(behaviour.LENGTHS)) if behaviour.opcode_name(o) == name)
-
-
-class FakeDll:
-    def __init__(self, words):
-        self._words = words
-
-    def scripts(self, ids):
-        return {i: list(self._words) for i in ids}
-
 
 class SkipIfTrueTests(unittest.TestCase):
     def setUp(self):
