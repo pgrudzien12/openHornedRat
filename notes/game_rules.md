@@ -847,7 +847,7 @@ The key visibility constants are recorded here for implementers.
   cross a **`SightEdge`** boundary (if a battle has none, "No Sight Boundary" and visible). **No range limit and
   no terrain height** anywhere in spotting, shooting or casting line of sight: hills never hide units.
 - **Hidden units** (`SpotHiddenUnits`, run by threat detection): each hidden enemy that passes
-  `IsVisible` is revealed **permanently** (flag `0x80000` cleared), with event 0x1C to it and 0x1D to the spotter.
+  `IsVisible` is revealed **permanently** (flag `0x80000` cleared), with event 0x1C to the spotter and 0x1D to the revealed unit (`threat_events_nodes.md`).
 - **AI decisions**: `PickBestTarget` scans all units for the highest `UnitScore`; `DetectThreat`
   spots hidden units, then keeps or re-picks the threat unless braced. `RunAway` (206) is one
   reactive flee step per behaviour period (±67.5° away from visible enemies), `CircleAroundTarget` (228) one
@@ -893,7 +893,7 @@ script each tick (the per-tick script step, called from the battle tick).
   (0x62/0x63), `Query N` (0x16, cases of the AI routine), `React N` (0xC2).
 - **More from the catalogue** ✅: after `ExecuteOrder` applies a player order, the interpreter drops the target and
   restarts the unit's script at its restart point (op 0x1E). `SetThreatRange` (0x31) sets `threat_range`, used by the AI
-  threat score (`UnitScore`): `worth × (range − d) / round(range / 4)` with the octagonal distance
+  threat score (`UnitScore`): `worth × (range − d) / trunc(range / 4)` with the octagonal distance
   `d = max(|dx|, |dy|) + min(|dx|, |dy|) / 2`, 0 for friends, broken, `CantMelee` or hidden units and beyond the
   range; ×4 if the enemy targets this unit, or ×32 instead if it is also charging (see "Routes, collisions and
   visibility"). Node opcodes move to a node (0x1F), face it (0x20), teleport to it (0x49), place and re-form there
