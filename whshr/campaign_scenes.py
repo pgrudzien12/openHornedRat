@@ -12,6 +12,7 @@ from .campaign import parse_window_ui
 from .engine import DEFAULT_SEED
 from .glue_runtime import ActivityResult
 from .glue_scene import GlueScene
+from .name_prompt_scene import NamePromptScene
 from .glue_fonts import glue_font_asset
 from . import payments
 from .legacy import module
@@ -166,15 +167,12 @@ class MainMenuScene(Scene):
 
     def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         if event == "new_campaign":
-            if self.campaign is None:
-                # Tests and development callers may still inject one focused
-                # briefing; a real installation derives the full initial flow.
-                self.campaign = (
-                    CampaignState.single_mission(self.briefing) if self.briefing is not None
-                    else CampaignState.from_installation(context.locator.installation, self.content,
-                                                         save_dir=getattr(context, "save_dir", None))
-                )
-            return Transition(GlueScene(campaign=self.campaign, window="STARTCARAVAN"), "new campaign started")
+            if self.campaign is not None or self.briefing is not None:
+                # Tests and development callers may inject one campaign or focused briefing: no prompt.
+                self.campaign = self.campaign or CampaignState.single_mission(self.briefing)
+                return Transition(GlueScene(campaign=self.campaign, window="STARTCARAVAN"), "new campaign started")
+            campaign = CampaignState.from_installation(context.locator.installation, self.content)
+            return Transition(NamePromptScene(campaign), "new campaign name prompt")
         if event == "load_game":
             from .load_save_scene import LOAD, LoadSaveScene
             return Transition(LoadSaveScene(LOAD, self), "load dialog opened")
@@ -448,6 +446,8 @@ class TroopSelectionScene(Scene):
             return None
         model = self.selection_model()
         campaign = self.campaign
+        if self.picked_whoami is not None and event in ("abort", "done", "page:back", "page:next"):
+            return None  # notes/native-windows.md §11.3.3: buttons are ignored while a regiment is carried
         if event == "abort":
             if not model.selection:  # nothing selected: aborts silently (notes/builtin_widgets.md section 4.1)
                 return Transition(self.glue_scene, "troop selection aborted")
@@ -494,7 +494,8 @@ class TroopSelectionScene(Scene):
             return None
         if event == "done":
             if self.phase == "select":
-                if model.selection:
+                # notes/native-windows.md §11.3.3: needs a selection and an affordable total; otherwise ignored
+                if model.selection and model.affordable:
                     self.phase = "march_order"
                 return None
             if campaign is None:

@@ -51,7 +51,7 @@ Pre-battle rules and the complete regiment-action availability table are maintai
     `s_rlmv × k / 16` units per tick (k 1.8 free, 1.0 closing, 2.5 charging, 1.5 fleeing); terrain does not slow
     them; units wheel on a front corner. That speed moves only the unit's own reference point — the models chase
     it separately at a rank-dependent rate with no charge multiplier, so a charging block visibly stretches and
-    its rear rank cannot keep station. Routes use a reactive steer-around controller (no path graph); units push
+    its rear rank cannot keep station. Point routes can use authored Nav lines for waypoints around movement regions, while scenery and units trigger reactive steering; units push
     apart on overlap; visibility is a 100° cone blocked by scenery and `SightEdge` lines, never by terrain height.
 12. **Magic** ✅ Each side has one shared power pool of 0–8, re-rolled by a random walk every 50 s of real time;
     spells cost 1–3 and always work when the target is in range and within ±50° of the wizard's facing (no
@@ -820,18 +820,26 @@ The key visibility constants are recorded here for implementers.
 - **Waypoints**: `ExecuteGoto` replaces and Ctrl-click appends to a queue of
   **at most 9 manual waypoints**; a point within 17 units of the queue head or tail is ignored. Moving
   onto the unit's own position just halts and re-forms.
-- **Routing is not pathfinding**: a unit walks straight towards its current waypoint. When `ObjectsOnPath`
+- **Point routes and local avoidance**: a unit walks towards its current waypoint. When `ObjectsOnPath`
   finds the first blocking map object on the line (scenery, spell area objects **or another
   unit's footprint**, tested with the same `asin(radius / d)` geometry as missile obstruction), `GotoTarget`
   dry-runs a detour to the left and to the right (cost `4 × turn + distance` per
   leg, +12 000 for leaving the playable area, abandoned beyond a full turn or cost 5 999) and keeps the cheaper
   side; if both exceed 11 999 the unit gives up ("can't find the way to target"). Each tick `PlanStep`
-  deflects the heading around the current obstruction again. `Nav*`, `SOLID`, `INVSOLID` and
-  `BATTLEEDGE` boundaries are polygon-membership obstacles only, never a graph, so units can get stuck against
-  concave shapes; an engine may use real pathfinding without visible change on the open maps.
+  deflects the heading around the current obstruction again. Active `SOLID`, `INVSOLID` and
+  `BATTLEEDGE` boundaries constrain movement regions. Shipped `Nav*` entries have line
+  status without solid status; they can guide a multi-waypoint route around those
+  boundaries while leaving the line itself traversable. Each eligible guide
+  connects the nearest points from the route's start and destination along its
+  intervening vertices; the shortest guide route wins, with authored order
+  breaking an exact tie. For footprint avoidance, a trial that leaves a
+  permitted region gains 12,000 cost. A side's trial stops when its running
+  cost exceeds 5,999, but the current route is rejected only when both final
+  side scores reach 12,000. See `movement_boundaries_route_finding.md`.
 - **Region masks**: `InRegion`/`NotInRegion`/`RegionCrossings`
-  scan the 40-byte boundary records whose flags are active and match the mask; `INVSOLID`
-  inverts containment (the outside of `BattleEdge` is solid); crossings snap to the boundary so movers slide
+  scan active boundary entries with a matching status; `INVSOLID`
+  inverts containment (the interior becomes forbidden). Shipped `BattleEdge` has its own
+  status, without `INVSOLID`; crossings can pull movers toward the boundary so they slide
   along it. `0xB0` routes and fanatic jumps, `0x200` `SightEdge` (spotting only), `8`
   `ViewEdge` and `0x40` `CameraEdge` (camera only), `0x20` leaving the table, `0x90` the rout probe.
 - **Collisions** (`ResolveUnitCollisions`, once per tick): every overlapping pair of footprints
@@ -855,6 +863,47 @@ The key visibility constants are recorded here for implementers.
   attacks" rule (event 0x13, `AIQuery` 9/10) and from mission scripts that assign "attack the n-th nearest
   enemy" targets (opcodes 176–191) to individual units. AI armies are not repositioned at battle start (their
   `.BTS` positions are used).
+
+### Scripted nearest-enemy search: range and failure rules
+
+**`AttackNearestEnemy` (opcode 176 / `0xB0`) searches the whole battlefield.** It has no
+maximum search radius, does not use `SetThreatRange`, and does not require weapon range or
+line of sight. Normal nearest ranking uses whole-unit Euclidean distance between regiment
+positions, `trunc(√(Δx² + Δy²))`, rather than the octagonal metric used for threat scoring.
+This is target selection; success queues an attack event, not an immediate hit or a promise
+that the unit can reach or fire at the selected target.
+
+The candidate must be active, pass the instruction's side filter, and have none of status
+mask `0x82140` set. That mask includes hidden and broken/routing targets and the separate
+exclusion states `0x140`. A class-filtered variant additionally requires the requested class.
+The instruction returns false if no candidate survives these filters. It also returns false
+unconditionally during deployment, without queuing an attack event.
+
+`AttackNearestVisibleEnemy` (177 / `0xB1`) adds the documented view-cone, scenery and
+`SightEdge` visibility test. That test has no additional distance ceiling. The non-visible
+variant can select a revealed enemy behind the unit or behind scenery; it still excludes a
+hidden enemy. Neither search instruction itself reveals a hidden target to make it eligible.
+Nearest/n-th-nearest and class-filtered members of this family likewise have no search-radius
+cutoff; n-th searches wrap through their eligible candidate list rather than fail merely
+because a valid positive n exceeds its size. The separately named axis-ranking variants
+use their different ordering rule, not a distance cutoff.
+
+`SetThreatRange` belongs to threat scoring and periodic threat decisions. Weapon range,
+firing arc and later pursuit/attack-script decisions are also separate rules. Do not apply
+any of those ranges as an extra nearest-enemy search filter. The earlier provisional
+300-unit/default-threat-range limit in the mission-script implementation note was a project
+choice and is superseded by these original behaviour rules.
+
+**Independent acceptance examples (expected, not new original-game play observations):**
+
+- Put a searcher at (0, 0), set threat range to 240, and put its only eligible revealed enemy
+  at (1000, 0). Outside deployment, plain `AttackNearestEnemy` succeeds and queues that
+  target. Reducing threat range does not change this outcome.
+- Turn the searcher away or obstruct sight to that target: the plain instruction can still
+  succeed; the visible variant fails if no other candidate passes visibility.
+- Mark the sole target hidden or broken, or give it a mismatching class for a class-filtered
+  instruction: the search fails regardless of distance.
+- Repeat with an eligible nearby target during deployment: the instruction returns false.
 
 ### Unit behaviour scripts and events ✅
 
@@ -1006,7 +1055,7 @@ Per-battle detail and the BF001 walkthrough are retained in private research not
   mission-specific opcode family.
 - **Spawning**: only Night Goblin fanatics are created at run time (opcode 0xD3, three copies at lateral offsets
   0/−20/+20, in BF004_5, BF015, BF034, BF038). Everything else exists from the start.
-- **`hidden:`** units exist on the battlefield but are invisible and untargetable until spotted (section "Routes,
+- **`hidden:`** units exist on the battlefield; hidden enemies are omitted from the player display and excluded from ordinary targeting until spotted (section "Routes,
   collisions and visibility") or placed. **Delayed reinforcements** are hidden units whose script first waits (BF001:
   three Clanrat Warriors wait 150 ticks, then march in along nodes 8 and 9).
 - **`SPRITES.PBX` contents** ✅ (verified independently): in every campaign battle, the bundled sprite files are
@@ -1261,7 +1310,7 @@ Drawing order: plan map, the selected unit's waypoints (numbered
 dots 161–169, end marker 159), all regiments, the selected regiment again, the camera marker (frames 170–177, 8 orientations).
 A regiment is an 8×8 dot centred on its position (fighting/charging base 119 friendly, 111 enemy; normal 135 / 127;
 broken 151 / 143; plus one of 8 facing frames) and, if the mode allows, its banner frame anchored 8 px left and 24 px above
-the point. Hidden units are skipped. **A left click on the minimap is handled exactly like a click in the 3D view**: with
+the point. Hidden enemy units are skipped; friendly units are not omitted merely because `hidden:` is set (see [deployment.md §1.3](deployment.md#13-hidden-friendly-regiments-display-and-picking)). **A left click on the minimap is handled exactly like a click in the 3D view**: with
 no pending order it selects the unit under the point (shift toggles multi-select), with a pending order it executes it
 there; it never issues a direct move.
 

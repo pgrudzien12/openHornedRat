@@ -34,8 +34,9 @@ unless stated.
   | `0x201` | `reinfButton` | reinforcements "take" (label offset 0, 0) |
   | `0x202` / `0x203` | `reinfArrowUp` / `reinfArrowDown` | reinforcement +1 / -1 |
 
-  Pressed art is the `…Dn0` twin; label offset (2, 4) released, (3, 3) pressed for the tab buttons. Every button plays speech cue
-  `3` on press and `4` on release (the same `upsfx`/`downsfx` of glue hotspots).
+  Pressed art is the `…Dn0` twin; label offset (2, 4) released, (3, 3) pressed for the tab buttons. Every button plays click cue `4` (`B4.WAV`) on
+  mouse-down and cue `3` (`B3.WAV`) on mouse-up inside the button (the same `downsfx`/`upsfx` of glue hotspots; both cues are skipped
+  while speech is playing or when speech is disabled: `notes/native-windows.md` §1.1).
 - **Leaving.** A built-in that was opened by a glue `res:` closes with `SetPalette(MAP)` + `PopContext(show)` (§7.2 of
   `notes/glue_interpreter.md`); if the popped context is of kind `WINDOW` the *caller* window (recorded when the built-in was opened)
   is re-run by name. A built-in opened from another built-in (the roster book from troop selection) instead re-shows its parent window

@@ -171,8 +171,8 @@ class GlueSceneTests(unittest.TestCase):
 
         self.assertEqual(labels, [
             (("BKTXT", 601, ()), 146, (0, 0, 0), {"font": view.heading_font}),
-            (("BKTXT", 602, (125,)), 168, (0, 0, 0), {}),
-            (("BKTXT", 603, (1000,)), 180, (0, 0, 0), {}),
+            (("BKTXT", 602, (25,)), 190, (0, 0, 0), {}),  # coffers only, +2*H4 (notes/native-windows.md 11.3.7)
+            (("BKTXT", 603, (1000,)), 214, (0, 0, 0), {}),
         ])
         self.assertEqual(buttons, [("done", 325, "GreenATab", 304, True)])
 

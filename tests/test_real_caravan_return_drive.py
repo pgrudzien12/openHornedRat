@@ -22,7 +22,7 @@ class RealCaravanReturnDriveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             save_dir = Path(directory)
             context = scene_context(WARFB, save_dir=save_dir, no_battle=True)
-            campaign = CampaignState.from_installation(context.locator.installation, context.glue, save_dir=save_dir)
+            campaign = CampaignState.from_installation(context.locator.installation, context.glue)
             map_scene = GlueScene(campaign.flow, campaign)
             machine = SceneMachine(map_scene, context)
             machine.handle(GlueInput("panel-action", "open_troop_select"))

@@ -13,7 +13,12 @@ from typing import Any
 from .glue import (AnimRecord, BitmapRecord, HotspotRecord, IncludeRecord, MidiRecord, MissionRecord,
                    MissionRef, MissionWindowRecord, PositionRecord, TextRecord, WindowRecord)
 from .glue_content import GlueContent
-from .glue_runtime import WindowInstance
+from .glue_runtime import SPEECH_OVERLAYS, WindowInstance
+
+
+# ``res:`` names that route a hotspot click to click speech instead of the launcher (notes/native-windows.md §14.3.1);
+# the match is exact and case-sensitive.
+CLICK_SPEECH_NAMES = frozenset(SPEECH_OVERLAYS)
 
 
 @dataclass(frozen=True)
@@ -56,6 +61,7 @@ class RenderHotspot:
     click_text: int | None = None  # first speech text id spoken when the hotspot is clicked
     click_count: int = 0  # number of consecutive speech lines (``clickrescnt`` + 1)
     alt_cursor: str | None = None  # cursor shown while the hotspot is pressed (``altcursor``, notes/glue_keywords.md §3.5)
+    speech_variant: str | None = None  # the ``res:`` name when it routes to click speech (notes/native-windows.md §14.3.1)
 
 
 @dataclass(frozen=True)
@@ -172,11 +178,16 @@ def build_render_model(content: GlueContent, window: WindowInstance,
             up_bitmap = values.get("setupbitmap") or None
             down_bitmap = values.get("setdownbitmap") or None
             click_text, click_count = None, 0
-            if values.get("clickres") is not None:  # notes/glue_keywords.md: speech played when clicked
-                click_text = _integer(values.get("clickres"), None)
+            speech_variant = target if target in CLICK_SPEECH_NAMES else None
+            if speech_variant is not None:
+                # Routing is by the ``res:`` name, not by ``clickres`` (notes/native-windows.md §14.3.1): a named hotspot
+                # without ``clickres`` speaks id 0, which has no text and no recording.
+                click_text = _integer(values.get("clickres"), 0)
                 # ``clickrescnt`` counts the lines *after* the first: ``clickres=933`` with ``clickrescnt=3`` is the four
                 # lines 933-936 of one speech, and no count means the single line.
                 click_count = max(0, _integer(values.get("clickrescnt"), 0)) + 1
+            elif values.get("clickres") is not None:
+                pass  # any other ``res:`` name goes to the launcher and does not speak
             elif (target is None and not values.get("cursor") and not values.get("script")
                   and hint is not None and hint > 0):
                 # PROVISIONAL: a hotspot with no cursor, target or script is a reaction: its text is
@@ -185,7 +196,8 @@ def build_render_model(content: GlueContent, window: WindowInstance,
             hotspots.append(RenderHotspot(_integer(values.get("x")), _integer(values.get("y")),
                                           _integer(values.get("vx")), _integer(values.get("vy")), hint,
                                           target, values.get("cursor") or None, up_bitmap, down_bitmap,
-                                          click_text, click_count, values.get("altcursor") or None))
+                                          click_text, click_count, values.get("altcursor") or None,
+                                          speech_variant))
         elif isinstance(record, AnimRecord):
             animations.append(RenderAnimation(values.get("name") or None, _integer(values.get("x")),
                                               _integer(values.get("y")),

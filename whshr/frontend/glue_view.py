@@ -22,7 +22,8 @@ from ..speech import load_speech
 from ..controlpanel import button_y, control_panel
 from ..glue_animation import GlueBitmapAnimator
 from ..glue_render import GlueRenderModel, RenderBitmap, RenderHotspot, RenderText, build_render_model
-from ..glue_runtime import Diagnostic, GlueInput, GlueRuntimeState, PlayMusic, PlaySpeech, StopMusic, StopSpeech
+from ..glue_runtime import (SPEECH_OVERLAYS, Diagnostic, GlueInput, GlueRuntimeState, PlayMusic, PlaySpeech, StopMusic,
+                            StopSpeech)
 from ..glue_palette import AppPalette
 from .bitmap_font import BitmapFont
 from .cursors import CursorController
@@ -64,6 +65,8 @@ class GlueView(NativeScreenView[GlueScene]):
         self.models: Models = ()
         self.quads: list[tuple[ScreenQuad, Point]] = []
         self.portrait_quads: list[tuple[ScreenQuad, Point]] = []
+        self.overlay_quads: list[tuple[ScreenQuad, Point]] = []
+        self._overlay_frames: tuple[tuple[str, str], ...] = ()
         self.text_labels: list[tuple[TextLabel, Point]] = []
         self.dialogue_labels: list[tuple[TextLabel, Point]] = []
         self.dialogue_state: tuple[str, tuple[Any, ...]] | None = None
@@ -114,9 +117,35 @@ class GlueView(NativeScreenView[GlueScene]):
         self.models = models
         self._refresh_bitmaps(models, frames, palette)
         self._refresh_portraits(models, palette)
+        self._refresh_speech_overlays(models, palette)
         self._refresh_panel(models, palette)
         self._refresh_missions(models, palette)
         self._refresh_dialogue(_dialogue_state(runtime.state))
+
+    def _speech_overlay_frames(self) -> tuple[tuple[str, str], ...]:
+        """(bitmap base name, cell name) of every running click-speech overlay: the fingerprint they redraw on."""
+        return tuple((name, animator.display_name) for name, animator in self.scene.require_runtime().state.speech_overlays.items())
+
+    def _refresh_speech_overlays(self, models: Models, palette: AppPalette) -> None:
+        """Eyes and mouth (or book) drawn over the caravan backdrop while Dietrich speaks (notes/native-windows.md §14.5)."""
+        frames = self._speech_overlay_frames()
+        if frames == self._overlay_frames and palette == self.palette:
+            return
+        self._overlay_frames = frames
+        for quad, _ in self.overlay_quads:
+            quad.release()
+        self.overlay_quads = []
+        if not models:
+            return
+        content = self.scene.require_runtime().content
+        overlays = {overlay.bitmap: overlay for group in SPEECH_OVERLAYS.values() for overlay in group}
+        for name, cell in frames:
+            surface = load_optional_bitmap(content, cell, app_palette=palette)
+            if surface is None or name not in overlays:
+                continue
+            quad = ScreenQuad(self.gpu, surface.get_size())
+            quad.write(pygame.image.tobytes(surface, "RGBA"))
+            self.overlay_quads.append((quad, (models[-1].x + overlays[name].x, models[-1].y + overlays[name].y)))
 
     def _static_animation_frames(self, models: Models, runtime_frames: Frames) -> Frames:
         active: dict[tuple[str, int], GlueBitmapAnimator] = {}
@@ -468,7 +497,7 @@ class GlueView(NativeScreenView[GlueScene]):
                 return (GlueInput("panel-action", pressed_button),)
             released = self.hotspot_at(self.models, point)
             if pressed is not None and pressed == released and pressed.click_text is not None:
-                return (GlueInput("hotspot-speech", f"{pressed.click_text}:{pressed.click_count}"),)
+                return (GlueInput("hotspot-speech", f"{pressed.click_text}:{pressed.click_count}:{pressed.speech_variant or ''}"),)
             if pressed is not None and pressed == released:
                 return (GlueInput("hotspot-release", pressed.target),)
             if pressed is None and released is None and pressed_button is None and released_button is None:
@@ -477,13 +506,15 @@ class GlueView(NativeScreenView[GlueScene]):
 
     def animate(self, seconds: float) -> None:
         changed = any(animator.tick(round(seconds * 1000)).redrawn for animator in self.bitmap_animators.values())
-        if changed:
+        if changed or self._speech_overlay_frames() != self._overlay_frames:
             self.refresh()
 
     def draw(self) -> None:
         super().draw()
         left, top, scale = self._layout()
         for quad, (x, y) in self.quads:
+            quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
+        for quad, (x, y) in self.overlay_quads:
             quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
         for quad, (x, y) in self.portrait_quads:
             quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
@@ -510,6 +541,8 @@ class GlueView(NativeScreenView[GlueScene]):
             quad.release()
         for quad, _ in self.portrait_quads:
             quad.release()
+        for quad, _ in self.overlay_quads:
+            quad.release()
         for quad, _ in self.panel_quads:
             quad.release()
         for quad, _ in self.mission_quads:
@@ -527,6 +560,7 @@ class GlueView(NativeScreenView[GlueScene]):
         self.dialogue_labels = []
         self.quads = []
         self.portrait_quads = []
+        self.overlay_quads = []
         self.panel_quads = []
         self.panel_labels = []
         self.mission_quads = []

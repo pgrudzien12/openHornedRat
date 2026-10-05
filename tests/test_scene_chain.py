@@ -47,7 +47,6 @@ class SceneChainTests(unittest.TestCase):
     def _mission_caravan(self, script):
         """The player is in ``script``'s caravan; the map that launched the mission is parked beneath."""
         campaign = committed_campaign()
-        campaign.save_dir = self.save_dir
         parked_map = GlueScene("MAPFLOW", campaign)
         parked_map.enter(self.context)
         mission = GlueScene(script, campaign, accept_mission=FIRST, return_scene=parked_map)
@@ -60,7 +59,7 @@ class SceneChainTests(unittest.TestCase):
 
     def _load(self, slot=0):
         """A new session: the load dialog on a fresh campaign of the same game."""
-        fresh = CampaignState(TWO_WINDOWS, flow="F", company=roster.parse_company(MRC, ROWS), save_dir=self.save_dir)
+        fresh = CampaignState(TWO_WINDOWS, flow="F", company=roster.parse_company(MRC, ROWS))
         dialog = LoadSaveScene(LOAD, GlueScene(window="STARTCARAVAN"),
                                new_campaign=lambda context, directory: fresh)
         machine = SceneMachine(dialog, self.context)
@@ -144,7 +143,6 @@ class SceneChainTests(unittest.TestCase):
     def test_given_a_save_of_the_start_caravan_then_it_loads_as_that_caravan(self):
         campaign = committed_campaign()
         campaign.taken_missions.clear()
-        campaign.save_dir = self.save_dir
         self.context.glue = GlueContent.from_data(resources={**RESOURCES, "STARTCARAVAN": WINDOW + HOTSPOTS % "LoadSaveWindow"})
         machine = SceneMachine(GlueScene(window="STARTCARAVAN", campaign=campaign), self.context)
         self._save(machine)

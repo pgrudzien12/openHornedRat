@@ -76,6 +76,12 @@ class TroopSelectionTests(unittest.TestCase):
         # whoami 2 forced+selected: price 100; whoami 5 hired, not selected: retainer 10
         self.assertEqual(selection.total_cost, 110)
 
+    def test_given_a_hired_excluded_regiment_then_its_retainer_is_still_in_the_total(self):
+        selection = TroopSelection([regiment(2, base_price=10, models=10), regiment(29, base_price=10, models=10)],
+                                   excluded=(29,), coffers=1000)
+        # notes/native-windows.md 11.3.5: whoami 2 selected (100) + whoami 29 excluded but hired (retainer 10)
+        self.assertEqual(selection.total_cost, 110)
+
     def test_given_the_default_limit_then_it_is_thirteen(self):
         selection = TroopSelection([regiment(2)], coffers=1000)
 

@@ -76,6 +76,44 @@ For BF001's three-regiment example the initial positions/facings are respectivel
 (240, 209, 64), (160, 144, 64), and (80, 82, 64). These supersede the player army's own
 `x`/`y`/`dir` values, including holding coordinates outside the playable field.
 
+### 1.3 Hidden friendly regiments: display and picking
+
+`hidden:` is not a universal “omit this unit from the player's screen” flag. An active
+player regiment may retain it while being drawn, shown on the minimap and selected/dragged.
+The hidden flag suppresses ordinary display for **enemy-side** units; player and allied/NPC
+units are not suppressed merely because this flag is set. Enemy spotting/targeting uses the
+flag separately. Friendly display does not reveal the regiment to the enemy.
+
+Default start-slot allocation changes position/facing and reserves the node; it does **not**
+clear `hidden:`. `InitUnit` likewise preserves this flag. No extra player reveal instruction
+or blanket `DeployTroops` flag-clearing step is needed before the first deployment frame.
+A deployment selection/placement can later recalculate whether the regiment is hidden from
+opposing observers; its friendly-side display/picking remains available either way.
+
+| Surface / action | Hidden-flag rule and other eligibility |
+|---|---|
+| Main-view models | Hidden suppresses enemy-side models, not player/allied models. Ordinary camera clipping and separate staging/removal states still apply. |
+| Main-view/banner picking | An active unit with a valid drawn banner can be picked geometrically. Ground-position fallback picking has no blanket hidden-bit exclusion. Deployment selection rejects status mask `0x140`; it does not reject `0x80000` alone. |
+| Minimap dots/banners | Hidden enemy units are omitted. Hidden player/allied units remain eligible for their selected marker mode. A banner resource, map viewport and separate exclusion/staging flags still affect drawing; flags `0x20400000` suppress the marker independently of `hidden`. |
+| Minimap picking | Uses the shared deployment selection/placement rules after converting to map coordinates; `hidden` alone does not block an own regiment. |
+| Previous/next HUD selection | Cycles eligible active player regiments; status mask `0x140` and non-player ownership exclude candidates. Hidden alone is not an exclusion. |
+| Drag / Ctrl-drag | Requires an eligible player-owned regiment. Allied/NPC and enemy ownership cannot be repositioned by the player, regardless of whether they are drawn. |
+
+A hidden enemy's omitted model/banner is not available as a visible click target. Geometric
+fallback picking is a separate rule; do not convert a rendering filter into a new universal
+map-picking filter. Selection or inspection of another side still grants no deployment control.
+
+**BF001 acceptance example (expected, not a new play-session observation):** all three
+regiments in the shipped player army have `hidden:` and use `PLAYER_SCRIPT`. Allocate the
+slots in §1.2 while preserving their hidden flags. Before Start, their models and allowed
+minimap markers must be visible to the player, previous/next must select them, and left/Ctrl
+placement must work. One script-initialization update need not clear the hidden flags.
+Check a hidden enemy separately: it remains omitted until revealed through the visibility
+rules. This side-dependent display rule applies across shipped missions, not just BF001.
+
+The implementation blocker and this handoff are tracked in
+[visibility research #151](https://github.com/pgrudzien12/openHornedRat/issues/151).
+
 ## 2. Deployment zone
 
 Read `[BOUNDARIES]` entries with `bnd_ACTIVE` and `bnd_DEPLOYMENT` status. The boundary
@@ -83,6 +121,10 @@ name is descriptive, not a lookup key: shipped names include `DeploymentArea`, `
 and other variants. The deployment boundary category uses mask `0x100` in the boundary
 status vocabulary. Use its `AddLine` geometry and existing boundary semantics, including
 inverted-region status if present. Do not infer the zone from start nodes or their radii.
+All shipped `.BTS` boundary entries specify `set:status`. Without that line, an
+entry remains active with its geometry but is not a deployment region; its name
+does not grant the role. Deployment status alone does not make a battle-movement
+obstacle. See [`movement_boundaries_route_finding.md`](movement_boundaries_route_finding.md).
 
 A survey of the 44 campaign `BF*.BTS` files found 31 with `DeployTroops:`. Each of those
 31 has exactly one deployment-tagged boundary. Multiple disjoint deployment regions and
@@ -171,11 +213,24 @@ battle rank order. Re-forming updates the model layout immediately for deploymen
 Independent toggles the selected regiment's setting directly and carries into battle.
 
 **Artillery:** direct left-drag and Ctrl-drag are allowed for an otherwise eligible own
-regiment, and placement updates the weapon and crew layout. The absence of a Move button
-restricts marching orders, not direct deployment rearrangement. Furniture/rolling-stock
-classes likewise do not gain a command panel, but lack of panel buttons is not a drag
-exclusion; ordinary ownership, visibility and picking eligibility still apply. On-screen
-picking and model appearance for these unusual classes remain useful confirmation checks.
+regiment, and placement updates the weapon and crew layout. The anchor that prevents
+ordinary marching orders does not prevent direct deployment placement. Map/banner picking
+has no artillery-class exclusion. The weapon occupies its reserved slot; crew positions are
+regenerated and snapped to the new layout, rather than marching the weapon to the cursor.
+Ctrl-drag changes facing without marching. No rank, firing or attack command becomes available.
+On-screen confirmation of sprite placement remains outstanding.
+
+**Wagons in shipped missions are not player-deployable.** Across the 31 deployment battles,
+all 14 rolling-stock entries occur in BF015, BF017 and BF020 and belong to the allied/NPC
+side (`s_side` ownership bits identify side 64), not the player. They receive no player
+starting slots, cannot be dragged or Ctrl-rotated by the player, and have no player command
+panel. Preserve their authored positions and script-controlled entry/movement. A wagon-looking
+cargo carrying a mortar name is still rolling stock; classify from its statistics, not its name.
+
+The earlier wording about testing “controllable wagons” was too broad for campaign
+compatibility. A hypothetical custom player-owned rolling-stock unit is a separate case:
+the shared ownership/picking checks have no blanket rolling-stock exclusion, but shipped data
+does not provide such a unit. Do not make campaign wagons deployable on that basis.
 
 ### 4.1 Available and unavailable regiment actions
 
@@ -268,6 +323,119 @@ movement; deployment is not a blanket rule suppressing all script-driven activit
 mission-specific activation against these distinctions, rather than assuming all enemy
 setup and delayed activity starts on the flag click.
 
+### 5.1 Script rules required by deployment
+
+Deployment updates use the same nominal 100 ms cadence as ordinary battle updates: at most
+ten ticks per second, with no catch-up. Tick counts describe updates, not a guaranteed wall-clock
+deadline. Pausing suppresses the update; deployment by itself does not.
+
+| Activity | Before Start | At/after Start |
+|---|---|---|
+| Unit script initialization | Runs: initialize, tags, handlers, behaviour settings and setup happen before the script's wait. | Continue the existing script state; do not initialize every unit again. |
+| `WaitForBattleStart` | Stays at the barrier each update; gates ordinary unit movement. Player deployment dragging remains available. | Passes on the next unit update; prepared routes can resume. |
+| `SetWait` / `Wait` | An already reached wait timer counts down once per script update, including at a battle-start barrier. A not-yet-reached timer has not begun. | Continue the remaining timer; no blanket reset or subtraction of time spent deploying. |
+| Periodic `SetBehaviour` decisions | Suppressed. Their countdown continues/reloads, so Start does not guarantee an immediate decision. | Resume when the countdown next becomes due. |
+| Nearest/n-th-nearest enemy attack instructions | Return false and do not issue their attack event, including visible/class-filtered variants. | Normal targeting resumes when the script reaches the instruction. |
+| Script setup, ambient scattering and event handling | Continue where the script permits; the start barrier is per unit, and queued interrupts may still run. | Continue from preserved script/event state. |
+| Combat clock, segments/rounds and scheduled objective passes | Do not advance. | Begin normal progression. |
+
+The attack restriction above concerns the nearest-enemy instruction family, not a claim that
+all conceivable scripted combat effects are globally disabled. Custom data must respect each
+action's own phase rules. Likewise, explicit script queries are distinct from the suppressed
+periodic behaviour callback.
+
+A script's `SetBattleState` / `IfBattleState` values are **mission choreography state**, not
+the deployment/normal-play phase. For example, changing that mission state to 2 does not
+press the Start flag or release `WaitForBattleStart`. These two states must remain distinct.
+
+### 5.2 Shipped-script coverage and timing examples
+
+The 31 deployment missions use 297 distinct mission/script assignments when repeated units
+sharing the same script in one mission are counted once. Of these, 267 entry scripts contain
+a battle-start barrier; 30 do not. All 31 player entry scripts use shared script 100. None of
+the 267 barrier-containing entry scripts sets a wait timer before its first barrier. This is
+a survey of entry scripts, not proof that every reachable interrupt/subroutine is also gated.
+
+- **Player artillery:** the shared player script installs the artillery-specific event handler
+  before waiting for Start. Normal player artillery therefore participates in script setup
+  and waits with the other player regiments. Starting battle does not change it into a
+  marching regiment or remove its normal weapon anchor.
+- **BF001 delayed Clanrats:** their 150-tick wait is after both the battle-start barrier and a
+  mission event gate. Waiting longer on the deployment screen cannot consume that delay.
+  The delay is nominally 15 seconds of updates after the event gate is satisfied, not always
+  15 seconds after clicking Start.
+- **BF015/BF017 wagons:** the leading wagon waits for Start before travelling toward node 12.
+  The following cargo waits for Start and for the staging area at node 15 to clear before
+  being placed there and following. Pre-battle hiding/staging setup must run, but the player
+  does not choose these wagon positions. BF020's wagons likewise wait before their route
+  through nodes 21 and 22.
+- **BF003 peasants:** scripts 2–4 have no battle-start barrier. They link their groups after a
+  yield, scatter around authored nodes and repeat waits of 20, 21 and 19 ticks. These ambient
+  updates continue while the player deploys.
+- **BF012/BF025 scattered enemies:** some entry scripts likewise have no barrier. Their
+  scattering/waits continue, but nearest-visible-enemy attack attempts return false during
+  deployment, so those attempts do not launch their attack sequence before Start.
+- **BF037:** several enemy entry scripts have no barrier. Script 2 also checks for a player
+  near node 19, excluding fleeing units, to change mission choreography and notify its side.
+  Placement can affect such a spatial condition before Start; the mission-state change
+  itself does not start combat. Other entry scripts still have phase-restricted nearest-enemy
+  attack attempts.
+
+These examples establish why scripts are a deployment dependency: a frozen interpreter,
+a global script restart on Start, or a single shared “battle state” would produce different
+setup, ambient behaviour and delayed activation. Visible original-game confirmation remains
+listed in §7; none of these examples is presented as a new play-session observation.
+
+### 5.3 Periodic AI countdown: exact timing handoff
+
+The period is data: `SetBehaviour(behaviour, P)` supplies the behaviour identifier and the
+period operand **P**. Do not assign one global AI period. The following rules describe normal
+non-negative period operands and belong to the per-unit mission-script scheduler:
+
+- `SetBehaviour` stores the supplied behaviour and period and resets that unit's periodic
+  countdown to zero. `InitUnit` also resets the countdown to zero.
+- The periodic scheduling check happens once at the **beginning** of a unit's script update,
+  before its instructions and queued interrupt handling. Consequently a `SetBehaviour`
+  executed in that update first becomes eligible at the next update.
+- P = 0 disables periodic decisions. It does not mean “decide every update.” Explicit script
+  `Query` instructions are separate from periodic scheduling.
+- For P > 0, a countdown already zero makes the decision due on that update and reloads it
+  with **P**. Outside deployment, invoke the configured behaviour query. During deployment,
+  skip that query but still reload with P; do not queue a deferred decision.
+- An update beginning with a positive countdown only decrements it by one. Reaching zero
+  does not also invoke/reload on that same update. Thus recurring due updates are **P + 1**
+  updates apart, not P apart.
+- Start preserves the remaining countdown. If it is already zero, the next script update
+  can decide. If it is C > 0, there are C decrement-only updates before the next decision.
+  Pause or a unit state that suppresses script updates also suppresses countdown progress.
+
+For P = 2, starting just after configuration, the next four scheduling checks are:
+
+| Update | Countdown at entry | Result |
+|---|---|---|
+| 1 | 0 | Due; reload to 2. Invoke outside deployment, skip during deployment. |
+| 2 | 2 | Decrement to 1; no decision. |
+| 3 | 1 | Decrement to 0; no decision. |
+| 4 | 0 | Due again; reload to 2. |
+
+At the nominal 100 ms update cadence, a full recurring interval is approximately
+`0.1 × (P + 1)` seconds, subject to the no-catch-up rule. The shared player script uses
+behaviour 11 or 12 with P = 30, giving 31-update intervals. BF001 enemy entry scripts use:
+
+| Script | Behaviour | P | Recurring interval in updates |
+|---|---|---|---|
+| 0 | 15 | 28 | 29 |
+| 1 | 15 | 29 | 30 |
+| 2 | 15 | 30 | 31 |
+| 4 | 15 | 31 | 32 |
+
+This publishes the timing needed by the follow-up on
+[mission-script epic #1](https://github.com/pgrudzien12/openHornedRat/issues/1).
+The scheduler remains mission-script implementation work; deployment requires its suppression
+and preserved countdown behaviour. Timing readiness does not imply every behaviour query's
+complete gameplay effects are implemented. Original-game runtime timing confirmation is
+still outstanding; the tables are independent expected acceptance cases.
+
 ## 6. Independent acceptance scenarios
 
 These are proposed implementation tests, not new observations of the running original.
@@ -294,6 +462,24 @@ These are proposed implementation tests, not new observations of the running ori
    Repeat after changing facing, ranks, and Independent: those settings survive the transition.
 9. A unit waiting for battle start remains at that wait while deployment continues, then
    resumes after the flag action. A prepared waypoint route is retained and starts afterward.
+10. In BF015/BF017/BF020, allied wagons retain authored/scripted positions and reject player
+    left/Ctrl dragging. They consume no player start nodes. Own artillery can be dragged;
+    the weapon and crew move together, while its panel exposes only Independent.
+11. Compare a reached 20-tick wait with a 20-tick wait after the start barrier. Only the
+    reached wait consumes deployment updates. Start preserves script state and remaining timers.
+12. Run BF003 ambient scattering while deploying and check its 19–21-tick waits continue.
+    Run BF012/BF025 attack attempts while deploying: the nearest-enemy instruction returns
+    false. After Start, targeting can succeed under normal visibility/range rules.
+13. For BF001, spend longer than 150 deployment ticks before Start: the delayed Clanrat
+    timer still begins after its mission event gate. A mission-state change to 2 alone
+    must neither start combat time nor release the deployment barrier.
+14. Keep BF001 player `hidden:` flags set after allocation and initialization: models,
+    minimap markers, previous/next selection and left/Ctrl placement remain available.
+    Friendly display must not clear the hidden flag or reveal the unit to opponents.
+15. Configure periodic behaviour with P = 2 and verify the four-update table in §5.3.
+    Repeat during deployment: the due updates reload but issue no decision. Start with
+    countdown 1: the next update decrements to zero, the following one decides. P = 0
+    produces no periodic query. A later `SetBehaviour` resets the countdown to zero.
 
 ## 7. Remaining checks for full original parity
 
@@ -309,11 +495,11 @@ The remaining work is confirmation of visible outcomes and exact coordinate edge
 |---|---|
 | Collision at edges and corners | Compare centre and soldiers for overlapping, deep and rotated formations. Correction follows clipping and can move the centre outside; no final zone clamp. |
 | Exact on-edge arithmetic | Confirm horizontal/sloping edge and vertex inclusion, truncated projected coordinates, equal-distance first-segment choice and the one-unit dead zone. |
-| Artillery and unusual classes | Confirm picking and visible weapon/crew movement during left/Ctrl drag; test monsters and controllable wagons without granting them extra panel actions. |
+| Artillery and unusual classes | Confirm picking and visible weapon/crew movement during left/Ctrl drag; test monsters; confirm shipped allied wagons reject player placement. Custom player-owned wagons are outside the campaign requirement. |
 | Main view versus minimap | Confirm both drag paths, front-anchor swing, Ctrl-click route planning, nine-destination limit, route clearing on direct selection, retention across Start and leaving-minimap release. |
-| Cancellation and unavailable commands | Confirm right-drag camera/pan and Esc do not undo, and no ordinary keyboard shortcut bypasses §4.1. |
+| Cancellation and unavailable commands (lower priority) | Confirm right-drag camera/pan and Esc do not undo, and no ordinary keyboard shortcut bypasses §4.1. |
 | Multiple/missing regions and outside starts | Confirm shared remembered region, initial-acquisition/switch overshoot, boundary-order selection and missing-zone translation refusal using custom data. |
-| Mission setup timing | Confirm a wait before the start barrier consumes deployment time, a wait after it starts later, periodic AI decisions remain suppressed, and combat time starts only on Start. |
+| Mission setup timing (required) | Confirm §5.1–5.2: BF003 ambient updates, nearest-enemy refusal, preserved timers/scripts, BF001 event-gated delay, and scripted wagon staging. Combat time starts only on Start. |
 
 Default placement, marching-order effects and boundary identification are ready for
 implementation. These remaining checks prevent claiming a fully verified reproduction of

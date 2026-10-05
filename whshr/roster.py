@@ -1,22 +1,17 @@
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Company roster: the static per-``whoami`` RMYI table, the starting company (STRTARMY.MRC),
-and writing the engine's own roster/marching-order saves.
+and the company as ``.MRC`` text.
 
 Behavioral source: notes/campaign.md sections 3.1 (whoami/hired unit fields) and 4.5 (the RMYI
 static roster table). Data is read from the user's own installation at runtime; nothing here is
 copied game content (`notes/campaign.md` §4.5's full table already lives in that note as a fact,
-not as copyrightable expression). Writes (``write_company``/``write_march``) never touch the
-original installation: they go to the engine's own save directory, not the original's `SAVE/`
-(notes/glue_engine_integration.md GEI7e). The engine keeps no other save/load compatibility
-promise toward the original (format included); reusing the readable `.MRC` grammar here is a
-convenient current implementation choice, not a compatibility commitment (GEI14 owns the actual
-save/load design).
+not as copyrightable expression). The company is persisted only inside the engine's JSON save slots
+(``company_text``, ``savegame.py``); the engine writes no loose ``.MRC`` files.
 """
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from os import PathLike
-from pathlib import Path
 
 from .paths import Installation
 from .rules import EXPECTED_STATS, PeImage, StatFields, stat_fields, stat_int
@@ -74,7 +69,7 @@ class Regiment:
     leader_profile: tuple[int, ...] = ()
     leader_armour: int = 0
     leader_weapon: int = 0
-    raw: script.Node | None = field(default=None, repr=False, compare=False)  # the parse() node, for write_company/write_march
+    raw: script.Node | None = field(default=None, repr=False, compare=False)  # the parse() node, for company_text
 
     @property
     def destroyed(self) -> bool:
@@ -178,16 +173,29 @@ def _with_hired(node: script.Node, hired: bool) -> script.Node:
     return copy
 
 
-def _with_models(node: script.Node, models: int) -> script.Node:
-    """A copy of ``node`` whose ``s_size`` stat is ``models``; never mutates ``node``."""
-    position = EXPECTED_STATS.index("s_size")
-    index = {name.lower(): i for i, name in enumerate(EXPECTED_STATS)}
+def _with_stat(node: script.Node, name: str, value: int) -> script.Node:
+    """A copy of ``node`` whose stat ``name`` is ``value``; never mutates ``node``."""
+    position = EXPECTED_STATS.index(name)
+    index = {stat.lower(): i for i, stat in enumerate(EXPECTED_STATS)}
     copy = node.copy()
     copy["stats"] = {key: list(values) for key, values in node["stats"].items()}
     for key, values in copy["stats"].items():
         start = index.get(key.lower())
         if start is not None and start <= position < start + len(values):
-            values[position - start] = models
+            values[position - start] = value
+    return copy
+
+
+def _with_models(node: script.Node, models: int) -> script.Node:
+    """A copy of ``node`` whose ``s_size`` stat is ``models``; never mutates ``node``."""
+    return _with_stat(node, "s_size", models)
+
+
+def _with_leader_stat(node: script.Node, name: str, value: int) -> script.Node:
+    """A copy of ``node`` whose leader block has stat ``name`` set to ``value``."""
+    copy = node.copy()
+    copy["children"] = [_with_stat(child, name, value) if child["kind"] == "addleader" else child
+                        for child in node["children"]]
     return copy
 
 
@@ -197,52 +205,68 @@ def with_hired(regiment: Regiment, hired: bool) -> Regiment:
     return replace(regiment, hired=hired, raw=raw)
 
 
+def with_leader_name(regiment: Regiment, name: str) -> Regiment:
+    """The same regiment under a new leader name (the raw node included); spaces are written as ``_``."""
+    raw = regiment.raw
+    if raw is not None:
+        raw = raw.copy()
+        raw['children'] = [{**child, 'name': name.replace(' ', '_')} if child['kind'] == 'addleader' else child
+                           for child in raw['children']]
+    return replace(regiment, leader_name=name, raw=raw)
+
+
 def with_models(regiment: Regiment, models: int) -> Regiment:
     """The same regiment with a new current model count (the raw node included)."""
     raw = None if regiment.raw is None else _with_models(regiment.raw, models)
     return replace(regiment, models=models, raw=raw)
 
 
-def write_company(save_dir: str | PathLike[str], regiments: Iterable[Regiment], hired: Mapping[int, bool],
-                  filename: str = "ARMY.MRC") -> None:
-    """Write the company roster (notes/troop_selection.md §5.3 point 5: hired regiments only).
+def with_stat(regiment: Regiment, name: str, value: int, leader: bool = False) -> Regiment:
+    """The same regiment with stat ``name`` (an ``EXPECTED_STATS`` name) set on its troops, or on its leader."""
+    raw = regiment.raw
+    if raw is not None:
+        raw = _with_leader_stat(raw, name, value) if leader else _with_stat(raw, name, value)
+    return replace(regiment, raw=raw)
 
-    ``save_dir`` is the engine's own save directory (never the original installation: this
-    engine does not keep save-format or save-location compatibility with the original game,
-    notes/glue_engine_integration.md GEI7e). ``hired`` is a ``{whoami: bool}`` mapping (the
-    confirmed troop-selection state); regiments without a ``raw`` node (not loaded from a real
-    .MRC, e.g. in tests) are skipped.
-    """
-    units = [_with_hired(regiment.raw, True) for regiment in regiments
-             if regiment.raw is not None and hired.get(regiment.whoami, regiment.hired)]
-    _write_units_file(save_dir, filename, units, "Mercenary Army")
+
+def with_experience(regiment: Regiment, experience: int) -> Regiment:
+    """The same regiment with a new experience total (the ``set:s_Exp`` field)."""
+    raw = regiment.raw
+    if raw is not None:
+        raw = raw.copy()
+        raw["set"] = {**raw["set"], "s_Exp": str(experience)}
+    return replace(regiment, experience=experience, raw=raw)
+
+
+def with_improved_stat(regiment: Regiment, stat: str) -> Regiment:
+    """+1 to a profile stat (``s_wepn``, ``s_strn``, ``s_wnds`` ...) or to armour (``s_armr``), on the troops and
+    on their leader (notes/campaign.md 1.3, 1.4)."""
+    if stat == "s_armr":
+        updated = replace(regiment, armour=regiment.armour + 1, leader_armour=regiment.leader_armour + 1)
+        troops, leader = updated.armour, updated.leader_armour
+    else:
+        slot = _PROFILE_STATS.index(stat)
+        profile = tuple(v + (i == slot) for i, v in enumerate(regiment.profile))
+        leader_profile = tuple(v + (i == slot) for i, v in enumerate(regiment.leader_profile))
+        updated = replace(regiment, profile=profile, leader_profile=leader_profile)
+        troops, leader = profile[slot], leader_profile[slot] if leader_profile else None
+    updated = with_stat(updated, stat, troops)
+    if regiment.leader_name is not None and leader is not None:
+        updated = with_stat(updated, stat, leader, leader=True)
+    return updated
+
+
+def with_points(regiment: Regiment, points: int) -> Regiment:
+    """The same regiment with a new ``s_pntval`` (the experience each model is worth)."""
+    return with_stat(replace(regiment, points=points), "s_pntval", points)
+
+
+def with_base_price(regiment: Regiment, base_price: int) -> Regiment:
+    """The same regiment with a new price per model."""
+    return replace(regiment, row=replace(regiment.row, base_price=base_price))
 
 
 def company_text(regiments: Iterable[Regiment]) -> str:
     """The whole company as ``.MRC`` text, unhired regiments included; the inverse of :func:`parse_company`."""
     return script.write(_unit_section([regiment.raw for regiment in regiments if regiment.raw is not None],
                                       "Mercenary Army"))
-
-
-def write_army(save_dir: str | PathLike[str], regiments: Iterable[Regiment], filename: str = "ARMY.MRC") -> None:
-    """Write the whole company, unhired regiments included (they wait in the recruit book with ``hired=0``)."""
-    units = [regiment.raw for regiment in regiments if regiment.raw is not None]
-    _write_units_file(save_dir, filename, units, "Mercenary Army")
-
-
-def write_march(save_dir: str | PathLike[str], ordered_whoami: Iterable[int], regiments: Iterable[Regiment],
-                filename: str = "MARCH.MRC") -> None:
-    """Write the marching order (notes/troop_selection.md §5.3 point 3), in list order."""
-    by_whoami = {regiment.whoami: regiment for regiment in regiments}
-    units: list[script.Node] = []
-    for whoami in ordered_whoami:
-        regiment = by_whoami.get(whoami)
-        if regiment is not None and regiment.raw is not None:
-            units.append(_with_hired(regiment.raw, True))
-    _write_units_file(save_dir, filename, units, "Mercenary Army (Marching Orders)")
-
-
-def _write_units_file(save_dir: str | PathLike[str], filename: str, units: Sequence[script.Node], label: str) -> None:
-    target = Path(save_dir) / filename
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(script.write(_unit_section(units, label)))

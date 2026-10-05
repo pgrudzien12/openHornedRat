@@ -224,7 +224,9 @@ class DebriefSceneTests(PostMissionCaravanTests):
         self.context.no_battle = False
         campaign = _campaign()
         campaign.begin_mission(parse_cash("1,100,400,50,25,A"))
-        SceneMachine(GlueScene("DEBRIEFONLY", campaign), self.context).update(0.1)
+        machine = SceneMachine(GlueScene("DEBRIEFONLY", campaign), self.context)
+        machine.update(0.1)
+        machine.handle("done")  # the balance sheet page closes
 
         self.assertEqual(campaign.coffers, 500)
         (row,) = self._rows("payment")

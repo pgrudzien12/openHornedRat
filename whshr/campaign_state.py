@@ -21,6 +21,7 @@ from .portraits import first_leader_speaker
 from .roster import Regiment, load_company, load_master, with_hired
 
 if TYPE_CHECKING:
+    from .debrief_screen import UnitOutcome
     from .payments import CashTerms
     from .roster_book import BookModel
     from .troop_selection import Deployment
@@ -163,9 +164,6 @@ class CampaignState:
     # Every regiment of the campaign in its fresh state (``PLAY.MRC``'s starting content): the source that
     # ``addunit``/``unitjoinmission`` copy a regiment from into the company (notes/campaign.md §2.4, §4.4).
     master: tuple[Regiment, ...] = field(default_factory=tuple[Regiment, ...], repr=False, compare=False)
-    # The engine's own save directory (never the original installation's SAVE/, GEI7e); None
-    # (e.g. focused tests, --glue-program runs) means troop selection stays in-memory only.
-    save_dir: str | PathLike[str] | None = field(default=None, repr=False, compare=False)
     # The portrait set of the first marching regiment with a leader portrait (notes/glue_portraits.md
     # §1.4); recomputed only when the marching roster is loaded, None until then.
     current_speaker: str | None = None
@@ -185,6 +183,9 @@ class CampaignState:
     mission_paid: bool = False
     # True while ``objective_results`` is the no-battle mode's flawless win (whshr.payments.flawless_results).
     flawless_result: bool = False
+    # What each marching regiment (by whoami) came out of the latest played battle with; empty when no battle was
+    # played (no-battle mode), in which case the debrief shows every marching regiment unharmed.
+    battle_outcome: "dict[int, UnitOutcome]" = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self.flow_history or self.flow_history[-1] != self.flow:
@@ -201,6 +202,7 @@ class CampaignState:
         self.mission_paid = False
         self.objective_results = {}
         self.flawless_result = False
+        self.battle_outcome = {}
 
     def is_unit_in_army(self, unit_id: int) -> bool:
         return int(unit_id) in self.army_units
@@ -262,7 +264,6 @@ class CampaignState:
             merged.append(unit_id)
         if merged:
             self._sync_army()
-            self._persist_company()
         return tuple(merged)
 
     def recruitable(self) -> bool:
@@ -277,7 +278,6 @@ class CampaignState:
         self.company = tuple(regiment for regiment in self.company if regiment.hired)
         self.reinforcements.clear()
         self._sync_army()
-        self._persist_company()
 
     def apply_army_book(self, model: "BookModel") -> None:
         """Army Records Done: the hired flags, men taken as reinforcements and (money variant) the coffers and
@@ -286,11 +286,10 @@ class CampaignState:
             self.company = tuple(with_hired(regiment, model.hired[whoami]) for whoami, regiment in model.company.items())
             self.reinforcements = dict(model.ledger.available)
             self._sync_army()
-            self._persist_company()
         if model.pays:
             self.coffers = model.coffers
             self.march_units = set(model.selection)
-            self._persist_march()
+            self.march_order = self.ordered_march_units
 
     def abort_army_book(self, model: "BookModel") -> None:
         """Army Records Abort: nothing is written, but a paying book already charged every click, so its coffers
@@ -298,14 +297,18 @@ class CampaignState:
         if model.pays:
             self.coffers = model.coffers
 
-    def _persist_company(self) -> None:
-        if self.save_dir is not None:
-            roster.write_army(self.save_dir, self.company)
+    def rename_commander(self, name: str) -> None:
+        """The name prompt's OK: the leader of the commander's regiment takes ``name`` (notes/native-windows.md
+        §7.3.1 step 6). The master roster is read-only and keeps its shipped name (open question of §7.3.1)."""
+        self.company = tuple(roster.with_leader_name(regiment, name)
+                             if regiment.whoami == roster.ALWAYS_FORCED_WHOAMI else regiment
+                             for regiment in self.company)
 
-    def _persist_march(self) -> None:
-        self.march_order = self.ordered_march_units
-        if self.save_dir is not None:
-            roster.write_march(self.save_dir, self.march_order, self.company)
+    @property
+    def commander_name(self) -> str:
+        """The leader name of the commander's regiment (the name prompt's default text)."""
+        return next((regiment.leader_name or "" for regiment in self.company
+                     if regiment.whoami == roster.ALWAYS_FORCED_WHOAMI), "")
 
     @property
     def ordered_march_units(self) -> tuple[int, ...]:
@@ -357,14 +360,6 @@ class CampaignState:
         # Point 5: regiments that were not hired leave the company, unused reinforcements are cleared.
         self.company = tuple(with_hired(regiment, True) for regiment in self.company if regiment.whoami in deployment.hired)
         self.reinforcements.clear()
-        if self.save_dir is not None:
-            # notes/troop_selection.md §5.3 points 3, 5: durable ARMY.MRC/MARCH.MRC, written to
-            # the engine's own save directory, never the original installation
-            # (notes/glue_engine_integration.md GEI7e). The reinforcement pool has no standalone-file
-            # home in the original either (only the savegame.N RIFF's RMYI chunk carries it,
-            # notes/campaign.md §4.5), so it stays in-memory until GEI14 defines that writer.
-            roster.write_army(self.save_dir, self.company)
-            roster.write_march(self.save_dir, deployment.units, self.company)
         by_whoami = {regiment.whoami: regiment for regiment in self.company}
         self.refresh_speaker([by_whoami[whoami] for whoami in deployment.units if whoami in by_whoami])
 
@@ -500,8 +495,8 @@ class CampaignState:
         return text % format_args if format_args else text
 
     @classmethod
-    def from_installation(cls, installation: Installation | str | PathLike[str], content: GlueContent | None = None,
-                          save_dir: str | PathLike[str] | None = None) -> "CampaignState":
+    def from_installation(cls, installation: Installation | str | PathLike[str],
+                          content: GlueContent | None = None) -> "CampaignState":
         game = installation if isinstance(installation, Installation) else Installation(installation)
         content = content or GlueContent(game)
         wnd = content.resources
@@ -519,7 +514,7 @@ class CampaignState:
             master = ()
         return cls(build_campaign_graph(str(game.root), wnd=wnd, string_tables=tables),
                    flow=initial_flow(hotspots), hints=hints, content=content, company=company,
-                   master=master, save_dir=save_dir)
+                   master=master)
 
     @classmethod
     def single_mission(cls, briefing: Any) -> "CampaignState":

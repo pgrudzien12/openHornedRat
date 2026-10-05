@@ -26,7 +26,8 @@ class GlueScene(Scene):
     def __init__(self, program: str | None = None, campaign: "CampaignState | None" = None, *,
                  window: str | None = None, speech_enabled: bool = True, accept_battle: str | None = None,
                  accept_mission: MissionRef | None = None, return_scene: Scene | None = None,
-                 record_battle: str | None = None, record_debrief: int | str | None = None) -> None:
+                 record_battle: str | None = None, record_debrief: int | str | None = None,
+                 parent_window: str | None = None) -> None:
         if record_battle is not None:
             if program is not None or window is not None:
                 raise ValueError("a record battle scene has neither program nor window")
@@ -34,6 +35,7 @@ class GlueScene(Scene):
             raise ValueError("GlueScene needs exactly one program or window")
         self.record_battle = str(record_battle).upper() if record_battle is not None else None
         self.record_debrief = record_debrief
+        self.parent_window = parent_window  # a window whose frame stays on the context stack under this scene
         self.program = str(program).upper() if program is not None else None
         self.window = str(window).upper() if window is not None else None
         self.campaign = campaign
@@ -126,19 +128,20 @@ class GlueScene(Scene):
         return self.runtime
 
     def resolve_debrief(self, effect: StartDebrief) -> None:
-        """Complete a debrief request without a screen (minimal debrief, :mod:`whshr.debrief`): log what was
-        applied or skipped, then resume the script exactly as the completion handler would."""
+        """Complete a debrief request (the screen's Done, or its skip): apply its effects (:mod:`whshr.debrief`), log
+        what was applied or skipped, then resume the script exactly as the completion handler would.  The debrief of
+        a battle (modes 2 and 6) answers the pending battle request, the glue commands their own."""
         self._apply_debrief(effect)
-        self.complete_activity(ActivityResult(effect.request_id, "debrief"))
+        self.complete_activity(ActivityResult(effect.request_id, "battle" if effect.mode in (2, 6) else "debrief"))
 
     def finish_battle(self, request_id: int) -> None:
-        """A battle this scene started has ended.  A *withdebrief* battle is followed by the debrief, whose
-        completion pays the mission (notes/campaign.md section 5, mode 2); a plain one is never paid."""
+        """A battle this scene started has ended: its debrief follows (mode 2 for a *withdebrief* battle, whose
+        completion pays the mission; mode 6 otherwise, never paid; notes/campaign.md section 5), and the pending
+        battle request resolves when that debrief completes."""
         state = self.require_runtime().state
-        if state.battle_with_debrief:
-            state.battle_with_debrief = False
-            self._apply_debrief(StartDebrief(request_id, 2, state.debrief_index, False))
-        self.complete_activity(ActivityResult(request_id, "battle"))
+        mode = 2 if state.battle_with_debrief else 6
+        state.battle_with_debrief = False
+        self._effects.append(StartDebrief(request_id, mode, state.debrief_index, False))
 
     def _apply_debrief(self, effect: StartDebrief) -> None:
         from .debrief import complete_debrief
@@ -148,7 +151,7 @@ class GlueScene(Scene):
         location = self.program or self.window or self.record_battle or ""
         self._queue(tuple(Diagnostic(location, f"debrief: skipped {text}") for text in skipped))
         log = getattr(self.context, "campaign_log", None)
-        if log is not None:
+        if log is not None and (applied or skipped or effect.mode != 6):
             try:
                 log.write("debrief", mode=effect.mode, debrief_index=effect.debrief_index, summary=effect.summary,
                           applied=applied, skipped=skipped)
@@ -169,6 +172,8 @@ class GlueScene(Scene):
             else:
                 self._queue(self.runtime.start(self.program) if self.program is not None
                             else self.runtime.start_window(self.window or ""))
+                if self.parent_window is not None:
+                    self.runtime.push_window_frame(self.parent_window.upper())
             history = getattr(self.campaign, "flow_history", ())
             if self.program is not None and history and self.program == history[0]:
                 for flow in history[1:]:  # resume: replay the chain up to the campaign's current flow
@@ -267,7 +272,7 @@ class GlueScene(Scene):
                 from .campaign_state import CampaignState
 
                 campaign = self.campaign or CampaignState.from_installation(
-                    context.locator.installation, self.runtime.content, save_dir=getattr(context, "save_dir", None)
+                    context.locator.installation, self.runtime.content
                 )
                 return Transition(GlueScene(campaign=campaign, window="STARTCARAVAN"),
                                   "generic mission map dismissed")

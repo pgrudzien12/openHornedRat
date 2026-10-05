@@ -13,6 +13,7 @@ from typing import Any
 
 from .campaign_runtime import CampaignRuntime
 from .campaign_state import caravan_window
+from .debrief_rules import STATUS_BIT_VICTORY_WITHOUT_C, STATUS_BIT_VICTORY_WITH_C, Evaluation, evaluate
 from .glue_animation import GlueBitmapAnimator
 from .glue import AnimRecord, BitmapRecord, GlueInstruction, MissionRecord, MissionRef
 from .glue_content import GlueContent
@@ -103,6 +104,25 @@ class StartDebrief:
 @dataclass(frozen=True)
 class PlayMusic:
     name: str
+
+
+@dataclass(frozen=True)
+class SpeechOverlay:
+    """One overlay animation that plays on Dietrich's portrait while a click speech runs (notes/native-windows.md §14.3.3)."""
+    bitmap: str  # base name; frame k is ``<bitmap><k>``
+    x: int
+    y: int
+    start_cell: int  # cells count down from here to 0 and wrap
+    loop_steps: int  # extra 50 ms steps after cell 0
+
+
+# Click-speech name -> its (eyes, mouth or book) overlay pair.  Cell sizes, positions and timing: notes/native-windows.md §14.3.2-§14.5.
+# PROVISIONAL: the loop pause of every overlay except the talking eyes is not observed and assumed 0 (§14.11).
+SPEECH_OVERLAYS: dict[str, tuple[SpeechOverlay, ...]] = {
+    "DietrichSpeech": (SpeechOverlay("TalkEyesCell", 300, 200, 1, 60), SpeechOverlay("DietMouthCell", 288, 220, 5, 0)),
+    "DietrichRead": (SpeechOverlay("ReadEyesCell", 312, 208, 1, 0), SpeechOverlay("DietBookCell", 296, 260, 11, 0)),
+}
+SPEECH_OVERLAY_TIMECNT = 2  # steps between cells: each cell shows for 3 steps = 150 ms
 
 
 @dataclass(frozen=True)
@@ -248,6 +268,7 @@ class GlueRuntimeState:
     dialogue_colour: str = "black"  # live settextcolor value, applies to the *next* queued line
     speech_lines: tuple[int, ...] = ()  # string ids still to speak after the current hotspot speech line
     speech_active: bool = False  # a hotspot click speech is typing or holding its current line
+    speech_overlays: dict[str, GlueBitmapAnimator] = field(default_factory=dict[str, GlueBitmapAnimator])  # running eyes/mouth animators by bitmap base name
     object_positions: dict[tuple[str, str], tuple[int, int]] = field(default_factory=dict[tuple[str, str], tuple[int, int]])
     portrait_animators: dict[str, PortraitAnimator] = field(default_factory=dict[str, PortraitAnimator])
     # window name -> (resident-list position, set name) chosen for an `index=-1` block when it was built
@@ -331,6 +352,8 @@ class GlueRuntime:
             if update.finished and animation.notify_on_stop and not animation.notified:
                 animation.notified = True
                 completed = True
+        for animator in self.state.speech_overlays.values():
+            animator.tick(milliseconds)
         if completed and self.state.wait_reason == "animation-finished":
             self.state.wait_reason = None
             if self.state.current is not None:
@@ -355,9 +378,7 @@ class GlueRuntime:
         """Cut off a hotspot speech that is still running (its clip and its text), e.g. when the caravan is left."""
         if not self.state.speech_active:
             return ()
-        self.state.speech_active = False
-        self.state.speech_lines = ()
-        self._clear_dialogue()
+        self._end_speech()
         return (StopSpeech(),)
 
     def _skip_speech_line(self) -> tuple[GlueEffect, ...]:
@@ -368,9 +389,15 @@ class GlueRuntime:
             self.state.speech_lines = tuple(rest)
             self._queue_dialogue_line(next_id)
             return self._speech_effects(next_id)
-        self.state.speech_active = False
-        self._clear_dialogue()
+        self._end_speech()
         return (StopSpeech(),)
+
+    def _end_speech(self) -> None:
+        """The run is over: the overlays are removed and the plain backdrop shows (§14.3.3)."""
+        self.state.speech_active = False
+        self.state.speech_lines = ()
+        self.state.speech_overlays = {}
+        self._clear_dialogue()
 
     def _step_line(self, milliseconds: float) -> bool:
         """Advance the line on screen; True once it has been typed and held and the next thing may start.
@@ -394,24 +421,39 @@ class GlueRuntime:
         return state.dialogue_ms >= DIALOGUE_HOLD_MILLISECONDS
 
     def _hotspot_speech(self, argument: str | None) -> tuple[GlueEffect, ...]:
-        """Speak a clicked hotspot's ``clickres`` lines (``"<first id>:<count>"``); ignored while a
-        script dialogue or an earlier click speech is still on screen."""
+        """Speak a clicked hotspot's ``clickres`` lines (``"<first id>:<count>[:<name>]"``); a click is ignored
+        while a script dialogue or an earlier click speech is still running (notes/native-windows.md §14.3.3)."""
         if self.state.speech_active:
-            return self._skip_speech_line()  # a click while he speaks moves on, like a click on the empty window
+            return ()
         if self.state.pending is not None and self.state.pending.kind == "dialogue":
             return ()
+        first, count, *rest = str(argument).split(":")
         try:
-            first, count = (int(part) for part in str(argument).split(":"))
+            first, count = int(first), int(count)
         except ValueError:
             return ()
         if count < 1:
             return ()
-        if self.state.pending is not None and self.state.pending.kind == "caravan":
-            self.state.dialogue_colour = "red"  # Dietrich's colour, as in the scripts' dialogues (notes/briefing_dialogue.md §3.4)
+        self.state.dialogue_colour = "red"  # Dietrich's colour, kept after the run like the original (§14.3.3)
+        self.state.variables["textlines"] = 2
+        self.state.speech_overlays = self._start_speech_overlays(rest[0] if rest else "")
         self.state.speech_active = True
         self.state.speech_lines = tuple(range(first + 1, first + count))
         self._queue_dialogue_line(first)
         return (HotspotSpeech(first, count), *self._speech_effects(first))
+
+    @staticmethod
+    def _start_speech_overlays(name: str) -> dict[str, GlueBitmapAnimator]:
+        """Start the eyes and mouth (or book) animators of click speech ``name``, each showing its first cell at once."""
+        animators: dict[str, GlueBitmapAnimator] = {}
+        for overlay in SPEECH_OVERLAYS.get(name, ()):
+            animator = GlueBitmapAnimator({
+                "bitmap": overlay.bitmap, "animstartframe": overlay.start_cell, "animstopframe": -1,
+                "timecnt": SPEECH_OVERLAY_TIMECNT, "looptimecnt": overlay.loop_steps})
+            animator.delay = 0
+            animator.step()
+            animators[overlay.bitmap] = animator
+        return animators
 
     def _advance_dialogue(self, milliseconds: float) -> tuple[GlueEffect, ...]:
         """Type the pending line, hold it, then resolve the dialogue and resume (§3.5)."""
@@ -531,16 +573,32 @@ class GlueRuntime:
             if record is None:
                 effects.append(Diagnostic(command, f"no battle result for objective {letter!r}: treated as not met"))
         else:
-            # Every evaluator of notes/debrief_evaluation.md section 4 reports victory for a flawless result
-            # (all win letters met, nothing lost); any other case needs a real battle result.
-            met = bool(getattr(self.campaign, "flawless_result", False))
-            if not met:
-                effects.append(Diagnostic(command, "no battle result to evaluate: treated as lost"))
+            met = self._mission_victory(effects)
         self._set_status(met)
         if command == "testmission":
             if self.campaign is not None:
                 self.campaign.autosave(self.snapshot())
             effects.append(Autosave())
+
+    def _mission_victory(self, effects: list[GlueEffect]) -> bool:
+        """The T-result of the current mission's debrief evaluator over the latest battle result
+        (notes/debrief_evaluation.md sections 4-5).  A no-battle flawless result is a win by definition."""
+        campaign = self.campaign
+        if getattr(campaign, "flawless_result", False):
+            return True
+        results = getattr(campaign, "objective_results", None)
+        if not results:
+            effects.append(Diagnostic("testmission", "no battle result to evaluate: treated as lost"))
+            return False
+        evaluation = evaluate(self.state.debrief_index, results)
+        self.apply_evaluation_status(evaluation)
+        return evaluation.victory
+
+    def apply_evaluation_status(self, evaluation: Evaluation) -> None:
+        """The last mission's evaluator refreshes two status bits whenever it runs (notes/debrief_evaluation.md 5)."""
+        if evaluation.entry.kind == 7:
+            bits = STATUS_BIT_VICTORY_WITH_C | STATUS_BIT_VICTORY_WITHOUT_C
+            self.state.status_bits = (self.state.status_bits & ~bits) | evaluation.status_bits
 
     def _bonus(self, command: str, argument: str, effects: list[GlueEffect]) -> None:
         """``bonusadd:<n>,<L>`` adds value ``n`` (1-4) of objective ``L`` to the bonus counter;
@@ -652,6 +710,14 @@ class GlueRuntime:
         ))
         if hide:
             self.state.windows.clear()
+        return True
+
+    def push_window_frame(self, window_name: str) -> bool:
+        """Keep a window that opened a flow on the context stack, without restoring anything when it is popped
+        (a hotspot's WINDOW frame: the main menu stays under the start caravan, notes/native-windows.md §7.3.1)."""
+        if len(self.state.context_stack) >= self.MAX_CONTEXT_DEPTH:
+            return False
+        self.state.context_stack.append(ContextSnapshot("WINDOW", None, [], [], window_name, self.state.palette_id))
         return True
 
     def pop_context(self, *, show: bool = True) -> str | None:

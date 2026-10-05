@@ -198,6 +198,7 @@ class EncounterSceneTests(unittest.TestCase):
         self.assertIsInstance(self.machine.active, ResultScene)
 
         self.machine.handle("continue")
+        self.machine.handle("done")  # the debrief screen closes
 
         self.assertIs(self.machine.active, self.scene)
         self.assertIsNone(self.scene.runtime.state.pending)

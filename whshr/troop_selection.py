@@ -154,8 +154,10 @@ class TroopSelection:
 
     @property
     def total_cost(self) -> int:
-        """notes/troop_selection.md §3.1: sum of the numbers shown, i.e. AVAILABLE rows only."""
-        return sum(self.row(whoami).total for whoami in self.company if self.status(whoami) == STATUS_AVAILABLE)
+        """notes/native-windows.md §11.3.5: the price of every selected regiment plus the retainer of every
+        hired regiment that is not selected. Excluded and destroyed rows are not skipped, so their retainers count."""
+        return sum(self.company[whoami].price if whoami in self.selection else self.company[whoami].retainer
+                   for whoami in self.company if self.hired[whoami])
 
     @property
     def affordable(self) -> bool:

@@ -21,9 +21,9 @@ CARAVAN = "[WINDOW]\n[POSITION]\nset:x=0\nset:y=0\nset:vx=640\nset:vy=480\n[END]
           "[HOTSPOT]\nset:x=1\nset:y=1\nset:vx=9\nset:vy=9\nscript:pop.wnd\nres:LoadSaveWindow\n[END]"
 
 
-def campaign(save_dir=None, **fields):
+def campaign(**fields):
     company = roster.parse_company(MRC, ROWS)
-    return CampaignState(GRAPH, mission_window="MAP", company=company, master=company, save_dir=save_dir, **fields)
+    return CampaignState(GRAPH, mission_window="MAP", company=company, master=company, **fields)
 
 
 class LoadSaveFixture(unittest.TestCase):
@@ -46,7 +46,7 @@ class LoadSaveTests(LoadSaveFixture):
         """(machine, parent): Save is reached through the caravan's hotspot, Load is the machine's first scene."""
         parent = GlueScene(window="STARTCARAVAN", campaign=state)
         if mode == LOAD:
-            dialog = LoadSaveScene(LOAD, parent, new_campaign=lambda context, directory: campaign(directory))
+            dialog = LoadSaveScene(LOAD, parent, new_campaign=lambda context, directory: campaign())
             return SceneMachine(dialog, self.context), parent
         machine = SceneMachine(parent, self.context)
         machine.handle(GlueInput("hotspot-release", "LoadSaveWindow"))
@@ -197,7 +197,6 @@ class LoadSaveTests(LoadSaveFixture):
         self.assertIsInstance(machine.active, GlueScene)
         self.assertEqual(machine.active.window, "STARTCARAVAN")
         self.assertEqual((machine.active.campaign.coffers, machine.active.campaign.flow), (999, "FLOWB"))
-        self.assertEqual(machine.active.campaign.save_dir, self.save_dir)
 
     def test_given_a_damaged_save_when_loaded_then_the_dialog_stays_with_a_message(self):
         self.save_dir.mkdir(parents=True)

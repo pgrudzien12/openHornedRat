@@ -186,9 +186,9 @@ class ReinforcementTests(unittest.TestCase):
 
 
 class CampaignRosterTests(unittest.TestCase):
-    def _campaign(self, company, master=(), save_dir=None, coffers=500):
+    def _campaign(self, company, master=(), coffers=500):
         return CampaignState({"flow_scripts": {}, "mission_windows": {}}, mission_window="MAP", coffers=coffers,
-                             company=tuple(company), master=tuple(master), save_dir=save_dir)
+                             company=tuple(company), master=tuple(master))
 
     def test_given_pending_regiments_when_the_caravan_opens_then_they_join_hired_unless_for_hire(self):
         master = [regiment(whoami, for_hire=whoami == 9) for whoami in (2, 5, 9)]
@@ -273,33 +273,6 @@ class CampaignRosterTests(unittest.TestCase):
 
         self.assertFalse(any(r.hired for r in campaign.company if r.whoami == 5))
         self.assertEqual(campaign.coffers, 500 - 120)
-
-    def test_given_a_save_dir_when_a_book_is_done_then_the_army_file_keeps_unhired_regiments(self):
-        with tempfile.TemporaryDirectory() as directory:
-            text = ("[MERCARMY]\n[UNITS]\n"
-                    "addunit:A\nset:whoami=2\nset:hired=1\nsetstats:s_side=2,10,10,1\nendunit:\n"
-                    "addunit:B\nset:whoami=5\nset:hired=0\nsetstats:s_side=2,10,10,1\nendunit:\n[END]\n[END]\n")
-            path = Path(directory) / "game/FILE/SCRIPT/STRTARMY.MRC"
-            path.parent.mkdir(parents=True)
-            path.write_text(text)
-            rows = {2: RosterRow(2, False, False, False, False, 10), 5: RosterRow(5, False, True, False, False, 10)}
-            company = load_company(Path(directory) / "game", roster=rows)
-            saves = Path(directory) / "saves"
-            campaign = self._campaign(company, save_dir=saves)
-            model = RosterBook(campaign.company, coffers=500, reinforcements={}, pays=False)
-            model.toggle_hired(5)
-
-            campaign.apply_army_book(model)
-
-            written = script.units_of(script.parse(str(saves / "ARMY.MRC")))
-            flags = {script.unit_view(u)["set"]["whoami"]: script.unit_view(u)["set"]["hired"] for u in written}
-            self.assertEqual(flags, {2: 1, 5: 1})
-            model2 = RosterBook(campaign.company, coffers=500, reinforcements={}, pays=False)
-            model2.toggle_hired(5)  # fire again
-            campaign.apply_army_book(model2)
-            written = script.units_of(script.parse(str(saves / "ARMY.MRC")))
-            flags = {script.unit_view(u)["set"]["whoami"]: script.unit_view(u)["set"]["hired"] for u in written}
-            self.assertEqual(flags, {2: 1, 5: 0})
 
 
 CARAVAN = "[WINDOW]\n[POSITION]\nset:x=0\nset:y=0\nset:vx=640\nset:vy=480\nset:palindex=3\n[END]\n" \

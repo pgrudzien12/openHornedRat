@@ -74,6 +74,8 @@ class SceneAssets:
     # Optional whshr.campaign_log.CampaignLogger; observation only, never changes behaviour.
     campaign_log: "CampaignLogger | None" = None
     battle_loader: Callable[[AssetRecord, Path, dict[str, Any]], Any] | None = None
+    battle_log_dir: str | PathLike[str] | None = None
+    battle_seed: int = 1995
 
     def load_battle(self, identifier: AssetId, player_army: dict[str, Any] | None = None) -> Any:
         """Decode dynamic army assets before rendering; never reuse a previous marching army."""
@@ -256,13 +258,19 @@ class SceneMachine:
             self._apply(Transition(parent, "mission released"))
 
     def _start_glue_debrief(self) -> None:
-        """A debrief request has no screen yet: it completes at once, applying what the engine can
-        (notes/activity_results.md section 5), and the script goes on."""
+        """A debrief request opens the debrief screen (whshr.debrief_scene); Done applies its effects and the script
+        goes on.  In no-battle mode there is no screen: the request completes at once (notes/activity_results.md
+        section 5)."""
         from .glue_scene import GlueScene
 
         while isinstance(self.active, GlueScene):
             effect = self.active.take_debrief_effect()
             if effect is None:
+                return
+            if not getattr(self.context, "no_battle", False):
+                from .debrief_scene import DebriefScene
+
+                self._apply(Transition(DebriefScene(self.active, effect), "debrief opened"))
                 return
             self.active.resolve_debrief(effect)
 
@@ -296,7 +304,9 @@ class SceneMachine:
         from .battle_scene import BattleScene
 
         battle = AssetId("vanilla", "battle", effect.battle.casefold())
-        self._apply(Transition(BattleScene(battle, glue_scene=self.active, request_id=effect.request_id),
+        self._apply(Transition(BattleScene(battle, log_dir=self.context.battle_log_dir,
+                                          seed=self.context.battle_seed,
+                                          glue_scene=self.active, request_id=effect.request_id),
                                "glue battle started"))
 
     def _start_glue_movie(self) -> None:

@@ -26,13 +26,14 @@ from .scene_view import NativeScreenView
 # notes/troop_selection.md §§2--5, §7.  Coordinates are native 640x480 pixels.
 Rgb = tuple[int, int, int]
 Point = tuple[int, int]
-BLACK, BLUE, GREY, RED, YELLOW = (0, 0, 0), (0, 0, 180), (127, 127, 127), (255, 0, 0), (255, 255, 0)
+BLACK, BLUE, GREY, RED, YELLOW = (0, 0, 0), (0, 0, 255), (127, 127, 127), (255, 0, 0), (255, 255, 0)
 BUTTONS: tuple[tuple[str, int, str, int], ...] = (
     ("abort", 225, "BrownATab", 307), ("done", 325, "GreenATab", 304),
     ("page:back", 425, "BlueATab", 301), ("page:next", 525, "RedATab", 300),
 )
 BUTTON_Y, BUTTON_SIZE = 448, (84, 32)
 P0_ROWS, P1_ROWS = 6, 7
+LABEL_OFFSET_RELEASED, LABEL_OFFSET_PRESSED = (4, 2), (3, 3)
 # notes/troop_selection.md §2: the named cursor groups of the game's executable (loaded at runtime, never copied).
 CURSORS: dict[str, str] = {
     "default": "SWORDCURSOR", "help": "HELPCURSOR", "toggle": "PENCILCURSOR", "no_toggle": "NOPENCILCURSOR",
@@ -115,7 +116,9 @@ class TroopSelectionView(NativeScreenView[TroopSelectionScene]):
             row = model.row(whoami)
             y = 50 + height + 4 * height * row_index
             self._regiment(row, y, 45, p1=False)
-            self.rows.append((pygame.Rect(45, y - height, 550, 4 * height), whoami))
+            # notes/native-windows.md §11.3.5/§11.5.1: full-width rows; a click just above row 0 selects row 0
+            top = y - height - (4 * height - 1 if row_index == 0 else 0)
+            self.rows.append((pygame.Rect(0, top, 640, y - height + 4 * height - top), whoami))
         shown = min(P0_ROWS, max(0, len(model.company) - start))
         total_y = 50 + 4 * height * shown
         self._label_right(self._string("BRTXT", 303), 495, total_y, BLACK)
@@ -140,7 +143,7 @@ class TroopSelectionView(NativeScreenView[TroopSelectionScene]):
                 self._bitmap("BookScroll2", (83, y - 10))
                 self._center(str(index + 1), y, BLACK, x=83, width=56)
                 self._regiment(model.row(whoami), y, 157, p1=True)
-            self.rows.append((pygame.Rect(83, y - height, 482, 4 * height), index))
+            self.rows.append((pygame.Rect(0, y - height, 640, 4 * height), index))
         # notes/troop_selection.md §5.2: "the strip (BookScroll0) with its contents follows the
         # cursor while the original row is hidden". Built once here (only when picked_whoami
         # changes, since this is part of refresh()'s diffed rebuild); draw() repositions the
@@ -167,17 +170,17 @@ class TroopSelectionView(NativeScreenView[TroopSelectionScene]):
     def _p5(self) -> None:
         """Draw the bankruptcy page; notes/troop_selection.md §7.
 
-        The availability test and its displayed coffer amount both include the already
-        evaluated initial payment, as on P0's coffer line (§3.5).
+        The coffers line shows the coffers alone, without the initial payment
+        (notes/native-windows.md §11.3.7).
         """
         height = self.body_font.font.height
         model = self._model()
         heading_y = 50 + 8 * height
         self._center(self._string("BKTXT", 601), heading_y, BLACK, font=self.heading_font)
-        self._center(self._string("BKTXT", 602, model.coffers + model.prepaid),
-                     heading_y + self.heading_font.font.height, BLACK)
+        self._center(self._string("BKTXT", 602, model.coffers),
+                     heading_y + 2 * self.heading_font.font.height, BLACK)
         self._center(self._string("BKTXT", 603, model.forced_cost),
-                     heading_y + self.heading_font.font.height + height, BLACK)
+                     heading_y + 2 * self.heading_font.font.height + 2 * height, BLACK)
         self._button("done", 325, "GreenATab", 304, True)
 
     def _regiment(self, row: TroopRow, y: int, x: int, *, p1: bool) -> None:
@@ -219,8 +222,8 @@ class TroopSelectionView(NativeScreenView[TroopSelectionScene]):
     def _button(self, action: str, x: int, art: str, text_id: int, enabled: bool) -> None:
         pressed = enabled and action == self.pressed_button
         self._bitmap(f"{art}Dn0" if pressed else f"{art}Up", (x, BUTTON_Y))
-        # The pressed label moves button left, matching the tab art's inset.
-        offset_x, offset_y = (0, 3) if pressed else (4, 3)
+        # notes/native-windows.md §11.3.3: label offset (+4,+2) released, (+3,+3) pressed.
+        offset_x, offset_y = LABEL_OFFSET_PRESSED if pressed else LABEL_OFFSET_RELEASED
         label_y = BUTTON_Y + (BUTTON_SIZE[1] - self.body_font.font.height) // 2 + offset_y
         self._center(self._string("BRTXT", text_id), label_y, YELLOW if enabled else (192, 192, 192),
                      x=x + offset_x, width=BUTTON_SIZE[0])
@@ -232,7 +235,8 @@ class TroopSelectionView(NativeScreenView[TroopSelectionScene]):
         if action == "abort":
             return True
         if action == "done":
-            return bool(model.selection) and model.affordable if self.scene.phase == "select" else True
+            # notes/native-windows.md §11.3.3: enabled by a non-empty selection; affordability is checked on click
+            return bool(model.selection) if self.scene.phase == "select" else True
         if action == "page:next":
             return self.scene.phase == "select" and self.scene.page < self.scene.page_count - 1
         return self.scene.phase == "select" and self.scene.page > 0 or self.scene.phase == "march_order"

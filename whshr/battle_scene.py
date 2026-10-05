@@ -7,7 +7,8 @@ from . import battle_log, behaviour, combat, payments, skirmish_log
 from .assets import AssetId
 from .battlefield import Battlefield, sprite_files
 from .clock import FixedStepClock
-from .engine import Battle, DEFAULT_SEED
+from .debrief_screen import UnitOutcome
+from .engine import Battle, DEFAULT_SEED, Side
 from .script import View
 from .skirmish_log import SkirmishLogger
 from .result_scene import ResultScene
@@ -245,6 +246,7 @@ class BattleScene(Scene):
                 self._store_flawless_results()
                 self.glue_scene.finish_battle(self.request_id or 0)
                 return Transition(self.glue_scene, "glue battle resolved")
+            self._store_played_results()
             return Transition(ResultScene(self.battle.result, self._casualty_summary(),
                                           glue_scene=self.glue_scene, request_id=self.request_id),
                               "battle resolved")
@@ -257,6 +259,32 @@ class BattleScene(Scene):
         if campaign is None:
             return
         payments.store_flawless(campaign, (self.field.script.get("mission") or {}).get("objectives", ()))
+
+    def _store_played_results(self) -> None:
+        """Hand the campaign what the debrief reports: objective records derived from the outcome
+        (payments.played_results) and each marching regiment's models, routed and casualties.  The engine does not
+        track kills or experience yet, so those stay 0."""
+        campaign = getattr(self.glue_scene, "campaign", None)
+        if campaign is None:
+            return
+        terms = getattr(campaign, "mission_cash", None)
+        lost = sum(1 for r in self.battle.regiments.values() if r.side == Side.PLAYER and not r.models)
+        campaign.objective_results = payments.played_results(
+            (self.field.script.get("mission") or {}).get("objectives", ()), self.battle.result == "victory",
+            terms.letters if terms else (), payments.marching_models(campaign), lost)
+        campaign.flawless_result = False
+        player = [(identifier, regiment) for identifier, regiment in self.battle.regiments.items()
+                  if regiment.side == Side.PLAYER]
+        marching = campaign.ordered_march_units
+        if len(player) != len(marching):
+            campaign.battle_outcome = {}
+            return
+        outcomes: dict[int, UnitOutcome] = {}
+        for whoami, (identifier, regiment) in zip(marching, player):
+            routed = regiment.models if regiment.fled else 0
+            dead = max(0, self.initial_models[identifier] - regiment.models)
+            outcomes[whoami] = UnitOutcome(regiment.models - routed, routed, dead + routed)
+        campaign.battle_outcome = outcomes
 
     def _casualty_summary(self) -> list[str]:
         return [f"{regiment.name}: {regiment.models}/{self.initial_models[identifier]} models"

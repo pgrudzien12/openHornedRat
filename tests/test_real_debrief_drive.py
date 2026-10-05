@@ -27,7 +27,7 @@ class RealDebriefDriveTests(unittest.TestCase):
             log_path = save_dir / "log.jsonl"
             context.campaign_log = CampaignLogger(log_path)
             self.addCleanup(context.campaign_log.close)
-            campaign = CampaignState.from_installation(context.locator.installation, context.glue, save_dir=save_dir)
+            campaign = CampaignState.from_installation(context.locator.installation, context.glue)
             map_scene = GlueScene(campaign.flow, campaign)
             machine = SceneMachine(map_scene, context)
 
@@ -77,7 +77,7 @@ class RealPaymentDriveTests(unittest.TestCase):
             log_path = save_dir / "log.jsonl"
             context.campaign_log = CampaignLogger(log_path)
             self.addCleanup(context.campaign_log.close)
-            campaign = CampaignState.from_installation(context.locator.installation, context.glue, save_dir=save_dir)
+            campaign = CampaignState.from_installation(context.locator.installation, context.glue)
             map_scene = GlueScene(campaign.flow, campaign)
             machine = SceneMachine(map_scene, context)
             coffers = []
@@ -120,7 +120,7 @@ class RealScriptlessMissionDriveTests(unittest.TestCase):
             with self.subTest(record=record), tempfile.TemporaryDirectory() as directory:
                 save_dir = Path(directory)
                 context = scene_context(WARFB, save_dir=save_dir, no_battle=True)
-                campaign = CampaignState.from_installation(context.locator.installation, context.glue, save_dir=save_dir)
+                campaign = CampaignState.from_installation(context.locator.installation, context.glue)
                 map_scene = GlueScene(campaign.flow, campaign)
                 machine = SceneMachine(map_scene, context)
                 played = False

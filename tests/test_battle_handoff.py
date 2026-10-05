@@ -39,6 +39,22 @@ RESOURCES = {
 
 
 class BattleHandoffTests(unittest.TestCase):
+    def test_given_campaign_battle_logging_and_seed_when_battle_starts_then_both_are_preserved(self):
+        import json
+        self.context.battle_log_dir = Path(self.temporary.name) / "logs"
+        self.context.battle_seed = 42
+        self._open_mission("MISSIONAWINDOW:601")
+        scene = self.machine.active
+        self.assertIsInstance(scene, BattleScene)
+        self.assertEqual(scene.seed, 42)
+        self.assertIsNotNone(scene.logger)
+        for _ in range(19):  # snapshots are emitted at segment boundaries
+            scene.update(BATTLE_TICK_SECONDS, self.context)
+        scene.exit(self.context)
+        rows = [json.loads(line) for line in scene.logger.path.read_text().splitlines()]
+        self.assertEqual(rows[0]["seed"], 42)
+        self.assertTrue(any(row["type"] == "snapshot" for row in rows))
+
     def test_given_confirmed_campaign_march_when_battle_loads_then_current_army_and_order_determine_slots(self):
         from whshr import roster
         from whshr.troop_selection import Deployment
@@ -98,6 +114,7 @@ class BattleHandoffTests(unittest.TestCase):
         self._open_mission("missionawindow.0")
         self._win()
         self.machine.handle("continue")
+        self.machine.handle("done")  # the debrief screen closes
 
     def test_given_a_no_battle_win_when_the_mission_ends_then_it_is_completed_and_the_flow_advances(self):
         self.context.no_battle = True
@@ -116,6 +133,7 @@ class BattleHandoffTests(unittest.TestCase):
         self.assertIsInstance(self.machine.active, ResultScene)
 
         self.machine.handle("continue")
+        self.machine.handle("done")  # the debrief screen closes
 
         self.assertIs(self.machine.active, self.map_scene)
         self.assertEqual(self.campaign.completed, {601})
@@ -127,6 +145,7 @@ class BattleHandoffTests(unittest.TestCase):
         self._open_mission("missionbwindow.0")  # names a battle only, and does not release the flow
         self._win()
         self.machine.handle("continue")
+        self.machine.handle("done")  # the debrief screen closes
 
         self.assertIs(self.machine.active, self.map_scene)
         self.assertEqual(self.campaign.completed, {601, 602})
@@ -139,6 +158,7 @@ class BattleHandoffTests(unittest.TestCase):
         self._open_mission("missionbwindow.1")
         self._win()
         self.machine.handle("continue")
+        self.machine.handle("done")  # the debrief screen closes
 
         self.assertEqual(self.campaign.completed, {601, 603})
         self.assertIn(EndGame(), self.map_scene.effects)
@@ -150,6 +170,7 @@ class BattleHandoffTests(unittest.TestCase):
         self.assertIsNotNone(glue.runtime.state.pending)
 
         self.machine.handle("continue")
+        self.machine.handle("done")  # the debrief screen closes
 
         self.assertIsNone(glue.runtime.state.pending)
 
@@ -163,6 +184,7 @@ class BattleHandoffTests(unittest.TestCase):
         self.assertIsInstance(machine.active, ResultScene)
 
         machine.handle("continue")
+        machine.handle("done")  # the debrief screen closes
 
         self.assertIsInstance(machine.active, MainMenuScene)
 

@@ -103,6 +103,9 @@ class Settlement:
     lines: list[tuple[str, int]] = field(default_factory=list[tuple[str, int]])  # (label, amount) in program order
     skipped: list[str] = field(default_factory=list[str])
     final: int = 0
+    # every program step, blank and display-only ones included: (op, amount); amount is None for a blank line or a
+    # label-only line ("experience", "armour"), the running total for "total" and 0 for a line whose objective is absent
+    steps: list[tuple[str, int | None]] = field(default_factory=list[tuple[str, int | None]])
 
     @property
     def credited(self) -> int:
@@ -123,7 +126,11 @@ def settle(terms: CashTerms, results: Mapping[str, ObjectiveResult], bonus_count
 
     for op in PROGRAMS.get(terms.type, ()):
         amount: int | None = None
-        if op in ("blank", "total"):
+        if op == "blank":
+            settlement.steps.append((op, None))
+            continue
+        if op == "total":
+            settlement.steps.append((op, total))
             continue
         if op in UNMODELLED:
             settlement.skipped.append(f"{op}: {UNMODELLED[op]}")
@@ -165,13 +172,16 @@ def settle(terms: CashTerms, results: Mapping[str, ObjectiveResult], bonus_count
         elif op == "final":
             settlement.final = max(total, 0)
             settlement.lines.append(("final", settlement.final))
+            settlement.steps.append((op, settlement.final))
             continue
         if amount is None:
             if op not in UNMODELLED:
                 settlement.skipped.append(f"{op}: the battle result lacks the objective it needs")
+            settlement.steps.append((op, None if op in ("experience", "armour") else 0))
             continue
         total += amount
         settlement.lines.append((op, amount))
+        settlement.steps.append((op, amount))
     return settlement
 
 
@@ -202,6 +212,24 @@ def flawless_results(objectives: Iterable[Sequence[Any]] | None, required_letter
         if letter not in DEFEAT_LETTERS:
             _, values = results.get(letter, (True, (0, 0, 0, 0)))
             results[letter] = (True, values)
+    return results
+
+
+def played_results(objectives: Iterable[Sequence[Any]] | None, victory: bool, required_letters: Iterable[str] = (),
+                   player_models: int | None = None, regiments_lost: int = 0) -> dict[str, ObjectiveResult]:
+    """The objective records of a played battle, derived from its outcome (the engine measures no objective itself).
+
+    A victory is the flawless result (every measured quantity unharmed: PROVISIONAL, villagers, buildings and the
+    like are not counted yet).  A defeat meets the hidden loss letter ``Z`` and leaves every other letter unmet."""
+    if victory:
+        return flawless_results(objectives, required_letters, player_models)
+    results: dict[str, ObjectiveResult] = {}
+    for entry in objectives or ():
+        letter, a, b = str(entry[0]).upper(), _number(entry[1]), _number(entry[2]) if len(entry) > 2 else 0
+        results[letter] = (False, (a, b, 0, 0))
+    models = player_models if player_models is not None else 0
+    z_values = results.get("Z", (False, (0, 0, 0, 0)))[1]
+    results["Z"] = (True, (models or z_values[0], z_values[1], regiments_lost, 0))
     return results
 
 

@@ -25,6 +25,9 @@
   "disableTaggedHints": true,
   "strict": [
     "whshr/paths.py",
+    "whshr/debrief_rules.py",
+    "whshr/debrief_screen.py",
+    "whshr/debrief_rewards.py",
     "whshr/user_dirs.py",
     "whshr/battle_events.py",
     "whshr/clock.py",

@@ -86,8 +86,13 @@ renumber later work.
   (`BRTXT 315`: "click to pick up, click again to drop") rather than switching to a continuous
   mouse-button-held drag, which the spec never documents.
 
-- [ ] **GEI8 — Debrief activity.** (issue #123) Present `StartDebrief`, apply the payment and result effects,
+- [x] **GEI8 — Debrief activity.** (issue #123) Present `StartDebrief`, apply the payment and result effects,
   and resume the requesting Glue runtime.
+  *Implemented:* `DebriefScene` opens for `debrief:`/`debriefwithsummary:` and after every played battle (modes 4/7 and 2/6),
+  shows the verdict, troop and balance pages of `notes/native-windows.md` §9, and on Done applies the payment (mode 2/4/7),
+  armour rewards, doubled experience and promotions before resuming the parked runtime. Open (status in §9.10): kills/experience
+  tracking, casualty carry-over and the army merge, wizard spells, the view-only roster book, the end screens and the
+  campaign-over route.
 
 - [x] **GEI9 — Generic post-mission caravan modes.** (issue #120) Route `EnterCaravan` to the requested
   generic caravan window while retaining the parked runtime. Implement the campaign-required
@@ -269,14 +274,13 @@ renumber later work.
   `addunit` node (`raw`) precisely so a write reuses that verbatim node (leader block, spells,
   items, sprites, AI script, deployment `x`/`y`, all of it) with only `set:hired` replaced,
   instead of reconstructing a unit from the trimmed fields `Regiment` exposes for display — the
-  narrower model would silently drop everything it doesn't track. `CampaignState.commit_troop_selection`
-  calls `roster.write_company`/`write_march` only when `self.save_dir` is set, so tests and other
-  save-dir-less callers stay a pure in-memory commit.
+  narrower model would silently drop everything it doesn't track. The company is persisted only inside
+  the engine's JSON save slots (`roster.company_text`); the engine writes no loose `.MRC` files.
 - Engine saves never go into the original installation (owner decision, not a spec finding): they
   write to the engine's own directory (`SceneAssets.save_dir`: `--save-dir`, else `OSH_SAVE_DIR`, else the
   per-user data directory of the platform, `whshr/user_dirs.py`), threaded from `app.run`/`game.scene_context` down to
   `CampaignState.save_dir`. The engine keeps no save-format compatibility promise toward the
-  original either; the `.MRC` text grammar is reused in `write_company`/`write_march` because it
+  original either; the `.MRC` text grammar is reused inside the JSON slot's `company` field because it
   is already required for reading, not as a compatibility commitment (CLAUDE.md "Engine rule:
   saves are the engine's own, not the original's").
 - GEI7f, first version: including the raw pointer in `refresh()`'s diffed state made every

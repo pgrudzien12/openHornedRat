@@ -25,5 +25,5 @@ def decode_state(data: Any) -> GlueRuntimeState:
     if not isinstance(state, GlueRuntimeState):
         raise ValueError("the saved interpreter state is not a GlueRuntimeState")
     # A save carries no sound: a speech line that was being read out is not resumed mid-word.
-    state.speech_lines, state.speech_active = (), False
+    state.speech_lines, state.speech_active, state.speech_overlays = (), False, {}
     return state

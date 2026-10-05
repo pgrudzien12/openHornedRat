@@ -96,6 +96,8 @@ def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), 
         # and should not play audio through the machine's real device while running unattended.
         os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     context = scene_context(installation, save_dir=save_dir, no_battle=no_battle)
+    context.battle_log_dir = log_dir
+    context.battle_seed = seed
     campaign_log: campaign_log_module.CampaignLogger | None = None
     if campaign_log_dir is not None:
         campaign_log = campaign_log_module.CampaignLogger(campaign_log_module.default_log_path(campaign_log_dir))

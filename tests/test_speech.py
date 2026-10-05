@@ -161,18 +161,16 @@ class ClickThroughTests(unittest.TestCase):
         return runtime
 
     def test_given_a_line_in_progress_when_the_player_clicks_then_the_next_line_plays_and_is_shown(self):
-        for click in (GlueInput("dialogue-drain"), GlueInput("hotspot-speech", "931:3")):
-            with self.subTest(click=click.kind):
-                runtime = self._runtime()
-                runtime.handle(GlueInput("hotspot-speech", "931:3"))
-                runtime.tick(50)
+        runtime = self._runtime()
+        runtime.handle(GlueInput("hotspot-speech", "931:3"))
+        runtime.tick(50)
 
-                effects = runtime.handle(click)
+        effects = runtime.handle(GlueInput("dialogue-drain"))  # a click on the empty window; another click on Dietrich is ignored
 
-                self.assertEqual(effects, (PlaySpeech(932),))
-                self.assertEqual(runtime.state.dialogue_text, "two")
-                self.assertEqual(runtime.state.dialogue_typed, 0)  # the new line types from its start
-                self.assertTrue(runtime.state.speech_active)
+        self.assertEqual(effects, (PlaySpeech(932),))
+        self.assertEqual(runtime.state.dialogue_text, "two")
+        self.assertEqual(runtime.state.dialogue_typed, 0)  # the new line types from its start
+        self.assertTrue(runtime.state.speech_active)
 
     def test_given_the_last_line_when_the_player_clicks_then_the_speech_stops_and_the_box_clears(self):
         runtime = self._runtime()

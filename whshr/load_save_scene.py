@@ -40,7 +40,7 @@ def _campaign_from_installation(context: SceneAssets, save_dir: Path) -> "Campai
     """A fresh campaign of the installed game, which a load then overwrites with the saved one."""
     from .campaign_state import CampaignState
 
-    return CampaignState.from_installation(context.locator.installation, context.glue_content(), save_dir=save_dir)
+    return CampaignState.from_installation(context.locator.installation, context.glue_content())
 
 
 class LoadSaveScene(Scene):

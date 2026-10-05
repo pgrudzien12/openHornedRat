@@ -94,6 +94,7 @@ class BattleSceneTests(unittest.TestCase):
         self.assertEqual(glue.take_effects(), ())  # still waiting on the battle request
 
         machine.handle("continue")
+        machine.handle("done")  # the debrief screen closes
 
         self.assertIs(machine.active, glue)
         self.assertEqual(glue.take_effects(), (EndGame(),))
@@ -253,6 +254,7 @@ class BattleSceneTests(unittest.TestCase):
         machine = SceneMachine(scene, self.context)
 
         machine.handle("continue")
+        machine.handle("done")  # the debrief screen closes
 
         self.assertIsInstance(machine.active, MainMenuScene)
 
