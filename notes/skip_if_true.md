@@ -19,7 +19,8 @@ conditional *forward-skip by distance* opcode; the other conditionals use pushed
    skipped span; `N = 0` is a no-op, `N = 1` skips exactly one following word.
 3. **Condition false:** nothing happens; continue at `pc + 2`.
 4. **The condition is neither consumed nor changed** (true stays true, false stays false), so later
-   `LoopIfTrue`/`If`/`YieldIfTrue` still see it.
+   `LoopIfTrue`/`If`/`YieldIfTrue` still see it — within the same tick. The condition is bit 2 of the unit's
+   condition word and is overwritten at the start of every tick; see `unit_script_control.md` §1.
 5. The count is raw words, not instructions: a skipped instruction of length 2 needs `N = 2`.
 
 ## Worked example — library script 162 (identical in every mission DLL)
