@@ -41,14 +41,14 @@ class FlagOpcodeTests(unittest.TestCase):
         self.assertTrue(self.interp._should_yield)
         self.interp._should_yield = False
         self.state.unit_flags = 0
-        self.assertEqual(self.call("WaitWhileUnitFlags", 8), self.state.pc + 1)
+        self.assertEqual(self.call("WaitWhileUnitFlags", 8), self.state.pc + 2)
         self.assertFalse(self.interp._should_yield)
 
     def test_flags2_waits_are_mirror_images(self):
         self.assertEqual(self.call("WaitUntilUnitFlags2", 4), self.state.pc)
-        self.assertEqual(self.call("WaitWhileUnitFlags2", 4), self.state.pc + 1)
+        self.assertEqual(self.call("WaitWhileUnitFlags2", 4), self.state.pc + 2)
         self.state.unit_flags2 = 4
-        self.assertEqual(self.call("WaitUntilUnitFlags2", 4), self.state.pc + 1)
+        self.assertEqual(self.call("WaitUntilUnitFlags2", 4), self.state.pc + 2)
         self.assertEqual(self.call("WaitWhileUnitFlags2", 4), self.state.pc)
 
     def test_yield_if_true_only_yields_on_true(self):

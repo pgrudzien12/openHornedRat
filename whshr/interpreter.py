@@ -43,6 +43,10 @@ WAIT_OPCODE = 0x1C  # Wait: blocking ticks are not traced (see ScriptInterpreter
 IN_MELEE_FLAG = 0x200
 
 
+REPEAT_ENTRY = 0  # tag of a RepeatStart entry on the script stack: (body start, count, tag)
+COND_TRUE = 4  # the bit of the condition word that holds the true/false result
+
+
 def _signed_word(value: int) -> int:
     """Interpret a 16-bit script word as a signed number."""
     return value - 0x10000 if value & 0x8000 else value
@@ -82,8 +86,10 @@ class UnitScriptState:
     # Unit state (flags set by SetUnitFlags, SetCondFlags, etc.)
     unit_flags: int = 0  # primary unit flag bits (game_rules.md)
     unit_flags2: int = 0  # secondary unit flag bits (game_rules.md)
-    cond_flags: int = 0  # truth result read by If/IfNot/LoopIf*/SendEvent*If*, written by Test*/Find*/GetEvent
-    cond_bits: int = 0  # persistent condition bit word: only SetCondFlags/ClearCondFlags/TestCondFlags touch it
+    # One persistent 16-bit condition word (notes/unit_script_control.md): bit 2 (COND_TRUE) is the truth
+    # result read by If/IfNot/LoopIf*/SkipIfTrue/..., written by Test*/Find*/GetEvent; the other bits
+    # (pending switch 8, script flag 0x10, switches refused 0x20) are set by SetCondFlags and friends.
+    cond_bits: int = 0
     threat_range: int = 0  # set by SetThreatRange; used by threat scoring
     # The single "remembered event" slot of StoreEventInfo (game_rules.md, scripted target and flight
     # opcodes): (sender regiment identifier, event code) of the event last stored, or None.
@@ -116,6 +122,15 @@ class UnitScriptState:
 
     # Script metadata (loaded once at init)
     script_dll: behaviour.ScriptDll | None = None  # for script lookup
+
+    @property
+    def cond_flags(self) -> int:
+        """The condition result (bit 2 of the condition word) as 0/1."""
+        return 1 if self.cond_bits & COND_TRUE else 0
+
+    @cond_flags.setter
+    def cond_flags(self, value: object) -> None:
+        self.cond_bits = (self.cond_bits | COND_TRUE) if value else (self.cond_bits & ~COND_TRUE)
 
 
 class EventBus:
@@ -357,6 +372,8 @@ class ScriptInterpreter:
 
         Returns the state after execution. Modifies state in-place.
         """
+        # The condition never carries across a tick boundary (notes/unit_script_control.md section 1).
+        state.cond_flags = False
         self._advance_wait_timer(state, tick_count)
         self._update_arrival_flag(unit_id, state)
         self._mirror_engine_flags(unit_id, state)
@@ -721,34 +738,34 @@ class ScriptInterpreter:
         if operand is not None and (state.unit_flags & operand):
             self._should_yield = True
             return state.pc
-        return state.pc + 1
+        return state.pc + 2
 
     def op_SetUnitFlags2(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """SetUnitFlags2 N: set bits in the secondary unit flag word (game_rules.md, control opcodes)."""
         if operand is not None:
             state.unit_flags2 |= operand
-        return state.pc + 1
+        return state.pc + 2
 
     def op_ClearUnitFlags2(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """ClearUnitFlags2 N: clear bits in the secondary unit flag word."""
         if operand is not None:
             state.unit_flags2 &= ~operand
-        return state.pc + 1
+        return state.pc + 2
 
     def op_TestUnitFlags2(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """TestUnitFlags2 N: the condition result is whether any bit of N is set in the secondary word."""
         if operand is not None:
-            state.cond_flags = state.unit_flags2 & operand
-        return state.pc + 1
+            state.cond_flags = (state.unit_flags2 & operand) != 0
+        return state.pc + 2
 
     def op_WaitUntilUnitFlags2(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """WaitUntilUnitFlags2 N: yield (same PC) until a bit of N is set in the secondary word."""
         if operand is not None and (state.unit_flags2 & operand):
-            return state.pc + 1
+            return state.pc + 2
         self._should_yield = True
         return state.pc
 
@@ -758,7 +775,7 @@ class ScriptInterpreter:
         if operand is not None and (state.unit_flags2 & operand):
             self._should_yield = True
             return state.pc
-        return state.pc + 1
+        return state.pc + 2
 
     def op_YieldIfTrue(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
@@ -779,6 +796,65 @@ class ScriptInterpreter:
             return state.pc + 2 + _signed_word(operand)
         return state.pc + 2
 
+    def op_IfGotoScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """IfGotoScript N: when the condition is true, switch at once to script N (word 0, same tick).
+
+        Stack, restart point, wait timer and condition stay untouched, exactly like GotoScript; unlike
+        the SwitchScript family it records no pending switch (notes/unit_script_control.md section 6).
+        """
+        if operand is not None and state.cond_flags:
+            return self.op_GotoScript(state, operand, script_words, unit_id, tick_count, rng)
+        return state.pc + 2
+
+    def op_IfNotGotoScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """IfNotGotoScript N: GotoScript N when the condition is false."""
+        if operand is not None and not state.cond_flags:
+            return self.op_GotoScript(state, operand, script_words, unit_id, tick_count, rng)
+        return state.pc + 2
+
+    def op_RepeatStart(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """RepeatStart N: push the body start (pc + 2) and the count N; the body is the words up to RepeatNext.
+
+        The two entries share the script stack with PushPC and Gosub, so repeats nest and sit inside
+        loops (notes/unit_script_control.md section 3). N = 0 wraps to 65536 iterations.
+        """
+        if operand is None:
+            return state.pc + 2
+        state.return_stack.append((state.pc + 2, operand & 0xFFFF, REPEAT_ENTRY))
+        return state.pc + 2
+
+    def op_RepeatNext(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """RepeatNext: count down; jump back to the body start while it is non-zero, else drop the entry."""
+        if not state.return_stack or len(state.return_stack[-1]) != 3:
+            return state.pc + 1  # unbalanced repeat: treated as an error, falls through
+        body_start, count, _ = state.return_stack.pop()
+        count = (count - 1) & 0xFFFF
+        if count:
+            state.return_stack.append((body_start, count, REPEAT_ENTRY))
+            return body_start
+        return state.pc + 1
+
+    def op_DrainEvents(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """DrainEvents: discard every queued event unhandled; the last one taken (the oldest) stays as
+        the current event, unconsumed. The condition becomes true if anything was drained, else nothing
+        changes (notes/unit_script_control.md section 4)."""
+        if state.event_queue:
+            while state.event_queue:
+                state.current_event = state.event_queue.pop()
+            state.cond_flags = True
+        return state.pc + 1
+
+    def op_ClearEvent(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """ClearEvent: forget the current event only; the queue and the condition are untouched."""
+        state.current_event = Event()
+        return state.pc + 1
+
     def op_Nop(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """Nop: do nothing."""
@@ -788,24 +864,24 @@ class ScriptInterpreter:
 
     def op_SetCondFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """SetCondFlags N: set bits in the persistent condition bit word (not the If/Loop result)."""
+        """SetCondFlags M: OR M into the condition word; with bit 15 set, replace the word with M & 0x7FFF."""
         if operand is not None:
-            state.cond_bits |= operand
-        return state.pc + 1
+            state.cond_bits = (operand & 0x7FFF) if operand & 0x8000 else (state.cond_bits | operand)
+        return state.pc + 2
 
     def op_ClearCondFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """ClearCondFlags N: clear bits in the persistent condition bit word."""
+        """ClearCondFlags M: clear the bits of M in the condition word (bit 15 is not special)."""
         if operand is not None:
             state.cond_bits &= ~operand
-        return state.pc + 1
+        return state.pc + 2
 
     def op_TestCondFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """TestCondFlags N: result = any of the persistent bits N is set."""
+        """TestCondFlags M: the condition becomes whether any bit of M is set (tested before the update)."""
         if operand is not None:
             state.cond_flags = (state.cond_bits & operand) != 0
-        return state.pc + 1
+        return state.pc + 2
 
     # ===== Event handling opcodes =====
 
@@ -820,7 +896,7 @@ class ScriptInterpreter:
         of the loop did exactly that and silently discarded every event dispatched via preemption.
         """
         if state.event_queue:
-            state.current_event = state.event_queue.popleft()
+            state.current_event = state.event_queue.pop()  # LIFO: the most recent event first
             state.cond_flags = 1
         else:
             state.current_event = Event()
@@ -829,8 +905,9 @@ class ScriptInterpreter:
 
     def op_ConsumeEvent(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """ConsumeEvent: clear the current event."""
+        """ConsumeEvent: release the current event; the condition becomes "more events are queued"."""
         state.current_event = Event()
+        state.cond_flags = bool(state.event_queue)
         return state.pc + 1
 
     def op_CaseEvent(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,

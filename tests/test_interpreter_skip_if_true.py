@@ -17,7 +17,9 @@ class SkipIfTrueTests(unittest.TestCase):
     def run_script(self, cond, words):
         self.state.script_dll = FakeDll(words + [behaviour.END])
         self.state.pc = 0
-        self.state.cond_flags = cond
+        # The condition is reset at every tick start, so scripts set it themselves.
+        if cond:
+            self.state.script_dll = FakeDll([word("SetCondFlags"), 4] + words + [behaviour.END])
         self.interp.run("t", self.state, 1, self.battle.rng)
 
     def marker(self, bit):

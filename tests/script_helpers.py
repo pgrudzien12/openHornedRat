@@ -10,10 +10,12 @@ def word(name: str) -> int:
 
 
 class FakeDll:
-    """A script DLL stand-in: every requested script id returns the same words."""
+    """A script DLL stand-in: a word list is served for every script id, or a {script id: words} dict."""
 
     def __init__(self, words):
         self._words = words
 
     def scripts(self, ids):
+        if isinstance(self._words, dict):
+            return {i: list(self._words[i]) for i in ids}
         return {i: list(self._words) for i in ids}
