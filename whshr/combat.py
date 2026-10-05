@@ -655,6 +655,16 @@ def _break_test(regiment: "Regiment", modifier: float, group_id: str, breakdown:
         start_rout(regiment, battle)
 
 
+def leave_grid(battle: "Battle", regiment: "Regiment") -> None:
+    """Take a regiment out of its fight's grid (game_rules.md 5.7, "Leaving"): its models are unpaired and the
+    melee state is cleared. Orders and targets survive; the opponent finds out on the next pairing pass."""
+    battle_grid.release(battle, regiment)
+    regiment.in_melee = False
+    regiment.melee_camp = None
+    regiment.melee_group = None
+    regiment.melee_touching = frozenset()
+
+
 def start_rout(regiment: "Regiment", battle: "Battle", flee_point: formation.Point | None = None) -> None:
     # game_rules.md "Flight and catching fleeing units": the flight starts "directly away from its
     # opponent" - a one-time bearing, not re-aimed every tick at whichever enemy is momentarily

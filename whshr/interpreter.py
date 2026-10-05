@@ -41,6 +41,8 @@ WAIT_OPCODE = 0x1C  # Wait: blocking ticks are not traced (see ScriptInterpreter
 # game_rules.md, unit flags: 0x200 is "in melee" -- Otto Hiln's script tests it (`TestUnitFlags 512`) and
 # the wizard casting scripts refuse to cast while it is set. Mirrored from `Regiment.in_melee`.
 IN_MELEE_FLAG = 0x200
+REFORMING_FLAG = 0x8  # script operand of WaitWhileUnitFlags 8: the models are re-forming
+BROKEN_FLAG = 0x2000  # script operand of TestUnitFlags 0x2000/0xa000: the unit is broken (routing)
 
 
 REPEAT_ENTRY = 0  # tag of a RepeatStart entry on the script stack: (body start, count, tag)
@@ -304,6 +306,16 @@ class ScriptInterpreter:
             state.unit_flags |= 0x80000
         else:
             state.unit_flags &= ~0x80000
+        # Re-forming (8): models are walking to new slots; scripts hold with WaitWhileUnitFlags 8 after a
+        # re-form. Broken (0x2000): the unit is routing (notes/movement_formation.md, sections 9 and 4).
+        if regiment.reforming:
+            state.unit_flags |= REFORMING_FLAG
+        else:
+            state.unit_flags &= ~REFORMING_FLAG
+        if regiment.routing:
+            state.unit_flags |= BROKEN_FLAG
+        else:
+            state.unit_flags &= ~BROKEN_FLAG
         # "Halted": scripts wait on it (WaitUntilUnitFlags 16) to learn a move, turn or charge is over
         # (notes/movement_formation.md, section 1.3). It holds while the unit has nothing to do and is
         # dropped as soon as it travels, turns, charges or routes.
@@ -1222,6 +1234,115 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
+    # ===== Formation, rally and grid opcodes (notes/movement_formation.md, Part B) =====
+
+    def _may_reform(self, unit: "Regiment") -> bool:
+        """Re-form requests are refused while routing, held or charging, and for a unit with no models."""
+        return unit.models > 0 and not (unit.routing or unit.held or unit.attack_target is not None)
+
+    def op_ReformToScriptRanks(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """ReformToScriptRanks: re-form at once to the rank count the battle file asks for (clamped).
+        Refused while routing, held or charging; a unit in a fight keeps its block until it leaves.
+        Does not halt the unit and does not write the condition."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is not None and self._may_reform(unit) and not unit.in_melee:
+            self.battle.reform_to_ranks(unit, unit.script_ranks)
+        return state.pc + 1
+
+    def op_SetRanks(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """SetRanks N: re-form to N ranks (not clamped to the model count, only to 1-8), with the refusals of
+        ReformToScriptRanks. The unit's script rank count is unchanged. The original defers the layout to
+        the next movement update; running it at once is equivalent for the scripts that Yield after it."""
+        unit = self.battle.regiments.get(unit_id)
+        if operand is not None and unit is not None and self._may_reform(unit) and not unit.in_melee:
+            self.battle.reform_to_ranks(unit, operand, formation_clamp=False)
+        return state.pc + 2
+
+    def op_ResetModelAnimations(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """ResetModelAnimations: stagger the models: each one pauses 2 to 32 ticks (even values, from its
+        own stagger number) before it walks, so a re-forming unit falls into line one model at a time."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is not None:
+            unit.model_positions()  # seeds the per-model state
+            for model in unit.melee_models:
+                model.freeze_ticks = (model.stagger & 15) * 2 + 2
+        return state.pc + 1
+
+    def op_Rally(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """Rally: stop being broken, charging, pursuing or braced; halt and re-form to the script's rank
+        count. While the unit is held the opcode yields without advancing and tries again next tick.
+        Does not leave the grid, change the target or facing, or write the condition."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is None:
+            return state.pc + 1
+        unit.routing = False
+        unit.rally_next_segment = None
+        unit.flee_x = unit.flee_y = None
+        unit.attack_target = None
+        unit.charge_started_target = None
+        unit.braced = False
+        unit.braced_target = None
+        unit.target_x = unit.target_y = None
+        unit.waypoints.clear()
+        unit.turn_order_key = None
+        unit.model_positions()
+        for model in unit.melee_models:
+            model.freeze_ticks = 0
+        if unit.held:
+            self._should_yield = True
+            return state.pc
+        if unit.models > 0 and not unit.in_melee:
+            self.battle.reform_to_ranks(unit, unit.script_ranks)
+        return state.pc + 1
+
+    def op_FlankRearTest(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FlankRearTest: inside a charge event handler, a charge from behind or into the rear half of a
+        flank needs a Leadership test (no modifier). Failing it queues a rout event to the unit and writes
+        false; otherwise (no test needed, or passed, or no sender) the condition is true."""
+        unit = self.battle.regiments.get(unit_id)
+        sender = self.battle.regiments.get(state.current_event.source or "")
+        state.cond_flags = True
+        if unit is None or sender is None or self._attack_direction(sender, unit) not in (1, 5, 2, 3):
+            return state.pc + 1
+        from . import combat
+        if not combat.leadership_test(unit.leadership, rng):
+            state.cond_flags = False
+            self.event_bus.queue_event(unit_id, Event(code=0x0C, source=unit_id), "self")
+        return state.pc + 1
+
+    def op_LeaveSharedGrid(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """LeaveSharedGrid: leave the fight's grid. The condition says whether the unit was on one. The
+        opponent learns on the next pairing pass; the target, orders and facing are kept."""
+        unit = self.battle.regiments.get(unit_id)
+        was_on_grid = unit is not None and unit.in_melee
+        if unit is not None and was_on_grid:
+            from . import combat
+            combat.leave_grid(self.battle, unit)
+        state.cond_flags = was_on_grid
+        return state.pc + 1
+
+    def op_LeaveGrid(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """LeaveGrid: LeaveSharedGrid without writing the condition."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is not None and unit.in_melee:
+            from . import combat
+            combat.leave_grid(self.battle, unit)
+        return state.pc + 1
+
+    def op_IfEngagedWithKind(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """IfEngagedWithKind MASK: true when the unit is in a fight with a map object of that kind. Every
+        shipped script asks for buildings and furniture, which this engine never fights, so it is false."""
+        state.cond_flags = False
+        return state.pc + 2
+
     # ===== Movement and facing (notes/movement_formation.md, Part A) =====
 
     @staticmethod
@@ -1369,6 +1490,28 @@ class ScriptInterpreter:
 
     # --- charge aim point and reach ---
 
+    def _attack_direction(self, charger: "Regiment", target: "Regiment") -> int:
+        """The eight-way attack direction of `charger` against `target` (notes/movement_formation.md, 5):
+        0/4 charger in front, 1/5 behind, 2/6 left flank (rear/front half), 3/7 right flank (rear/front half)."""
+        diagonal = int(256 * math.atan(max(target.frontage, 1) / max(target.ranks, 1)) / math.pi)
+        relative = (self._bearing_from_to((charger.x, charger.y), self._object_centre(target))
+                    - int(target.direction)) % 512
+        if relative < diagonal:
+            return 1
+        if relative <= 128:
+            return 2
+        if relative <= 256 - diagonal:
+            return 6
+        if relative < 256:
+            return 0
+        if relative < 256 + diagonal:
+            return 4
+        if relative < 384:
+            return 7
+        if relative <= 512 - diagonal:
+            return 3
+        return 5
+
     def _charge_aim_point(self, unit: "Regiment", target: "Regiment") -> tuple[float, float]:
         """The point a charge aims at: the target's object centre, pushed out by its bounding radius to the
         FAR side for block formations (war machines, monsters and wagons are aimed at their centre).
@@ -1377,18 +1520,7 @@ class ScriptInterpreter:
         if target.hud_class in ("art", "mon") or target.is_wagon:
             return centre
         radius = int(target.bounding_radius())
-        diagonal = int(256 * math.atan(max(target.frontage, 1) / max(target.ranks, 1)) / math.pi)
-        relative = (self._bearing_from_to((unit.x, unit.y), centre) - int(target.direction)) % 512
-        # Aim angle offset by the charger's side: behind -> the target's facing, front -> opposite,
-        # left flank -> +128, right flank -> -128 (the eight attack-direction codes collapse to four).
-        if relative < diagonal or relative > 512 - diagonal:
-            side = 1
-        elif diagonal <= relative <= 256 - diagonal:
-            side = 2
-        elif 256 - diagonal < relative < 256 + diagonal:
-            side = 0
-        else:
-            side = 3
+        side = self._attack_direction(unit, target) % 4  # 0 front, 1 rear, 2 left flank, 3 right flank
         aim = (int(target.direction) + (256, 0, 128, -128)[side]) % 512
         return centre[0] + int(_trunc_sin(aim) * radius / 256), centre[1] + int(_trunc_cos(aim) * radius / 256)
 

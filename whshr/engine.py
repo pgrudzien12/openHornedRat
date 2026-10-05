@@ -217,6 +217,7 @@ class Regiment:
     # game_rules.md 6.1: the formed frontage, which casualties never reduce (only a re-form would).
     # The rank bonus divides the live model count by this, so it decays as the unit is worn down.
     frontage: int = -1  # negative = derived from `models`/`ranks` in __post_init__
+    script_ranks: int = -1  # the rank count the battle file asks for (what re-form scripts restore); negative = `ranks`
     # game_rules.md 5.5: floor(1.5 x frontage), set when the regiment charges into a fight and spent
     # one attacking model at a time, so only the first models to strike get the +1 S.
     charge_counter: int = 0
@@ -229,6 +230,8 @@ class Regiment:
     def __post_init__(self) -> None:
         if self.original_models < 0:
             self.original_models = self.models
+        if self.script_ranks < 0:
+            self.script_ranks = self.ranks
         if self.frontage < 0:
             sizes = formation.rank_sizes(self.models, self.ranks)
             self.frontage = sizes[0] if sizes else 0
@@ -840,6 +843,13 @@ class Battle:
         if self.phase == "deployment":
             self._snap_deployment_layout(regiment)
             self.refresh_visibility()
+
+    def reform_to_ranks(self, regiment: Regiment, ranks: int, formation_clamp: bool = True) -> None:
+        """Lay `regiment` out in `ranks` ranks and start re-slotting its models: the layout a re-form script
+        opcode asks for, with none of the player-order guards. The count is clamped to the span the model
+        count allows, or (`formation_clamp` false) only to the 1-8 ranks a battle file may name."""
+        self._begin_reform(regiment, formation.clamp_ranks(regiment.models, ranks) if formation_clamp
+                           else max(1, min(8, ranks)))
 
     def _check_turn_order(self, identifier: str) -> Regiment:
         """Shared guard for all standalone turn orders (game_rules.md "Turning, wheeling and reversing")."""
