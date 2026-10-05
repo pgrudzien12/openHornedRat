@@ -1201,6 +1201,101 @@ class ScriptInterpreter:
             state.cond_flags = 0
         return state.pc + 1
 
+    # ===== Target and range queries (notes/target_queries.md) =====
+
+    def _query_pair(self, state: UnitScriptState, unit_id: str) -> tuple["Regiment", "Regiment"] | None:
+        """The unit's regiment and its current target regiment, or None when either is missing.
+
+        The target is always the current target, never the event source. This engine keeps no fire-order
+        target point, so the "no target unit" fallback of InArcAndRange has nothing to fall back to.
+        """
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment is None or state.current_target is None:
+            return None
+        target = self.battle.regiments.get(state.current_target[0])
+        return (regiment, target) if target is not None else None
+
+    @staticmethod
+    def _distance(unit: "Regiment", target: "Regiment") -> int:
+        """Centre-to-centre Euclidean distance, truncated."""
+        return int(math.hypot(target.x - unit.x, target.y - unit.y))
+
+    @staticmethod
+    def _bearing(unit: "Regiment", target: "Regiment") -> int:
+        """Bearing from the unit to the target in 1/512 turn, 0 = +Y, clockwise, truncated."""
+        return int(256 - 256 * math.atan2(target.x - unit.x, -(target.y - unit.y)) / math.pi) % 512
+
+    def _in_arc(self, unit: "Regiment", target: "Regiment", half_width: int = 64) -> bool:
+        """The circular difference between facing and bearing is strictly below `half_width`."""
+        difference = abs(int(unit.direction) - self._bearing(unit, target)) % 512
+        return min(difference, 512 - difference) < half_width
+
+    @staticmethod
+    def _weapon_range(unit: "Regiment") -> float:
+        """Strict weapon range; a unit without a missile weapon has range 0 and is never in range."""
+        return unit.missile_range or 0
+
+    def op_InArc(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """InArc: the target lies within +-45 degrees of the unit's facing (false without a target)."""
+        pair = self._query_pair(state, unit_id)
+        state.cond_flags = pair is not None and self._in_arc(*pair)
+        return state.pc + 2
+
+    def op_InRange(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """InRange: the target is strictly inside weapon range. The operand only selects the player
+        failure message in the original and never changes the result."""
+        pair = self._query_pair(state, unit_id)
+        state.cond_flags = pair is not None and self._distance(*pair) < self._weapon_range(pair[0])
+        return state.pc + 2
+
+    def op_InArcAndRange(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
+            rng: random.Random) -> int | None:
+        """InArcAndRange: arc first (skipped when the target stands exactly on the unit), then range."""
+        pair = self._query_pair(state, unit_id)
+        if pair is None:
+            state.cond_flags = False
+        else:
+            unit, target = pair
+            on_top = unit.x == target.x and unit.y == target.y
+            state.cond_flags = ((on_top or self._in_arc(unit, target))
+                                and self._distance(unit, target) < self._weapon_range(unit))
+        return state.pc + 2
+
+    def op_BrokenTargetInRange(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """BrokenTargetInRange: true when the target is not broken; a broken target counts only in range."""
+        pair = self._query_pair(state, unit_id)
+        if pair is None:
+            state.cond_flags = False
+        else:
+            unit, target = pair
+            state.cond_flags = (not target.routing) or self._distance(unit, target) < self._weapon_range(unit)
+        return state.pc + 1
+
+    def op_IfTargetNotBroken(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IfTargetNotBroken: the target exists and is not routing."""
+        pair = self._query_pair(state, unit_id)
+        state.cond_flags = pair is not None and not pair[1].routing
+        return state.pc + 1
+
+    def op_IfTargetVisible(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IfTargetVisible: line of sight to the target with the unit treated as facing it, so only
+        scenery blocks the view (no cone, no range limit, no visible turn)."""
+        pair = self._query_pair(state, unit_id)
+        if pair is None:
+            state.cond_flags = False
+        else:
+            unit, target = pair
+            heading = math.atan2(target.x - unit.x, target.y - unit.y) * 512 / math.tau
+            state.cond_flags = visibility.visible(
+                self.battle.formation_centre(unit), heading, self.battle.formation_centre(target),
+                target.bounding_radius(), 256, self.battle.boundaries, self.battle.objects)
+        return state.pc + 1
+
     def op_TargetValid(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """TargetValid: test if current target is still valid."""
@@ -1242,13 +1337,6 @@ class ScriptInterpreter:
         """TargetGone: test if target is no longer visible/alive."""
         # For now, assume target still exists
         state.cond_flags = 0
-        return state.pc + 1
-
-    def op_InRange(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """InRange: test if current target is in weapon range."""
-        # TODO: check distance to current target against weapon range
-        state.cond_flags = 0  # assume out of range for now
         return state.pc + 1
 
     def op_IfTargetInChargeReach(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
