@@ -25,6 +25,7 @@ saves/
 
 # Temporary git worktrees of parallel agent sessions.
 .claude/worktrees/
+.claude/commands/
 
 # Native build output.
 build/
