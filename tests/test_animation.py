@@ -406,7 +406,10 @@ class WalkDesyncAndFireCadenceTests(unittest.TestCase):
         for mode in ("march", "charge", "pursue", "flee"):
             mover = Regiment("m", "M", 2000, 2000, 0, Side.PLAYER, models=6, ranks=2)
             other = Regiment("o", "O", 2000, 2600, 0, Side.ENEMY, models=6, ranks=2)
-            battle = Battle(4000, 4000, [mover, other], seed=1)
+            edge = {"status": ["bnd_ACTIVE", "bnd_BATTLEEDGE"],
+                    "lines": [[0, 0, 4000, 0], [4000, 0, 4000, 4000],
+                              [4000, 4000, 0, 4000], [0, 4000, 0, 0]]}
+            battle = Battle(4000, 4000, [mover, other], seed=1, boundaries=[edge])
             if mode == "march":
                 battle.order_move("m", 2500, 2000)
             elif mode == "charge":

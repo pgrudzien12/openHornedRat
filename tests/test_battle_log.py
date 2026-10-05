@@ -241,9 +241,19 @@ class FleeingRemovalLoggingTests(unittest.TestCase):
 
     def test_given_a_routing_regiment_when_it_crosses_the_field_edge_then_removal_is_logged_with_position(self):
         fleeing = Regiment("r", "Fleeing", 1595, 500, 128, Side.PLAYER, models=5, speed_per_tick=1000.0, routing=True)
-        battle = Battle(1600, 1760, [fleeing], seed=1)
+        edge = {"status": ["bnd_ACTIVE", "bnd_BATTLEEDGE"],
+                "lines": [[16, 16, 1584, 16], [1584, 16, 1584, 1744],
+                          [1584, 1744, 16, 1744], [16, 1744, 16, 16]]}
+        battle = Battle(1600, 1760, [fleeing], seed=1, boundaries=[edge])
 
         battle.tick()
+        self.assertTrue(fleeing.flight_departed)
+        self.assertTrue(fleeing.flight_complete)
+        self.assertFalse(fleeing.fled)  # completion precedes model settling and removal
+        for _ in range(200):
+            if fleeing.fled:
+                break
+            battle.tick()
 
         self.assertTrue(fleeing.fled)
         fled_events = [e for e in battle.events if e.kind == "fled"]

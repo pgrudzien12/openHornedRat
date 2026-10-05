@@ -697,6 +697,10 @@ def start_rout(regiment: "Regiment", battle: "Battle", flee_point: formation.Poi
                 opposing_model.rout_pause_ticks = max(opposing_model.rout_pause_ticks, pause)
     battle_grid.release(battle, regiment)
     regiment.routing = True
+    regiment.flight_check_ticks = 0
+    regiment.flight_departed = False
+    regiment.flight_complete = False
+    regiment.flight_complete_tick = -1
     regiment.in_melee = False
     regiment.melee_camp = None
     regiment.melee_group = None
@@ -837,7 +841,7 @@ def resolve_rally(battle: "Battle") -> None:
     for regiment in battle.regiments.values():
         # A regiment that has fled off the field is permanently out (game_rules.md, "Flight"): once
         # `fled`, `active` is false forever, so it must never be offered another rally attempt.
-        if not regiment.routing or not regiment.active:
+        if not regiment.routing or not regiment.active or regiment.flight_complete:
             continue
         if regiment.rally_next_segment is None or absolute_segment < regiment.rally_next_segment:
             continue

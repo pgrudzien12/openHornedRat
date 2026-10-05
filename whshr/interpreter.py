@@ -1360,7 +1360,7 @@ class ScriptInterpreter:
     def _object_centre(self, unit: "Regiment") -> tuple[float, float]:
         return self.battle.formation_centre(unit)
 
-    def _start_point_move(self, unit: "Regiment", goal: tuple[float, float]) -> None:
+    def _start_point_move(self, unit: "Regiment", goal: tuple[float, float], follows_unit: bool = False) -> None:
         """An ordinary move to a point: a new plan replaces any charge, turn order or earlier destination.
         A unit starting from rest first snaps 90/180 degrees towards it (game_rules.md, real time and movement)."""
         was_moving = unit.moving
@@ -1368,7 +1368,8 @@ class ScriptInterpreter:
         unit.attack_target = None
         unit.charge_started_target = None
         unit.turn_order_key = None
-        unit.target_x, unit.target_y = float(goal[0]), float(goal[1])
+        self.battle.set_point_route(unit, (float(goal[0]), float(goal[1])))
+        unit.route_follows_unit = follows_unit
         if not was_moving:
             heading = round(math.atan2(goal[0] - unit.x, goal[1] - unit.y) * 512 / math.tau) % 512
             self.battle.snap_move_start(unit, heading)
@@ -1387,17 +1388,27 @@ class ScriptInterpreter:
         state.cond_flags = False
         if pair is None or unit is None or unit.reforming or unit.anchored or unit.routing:
             return state.pc + 1
-        self._start_point_move(unit, self._object_centre(pair[1]))
+        self._start_point_move(unit, self._object_centre(pair[1]), follows_unit=True)
         state.cond_flags = True
         return state.pc + 1
 
     def op_RefreshRouteToTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
-        """RefreshRouteToTarget: re-plans multi-leg or boundary-crossing routes only. With this engine's
-        single-destination movement there is nothing to shorten, so it does nothing and leaves the
-        condition as it was; with no target it writes false."""
-        if self._query_pair(state, unit_id) is None:
+        """Refresh a multi-leg route when the direct path clears, or a single leg becomes blocked."""
+        pair = self._query_pair(state, unit_id)
+        if pair is None:
             state.cond_flags = False
+            return state.pc + 1
+        unit, target = pair
+        if unit.target_x is None:
+            return state.pc + 1
+        from . import navigation
+        goal = self._object_centre(target)
+        crosses = navigation.first_crossing((unit.x, unit.y), goal,
+                                            self.battle.navigation_boundaries) is not None
+        if (crosses and not unit.waypoints) or (not crosses and unit.waypoints):
+            self.battle.set_point_route(unit, goal)
+            state.cond_flags = True
         return state.pc + 1
 
     def op_TurnToFaceTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,

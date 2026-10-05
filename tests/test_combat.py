@@ -559,7 +559,10 @@ class FleeBearingTests(unittest.TestCase):
                             attack_target="f")
         infantry = _regiment("inf", 470, 500, Side.PLAYER, speed_per_tick=4.0, initiative=5,
                              attack_target="f")
-        battle = Battle(1000, 1000, [fleeing, cavalry, infantry], seed=0)
+        edge = {"status": ["bnd_ACTIVE", "bnd_BATTLEEDGE"],
+                "lines": [[0, 0, 1000, 0], [1000, 0, 1000, 1000],
+                          [1000, 1000, 0, 1000], [0, 1000, 0, 0]]}
+        battle = Battle(1000, 1000, [fleeing, cavalry, infantry], seed=0, boundaries=[edge])
         fleeing.routing = True
         fleeing.flee_x, fleeing.flee_y = battle.flee_point(fleeing)
         start_x, start_y = fleeing.x, fleeing.y

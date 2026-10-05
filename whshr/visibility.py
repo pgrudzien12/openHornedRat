@@ -22,7 +22,7 @@ def clear_ray(start: Point, end: Point, boundaries: Sequence[View], objects: Seq
     ray = (*start, *end)
     for boundary in boundaries:
         flags = {str(flag).casefold() for flag in boundary.get("status") or ()}
-        if {"bnd_active", "bnd_sightedge"}.issubset(flags):
+        if "bnd_active" in flags and ("bnd_sight" in flags or "bnd_sightedge" in flags):
             lines: Sequence[Sequence[float]] = boundary.get("lines") or ()
             if any(crosses(ray, (line[0], line[1], line[2], line[3])) for line in lines if len(line) == 4):
                 return False
