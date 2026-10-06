@@ -20,7 +20,7 @@ import random
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from . import behaviour, nodes, visibility
+from . import animation, behaviour, nodes, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import Side, side_of_code
@@ -47,6 +47,7 @@ INDEPENDENT_FLAG = 0x8000000  # script operand of TestUnitFlags 0x8000000: the p
 # Script-owned busy states (SetUnitFlags2 operands of the library shooting and casting scripts), which
 # ReacquireEventSource respects (notes/threat_events_nodes.md, part B 1).
 CASTING_SEQUENCE_FLAG2 = 2
+WIZARD_CLASS = 5  # s_race class Wizard (game_rules.md section 3)
 LEAVING_BATTLE_FLAG = 0x100  # SetUnitFlags 256: the unit is leaving the battle (objective G, game_rules.md R60)
 VIEW_CONE = 71  # +-50 degrees in 1/512 turn, doubled while the looker is in melee (game_rules.md visibility)
 REACT_VIEW_CONE = 85  # ReactToThreat's wider +-60 degrees (notes/threat_events_nodes.md, part A 6)
@@ -127,6 +128,16 @@ class UnitScriptState:
     threat: str | None = None
     threat_score: float = 0.0
     approach_point: tuple[float, float] | None = None  # set by ReactToThreat; see op_ReactToThreat
+    # Animation request: the event the models post at their animation's event step, every divisor-th
+    # arrival, while the countdown runs (notes/script_animation_sound.md, 0.3).
+    anim_event: int = 0
+    anim_divisor: int = 0
+    anim_countdown: int = 0
+    loop_sound: tuple[int, int] | None = None  # (packet, effect) started by StartUnitLoopSound
+    # Casting states (notes/script_animation_sound.md, 3): a spell chosen but not yet launched, and the
+    # caster of an active Storm of Shemtek or Flying Bower. Set by the magic opcodes and spell effects.
+    pending_spell: int | None = None
+    channelling: bool = False
     current_node: int | None = None  # waypoint node for movement orders
     pending_arrival: bool = False  # a MoveToNode order is in flight; see
     # ScriptInterpreter._update_arrival_flag, which sets ARRIVED_FLAG on unit_flags once the
@@ -178,6 +189,17 @@ class EventBus:
             return None
         return next((unit_id for unit_id in self.battle.regiments
                      if self.is_live(unit_id) and self.unit_states[unit_id].tag == tag), None)
+
+    def animation_event_step(self, unit_id: str) -> None:
+        """A model of the unit reached its animation's event step: count the request down and post its
+        event to the unit when the new countdown is divisible by the divisor; nothing with no request
+        running (notes/script_animation_sound.md, 0.3)."""
+        state = self.unit_states.get(unit_id)
+        if state is None or state.anim_countdown <= 0:
+            return
+        state.anim_countdown -= 1
+        if state.anim_divisor and state.anim_countdown % state.anim_divisor == 0:
+            self.queue_event(unit_id, Event(code=state.anim_event, source=unit_id))
 
     def queue_event(self, recipient_id: str, event: Event, route: str = "self", checked: bool = False) -> None:
         """Queue an event to a recipient or broadcast to a side (notes/threat_events_nodes.md, part B 0.2).
@@ -2737,6 +2759,155 @@ class ScriptInterpreter:
             break
         state.cond_flags = found
         return state.pc + 4
+
+    # ===== Animation requests, casting states and sound cues (notes/script_animation_sound.md) =====
+
+    def _broadcast_action(self, unit: "Regiment", action: int) -> None:
+        unit.script_action = action
+        unit.script_action_key = unit.activity_key()
+
+    def op_SetActionState(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """SetActionState A: the figures play action A until the unit's next state change; movement is
+        untouched, no event, no condition (section 2.1)."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is not None:
+            self._broadcast_action(unit, operand or 0)
+        return state.pc + 2
+
+    def op_PlayUnitAnimation(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """PlayUnitAnimation A E D: broadcast A and request event E every D-th event step, counting down
+        from the unit's model count; overwrites an older request (section 2.2). Divisor 0 is invalid and
+        posts nothing. Not modelled: the walk program event step of the fanatics' family."""
+        unit = self.battle.regiments.get(unit_id)
+        event = script_words[state.pc + 2] if state.pc + 2 < len(script_words) else 0
+        divisor = script_words[state.pc + 3] if state.pc + 3 < len(script_words) else 0
+        if unit is not None:
+            self._broadcast_action(unit, operand or 0)
+            state.anim_event, state.anim_divisor, state.anim_countdown = event, divisor, unit.models
+        return state.pc + 4
+
+    def op_PlayLeaderAnimation(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """PlayLeaderAnimation A E: the leader (or war machine) model alone requests action A, and the
+        request becomes (E, 1, 1); a unit without a leader changes nothing at all (section 2.3).
+        PROVISIONAL: the engine has no leader-model identity, so the first model plays the leader."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is not None and (unit.has_leader or unit.anchored) and unit.melee_models:
+            unit.melee_models[0].own_request = operand or 0
+            event = script_words[state.pc + 2] if state.pc + 2 < len(script_words) else 0
+            state.anim_event, state.anim_divisor, state.anim_countdown = event, 1, 1
+        return state.pc + 3
+
+    def op_IfAnimationDone(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IfAnimationDone A: true with no countdown left; false for A = 0 or while any model is playing A
+        (queued requests do not count); otherwise the request is cleared and the condition is true
+        (section 2.4)."""
+        unit = self.battle.regiments.get(unit_id)
+        if state.anim_countdown == 0:
+            state.cond_flags = True
+        elif not operand or (unit is not None and any(model.action == operand for model in unit.melee_models)):
+            state.cond_flags = False
+        else:
+            state.anim_event = state.anim_divisor = state.anim_countdown = 0
+            state.cond_flags = True
+        return state.pc + 2
+
+    def op_ClearAnimationRequest(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """ClearAnimationRequest: drop the request; models finish their pose but post nothing (section 2.5)."""
+        state.anim_event = state.anim_divisor = state.anim_countdown = 0
+        return state.pc + 1
+
+    def _cast_pose_running(self, unit: "Regiment | None") -> bool:
+        """Some model is playing action 7, the cast pose -- which is also the shoot pose (section 3)."""
+        return unit is not None and any(model.action == animation.SHOOT for model in unit.melee_models)
+
+    def _battle_message(self, unit_id: str, text_id: int) -> None:
+        """A battle message by its game-text id; the frontend loads the text from the installation."""
+        unit = self.battle.regiments.get(unit_id)
+        name = unit.name if unit is not None else unit_id
+        self.battle.events.append(BattleEvent(f"{name}: message {text_id}", "message",
+                                              regiment=unit_id, text_id=text_id))
+
+    def op_IfCastingAnimation(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IfCastingAnimation F: condition := cast pose running or channelling, any class; a pending spell
+        is not tested. True with F set shows message 2014 (section 3.1)."""
+        state.cond_flags = self._cast_pose_running(self.battle.regiments.get(unit_id)) or state.channelling
+        if state.cond_flags and operand:
+            self._battle_message(unit_id, 2014)
+        return state.pc + 2
+
+    def op_IfCasting(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IfCasting R M: condition := the unit is of class Wizard and its cast pose is running, a spell is
+        pending or it is channelling. True with M set shows message 2014 (section 3.2). Not modelled: R's
+        re-enabling of the refused spell's magic-panel entry (no magic panel yet)."""
+        unit = self.battle.regiments.get(unit_id)
+        state.cond_flags = (unit is not None and unit.unit_class == WIZARD_CLASS
+                            and (self._cast_pose_running(unit) or state.pending_spell is not None
+                                 or state.channelling))
+        message = script_words[state.pc + 2] if state.pc + 2 < len(script_words) else 0
+        if state.cond_flags and message:
+            self._battle_message(unit_id, 2014)
+        return state.pc + 3
+
+    def op_TurningToCastMessage(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """TurningToCastMessage F: F = 0 shows message 2010; no state, no condition (section 3.3)."""
+        if not operand:
+            self._battle_message(unit_id, 2010)
+        return state.pc + 2
+
+    def _sound(self, unit_id: str, kind: str, packet: int, effect: int, positional: bool) -> None:
+        """Record a sound cue for the frontend; sounds never change game state (section 4)."""
+        unit = self.battle.regiments.get(unit_id)
+        at = (unit.x, unit.y) if positional and unit is not None else None
+        self.battle.events.append(BattleEvent(f"sound {kind} {packet}/{effect}", "sound", regiment=unit_id,
+                                              cue=kind, packet=packet, effect=effect, position=at))
+
+    def op_PlaySoundAtUnit(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """PlaySoundAtUnit P E: an overlapping copy of effect E of packet P at the unit (section 4)."""
+        effect = script_words[state.pc + 2] if state.pc + 2 < len(script_words) else 0
+        self._sound(unit_id, "at_unit", operand or 0, effect, positional=True)
+        return state.pc + 3
+
+    def op_PlaySound(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """PlaySound P E: non-positional, not restarted while already playing (section 4)."""
+        effect = script_words[state.pc + 2] if state.pc + 2 < len(script_words) else 0
+        self._sound(unit_id, "play", operand or 0, effect, positional=False)
+        return state.pc + 3
+
+    def op_StartUnitLoopSound(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """StartUnitLoopSound P E F: stop the unit's loop sound, start effect E of packet P at the unit and
+        keep it as the loop sound (section 4). Not modelled: the fader operand F."""
+        if state.loop_sound is not None:
+            self._sound(unit_id, "loop_stop", *state.loop_sound, positional=False)
+        effect = script_words[state.pc + 2] if state.pc + 2 < len(script_words) else 0
+        state.loop_sound = (operand or 0, effect)
+        self._sound(unit_id, "loop_start", operand or 0, effect, positional=True)
+        return state.pc + 4
+
+    def op_StopUnitLoopSound(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """StopUnitLoopSound: stop the loop sound; the handle is kept, stopping again is harmless (section 4)."""
+        if state.loop_sound is not None:
+            self._sound(unit_id, "loop_stop", *state.loop_sound, positional=False)
+        return state.pc + 1
+
+    def op_MoveUnitSound(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """MoveUnitSound W: move the charge sound (W = 0) or loop sound (W = 1) to the unit (section 4).
+        Not modelled: the engine starts no charge sound, so W = 0 finds an empty handle."""
+        if operand == 1 and state.loop_sound is not None:
+            self._sound(unit_id, "loop_move", *state.loop_sound, positional=True)
+        return state.pc + 2
 
     def op_IfEventSource(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:

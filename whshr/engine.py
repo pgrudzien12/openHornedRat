@@ -110,6 +110,9 @@ class ModelState:
     pending_action: int | None = None  # action queued behind a running one-shot script
     drawn_facing: float | None = None  # facing (0-511) the sprite direction is drawn from; None until first set
     fire_event: bool = False  # animation reached its fire point on this tick (whshr.animation)
+    # The model's own pending action request (0 = none), consumed at its next update; it beats the
+    # unit's broadcast for that tick (notes/script_animation_sound.md, 0.2).
+    own_request: int = 0
     # ScatterModelsToNode destination this model walks to instead of its formation slot, or None while
     # in formation (notes/scatter_models_to_node.md); cleared by SnapModelsToFormation.
     scatter_target: Point | None = None
@@ -167,6 +170,11 @@ class Regiment:
     # set:whoami as one byte: the persistent campaign regiment id (0 for ordinary mission units),
     # addressed by SendEventToUnitId (notes/threat_events_nodes.md, part B 0.1).
     whoami: int = 0
+    has_leader: bool = False  # the .BTS unit has a leader (character) block: PlayLeaderAnimation's model
+    # A script's action broadcast (SetActionState/PlayUnitAnimation; 0 = none) and the unit's activity
+    # when it was made: it sticks until the unit's next state change (notes/script_animation_sound.md, 0.1).
+    script_action: int = 0
+    script_action_key: tuple[bool, ...] | None = None
 
     # Combat/order state (whshr.combat).
     attack_target: str | None = None  # identifier of an enemy regiment this regiment is charging
@@ -311,6 +319,12 @@ class Regiment:
     def active(self) -> bool:
         """False once a regiment is out of the fight (all models dead, or routed off the field)."""
         return not self.destroyed and not self.fled
+
+    def activity_key(self) -> tuple[bool, ...]:
+        """The states whose change makes the original re-request the figures' action (halt, move or
+        turn start, charge, melee, rout, re-form; notes/script_animation_sound.md, 0.1)."""
+        return (self.moving or bool(self.waypoints), self.turn_order_key is not None,
+                self.attack_target is not None, self.in_melee, self.routing, self.reforming)
 
     def speed_for_mode(self, k: float) -> float:
         """Per-tick speed at movement factor ``k`` (game_rules.md k factors), scaled from the regiment's
@@ -602,6 +616,7 @@ class Battle:
                     portrait=resource_name(leader.get("portrait")),
                     hidden=bool(unit.get("hidden", False)),
                     whoami=int(position.get("whoami") or 0) & 0xFF,
+                    has_leader=bool(unit.get("leader")),
                     **_decode_combat_profile(unit),
                 ))
                 script_value = position.get("script")
@@ -1662,8 +1677,16 @@ class Battle:
             if regiment.volley_age >= 6:
                 regiment.volley_countdown = None
         volley_divisor = 1 if regiment.hud_class == "art" else 4
+        # A script's broadcast holds until the unit's activity changes (notes/script_animation_sound.md,
+        # 0.1); a model's own request beats it for one update (0.2).
+        if regiment.script_action and regiment.script_action_key != regiment.activity_key():
+            regiment.script_action = 0
         for model in regiment.melee_models:
-            if regiment.in_melee:
+            if model.own_request:
+                requested, model.own_request = model.own_request, 0
+            elif regiment.script_action:
+                requested = regiment.script_action
+            elif regiment.in_melee:
                 requested = animation.FIGHT if model.opponent is not None else animation.WEAPON_READY
             elif regiment.missile_range and not regiment.moving and not regiment.attack_target \
                     and regiment.reload_ticks <= 1:
@@ -1674,6 +1697,8 @@ class Battle:
                 requested = animation.IDLE
             animation.step(model, requested, self.rng, regiment.animation_family)
             self._slew_drawn_facing(regiment, model, wagon)
+            if model.fire_event:
+                self.event_bus.animation_event_step(regiment.identifier)
             # Each model's fire event decrements the volley countdown once; a post is issued each
             # time the new countdown value is a multiple of the divisor (game_rules.md 8.1).
             # Reload does not gate this: it was stamped at order time, so reload > 0 is normal
