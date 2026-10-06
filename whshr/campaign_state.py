@@ -13,6 +13,7 @@ from os import PathLike
 from typing import TYPE_CHECKING, Any
 
 from .campaign import build_campaign_graph, parse_window_ui
+from .encyclopedia import DEFAULT_KEYS
 from .glue import MissionRecord, MissionRef
 from .glue_content import GlueContent
 from .paths import Installation
@@ -514,7 +515,7 @@ class CampaignState:
             master = ()
         return cls(build_campaign_graph(str(game.root), wnd=wnd, string_tables=tables),
                    flow=initial_flow(hotspots), hints=hints, content=content, company=company,
-                   master=master)
+                   master=master, book_flags={0: set(DEFAULT_KEYS)})
 
     @classmethod
     def single_mission(cls, briefing: Any) -> "CampaignState":

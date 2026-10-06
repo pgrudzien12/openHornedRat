@@ -501,17 +501,11 @@ Only A-Z and digits 1-4 have glyphs; any other first character draws nothing (al
 uppercase letter; initial letters seen: T, A, F).
 
 ### 5.8 Engine status and deviations
-❌ not implemented. `whshr/glue_scene.py` `_leave_caravan` logs `hotspot 'MagicBook' is not yet implemented` and stays inert;
-`tests/test_post_mission_caravan.py` ("unimplemented hotspot ... stays open") uses `MagicBook` as its inert example and must switch to
-another. No `MagicBookScene` or view exists.
-Suggested shape: a headless `MagicBookScene` in `whshr/campaign_scenes.py` beside `ArmyRecordsScene` holding two books
-(entries, known, entry, page, page_starts), current book, caller (name, mode) and company; a `MagicBookView` in `whshr/frontend/` (a
-`NativeScreenView` like `ArmyRecordsView`) reusing its helpers (`_string`, `_bitmap`/`_bitmap_centered`, `_description` - fix to cut at
-the first ESC, it only strips `\x1a\0\r\n` -, `_label`/`_center`/`_center_bold`, the button strip). Additions needed: a line-wrapping
-routine per 5.7 (existing `_paragraph` collapses all whitespace, has no cap, page limit or `@...#` spans), a `FancyLetters` glyph
-drawer, per-page start bookkeeping, and wiring in `_leave_caravan` (`magicbook` -> new scene with pending caller so Done re-opens the
-caravan as `_open_army_book` does; palette 1 in, 2 out). Company data: `Regiment.raw` plus `whshr.script.unit_view` already carry
-`spells`/`items`.
+✅ Implemented in `whshr/magic_book.py`, `whshr/campaign_scenes.py` (`MagicBookScene`) and
+`whshr/frontend/magic_book_view.py`. Caravan hotspots open the book; the two tabs derive known entries from the campaign company,
+remember their entry and page, and draw the installed pictures, descriptions, drop caps and buttons with palette 1. Done returns to
+the parent caravan scene. The engine currently resumes that scene instance, rather than rebuilding the caller by name as the original
+does. Button click sounds are not yet played by the book view.
 
 ### 5.9 Test scenarios
 1. Given the starting company (items `ItemGrudgeBringer`, `ItemPotionOfStrength`), when the book opens, then Items is current on entry 6
@@ -703,15 +697,11 @@ directions. Done: destroy everything, palette 2, pop the frame, re-open the call
 kept: it always opens at entry 0. No timeout, no autosave, no cue other than the shared button cues.
 
 ### 6.8 Engine status and deviations
-❌ Not implemented: `whshr/glue_scene.py` `_leave_caravan` logs "hotspot 'EncyclopediaBook' is not yet implemented" (`STARTCARAVAN`
-lets it fall through the generic branch list). `whshr/campaign_state.py` has `book_flags: dict[int, set[int]]` and
-`enable_book(book, index)`, and `whshr/savegame.py` round-trips it, but **the default-known keys (0, 6, 10, 21, 28) are not seeded**
-and `testbook` is not read.
-Suggested shape: `EncyclopediaScene(parent: GlueScene)` next to `ArmyRecordsScene` in `whshr/campaign_scenes.py` (state: position, page,
-page-start offsets; pure `known_entries(book_flags, testbook)` and pure paginator `paginate(text, measure, cap_h, line_h)` testable
-with a fake font); `EncyclopediaView(NativeScreenView)` in `whshr/frontend/` reusing `_bitmap`, `_bitmap_centered`, `_label`,
-`_paragraph` and button helpers of `army_records_view.py` (which already loads `BKTXT` RCDATA); the drop cap needs a `FancyLetters`
-crop through the existing bitmap loader. Read ids, names and sizes from the installation (one table row per entry citing 6.3).
+✅ Implemented in `whshr/encyclopedia.py`, `whshr/campaign_scenes.py` (`EncyclopediaScene`) and
+`whshr/frontend/encyclopedia_view.py`. Caravan hotspots open it; the scene reads `book_flags[0]`, visits known entries in display
+order and remembers description page offsets. A new campaign seeds the five default keys. The view draws the installed title and
+description drop caps, pictures, text and buttons with palette 1. `testbook` is supported by the scene but the engine has no global
+option for it yet. Done resumes the existing caravan scene rather than rebuilding it by name. Button click sounds are not yet played.
 
 ### 6.9 Test scenarios
 1. Given a new campaign, when the book opens, then `Men` is shown and the entries reachable by Next are exactly `Men, Dwarf, Goblin,
@@ -1520,8 +1510,8 @@ windows. Deviations to fix:
 1. Tab-label offset: engine (2,4)/(3,3); real (+4,+2)/(+3,+3).
 2. Take label colour: engine yellow, real black.
 3. Cost line arguments: engine (price, retainer), real (retainer, price); price must be models + routed and the stored per-model price.
-4. Left page: engine draws the name as bold body text under a top-anchored picture at y = 65 centred at x = 170. Real: bottom-anchored picture at
-   x = 50 + (240 - w)/2 above a blackletter drop-cap name block anchored 3 lines above the bottom.
+4. ✅ Left page now draws the name with slot 5 blackletter and a `FancyLetters` drop cap, with the picture bottom-anchored 4 px above
+   the name block. The description also stops at its first ESC byte.
 5. Headings `BKTXT 503/504` are left-aligned at x = 350, not centred.
 6. Status line: real on both pages, group-centred; engine only on Information, icon centred at x = 380.
 7. Information page: no `BKTXT 408` heading in the leader column; regiment equipment omitted for heroes (leader present and `s_orgsize` = 1, not

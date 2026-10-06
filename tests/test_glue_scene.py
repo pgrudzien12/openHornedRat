@@ -276,7 +276,7 @@ class GlueSceneTests(unittest.TestCase):
         view.heading_font = object()
         calls = []
         view._center = lambda value, *_args, **_kwargs: calls.append(value)
-        view._center_bold = lambda value, *_args, **_kwargs: calls.append(value)
+        view._regiment_name = lambda value: calls.append(value) or 300
         view._label = lambda value, *_args: calls.append(value)
         view._string = lambda table, text_id, *args: (table, text_id, args)
         view._bitmap = lambda *_args: None

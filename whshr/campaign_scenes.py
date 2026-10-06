@@ -609,6 +609,146 @@ class ArmyRecordsScene(Scene):
         return None
 
 
+class MagicBookScene(Scene):
+    """Read-only caravan Magic Book; each tab remembers its entry and description page."""
+
+    def __init__(self, parent: GlueScene, campaign: CampaignState) -> None:
+        from .magic_book import known_entries
+
+        self.parent = parent
+        self.campaign = campaign
+        self.known = known_entries(campaign.company)
+        campaign.book_flags[1] = set(self.known[0])
+        campaign.book_flags[2] = set(self.known[1])
+        self.book = 0 if self.known[0] else 1
+        self.entry_positions = [0, 0]
+        self.pages = [0, 0]
+        self.page_starts: dict[tuple[int, int], list[int]] = {}
+        self.next_starts: dict[tuple[int, int, int], int | None] = {}
+
+    @property
+    def entry(self) -> int | None:
+        known = self.known[self.book]
+        return known[self.entry_positions[self.book]] if known else None
+
+    @property
+    def page(self) -> int:
+        return self.pages[self.book]
+
+    @property
+    def page_start(self) -> int:
+        entry = self.entry
+        if entry is None:
+            return 0
+        return self.page_starts.setdefault((self.book, entry), [0])[self.page]
+
+    def set_next_start(self, offset: int | None) -> None:
+        if (entry := self.entry) is not None:
+            self.next_starts[self.book, entry, self.page] = offset
+
+    @property
+    def can_back(self) -> bool:
+        return self.page > 0 or self.entry_positions[self.book] > 0
+
+    @property
+    def can_next(self) -> bool:
+        entry = self.entry
+        return (entry is not None and
+                (self.next_starts.get((self.book, entry, self.page)) is not None or
+                 self.entry_positions[self.book] + 1 < len(self.known[self.book])))
+
+    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
+        if event == "book:done":
+            return Transition(self.parent, "magic book closed")
+        if event == "book:spells" and self.known[0]:
+            self.book = 0
+        elif event == "book:items" and self.known[1]:
+            self.book = 1
+        elif event == "book:back" and self.can_back:
+            if self.page:
+                self.pages[self.book] -= 1
+            else:
+                self.entry_positions[self.book] -= 1
+                self.pages[self.book] = 0
+        elif event == "book:next" and self.can_next:
+            entry = self.entry
+            assert entry is not None
+            offset = self.next_starts.get((self.book, entry, self.page))
+            if offset is not None:
+                starts = self.page_starts.setdefault((self.book, entry), [0])
+                if len(starts) == self.page + 1:
+                    starts.append(offset)
+                self.pages[self.book] += 1
+            else:
+                self.entry_positions[self.book] += 1
+                self.pages[self.book] = 0
+        return None
+
+
+class EncyclopediaScene(Scene):
+    """The campaign bestiary, ordered by display position rather than unlock key."""
+
+    def __init__(self, parent: GlueScene, campaign: CampaignState, *, testbook: bool = False) -> None:
+        from .encyclopedia import known_positions
+
+        self.parent = parent
+        self.campaign = campaign
+        if testbook:
+            campaign.book_flags.setdefault(0, set()).update(range(29))
+        self.known = known_positions(campaign.book_flags.get(0, set()))
+        self.position_index = 0
+        self.page = 0
+        self.page_starts: dict[int, list[int]] = {}
+        self.next_starts: dict[tuple[int, int], int | None] = {}
+
+    @property
+    def entry(self) -> int | None:
+        return self.known[self.position_index] if self.known else None
+
+    @property
+    def page_start(self) -> int:
+        entry = self.entry
+        return self.page_starts.setdefault(entry, [0])[self.page] if entry is not None else 0
+
+    def set_next_start(self, offset: int | None) -> None:
+        if (entry := self.entry) is not None:
+            self.next_starts[entry, self.page] = offset
+
+    @property
+    def can_back(self) -> bool:
+        return self.page > 0 or self.position_index > 0
+
+    @property
+    def can_next(self) -> bool:
+        entry = self.entry
+        return (entry is not None and
+                (self.next_starts.get((entry, self.page)) is not None or
+                 self.position_index + 1 < len(self.known)))
+
+    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
+        if event == "book:done":
+            return Transition(self.parent, "encyclopedia closed")
+        if event == "book:back" and self.can_back:
+            if self.page:
+                self.page -= 1
+            else:
+                self.position_index -= 1
+                self.page = 0
+        elif event == "book:next" and self.can_next:
+            entry = self.entry
+            assert entry is not None
+            offset = self.next_starts.get((entry, self.page))
+            if offset is not None:
+                starts = self.page_starts.setdefault(entry, [0])
+                if len(starts) == self.page + 1:
+                    starts.append(offset)
+                self.page += 1
+            else:
+                self.position_index += 1
+                self.page = 0
+        return None
+
+
 def _unit_ids(mission_record: MissionRecord, command: str) -> tuple[int, ...]:
     """The whoami ids of a mission record's ``forceunits``/``excludeunits`` lines; an argument may list several ids."""
     return tuple(int(part) for field in mission_record.fields if field.command == command

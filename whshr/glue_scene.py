@@ -236,6 +236,10 @@ class GlueScene(Scene):
             if event.kind == "hotspot-release" and self.window == "STARTCARAVAN" and event.target:
                 if event.target.casefold() == "armybook":
                     return self._open_army_book(hire_only=False)
+                if event.target.casefold() == "magicbook":
+                    return self._open_magic_book()
+                if event.target.casefold() == "encyclopediabook":
+                    return self._open_encyclopedia()
                 if event.target.casefold() == "loadsavewindow":
                     return self._open_save_dialog()
                 if event.target.casefold() == "abortgame":
@@ -304,8 +308,8 @@ class GlueScene(Scene):
         """A hotspot of the caravan a script asked for (notes/activity_results.md section 6.2).
 
         The hotspot's own exit name decides: ``UnwindMission`` pops the parked script, lets it finish and
-        releases the mission on the map; ``PopAndResume`` pops it and lets the script carry on. Every other
-        hotspot (books, options, speech, save/load) has no activity yet and stays inert."""
+        releases the mission on the map; ``PopAndResume`` pops it and lets the script carry on.
+        Supported book and save hotspots open their own scenes; other hotspots stay inert."""
         pending = self.require_runtime().state.pending
         if pending is None:
             return None
@@ -313,6 +317,10 @@ class GlueScene(Scene):
         mode = pending.mode
         if name in ("armybook", "hireonlyarmybook"):
             return self._open_army_book(hire_only=name == "hireonlyarmybook")
+        if name == "magicbook":
+            return self._open_magic_book()
+        if name == "encyclopediabook":
+            return self._open_encyclopedia()
         if name == "loadsavewindow":
             return self._open_save_dialog()
         if name == "abortgame":
@@ -367,6 +375,22 @@ class GlueScene(Scene):
         model = RosterBook(campaign.company, coffers=campaign.coffers, reinforcements=campaign.reinforcements,
                            pays=hire_only)
         return Transition(ArmyRecordsScene(self, campaign.company[0].whoami, model), "army records opened")
+
+    def _open_magic_book(self) -> Transition | None:
+        from .campaign_scenes import MagicBookScene
+
+        if self.campaign is None:
+            self._queue((Diagnostic("caravan", "the magic book needs a company"),))
+            return None
+        return Transition(MagicBookScene(self, self.campaign), "magic book opened")
+
+    def _open_encyclopedia(self) -> Transition | None:
+        from .campaign_scenes import EncyclopediaScene
+
+        if self.campaign is None:
+            self._queue((Diagnostic("caravan", "the encyclopedia needs a campaign"),))
+            return None
+        return Transition(EncyclopediaScene(self, self.campaign), "encyclopedia opened")
 
     def _map_program(self, target: str) -> str:
         """The flow program the caravan's map hotspot opens.

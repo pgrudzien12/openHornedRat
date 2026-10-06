@@ -8,7 +8,7 @@ from .gpu import Gpu
 from ..battle_scene import BattleScene
 from ..campaign_scenes import (
     BriefingScene, MainMenuScene, MissionMapScene, MovieScene, OpeningNarrationScene,
-    ArmyRecordsScene, TroopSelectScene, TroopSelectionScene,
+    ArmyRecordsScene, EncyclopediaScene, MagicBookScene, TroopSelectScene, TroopSelectionScene,
 )
 from ..confirm_scene import ConfirmScene
 from ..credits_scene import CreditsScene
@@ -33,6 +33,8 @@ from .result_view import ResultView
 from .scene_view import PlaceholderView, SceneView
 from .troop_selection_view import TroopSelectionView
 from .army_records_view import ArmyRecordsView
+from .magic_book_view import MagicBookView
+from .encyclopedia_view import EncyclopediaView
 
 VIEWS: dict[type[Scene], type[SceneView[Any]]] = {
     OpeningNarrationScene: OpeningNarrationView,
@@ -42,6 +44,8 @@ VIEWS: dict[type[Scene], type[SceneView[Any]]] = {
     TroopSelectScene: PlaceholderView,
     TroopSelectionScene: TroopSelectionView,
     ArmyRecordsScene: ArmyRecordsView,
+    MagicBookScene: MagicBookView,
+    EncyclopediaScene: EncyclopediaView,
     BriefingScene: BriefingView,
     GlueScene: GlueView,
     LoadSaveScene: LoadSaveView,

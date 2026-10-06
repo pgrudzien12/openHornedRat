@@ -63,9 +63,37 @@ class PostMissionCaravanTests(DirectMissionRouteTests):
     def test_given_the_caravan_when_an_unimplemented_hotspot_is_released_then_it_stays_open(self):
         machine, map_scene, campaign = self._play(("missionawindow.0",), False)
 
-        machine.handle(GlueInput("hotspot-release", "MagicBook"))
+        machine.handle(GlueInput("hotspot-release", "OptionsDialog"))
 
         self.assertEqual(self._names(machine.active), ["CARAVANAFTERMISSION"])
+        self.assertEqual(campaign.completed, set())
+
+    def test_given_the_caravan_when_magic_book_closes_then_the_caravan_resumes(self):
+        from whshr.campaign_scenes import MagicBookScene
+
+        machine, _, campaign = self._play(("missionawindow.0",), False)
+        caravan = machine.active
+
+        machine.handle(GlueInput("hotspot-release", "MagicBook"))
+        self.assertIsInstance(machine.active, MagicBookScene)
+        machine.handle("book:done")
+
+        self.assertIs(machine.active, caravan)
+        self.assertEqual(self._names(caravan), ["CARAVANAFTERMISSION"])
+        self.assertEqual(campaign.completed, set())
+
+    def test_given_the_caravan_when_bestiary_closes_then_the_caravan_resumes(self):
+        from whshr.campaign_scenes import EncyclopediaScene
+
+        machine, _, campaign = self._play(("missionawindow.0",), False)
+        caravan = machine.active
+
+        machine.handle(GlueInput("hotspot-release", "EncyclopediaBook"))
+        self.assertIsInstance(machine.active, EncyclopediaScene)
+        machine.handle("book:done")
+
+        self.assertIs(machine.active, caravan)
+        self.assertEqual(self._names(caravan), ["CARAVANAFTERMISSION"])
         self.assertEqual(campaign.completed, set())
 
     def test_given_a_recruit_caravan_when_its_exit_is_released_then_the_script_resumes_after_it(self):
