@@ -1416,6 +1416,11 @@ class Battle:
                     # (notes/pursuit_map_edge.md 2); a charge re-aims at its target every update.
                     chase = (regiment.pursuit_point if regiment.pursuing and regiment.pursuit_point is not None
                              else (target.x, target.y))
+                    if regiment.pursuing and math.dist(chase, (regiment.x, regiment.y)) < 2 * regiment.speed_for_mode(CHARGING_K):
+                        # PROVISIONAL: having reached the chase point before the next re-aim, run on along the facing
+                        # instead of circling it.
+                        facing = regiment.direction * math.tau / 512
+                        chase = (regiment.x + 256 * math.sin(facing), regiment.y + 256 * math.cos(facing))
                     moved = self._advance_toward(regiment, chase,
                                                  regiment.speed_for_mode(CHARGING_K) * move_scale, arrive=False,
                                                  order_key=("charge", target.identifier), scale=scale)
@@ -1668,7 +1673,8 @@ class Battle:
                           ) -> tuple[list[steering.Footprint], dict[str, Regiment]]:
         """Live footprints in collision-object order (solid scenery, then the other regiments by their collision
         centre), and the regiments behind the unit footprints. A charge's own target and routing regiments are
-        not obstacles; flight only steers round scenery (notes/obstacle_steering.md section 3)."""
+        not obstacles (notes/obstacle_steering.md section 3); flight steers round units too
+        (notes/flight_solid_obstacles.md 3)."""
         footprints: list[steering.Footprint] = []
         for index, obj in enumerate(self.objects):
             flags = {str(flag).casefold() for flag in obj.get("status") or ()}
@@ -1676,8 +1682,6 @@ class Battle:
                 footprints.append(steering.Footprint(f"object:{index}", float(obj.get("x") or 0),
                                                      float(obj.get("y") or 0), float(int(obj.get("radius") or 0))))
         units: dict[str, Regiment] = {}
-        if order_key[0] == "flee":
-            return footprints, units
         for other in self.regiments.values():
             if (other is regiment or not other.active or other.routing
                     or (order_key[0] == "charge" and order_key[1] == other.identifier)):
@@ -2097,13 +2101,12 @@ class Battle:
             if not any(not edge.forbidden(probe) for edge in edges):
                 self._stop_pursuit(regiment)
                 continue
-            # Re-aim (section 2 step 3): the route goes to the fugitive and the pursuer then runs straight until the
-            # next segment tick. PROVISIONAL: the chase point is placed on the same line well beyond the fugitive, so
-            # a pursuer that reaches the fugitive keeps running past it instead of circling.
-            gap = max(math.hypot(target.x - regiment.x, target.y - regiment.y), 1e-6)
-            beyond = 1000.0 / gap
-            regiment.pursuit_point = (target.x + (target.x - regiment.x) * beyond,
-                                      target.y + (target.y - regiment.y) * beyond)
+            # Re-aim (notes/pursuit_map_edge.md 2 step 3, notes/flight_solid_obstacles.md 5): the chase point is the
+            # fugitive's leading edge, its footprint centre plus one radius along its facing.
+            centre = self.formation_centre(target)
+            angle = int(target.direction) * math.tau / 512
+            lead = float(int(target.bounding_radius()))
+            regiment.pursuit_point = (centre[0] + lead * math.sin(angle), centre[1] + lead * math.cos(angle))
 
     def _stop_pursuit(self, regiment: Regiment) -> None:
         """Event 0x10 ("stop pursuing") to the pursuer: with behaviour scripts, its library handler shouts, stops
@@ -2141,6 +2144,8 @@ class Battle:
             regiment=regiment.identifier))
 
     def _correct_boundaries(self, regiment: Regiment) -> None:
+        if regiment.routing:
+            return  # notes/flight_solid_obstacles.md 4: routing units get no boundary correction of any kind
         for boundary in self.navigation_boundaries:
             if not (boundary.solid or boundary.inverse or boundary.battle_edge):
                 continue
@@ -2178,6 +2183,53 @@ class Battle:
             self._translate_regiment(regiment, shift_x, shift_y)
             centre = centre[0] + shift_x, centre[1] + shift_y
 
+    def _reroute_flight(self, regiment: Regiment) -> None:
+        """The flight re-route of a flee period (notes/flight_solid_obstacles.md 3), from the current facing: probe
+        256 units ahead, snap it clear of solid and inverse-solid areas (the BattleEdge is not used); a probe that
+        moved, or a line to it crossing such a boundary, turns the heading 22.5 degrees beyond the bearing to the
+        snapped probe in the turning direction (clockwise when head-on); a clear probe becomes the flee point and
+        footprint steering (units included) may deflect it. Stops when the heading holds or after a full turn of
+        changes; the facing is set at once."""
+        areas = [boundary for boundary in self.navigation_boundaries if boundary.solid or boundary.inverse]
+        footprints, units = self._route_footprints(regiment, ("flight",))
+        own_radius = float(int(regiment.bounding_radius()))
+        front = (regiment.x, regiment.y)
+
+        def blocks(footprint: steering.Footprint) -> bool:
+            other = units.get(footprint.key)
+            return other is None or self.route_unit_relation(regiment, other, False) == "block"
+
+        heading = int(regiment.direction) % 512
+        total = 0
+        point: Point | None = None
+        for _ in range(64):
+            probe = (front[0] + round(256 * math.sin(heading * math.tau / 512)),
+                     front[1] + round(256 * math.cos(heading * math.tau / 512)))
+            snapped = probe
+            for area in areas:
+                if area.forbidden(snapped):
+                    snapped = area.nearest(snapped)
+            if snapped == probe and navigation.first_crossing(front, probe, areas) is None:
+                point = probe
+                steer = steering.steer(front, probe, footprints, own_radius, blocks, facing=heading)
+                new_heading = steer.heading if steer is not None and not steer.gave_up else heading
+            else:
+                point = None
+                bearing = steering.bearing(front, snapped)
+                clockwise = (bearing - heading) % 512 <= 256
+                new_heading = (bearing + 32) % 512 if clockwise else (bearing - 32) % 512
+            if new_heading == heading:
+                break
+            change = abs(new_heading - heading) % 512
+            total += min(change, 512 - change)
+            heading = new_heading
+            if total >= 512:
+                break
+        regiment.direction = heading
+        if point is None or steering.bearing(front, point) != heading:
+            point = (front[0] + 256 * math.sin(heading * math.tau / 512), front[1] + 256 * math.cos(heading * math.tau / 512))
+        regiment.flee_x, regiment.flee_y = point
+
     def _check_flight_edges(self) -> None:
         edges = [boundary for boundary in self.navigation_boundaries if boundary.battle_edge]
         for regiment in self.regiments.values():
@@ -2189,6 +2241,8 @@ class Battle:
             regiment.flight_check_ticks = math.floor(regiment.bounding_radius() / 2)
             outside = not any(edge.contains((regiment.x, regiment.y)) for edge in edges)
             if not outside:
+                if not regiment.flight_departed:
+                    self._reroute_flight(regiment)
                 continue
             if not regiment.flight_departed:
                 regiment.flight_departed = True
