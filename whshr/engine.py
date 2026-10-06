@@ -943,11 +943,33 @@ class Battle:
         unit.waypoints.clear()
         unit.turn_order_key = None
         unit.clear_shooting()
+        if self.interpreter is not None and not script and not bomb:
+            self._post_fire_event(unit, mode, target_id, point, object_index)
+            return feedback
         unit.shooting_target = target_id
         unit.shooting_object = object_index
         unit.shooting_point = point
         unit.shooting_mode = mode
         return feedback
+
+    def _post_fire_event(self, unit: Regiment, mode: str, target_id: str | None, point: Point | None,
+                         object_index: int | None) -> None:
+        """With behaviour scripts running, a player Fire order is the event the shooter's script handles
+        (notes/script_shooting.md 5.1): 0x1F at a unit, 0x1E at a building, 0x20 on itself, 0x21 on the ground;
+        an independent Archers unit gets 0x25 (unit or building) and 0x24 (itself). PROVISIONAL: placed
+        buildings are not units here, so a building order carries the object's position and no source."""
+        hunts = unit.independent and unit.hud_class == "arch"
+        if mode == "target":
+            event = interpreter.Event(code=0x25 if hunts else 0x1F, source=target_id)
+        elif mode == "building" and object_index is not None:
+            obj = self.shooting_objects[object_index]
+            event = interpreter.Event(code=0x25 if hunts else 0x1E, x=int(obj.get("x") or 0), y=int(obj.get("y") or 0))
+        elif mode == "search":
+            event = interpreter.Event(code=0x24 if hunts else 0x20, x=-1, y=-1)
+        else:
+            x, y = point if point is not None else (-1.0, -1.0)
+            event = interpreter.Event(code=0x21, x=int(x), y=int(y))
+        self.event_bus.queue_event(unit.identifier, event)
 
     def resolve_no_battle(self) -> None:
         """No-battle mode (a campaign-progression shortcut, not a game rule): skip this fight and
@@ -1811,7 +1833,7 @@ class Battle:
             animation.step(model, requested, self.rng, regiment.animation_family)
             self._slew_drawn_facing(regiment, model, wagon)
             if model.fire_event:
-                self.event_bus.animation_event_step(regiment.identifier)
+                self.event_bus.animation_event_step(regiment.identifier, model_index)
             # Each model's fire event decrements the volley countdown once; a post is issued each
             # time the new countdown value is a multiple of the divisor (game_rules.md 8.1).
             # Reload does not gate this: it was stamped at order time, so reload > 0 is normal

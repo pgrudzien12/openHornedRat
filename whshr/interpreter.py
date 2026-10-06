@@ -84,6 +84,8 @@ class Event:
     x: int = 0  # world coordinate (or -1 for "not set")
     y: int = 0  # world coordinate (or -1 for "not set")
     link: int = 0  # chaining pointer for multi-record sequences (0 = none)
+    # The posting model's index for an animation event (notes/script_shooting.md 0: the launching model), or -1.
+    model: int = -1
 
 
 @dataclass
@@ -211,7 +213,7 @@ class EventBus:
             self._power = magic.PowerPools.rolled(self.battle.rng)
         return self._power
 
-    def animation_event_step(self, unit_id: str) -> None:
+    def animation_event_step(self, unit_id: str, model_index: int = -1) -> None:
         """A model of the unit reached its animation's event step: count the request down and post its
         event to the unit when the new countdown is divisible by the divisor; nothing with no request
         running (notes/script_animation_sound.md, 0.3)."""
@@ -220,7 +222,7 @@ class EventBus:
             return
         state.anim_countdown -= 1
         if state.anim_divisor and state.anim_countdown % state.anim_divisor == 0:
-            self.queue_event(unit_id, Event(code=state.anim_event, source=unit_id))
+            self.queue_event(unit_id, Event(code=state.anim_event, source=unit_id, model=model_index))
 
     def queue_event(self, recipient_id: str, event: Event, route: str = "self", checked: bool = False) -> None:
         """Queue an event to a recipient or broadcast to a side (notes/threat_events_nodes.md, part B 0.2).
@@ -2230,25 +2232,92 @@ class ScriptInterpreter:
                 # Battle.tick() handles the actual charging movement
         return state.pc + 1
 
-    def op_FireAtTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """Choose the script's current target for the shared ranged loop, never a melee charge."""
-        regiment = self.battle.regiments.get(unit_id)
-        if regiment is not None and state.aim_at_point and state.target_point is not None:
-            regiment.shooting_target = None
-            regiment.shooting_point = state.target_point
-            regiment.shooting_mode = "ground"
-        elif regiment is not None and state.current_target:
-            target_id = state.current_target[0]
-            if target_id in self.battle.regiments:
-                regiment.shooting_target = target_id
-                regiment.shooting_point = None
-                regiment.shooting_mode = "target"
-        elif regiment is not None and state.target_point is not None:
-            regiment.shooting_target = None
-            regiment.shooting_point = state.target_point
-            regiment.shooting_mode = "ground"
+    def op_FireAtTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FireAtTarget: launch one shot now (notes/script_shooting.md 1.1) from the model that posted the current
+        event (the unit centre with none) at the current target's centre, or at the target point when there is
+        no live target or aim-at-point is on. No range, arc, reload or line test: those were the script's before
+        the volley. A failed launch falls back to the 90 % shot; the condition is true only when the first
+        launch worked. Afterwards aim-at-point is off and a unit that forgets its target after a shot drops it."""
+        unit = self.battle.regiments.get(unit_id)
+        state.cond_flags = False
+        if unit is not None:
+            point = self._shot_point(state, use_aim_flag=True)
+            if point is not None:
+                from . import ranged
+                origin = self._launch_origin(unit, state.current_event.model)
+                state.cond_flags = ranged.launch_shot(self.battle, unit, origin, point) != "failed"
+                if not state.cond_flags:
+                    self._launch_90(unit, origin, point)
+        state.aim_at_point = False
+        if state.unit_flags & CAST_ONLY_TARGET_FLAG:
+            state.current_target = None
         return state.pc + 1
+
+    def _shot_point(self, state: UnitScriptState, use_aim_flag: bool) -> tuple[float, float] | None:
+        """The current target's centre (unless aim-at-point is on and consulted), else the target point."""
+        target = self.battle.regiments.get(state.current_target[0]) if state.current_target else None
+        if target is not None and target.active and not (use_aim_flag and state.aim_at_point):
+            return target.x, target.y
+        return state.target_point
+
+    def _launch_origin(self, unit: "Regiment", model_index: int) -> tuple[float, float]:
+        """The launching model's position, or the unit centre for "no model" or an index past the models."""
+        positions = unit.model_positions()
+        if 0 <= model_index < len(positions):
+            return positions[model_index]
+        return unit.x, unit.y
+
+    def _launch_90(self, unit: "Regiment", origin: tuple[float, float], point: tuple[float, float]) -> bool:
+        """Launch90 (notes/script_shooting.md 2.2): needs the +-45 degree front arc; aims exactly at
+        trunc(0.9 R) along the line from the unit centre to `point` (truncating per axis)."""
+        from . import ranged
+        code = unit.shooting_code or unit.missile_code or 0
+        weapon = ranged.WEAPONS.get(code) or ranged.SPECIAL.get(code)
+        distance = int(math.hypot(point[0] - unit.x, point[1] - unit.y))
+        if weapon is None or distance == 0 or not self._arc_ok(unit, point[0], point[1], 64):
+            return False
+        reach = weapon.reach * 9 // 10
+        aim = (unit.x + int((point[0] - unit.x) * reach / distance), unit.y + int((point[1] - unit.y) * reach / distance))
+        return ranged.launch_shot(self.battle, unit, origin, aim) != "failed"
+
+    def op_FireAt90PercentRange(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """FireAt90PercentRange: Launch90 at the current target's centre (aim-at-point not consulted) or the
+        target point; condition := launched. Neither the aim flag nor the target is changed
+        (notes/script_shooting.md 2.1)."""
+        unit = self.battle.regiments.get(unit_id)
+        point = self._shot_point(state, use_aim_flag=False)
+        state.cond_flags = (unit is not None and point is not None
+                            and self._launch_90(unit, self._launch_origin(unit, state.current_event.model), point))
+        return state.pc + 1
+
+    def op_FireAtNode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FireAtNode N: queue the ground-fire event 0x21 (no source, at map node N by file position) to the unit
+        itself; its shooter handler takes the point and runs the one-attempt shot next tick. Condition := queued
+        (notes/script_shooting.md 3). PROVISIONAL: a missing node queues nothing (false)."""
+        node = operand or 0
+        state.cond_flags = 0 <= node < len(self.battle.script_nodes)
+        if state.cond_flags:
+            area = self.battle.script_nodes[node]
+            self.event_bus.queue_event(unit_id, Event(code=0x21, x=int(area.x), y=int(area.y)))
+        return state.pc + 2
+
+    def _manned(self, unit: "Regiment") -> bool:
+        """Artillery class with its machine and at least 2 models (notes/script_shooting.md 0)."""
+        return (unit.unit_class == 4 or unit.hud_class == "art") and unit.machine_alive and unit.models >= 2
+
+    def op_IfArtilleryManned(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """IfArtilleryManned TAG: the unit carrying TAG (itself for a negative operand) is manned artillery
+        (notes/script_shooting.md 4). PROVISIONAL: "negative" is read as the word -1 (0xFFFF), because the shipped
+        tags 0xABC1/0xABC8 are themselves negative as 16-bit values."""
+        tag = operand or 0
+        unit_ref = unit_id if tag == 0xFFFF else self.event_bus.find_by_tag(tag)
+        unit = self.battle.regiments.get(unit_ref) if unit_ref is not None else None
+        state.cond_flags = unit is not None and self._manned(unit)
+        return state.pc + 2
 
     def op_KillAllModels(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
@@ -3604,23 +3673,37 @@ class ScriptInterpreter:
                 regiment.attack_target = state.current_target[0]
         return state.pc + 1
 
-    def op_ReadyToFire(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """ReadyToFire: test if unit can shoot (not reloading)."""
-        regiment = self.battle.regiments.get(unit_id)
-        if regiment and regiment.missile_range and regiment.reload_ticks <= 0 and \
-                (regiment.hud_class != "art" or (regiment.machine_alive and regiment.models >= 2)):
-            state.cond_flags = 1
-        else:
-            state.cond_flags = 0
-        return state.pc + 1
+    def op_ReadyToFire(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """ReadyToFire M: false while held; false while reloading (message 2003 when M is set); an Artillery unit
+        without its machine (message 2015) or with fewer than 2 models (message 2016) is false whatever M is;
+        otherwise true (notes/script_shooting.md 0)."""
+        unit = self.battle.regiments.get(unit_id)
+        state.cond_flags = False
+        if unit is None or unit.held:
+            return state.pc + 2
+        if unit.reload_ticks > 0:
+            if operand:
+                self._battle_message(unit_id, 2003)
+            return state.pc + 2
+        if unit.unit_class == 4 or unit.hud_class == "art":
+            if not unit.machine_alive:
+                self._battle_message(unit_id, 2015)
+                return state.pc + 2
+            if unit.models < 2:
+                self._battle_message(unit_id, 2016)
+                return state.pc + 2
+        state.cond_flags = True
+        return state.pc + 2
 
-    def op_StampReload(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """StampReload: manually reset reload counter (shortcut for rapid fire)."""
-        regiment = self.battle.regiments.get(unit_id)
-        if regiment:
-            regiment.reload_ticks = 0
+    def op_StampReload(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """StampReload: restart the reload now; the condition is not written (notes/script_shooting.md 0). The
+        stamp is one tick longer than the reload for the strict readiness test (see ranged.launch_shot)."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is not None:
+            from . import ranged
+            unit.reload_ticks = ranged.reload_time(unit) + 1
         return state.pc + 1
 
     def op_FollowParent(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,

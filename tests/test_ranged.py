@@ -164,8 +164,9 @@ class RangedOrders(unittest.TestCase):
         state.aim_at_point = True
         runner = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
         runner.op_FireAtTarget(state, None, [], "bow", 0, self.battle.rng)
-        self.assertEqual(self.shooter.shooting_point, (100, 300))
-        self.assertEqual(self.shooter.shooting_mode, "ground")
+        # notes/script_shooting.md 1.1: FireAtTarget is the launcher -- one projectile at the point, no charge.
+        self.assertEqual([(p.x1, p.y1) for p in self.battle.projectiles], [(100, 300)])
+        self.assertFalse(state.aim_at_point)
         self.assertIsNone(self.shooter.attack_target)
 
     def test_ctrl_gyrocopter_bomb_requires_airborne_and_drops_at_self(self):

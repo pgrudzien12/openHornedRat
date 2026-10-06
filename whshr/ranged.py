@@ -209,6 +209,12 @@ def _order_volleys(battle: Battle) -> None:
             unit.reload_ticks = max(0.0, unit.reload_ticks - 1)
         if unit.volley_countdown is None:
             unit.volley_age = 0
+        if battle.interpreter is not None and not (unit.shooting_mode == "ground" and unit.shooting_code == 17
+                                                   and unit.hud_class == "arch"):
+            # notes/script_shooting.md 5.1: with behaviour scripts running, every ordinary shot comes from the
+            # scripts (FireAtTarget on events 34/35); the engine orders no volley of its own. The Gyrocopter
+            # bomb (Ctrl + Fire) is the one player order that bypasses the scripts.
+            continue
         if not unit.active or unit.routing or unit.in_melee or unit.braced or unit.attack_target:
             unit.shooting_mode = None
             continue
@@ -294,36 +300,77 @@ def _launch_posts(battle: Battle) -> None:
             aim = _aim(battle, unit) if unit.shooting_mode else unit.volley_aim
             if aim is None:
                 continue
-            first_die = 1
-            if code in ARTILLERY or code == 17:
-                first_die = battle.rng.randint(1, 6)
-                if first_die == 6:
-                    second = battle.rng.randint(1, 6)
-                    if second == 1:
-                        _destroy_machine(battle, unit)
-                        _message(battle, unit, 2018)
-                    else:
-                        _message(battle, unit, 2019)
-                    continue
-            x0, y0 = positions[index] if index < len(positions) else (unit.x, unit.y)
-            distance = math.dist((x0, y0), aim)
-            spread = (8 * first_die if code in ARTILLERY else 8)
-            if _scenery_between(battle, unit, aim):
-                spread += 8
-            scatter_max = 10 - min(unit.bs, 10)
-            offsets = [battle.rng.randint(0, scatter_max) * battle.rng.choice((-1, 1))
-                       * spread * distance / weapon.reach for _ in range(2)]
-            radius = battle.rng.randint(24, 48) if code in {5, 11} else weapon.radius
-            strength = 4 if code == 7 and distance > 287 else weapon.strength
-            z0 = battle.ground_height(x0, y0) + (72 if code == 17 else 24 if code in {8, 12} else 0)
-            p = Projectile(unit.identifier, code, x0, y0, z0, aim[0]+offsets[0], aim[1]+offsets[1],
-                           battle.ground_height(*aim), radius, strength, weapon.wounds,
-                           x=x0, y=y0, z=z0,
-                           visual=_visual(code) + ("_alt" if code in BOWS and battle.ctrl_held else ""),
-                           building_strength=weapon.building_strength, slot=slot)
-            battle.projectiles.append(p)
-            battle.events.append(BattleEvent(f"{unit.name} launches a missile.", "projectile_launch",
-                                             regiment=unit.identifier, code=code, x=x0, y=y0))
+            origin = positions[index] if index < len(positions) else (unit.x, unit.y)
+            _create_projectile(battle, unit, code, weapon, origin, aim, slot)
+
+
+def _create_projectile(battle: Battle, unit: Regiment, code: int, weapon: Weapon,
+                       origin: tuple[float, float], aim: tuple[float, float], slot: int) -> str:
+    """One ordinary projectile from `origin` at `aim` in pool `slot`: artillery and the bomb roll for a misfire
+    first (no projectile, "misfire"); otherwise scatter, height and the flight record ("launched")."""
+    first_die = 1
+    if code in ARTILLERY or code == 17:
+        first_die = battle.rng.randint(1, 6)
+        if first_die == 6:
+            second = battle.rng.randint(1, 6)
+            if second == 1:
+                _destroy_machine(battle, unit)
+                _message(battle, unit, 2018)
+            else:
+                _message(battle, unit, 2019)
+            return "misfire"
+    x0, y0 = origin
+    distance = math.dist((x0, y0), aim)
+    spread = (8 * first_die if code in ARTILLERY else 8)
+    if _scenery_between(battle, unit, aim):
+        spread += 8
+    scatter_max = 10 - min(unit.bs, 10)
+    offsets = [battle.rng.randint(0, scatter_max) * battle.rng.choice((-1, 1))
+               * spread * distance / weapon.reach for _ in range(2)]
+    radius = battle.rng.randint(24, 48) if code in {5, 11} else weapon.radius
+    strength = 4 if code == 7 and distance > 287 else weapon.strength
+    z0 = battle.ground_height(x0, y0) + (72 if code == 17 else 24 if code in {8, 12} else 0)
+    p = Projectile(unit.identifier, code, x0, y0, z0, aim[0]+offsets[0], aim[1]+offsets[1],
+                   battle.ground_height(*aim), radius, strength, weapon.wounds,
+                   x=x0, y=y0, z=z0,
+                   visual=_visual(code) + ("_alt" if code in BOWS and battle.ctrl_held else ""),
+                   building_strength=weapon.building_strength, slot=slot)
+    battle.projectiles.append(p)
+    battle.events.append(BattleEvent(f"{unit.name} launches a missile.", "projectile_launch",
+                                     regiment=unit.identifier, code=code, x=x0, y=y0))
+    return "launched"
+
+
+def launch_shot(battle: Battle, unit: Regiment, origin: tuple[float, float], aim: tuple[float, float]) -> str:
+    """One scripted shot (notes/script_shooting.md 1.2): "special" for a special shooter (14, 15, 17) that is not
+    Archers or Artillery class, fired as its innate routine; "failed" for any other non-Archers/Artillery unit,
+    a full projectile pool (where a special-shooter code still fires its routine) or a missile code without a
+    projectile; otherwise the reload is stamped first and an ordinary projectile is launched ("launched",
+    revealing a hidden shooter) or the artillery misfires ("misfire", which counts as fired). The stamp is one
+    tick longer than the reload so the strict "elapsed > reload" readiness test holds; PROVISIONAL: the extra
+    tick per segment boundary of the original clock is not modelled."""
+    code = unit.shooting_code or unit.missile_code or 0
+    shooter_class = unit.unit_class in (3, 4) or unit.hud_class in ("arch", "art")
+    if code in SPECIAL and not shooter_class:
+        _launch_innate(battle, unit, code, origin, aim)
+        return "special"
+    if not shooter_class:
+        return "failed"
+    occupied = {projectile.slot for projectile in battle.projectiles}
+    slot = next((value for value in range(32) if value not in occupied), None)
+    if slot is None:
+        if code in SPECIAL:
+            _launch_innate(battle, unit, code, origin, aim)
+            return "special"
+        return "failed"
+    unit.reload_ticks = reload_time(unit) + 1
+    weapon = WEAPONS.get(code)
+    if weapon is None or code == 17 or (code in ARTILLERY and not unit.machine_alive):
+        return "failed"
+    result = _create_projectile(battle, unit, code, weapon, origin, aim, slot)
+    if result == "launched":
+        unit.hidden = False
+    return result
 
 
 def _destroy_machine(battle: Battle, unit: Regiment) -> None:
@@ -351,8 +398,9 @@ def _visual(code: int) -> str:
 
 
 def _launch_innate(battle: Battle, unit: Regiment, code: int,
-                   origin: tuple[float, float]) -> None:
-    aim = _aim(battle, unit) if unit.shooting_mode else unit.volley_aim
+                   origin: tuple[float, float], aim: tuple[float, float] | None = None) -> None:
+    if aim is None:
+        aim = _aim(battle, unit) if unit.shooting_mode else unit.volley_aim
     if aim is None:
         return
     count = battle.rng.randint(1, 6) + 3 if code == 14 else battle.rng.randint(1, 6) if code == 15 else 1
