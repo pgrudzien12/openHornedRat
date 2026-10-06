@@ -179,6 +179,13 @@ the order is rejected: the shorter, still affordable side can be tried. Live
 steering tests obstacles again as the unit moves, so a moving regiment can
 change the path or cause another route attempt.
 
+Unit footprints first pass a relationship and movement filter: allied-side
+units, including player infantry and neutral Peasants, can be passed over when
+their travel speeds, headings and proximity do not call for a detour. Route
+geometry uses integer-truncated footprint radii. See
+`bf003_peasant_move_obstruction.md` for the BF003 example and conditions;
+physical overlap remains a separate collision check.
+
 The **routed edge rule is two-stage**. When a periodic flight check finds the
 regiment's reference point outside every active BattleEdge area, it broadcasts
 departure: other units drop it as a target. On that same check, or a later

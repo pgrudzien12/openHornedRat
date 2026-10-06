@@ -176,6 +176,59 @@ class BattleNavigationTests(unittest.TestCase):
         battle.tick()
         self.assertLess(unit.avoid_target[1], 200)
 
+    def test_stationary_bf003_infantry_accepts_move_past_near_peasants(self):
+        # The logged infantry centre is almost tangent to the first Peasant
+        # footprint. Both regiments have zero anchor travel speed at order time.
+        infantry = Regiment("infantry", "Infantry", 657.8680830763195, 615.935870876748,
+                            379.9609375, Side.PLAYER, models=16, ranks=4, speed_per_tick=5)
+        peasants = Regiment("peasants", "Peasants", 645, 670, 485, Side.NEUTRAL,
+                            models=5, ranks=2)
+        battle = Battle(1440, 1680, [infantry, peasants],
+                        boundaries=[rectangle("bnd_BATTLEEDGE", 0, 0, 1440, 1680)])
+        destination = (535.0819672131148, 968.9302325581397)
+        self.assertEqual(infantry.bounding_radius(), 33)
+        self.assertEqual(peasants.bounding_radius(), 21)
+        self.assertEqual(battle._steering_target(infantry, destination, ("move", *destination)), destination)
+
+        battle.order_move("infantry", *destination)
+        for _ in range(120):
+            battle.tick()
+            if not infantry.moving:
+                break
+        self.assertAlmostEqual(infantry.x, destination[0])
+        self.assertAlmostEqual(infantry.y, destination[1])
+
+    def test_same_side_route_filter_uses_speed_heading_and_octagonal_nearness(self):
+        mover = Regiment("m", "Mover", 100, 200, 128, Side.PLAYER, models=1, ranks=1)
+        ally = Regiment("a", "Ally", 200, 200, 128, Side.NEUTRAL, models=1, ranks=1)
+        battle = Battle(500, 500, [mover, ally])
+        goal = (350, 200)
+        key = ("move", *goal)
+        self.assertEqual(battle._steering_target(mover, goal, key), goal)
+        mover.route_speed = 5
+        self.assertIsNotNone(battle._steering_target(mover, goal, key))
+        self.assertIsNotNone(mover.avoid_target)
+
+        mover.route_speed = 0
+        ally.direction = 0  # differing headings: nearby slower units are passed over
+        ally.x = 115
+        self.assertEqual(battle._steering_target(mover, goal, key), goal)
+        ally.x = 200  # distant slower units may obstruct
+        battle._steering_target(mover, goal, key)
+        self.assertIsNotNone(mover.avoid_target)
+
+    def test_regiment_collision_uses_stored_integer_radii(self):
+        mover = Regiment("m", "Mover", 100, 100, 0, Side.PLAYER, models=1, ranks=1,
+                         target_x=200, target_y=100)
+        ally = Regiment("a", "Ally", 116, 100, 0, Side.NEUTRAL, models=1, ranks=1)
+        battle = Battle(500, 500, [mover, ally])
+        self.assertEqual(mover.bounding_radius() + ally.bounding_radius(), 16)
+        battle._resolve_collisions()
+        self.assertEqual(mover.x, 100)
+        ally.x = 115
+        battle._resolve_collisions()
+        self.assertLess(mover.x, 100)
+
     def test_routing_unit_steers_around_solid_scenery(self):
         unit = Regiment("u", "U", 100, 200, 128, Side.PLAYER, models=1, ranks=1,
                         speed_per_tick=5, routing=True, flee_x=1000, flee_y=200)

@@ -11,7 +11,7 @@ from . import magic
 from . import nodes as node_table
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
-from .rules import (EXPECTED_WEAPON_BONUS, MISSILE_RANGES, MOUNT_PROFILES, Side, may_engage, side_of_code,
+from .rules import (EXPECTED_WEAPON_BONUS, MISSILE_RANGES, MOUNT_PROFILES, Side, can_fight, may_engage, side_of_code,
                     stat_fields, stat_int)
 from .script import StrPath, View, load_battle, resource_name
 
@@ -225,6 +225,7 @@ class Regiment:
     flight_complete: bool = False
     flight_complete_tick: int = -1
     avoid_target: Point | None = None
+    route_speed: float = 0.0  # anchor travel on the previous movement update; scattering models do not count
     fire_posts: int = 0  # fire events posted by this volley's shooters so far (consumed by combat)
     fire_post_positions: list[Point] = field(default_factory=list[Point])
     shooting_target: str | None = None
@@ -408,7 +409,7 @@ class Regiment:
         return abs(local_side) <= half_side and abs(local_forward) <= half_forward
 
     def bounding_radius(self) -> float:
-        return formation.bounding_radius(self.models, self.ranks)
+        return float(math.trunc(formation.bounding_radius(self.models, self.ranks)))
 
     def block(self) -> formation.Block:
         """`(x, y, direction, models, ranks)`, the block description `whshr.formation` works from."""
@@ -905,6 +906,7 @@ class Battle:
         regiment.attack_target = None
         regiment.charge_started_target = None
         regiment.turn_order_key = None
+        regiment.route_speed = 0.0
         regiment.waypoints.clear()
         regiment.route_follows_unit = False
         regiment.clear_shooting()
@@ -1039,6 +1041,7 @@ class Battle:
         regiment.target_x = regiment.target_y = None
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
+        regiment.route_speed = 0.0
 
     def order_turn_right(self, identifier: str) -> None:
         """Rotate a player regiment 90° clockwise in place (game_rules.md, opcodes 0x0D)."""
@@ -1048,6 +1051,7 @@ class Battle:
         regiment.target_x = regiment.target_y = None
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
+        regiment.route_speed = 0.0
 
     def order_about_face(self, identifier: str) -> None:
         """Rotate a player regiment 180° in place (game_rules.md, opcodes 0x0E)."""
@@ -1057,6 +1061,7 @@ class Battle:
         regiment.target_x = regiment.target_y = None
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
+        regiment.route_speed = 0.0
 
     def order_face_point(self, identifier: str, x: float, y: float) -> None:
         """Turn a player regiment to face world coordinates (x, y) in place."""
@@ -1069,6 +1074,7 @@ class Battle:
         regiment.target_x = regiment.target_y = None
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
+        regiment.route_speed = 0.0
 
     @staticmethod
     def begin_script_turn(regiment: Regiment, goal: float) -> None:
@@ -1316,6 +1322,8 @@ class Battle:
                     regiment.turn_order_key = None
             else:
                 regiment.turn_order_key = regiment.turn_mode = None
+            if regiment.in_melee or not (regiment.routing or regiment.attack_target or regiment.moving):
+                regiment.route_speed = 0.0
             if regiment.attack_target is None and not regiment.in_melee:
                 for model in regiment.melee_models:
                     model.freeze_ticks = 0
@@ -1429,6 +1437,7 @@ class Battle:
         """
         steering_target = self._steering_target(regiment, target, order_key)
         if steering_target is None:
+            regiment.route_speed = 0.0
             regiment.target_x = regiment.target_y = None
             regiment.waypoints.clear()
             regiment.attack_target = regiment.charge_started_target = None
@@ -1437,6 +1446,7 @@ class Battle:
         dx, dy = steering_target[0] - regiment.x, steering_target[1] - regiment.y
         distance = math.hypot(dx, dy)
         if distance < 1e-9:
+            regiment.route_speed = 0.0
             if arrive:
                 regiment.target_x = regiment.target_y = None
             return False
@@ -1459,12 +1469,15 @@ class Battle:
         elif mode is not None and mode != "charge_reaim":
             step = 0  # a charge re-aim keeps full anchor speed (game_rules.md, model_movement.md)
         if step <= 0:
+            regiment.route_speed = 0.0
             return mode is not None
         if arrive and steering_target == target and distance <= step and abs(self._turn_delta(regiment.direction, goal)) <= 10:
+            regiment.route_speed = distance
             regiment.x, regiment.y = target
             regiment.target_x = regiment.target_y = None
             return False
         angle = regiment.direction * math.tau / formation.FULL_TURN
+        regiment.route_speed = min(step, distance)
         regiment.x += math.sin(angle) * min(step, distance)
         regiment.y += math.cos(angle) * min(step, distance)
         return True
@@ -1486,6 +1499,15 @@ class Battle:
             if other is regiment or not other.active or (order_key[0] == "charge" and
                                                         order_key[1] == other.identifier):
                 continue
+            if not can_fight(regiment.side, other.side):
+                turn = abs(self._turn_delta(regiment.direction, other.direction))
+                if regiment.route_speed <= other.route_speed:
+                    if turn < 64:
+                        continue
+                    dx = abs(start[0] - self.formation_centre(other)[0])
+                    dy = abs(start[1] - self.formation_centre(other)[1])
+                    if max(dx, dy) + math.floor(min(dx, dy) / 2) <= 16 * regiment.frontage:
+                        continue
             obstacles.append((f"unit:{other.identifier}", self.formation_centre(other),
                               other.bounding_radius()))
         obstacle = self._first_route_obstacle(start, target, obstacles, regiment.bounding_radius())
