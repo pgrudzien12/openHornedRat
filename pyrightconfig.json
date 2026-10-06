@@ -33,6 +33,7 @@
     "whshr/clock.py",
     "whshr/script.py",
     "whshr/formation.py",
+    "whshr/magic.py",
     "whshr/deployment.py",
     "whshr/visibility.py",
     "whshr/rules.py",

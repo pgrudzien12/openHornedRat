@@ -7,6 +7,7 @@ import random
 from typing import Any, Literal
 
 from . import animation, battle_grid, behaviour, combat, deployment, formation, interpreter, navigation, visibility
+from . import magic
 from . import nodes as node_table
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
@@ -171,6 +172,10 @@ class Regiment:
     # addressed by SendEventToUnitId (notes/threat_events_nodes.md, part B 0.1).
     whoami: int = 0
     has_leader: bool = False  # the .BTS unit has a leader (character) block: PlayLeaderAnimation's model
+    spells: tuple[int, ...] = ()  # spell codes from the unit's addspell: lines, in file order (whshr.magic)
+    # The missile code "Who shoots" reads (game_rules.md): Archers their own S_BalWeap, Artillery the leader's,
+    # others the leader's if non-zero, else their own; None without one. Read by IsSpecialShooter.
+    shooting_code: int | None = None
     # A script's action broadcast (SetActionState/PlayUnitAnimation; 0 = none) and the unit's activity
     # when it was made: it sticks until the unit's next state change (notes/script_animation_sound.md, 0.1).
     script_action: int = 0
@@ -406,6 +411,21 @@ def _slot_offsets(assignment: Sequence[Point | None]) -> list[Point]:
     return slots
 
 
+def _shooting_code(unit: Mapping[str, Any]) -> int | None:
+    """The missile code game_rules.md "Who shoots" reads for a unit (see `Regiment.shooting_code`)."""
+    fields, _conflicts = stat_fields(unit.get("stats") or {})
+    leader: Mapping[str, Any] = unit.get("leader") or {}
+    leader_fields, _leader_conflicts = stat_fields(leader.get("stats") or {})
+    own, leaders = stat_int(fields, "S_BalWeap"), stat_int(leader_fields, "S_BalWeap")
+    race = stat_int(fields, "s_race")
+    unit_class = race >> 3 if race is not None else None
+    if unit_class == 3:
+        return own
+    if unit_class == 4:
+        return leaders
+    return leaders or own
+
+
 def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
     """Decode a regiment's speed, WS/BS/S/T/W/I/A/Ld, armour, weapon and missile stats from its raw script
     setstats lines (game_rules.md section 3), stdlib-only (no GAMEF.DLL access needed at battle time:
@@ -616,6 +636,8 @@ class Battle:
                     hidden=bool(unit.get("hidden", False)),
                     whoami=int(position.get("whoami") or 0) & 0xFF,
                     has_leader=bool(unit.get("leader")),
+                    spells=magic.spell_codes(unit.get("spells") or ()),
+                    shooting_code=_shooting_code(unit),
                     **_decode_combat_profile(unit),
                 ))
                 script_value = position.get("script")

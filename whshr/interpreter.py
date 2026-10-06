@@ -20,7 +20,7 @@ import random
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from . import animation, behaviour, nodes, visibility
+from . import animation, behaviour, magic, nodes, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import Side, side_of_code
@@ -48,6 +48,7 @@ INDEPENDENT_FLAG = 0x8000000  # script operand of TestUnitFlags 0x8000000: the p
 # ReacquireEventSource respects (notes/threat_events_nodes.md, part B 1).
 CASTING_SEQUENCE_FLAG2 = 2
 WIZARD_CLASS = 5  # s_race class Wizard (game_rules.md section 3)
+CAST_ONLY_TARGET_FLAG = 0x4000000  # SetUnitFlags operand: CastPending drops the target after the cast
 LEAVING_BATTLE_FLAG = 0x100  # SetUnitFlags 256: the unit is leaving the battle (objective G, game_rules.md R60)
 VIEW_CONE = 71  # +-50 degrees in 1/512 turn, doubled while the looker is in melee (game_rules.md visibility)
 REACT_VIEW_CONE = 85  # ReactToThreat's wider +-60 degrees (notes/threat_events_nodes.md, part A 6)
@@ -138,6 +139,10 @@ class UnitScriptState:
     # caster of an active Storm of Shemtek or Flying Bower. Set by the magic opcodes and spell effects.
     pending_spell: int | None = None
     channelling: bool = False
+    # Magic aim (notes/script_magic.md 0.1): a ground point (None = unset) and whether CastPending aims at it
+    # even though a current target exists.
+    target_point: tuple[float, float] | None = None
+    aim_at_point: bool = False
     current_node: int | None = None  # waypoint node for movement orders
     pending_arrival: bool = False  # a MoveToNode order is in flight; see
     # ScriptInterpreter._update_arrival_flag, which sets ARRIVED_FLAG on unit_flags once the
@@ -175,6 +180,7 @@ class EventBus:
     def __init__(self, battle: "Battle") -> None:
         self.battle = battle
         self.unit_states: dict[str, UnitScriptState] = {}  # {unit_identifier: UnitScriptState}
+        self._power: magic.PowerPools | None = None
 
     def is_live(self, unit_id: str) -> bool:
         """A scripted unit still in the battle: not destroyed, not routed off the field and not removed
@@ -189,6 +195,13 @@ class EventBus:
             return None
         return next((unit_id for unit_id in self.battle.regiments
                      if self.is_live(unit_id) and self.unit_states[unit_id].tag == tag), None)
+
+    @property
+    def power(self) -> magic.PowerPools:
+        """The battle's power pools, rolled 1-8 each on first use (game_rules.md "Winds of magic")."""
+        if self._power is None:
+            self._power = magic.PowerPools.rolled(self.battle.rng)
+        return self._power
 
     def animation_event_step(self, unit_id: str) -> None:
         """A model of the unit reached its animation's event step: count the request down and post its
@@ -2908,6 +2921,322 @@ class ScriptInterpreter:
         if operand == 1 and state.loop_sound is not None:
             self._sound(unit_id, "loop_move", *state.loop_sound, positional=True)
         return state.pc + 2
+
+    # ===== Magic: spell choice, pending spell and casting (notes/script_magic.md) =====
+
+    AI_ARC = 55  # the AI's spell-choice arc, 1/512 turn, strict (section 2.2)
+    LAUNCH_ARC = 71  # the launch arc, +-50 degrees, strict (section 0.4, 3.6)
+
+    def _arc_ok(self, unit: "Regiment", x: float, y: float, half: int) -> bool:
+        """The bearing to (x, y) differs from the facing by less than `half`; a point on the unit passes."""
+        if x == unit.x and y == unit.y:
+            return True
+        bearing = int(256 - 256 * math.atan2(x - unit.x, -(y - unit.y)) / math.pi) % 512
+        difference = abs(int(unit.direction) - bearing) % 512
+        return min(difference, 512 - difference) < half
+
+    @staticmethod
+    def _point_distance(unit: "Regiment", x: float, y: float) -> int:
+        return int(math.hypot(x - unit.x, y - unit.y))
+
+    def _pool_side(self, unit: "Regiment") -> bool:
+        """True when the unit draws on the enemy pool; the player army and the allied side share the player's."""
+        return unit.side == Side.ENEMY
+
+    def _spell_point(self, state: UnitScriptState, unit: "Regiment", spell: magic.Spell,
+                     target: "Regiment", rng: random.Random) -> tuple[bool, tuple[float, float] | None]:
+        """Section 2.2 steps 3-4 for one list entry: (accepted, aim point or None for "aim at the target")."""
+        distance = self._distance(unit, target)
+        if not magic.in_range(distance, spell.code, rng):
+            return False, None
+        rule = spell.rule
+        if rule == magic.ARC:
+            return self._arc_ok(unit, target.x, target.y, self.AI_ARC), None
+        if rule == magic.MADNESS:
+            return self._arc_ok(unit, target.x, target.y, self.AI_ARC) and not self._maddened(target), None
+        if rule == magic.AZURE:
+            return distance <= 23, None
+        if rule == magic.FISTS:
+            return distance < 16, None
+        if rule == magic.AREA:
+            # Inverted rule: any non-friend within the radius rejects -- the hostile target itself always does
+            # (game_rules.md "AI casting"). Not modelled: the race-pair friend table and units not counted
+            # as ground units, the only exceptions.
+            return False, None
+        if rule == magic.FRIEND_POINT:
+            friends = [other for other in self.battle.regiments.values()
+                       if other is not unit and other is not target and other.active and not other.hidden
+                       and not self._hostile(unit, other) and not self._leaving(other)
+                       and math.hypot(other.x - target.x, other.y - target.y) <= 24]
+            if not friends:
+                return False, None
+            friend = min(friends, key=lambda other: math.hypot(other.x - target.x, other.y - target.y))
+            return True, (friend.x, friend.y)
+        if rule == magic.SKITTER:
+            if not distance < state.threat_range:
+                return False, None
+            leap = state.threat_range * 9 // 10
+            dx, dy = unit.x - target.x, unit.y - target.y
+            length = math.hypot(dx, dy)
+            if length == 0:  # PROVISIONAL: jump straight back from the unit's facing
+                angle = int(unit.direction) * math.tau / 512
+                dx, dy, length = -math.sin(angle), -math.cos(angle), 1.0
+            return True, (unit.x + leap * dx / length, unit.y + leap * dy / length)
+        if rule == magic.DISPEL:
+            # Needs an active hostile effect whose caster sees the chooser; there are no spell effects yet.
+            return False, None
+        return False, None  # NEVER
+
+    def _maddened(self, target: "Regiment") -> bool:
+        """Not modelled: the Madness effect, so no unit is ever maddened."""
+        return False
+
+    def _leaving(self, other: "Regiment") -> bool:
+        other_state = self.event_bus.unit_states.get(other.identifier)
+        return other_state is not None and bool(other_state.unit_flags & LEAVING_BATTLE_FLAG)
+
+    def _choose_spell(self, state: UnitScriptState, unit: "Regiment", target: "Regiment", pay: bool,
+                      rng: random.Random) -> bool:
+        """Take the first list entry that is affordable, has no own effect active (no effects are modelled
+        yet), is in range and passes its rule; set pending (and the point/aim for point spells), pay when
+        asked. Failure clears the pending spell (section 2.2)."""
+        pool = self.event_bus.power.get(self._pool_side(unit))
+        for code in unit.spells:
+            spell = magic.SPELLS[code]
+            if spell.cost > pool:
+                continue
+            accepted, point = self._spell_point(state, unit, spell, target, rng)
+            if not accepted:
+                continue
+            state.pending_spell = code
+            if point is not None:
+                state.target_point, state.aim_at_point = point, True
+            if pay:
+                self.event_bus.power.add(self._pool_side(unit), -spell.cost)
+            return True
+        state.pending_spell = None
+        return False
+
+    def _choose_enemy_and_spell(self, state: UnitScriptState, unit_id: str, class_operand: int, pay: bool,
+                                rng: random.Random) -> None:
+        """Target := the nearest eligible hostile of the class (no range or visibility, first in order on
+        ties), then the spell choice; any failure leaves no target and no pending spell (section 2.1)."""
+        unit = self.battle.regiments.get(unit_id)
+        found = self._nearest_pick(unit, class_operand) if unit is not None else None
+        target = self.battle.regiments.get(found) if found is not None else None
+        chosen = False
+        if unit is not None and target is not None:
+            state.current_target = (target.identifier, 0)
+            chosen = self._choose_spell(state, unit, target, pay, rng)
+        if not chosen:
+            state.current_target = None
+            state.pending_spell = None
+        state.cond_flags = chosen
+
+    def _choose_spell_for_target(self, state: UnitScriptState, unit_id: str, pay: bool, rng: random.Random) -> None:
+        """The spell choice against the current target, which stays as it is (section 2.2)."""
+        unit = self.battle.regiments.get(unit_id)
+        target = self.battle.regiments.get(state.current_target[0]) if state.current_target else None
+        if unit is None or target is None:
+            state.pending_spell = None
+            state.cond_flags = False
+            return
+        state.cond_flags = self._choose_spell(state, unit, target, pay, rng)
+
+    def op_ChooseEnemyAndSpellPay(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """ChooseEnemyAndSpellPay: nearest hostile, first acceptable spell, paid when chosen (section 2)."""
+        self._choose_enemy_and_spell(state, unit_id, 0, True, rng)
+        return state.pc + 1
+
+    def op_ChooseEnemyOfClassAndSpellPay(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """ChooseEnemyOfClassAndSpellPay C: as ChooseEnemyAndSpellPay among class C (class x 8) (section 2)."""
+        self._choose_enemy_and_spell(state, unit_id, operand or 0, True, rng)
+        return state.pc + 2
+
+    def op_ChooseEnemyAndSpell(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """ChooseEnemyAndSpell: as ChooseEnemyAndSpellPay without paying (a scripted free cast, section 0.3)."""
+        self._choose_enemy_and_spell(state, unit_id, 0, False, rng)
+        return state.pc + 1
+
+    def op_ChooseSpellForTargetPay(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """ChooseSpellForTargetPay: first acceptable spell against the current target, paid (section 2.2)."""
+        self._choose_spell_for_target(state, unit_id, True, rng)
+        return state.pc + 1
+
+    def op_ChooseSpellForTarget(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """ChooseSpellForTarget: as ChooseSpellForTargetPay without paying (section 2.2)."""
+        self._choose_spell_for_target(state, unit_id, False, rng)
+        return state.pc + 1
+
+    def op_SetSpellIfAffordable(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """SetSpellIfAffordable CODE: when the side pool covers the cost, pending := CODE (marker bits kept,
+        which make the range unlimited) and condition true; otherwise false, pending unchanged; never pays
+        (section 3.1)."""
+        unit = self.battle.regiments.get(unit_id)
+        price = magic.cost(operand or 0)
+        affordable = (unit is not None and price is not None
+                      and self.event_bus.power.get(self._pool_side(unit)) >= price)
+        if affordable:
+            state.pending_spell = operand
+        state.cond_flags = affordable
+        return state.pc + 2
+
+    def op_SetCastPointNode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """SetCastPointNode N: target := none, target point := node N (file position); no condition (3.2)."""
+        state.current_target = None
+        node = operand or 0
+        if 0 <= node < len(self.battle.script_nodes):
+            state.target_point = (self.battle.script_nodes[node].x, self.battle.script_nodes[node].y)
+        return state.pc + 2
+
+    def _launch(self, unit_id: str, unit: "Regiment", code: int, x: float, y: float, rng: random.Random) -> bool:
+        """The launch checks of section 0.4: a caster (class Wizard, or a leader with the casting weapon),
+        the aim point within the spell's range and the +-50 degree arc (skipped in melee), and a unit under
+        the point for unit-target spells. Success records a "spell" battle event; a player-army failure
+        shows message 2021. Not modelled: the spell effects themselves, the 64-effect limit and the magic
+        panel entry made usable again on failure."""
+        can_cast = unit.unit_class == WIZARD_CLASS or unit.shooting_code == 16
+        ok = (can_cast and magic.in_range(self._point_distance(unit, x, y), code, rng)
+              and (unit.in_melee or self._arc_ok(unit, x, y, self.LAUNCH_ARC)))
+        if ok and code in magic.UNIT_TARGET_SPELLS:
+            ok = any(other.active and self._hostile(unit, other)
+                     and math.hypot(other.x - x, other.y - y) <= other.bounding_radius()
+                     for other in self.battle.regiments.values())
+        if ok:
+            self.battle.events.append(BattleEvent(f"{unit.name} casts spell {code}", "spell", regiment=unit_id,
+                                                  spell=code, x=x, y=y))
+        elif unit.side == Side.PLAYER:
+            self._battle_message(unit_id, 2021)
+        return ok
+
+    def op_CastPending(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """CastPending: launch the pending spell at the current target (PROVISIONAL: its unit position stands
+        in for its leader figure) unless aim-at-point is on, else at the target point; condition := launched.
+        Afterwards aim-at-point is off, the pending spell none, and a unit in the cast-only-target state drops
+        its target. No refund on failure (section 3.3)."""
+        unit = self.battle.regiments.get(unit_id)
+        if state.pending_spell is None or unit is None:
+            state.cond_flags = False
+            return state.pc + 1
+        target = self.battle.regiments.get(state.current_target[0]) if state.current_target else None
+        if target is not None and not state.aim_at_point:
+            aim: tuple[float, float] | None = (target.x, target.y)
+        else:
+            aim = state.target_point
+        state.cond_flags = aim is not None and self._launch(unit_id, unit, state.pending_spell, *aim, rng)
+        state.aim_at_point = False
+        if state.unit_flags & CAST_ONLY_TARGET_FLAG:
+            state.current_target = None
+        state.pending_spell = None
+        return state.pc + 1
+
+    def op_DropPendingSpell(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """DropPendingSpell: pending := none, no refund, no condition (section 3.4). Not modelled: the magic
+        panel entry made usable again."""
+        state.pending_spell = None
+        return state.pc + 1
+
+    def op_IfEnemyPower(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IfEnemyPower N: condition := the enemy pool holds at least N, whatever the unit's side (3.5)."""
+        state.cond_flags = self.event_bus.power.enemy >= (operand or 0)
+        return state.pc + 2
+
+    def op_AddEnemyPower(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """AddEnemyPower N: the enemy pool gains N, clamped to 0-8; no condition (section 3.5)."""
+        self.event_bus.power.add(True, _signed_word(operand or 0))
+        return state.pc + 2
+
+    def op_TargetInCastArc(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """TargetInCastArc: the current target lies in the +-50 degree launch arc, also in melee; false
+        without a target (section 3.6)."""
+        pair = self._query_pair(state, unit_id)
+        state.cond_flags = pair is not None and self._arc_ok(pair[0], pair[1].x, pair[1].y, self.LAUNCH_ARC)
+        return state.pc + 2
+
+    def op_IsSpecialShooter(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IsSpecialShooter: condition := the unit's missile code is 14, 15 or 17 (section 3.7)."""
+        unit = self.battle.regiments.get(unit_id)
+        state.cond_flags = unit is not None and unit.shooting_code in (14, 15, 17)
+        return state.pc + 1
+
+    def _pending_point(self, state: UnitScriptState, unit_id: str) -> tuple["Regiment", float, float] | None:
+        """The point PendingInRange* test: the current target's unit position whenever there is a target
+        (even with aim-at-point on), else the target point (target_queries.md section 6)."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is None:
+            return None
+        target = self.battle.regiments.get(state.current_target[0]) if state.current_target else None
+        if target is not None:
+            return unit, target.x, target.y
+        if state.target_point is not None:
+            return unit, *state.target_point
+        return None
+
+    def _pending_in_range(self, state: UnitScriptState, unit: "Regiment", x: float, y: float,
+                          rng: random.Random) -> bool:
+        """Strict range of the pending spell. PROVISIONAL with no pending spell: the largest finite range
+        among the unit's own spells (target_queries.md section 6)."""
+        distance = self._point_distance(unit, x, y)
+        if state.pending_spell is not None:
+            return magic.in_range(distance, state.pending_spell, rng)
+        ranges = [magic.SPELLS[code].range for code in unit.spells]
+        finite = [limit for limit in ranges if limit is not None]
+        return bool(finite) and distance < max(finite)
+
+    def _pending_query(self, state: UnitScriptState, operand: int | None, unit_id: str, rng: random.Random,
+                       with_arc: bool) -> None:
+        located = self._pending_point(state, unit_id)
+        if located is None:
+            state.cond_flags = False
+            return
+        unit, x, y = located
+        if with_arc and not unit.in_melee and not self._arc_ok(unit, x, y, self.LAUNCH_ARC):
+            state.cond_flags = False
+            return
+        state.cond_flags = self._pending_in_range(state, unit, x, y, rng)
+        if not state.cond_flags and operand:
+            self._battle_message(unit_id, 2001)
+
+    def op_PendingInRange(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """PendingInRange F: the target is within the pending spell's range; F reports a range failure with
+        message 2001 (target_queries.md section 6)."""
+        self._pending_query(state, operand, unit_id, rng, with_arc=False)
+        return state.pc + 2
+
+    def op_PendingInRangeArc(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """PendingInRangeArc F: as PendingInRange, and within the +-50 degree arc unless in melee
+        (target_queries.md section 6)."""
+        self._pending_query(state, operand, unit_id, rng, with_arc=True)
+        return state.pc + 2
+
+    def op_PendingReachesBrokenTarget(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """PendingReachesBrokenTarget: false without a target; a broken target counts only within the pending
+        spell's range; any other target is true (section 5)."""
+        pair = self._query_pair(state, unit_id)
+        if pair is None:
+            state.cond_flags = False
+        else:
+            unit, target = pair
+            state.cond_flags = (not target.routing
+                                or (state.pending_spell is not None
+                                    and magic.in_range(self._distance(unit, target), state.pending_spell, rng)))
+        return state.pc + 1
 
     def op_IfEventSource(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
