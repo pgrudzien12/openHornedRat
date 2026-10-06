@@ -26,6 +26,7 @@ class FleeRerouteTests(unittest.TestCase):
         battle, unit = fugitive(260, 1000, 384)
         battle._reroute_flight(unit)
         self.assertEqual(unit.direction, 509)
+        assert unit.flee_x is not None and unit.flee_y is not None
         self.assertGreater(unit.flee_y, 1000)  # runs along the bank towards +Y
         self.assertGreater(unit.flee_x, 216)
 
