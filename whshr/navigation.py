@@ -16,6 +16,7 @@ class Boundary:
     inverse: bool = False
     battle_edge: bool = False
     guide: bool = False
+    camera_edge: bool = False
 
     def contains(self, point: Point) -> bool:
         # Rightward ray parity. The endpoint Y convention is half-open: testing
@@ -56,7 +57,8 @@ def boundaries_from_views(views: Sequence[Mapping[str, Any]]) -> list[Boundary]:
         if not lines:
             continue
         result.append(Boundary(lines, "bnd_solid" in flags, "bnd_invsolid" in flags,
-                               "bnd_battleedge" in flags, "bnd_line" in flags))
+                               "bnd_battleedge" in flags, "bnd_line" in flags,
+                               "bnd_camedge" in flags))
     return result
 
 

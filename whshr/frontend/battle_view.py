@@ -186,10 +186,11 @@ class BattleView(SceneView[BattleScene]):
     def __init__(self, gpu: Gpu, scene: BattleScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
         field, ctx, target = scene.field, gpu.ctx, gpu.target
-        self.initial_camera = BattleCamera.for_battle(field.script)
+        self.initial_camera = BattleCamera.for_battle(field.script, field.ground_height)
         if self.options.get("camera"):
             yaw, pitch, distance = self.options["camera"]
             self.initial_camera = replace(self.initial_camera, yaw=yaw % 360, pitch=pitch, distance=distance)
+            self.initial_camera.set_target(self.initial_camera.target_x, self.initial_camera.target_y)
         self.camera = replace(self.initial_camera)
         self.soldiers = 0
         self._right_down: Point | None = None  # screen position of an unreleased right-button press, for click detection
@@ -275,8 +276,7 @@ class BattleView(SceneView[BattleScene]):
         elif event.type == pygame.MOUSEMOTION and event.buttons[2]:
             if deploying and getattr(self, "_right_minimap", False):
                 dx, dy = self.hud.minimap_delta(event.rel)
-                camera.target_x -= dx
-                camera.target_y -= dy
+                camera.set_target(camera.target_x - dx, camera.target_y - dy)
                 return ()
             # Drag the ground: one screen pixel at the target covers this many BTS world units.
             height = self.gpu.target.size[1]
@@ -357,7 +357,7 @@ class BattleView(SceneView[BattleScene]):
             return ()
         current = next((i for i, r in enumerate(candidates) if r.identifier == self.scene.selected_id), -1 if step > 0 else 0)
         regiment = candidates[(current + step) % len(candidates)]
-        self.camera.target_x, self.camera.target_y = regiment.x, regiment.y
+        self.camera.set_target(regiment.x, regiment.y)
         return (("select", regiment.identifier),)
 
     def _deployment_press(self, identifier: str | None, world: tuple[float, float] | None,

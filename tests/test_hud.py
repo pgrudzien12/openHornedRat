@@ -569,9 +569,12 @@ class BattleViewHudInputTests(unittest.TestCase):
         self.assertTrue(regiment.hidden)
 
     def _deployment_view(self, marker="player"):
+        from whshr.camera import BattleCamera
+
         hud = self._hud_mock(minimap_regiment_at=lambda pos: marker,
                              minimap_position=lambda pos: (float(pos[0]), float(pos[1])) if pos[0] >= 0 else None)
         view = self._view(hud)
+        view.camera = BattleCamera(0, 0)
         view.scene.battle = Battle(1000, 1000, [Regiment("player", "P", 100, 100, 0, Side.PLAYER, hud_class="inf"),
                                               Regiment("enemy", "E", 800, 800, 0, Side.ENEMY)], deploy=True)
         return view

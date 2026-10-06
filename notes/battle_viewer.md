@@ -126,6 +126,17 @@ look about twice as large as in the game screenshot (see `--scenery-scale`).
 
 ## Real-time engine battle view
 
+The engine uses an explicit camera safety choice where the original `CameraEdge`
+limits are not yet measured: active `bnd_CAMEDGE` outlines keep the ground
+look-at point and the camera eye within a camera area. Panning can slide along
+an outline; rotation, tilt, and zoom adjust pitch or distance when the eye
+would cross it. The engine also samples terrain height between the look-at
+point and eye, raising the camera or moving it closer if a ridge would block
+that sightline. This height check does not model occlusion by scenery meshes;
+the CameraEdge constraint keeps the eye away from perimeter scenery where the
+map supplies such an area. These are engine choices, not measured original
+camera rules.
+
 `python3 -m whshr engine <WARFB> --battle BF001` (see `notes/engine_architecture.md`) renders the same
 scene on the GPU from `whshr.battlefield`. The static viewer uses the same placement, shading and
 frame-direction helpers, and the same camera model. With the same camera (perspective, yaw 225,
