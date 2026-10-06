@@ -224,10 +224,6 @@ class BF001InterpreterTests(unittest.TestCase):
         state = interpreter.UnitScriptState()
         script_words = []
 
-        # FindTarget
-        interp.op_FindTarget(state, None, script_words, "test", 0, None)
-        self.assertEqual(state.cond_flags, 1)  # target found (simplified)
-
         # TargetValid
         state.current_target = ("enemy", 0)
         interp.op_TargetValid(state, None, script_words, "test", 0, None)

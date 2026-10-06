@@ -15,6 +15,13 @@ from whshr.engine import Battle, Regiment
 from whshr.rules import Side
 
 
+def picked(state):
+    """The unit an AttackNearest* search chose: the source of the event 0x04 it queued to itself
+    (notes/threat_events_nodes.md, part A 4.1), or None."""
+    events = [event.source for event in state.event_queue if event.code == 0x04]
+    return events[-1] if events else None
+
+
 class TargetSelectionTests(unittest.TestCase):
     """AttackNearestEnemy family and the TargetNearestEnemy fix (it was previously a stub)."""
 
@@ -39,11 +46,12 @@ class TargetSelectionTests(unittest.TestCase):
         self.assertIsNone(state.current_target)
         self.assertEqual(state.cond_flags, 0)
 
-    def test_attack_nearest_enemy_sets_both_current_target_and_attack_target(self):
+    def test_attack_nearest_enemy_queues_an_attack_event_and_leaves_the_target_to_its_handler(self):
         state = self.battle.event_bus.unit_states["enemy_1"]
         self.interp.op_AttackNearestEnemy(state, None, [], "enemy_1", 0, None)
-        self.assertEqual(state.current_target, ("player_near", 0))
-        self.assertEqual(self.enemy.attack_target, "player_near")
+        self.assertEqual(picked(state), "player_near")
+        self.assertIsNone(state.current_target)
+        self.assertIsNone(self.enemy.attack_target)
         self.assertEqual(state.cond_flags, 1)
 
     def test_attack_nearest_visible_enemy_fails_when_candidates_are_outside_view_cone(self):
@@ -63,7 +71,7 @@ class TargetSelectionTests(unittest.TestCase):
 
         interp.op_AttackNearestFlag40Unit(state, None, [], "enemy_1", 0, None)
 
-        self.assertEqual(self.enemy.attack_target, "peasant_1")
+        self.assertEqual(picked(state), "peasant_1")
 
     def test_attack_nearest_flag40_unit_fails_gracefully_with_no_neutral_units(self):
         state = self.battle.event_bus.unit_states["enemy_1"]
@@ -74,13 +82,13 @@ class TargetSelectionTests(unittest.TestCase):
     def test_attack_nth_nearest_enemy_picks_the_second_closest(self):
         state = self.battle.event_bus.unit_states["enemy_1"]
         self.interp.op_AttackNthNearestEnemy(state, 2, [], "enemy_1", 0, None)
-        self.assertEqual(self.enemy.attack_target, "player_far")
+        self.assertEqual(picked(state), "player_far")
 
     def test_attack_nth_nearest_enemy_wraps_when_n_exceeds_candidate_count(self):
         state = self.battle.event_bus.unit_states["enemy_1"]
         self.interp.op_AttackNthNearestEnemy(state, 5, [], "enemy_1", 0, None)
         self.assertEqual(state.cond_flags, 1)
-        self.assertEqual(self.enemy.attack_target, "player_near")
+        self.assertEqual(picked(state), "player_near")
 
     def test_given_distant_target_then_threat_and_weapon_ranges_do_not_limit_nearest_search(self):
         self.near.models = 0
@@ -89,7 +97,6 @@ class TargetSelectionTests(unittest.TestCase):
         state.threat_range = 10
         self.enemy.missile_range = 20
         self.interp.op_AttackNearestEnemy(state, None, [], "enemy_1", 0, None)
-        self.assertEqual(state.current_target, ("player_far", 0))
         self.assertEqual([(e.code, e.source) for e in state.event_queue], [(0x04, "player_far")])
         self.assertEqual((self.enemy.x, self.enemy.y), (100, 100))
 
@@ -109,19 +116,19 @@ class TargetSelectionTests(unittest.TestCase):
         self.far.x, self.far.y = 100, 900
         state = self.battle.event_bus.unit_states["enemy_1"]
         self.interp.op_AttackNearestVisibleEnemy(state, None, [], "enemy_1", 0, None)
-        self.assertEqual(self.enemy.attack_target, "player_far")
+        self.assertEqual(picked(state), "player_far")
         self.battle.boundaries = [{"status": ["bnd_ACTIVE", "bnd_SIGHTEDGE"],
                                    "lines": [[0, 500, 1000, 500]]}]
-        self.enemy.attack_target = None
+        state.event_queue.clear()
         self.interp.op_AttackNearestVisibleEnemy(state, None, [], "enemy_1", 1, None)
-        self.assertIsNone(self.enemy.attack_target)
+        self.assertIsNone(picked(state))
         self.assertEqual(state.cond_flags, 0)
 
     def test_attack_nearest_enemy_ignores_destroyed_regiments(self):
         self.near.models = 0  # destroyed: no longer .active
         state = self.battle.event_bus.unit_states["enemy_1"]
         self.interp.op_AttackNearestEnemy(state, None, [], "enemy_1", 0, None)
-        self.assertEqual(self.enemy.attack_target, "player_far")
+        self.assertEqual(picked(state), "player_far")
 
 
 class WaitUntilUnitFlagsTests(unittest.TestCase):
@@ -410,7 +417,7 @@ class AttackSearchRangeTests(unittest.TestCase):
         state = battle.event_bus.unit_states["guard"]
         state.threat_range = threat_range
         interp.op_AttackNearestEnemy(state, None, [], "guard", 0, None)
-        return state.cond_flags, guard.attack_target
+        return state.cond_flags, picked(state)
 
     def test_enemy_inside_the_units_own_range_is_attacked(self):
         self.assertEqual(self._attack(distance=200, threat_range=240), (1, "player"))
@@ -431,7 +438,7 @@ class AttackSearchRangeTests(unittest.TestCase):
         state = battle.event_bus.unit_states["guard"]
         state.threat_range = 290
         interp.op_AttackNearestEnemy(state, None, [], "guard", 0, None)
-        self.assertEqual(guard.attack_target, "player")
+        self.assertEqual(picked(state), "player")
 
 
 class MeleeFlagMirrorTests(unittest.TestCase):

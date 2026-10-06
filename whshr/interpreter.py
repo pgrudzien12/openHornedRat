@@ -47,6 +47,9 @@ INDEPENDENT_FLAG = 0x8000000  # script operand of TestUnitFlags 0x8000000: the p
 # Script-owned busy states (SetUnitFlags2 operands of the library shooting and casting scripts), which
 # ReacquireEventSource respects (notes/threat_events_nodes.md, part B 1).
 CASTING_SEQUENCE_FLAG2 = 2
+LEAVING_BATTLE_FLAG = 0x100  # SetUnitFlags 256: the unit is leaving the battle (objective G, game_rules.md R60)
+VIEW_CONE = 71  # +-50 degrees in 1/512 turn, doubled while the looker is in melee (game_rules.md visibility)
+REACT_VIEW_CONE = 85  # ReactToThreat's wider +-60 degrees (notes/threat_events_nodes.md, part A 6)
 SHOOTING_SEQUENCE_FLAG2 = 4
 
 
@@ -119,6 +122,11 @@ class UnitScriptState:
 
     # Current order and target (set by FindTarget*, AttackTarget, etc.)
     current_target: Target | None = None  # (regiment_id, unit_id) for attack/movement orders
+    # The "enemy I am worried about", separate from the current target, and its stored score
+    # (notes/threat_events_nodes.md, part A 0).
+    threat: str | None = None
+    threat_score: float = 0.0
+    approach_point: tuple[float, float] | None = None  # set by ReactToThreat; see op_ReactToThreat
     current_node: int | None = None  # waypoint node for movement orders
     pending_arrival: bool = False  # a MoveToNode order is in flight; see
     # ScriptInterpreter._update_arrival_flag, which sets ARRIVED_FLAG on unit_flags once the
@@ -585,7 +593,7 @@ class ScriptInterpreter:
         return regiment.models * regiment.points * multiplier
 
     def _threat_score(self, regiment: "Regiment", other: "Regiment", threat_range: float) -> float:
-        """game_rules.md's UnitScore: worth x (range - d) / round(range / 4), octagonal distance
+        """game_rules.md's UnitScore: worth x (range - d) / trunc(range / 4), octagonal distance
         d = max(|dx|, |dy|) + min(|dx|, |dy|) / 2; 0 for friends, broken (routing), CantMelee, or
         beyond range. The documented x4 ("enemy targets this unit") / x32 ("also charging") score
         multipliers collapse into a single x4 here: this engine's attack_target field does not
@@ -599,7 +607,7 @@ class ScriptInterpreter:
         d = max(abs(dx), abs(dy)) + min(abs(dx), abs(dy)) / 2.0
         if d > threat_range:
             return 0.0
-        divisor = round(threat_range / 4)
+        divisor = math.trunc(threat_range / 4)  # trunc, not round (notes/threat_events_nodes.md, part A)
         if divisor <= 0:
             return 0.0
         score = self._unit_worth(other) * (threat_range - d) / divisor
@@ -1175,14 +1183,6 @@ class ScriptInterpreter:
 
     # ===== Targeting and threat opcodes =====
 
-    def op_FindTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """FindTarget: find the nearest valid enemy target."""
-        # TODO: implement proper targeting (check visibility, range, etc.)
-        # Simplified: set cond_flags to indicate target found
-        state.cond_flags = 1  # assume target found
-        return state.pc + 1
-
     def op_FindTargetNear(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """FindTargetNear: find nearest enemy within threat range."""
@@ -1193,18 +1193,6 @@ class ScriptInterpreter:
             rng: random.Random) -> int | None:
         """FindNewTargetNear: find a new target, ignoring current one."""
         state.cond_flags = 1  # assume target found
-        return state.pc + 1
-
-    def op_TargetNearestEnemy(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """TargetNearestEnemy: set current target to nearest enemy."""
-        regiment = self.battle.regiments.get(unit_id)
-        target_id = self._nearest_enemy_id(regiment) if regiment else None
-        if target_id:
-            state.current_target = (target_id, 0)
-            state.cond_flags = 1
-        else:
-            state.cond_flags = 0
         return state.pc + 1
 
     def op_AttackNearestEnemy(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -1235,6 +1223,11 @@ class ScriptInterpreter:
 
     def _attack_nearest(self, state: UnitScriptState, unit_id: str, n: int, side: Side | None = None,
                         visible_only: bool = False) -> int | None:
+        """The n-th nearest search shared by AttackNearestEnemy/-Visible/-Nth/-Flag40Unit. Success queues
+        event 0x04 (source = the chosen unit) to the unit itself and leaves the current target to the
+        0x04 handler (TakeEventTarget), as for the rest of the family (notes/threat_events_nodes.md,
+        part A 4.1). PROVISIONAL: these members keep the engine's previous whole-field n-th ordering;
+        only the part A members use the report's side sets and last-in-order tie-break."""
         if self.battle.phase == "deployment":
             state.cond_flags = 0
             return state.pc + 1
@@ -1244,13 +1237,326 @@ class ScriptInterpreter:
             return state.pc + 1
         target_id = self._nearest_enemy_id(regiment, n, side=side, visible_only=visible_only)
         if target_id:
-            state.current_target = (target_id, 0)
-            if not regiment.anchored:
-                regiment.attack_target = target_id
             self.event_bus.queue_event(unit_id, Event(code=0x04, source=target_id), route="self")
             state.cond_flags = 1
         else:
             state.cond_flags = 0
+        return state.pc + 1
+
+    # ===== Threat and target search (notes/threat_events_nodes.md, part A) =====
+
+    @staticmethod
+    def _hostile(unit: "Regiment", other: "Regiment") -> bool:
+        """One is in the enemy army and the other in the player army or on the allied side (part A 0)."""
+        return (unit.side == Side.ENEMY) != (other.side == Side.ENEMY)
+
+    def _eligible(self, other: "Regiment") -> bool:
+        """Active, not hidden, not broken and not leaving the battle (part A 0)."""
+        if not other.active or other.hidden or other.routing:
+            return False
+        other_state = self.event_bus.unit_states.get(other.identifier)
+        return other_state is None or not other_state.unit_flags & LEAVING_BATTLE_FLAG
+
+    @staticmethod
+    def _of_class(other: "Regiment", class_operand: int) -> bool:
+        """Class operand = class x 8 as in s_race; 0 means any class (part A 0)."""
+        return not class_operand or other.unit_class == class_operand >> 3
+
+    def _sees(self, looker: "Regiment", other: "Regiment", half_cone: int = VIEW_CONE) -> bool:
+        """IsVisible: view cone (doubled in melee), scenery and sight edges, no range."""
+        return visibility.visible(
+            self.battle.formation_centre(looker), looker.direction, self.battle.formation_centre(other),
+            other.bounding_radius(), half_cone * 2 if looker.in_melee else half_cone,
+            self.battle.boundaries, self.battle.objects)
+
+    def _threat_search(self, unit: "Regiment") -> str | None:
+        """Nearest facing threat: the nearest eligible hostile the unit sees within trunc(3R/8),
+        inclusive, first in unit order on ties; none when that unit does not see the searcher
+        (no fallback). Part A 1.1."""
+        radius = math.trunc(self._weapon_range(unit) * 3 / 8)
+        best: "Regiment | None" = None
+        best_distance = 0
+        for other in self.battle.regiments.values():
+            if other is unit or not self._eligible(other) or not self._hostile(unit, other):
+                continue
+            distance = self._distance(unit, other)
+            if distance <= radius and (best is None or distance < best_distance) and self._sees(unit, other):
+                best, best_distance = other, distance
+        return best.identifier if best is not None and self._sees(best, unit) else None
+
+    def op_FindThreatNear(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FindThreatNear: threat slot := the nearest facing threat, cleared when none; condition true iff
+        found. The current target is untouched (part A 1.2)."""
+        unit = self.battle.regiments.get(unit_id)
+        state.threat = self._threat_search(unit) if unit is not None else None
+        state.cond_flags = state.threat is not None
+        return state.pc + 1
+
+    def op_FindNewThreatNear(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FindNewThreatNear: store the search result only when found and different from the slot;
+        condition true iff the slot changed. A failed search keeps the slot (part A 1.2)."""
+        unit = self.battle.regiments.get(unit_id)
+        found = self._threat_search(unit) if unit is not None else None
+        changed = found is not None and found != state.threat
+        if changed:
+            state.threat = found
+        state.cond_flags = changed
+        return state.pc + 1
+
+    def op_KeepThreat(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """KeepThreat: keep the threat while it is closer than trunc(5R/8) (strict) and sees the unit,
+        else clear it; condition true iff kept. No hostility, broken or hidden re-check (part A 1.2)."""
+        unit = self.battle.regiments.get(unit_id)
+        threat = self.battle.regiments.get(state.threat) if state.threat is not None else None
+        kept = (unit is not None and threat is not None and threat.active
+                and self._distance(unit, threat) < math.trunc(self._weapon_range(unit) * 5 / 8)
+                and self._sees(threat, unit))
+        if not kept:
+            state.threat = None
+        state.cond_flags = kept
+        return state.pc + 1
+
+    def _crowded_by_friend(self, unit: "Regiment", candidate: "Regiment") -> bool:
+        """An independent unit skips a candidate when another friendly unit's centre lies within its
+        footprint radius + 24 of the aim point (candidate x, searcher y) -- the report's quirk.
+        Not modelled: blast radii above 24 (part A 2.1 step 4)."""
+        aim_x, aim_y = candidate.x, unit.y
+        return any(other is not unit and other is not candidate and other.active and not self._hostile(unit, other)
+                   and math.hypot(other.x - aim_x, other.y - aim_y) < other.bounding_radius() + 24
+                   for other in self.battle.regiments.values())
+
+    def _weapon_target_search(self, unit: "Regiment", class_operand: int, limited: bool) -> str | None:
+        """Nearest shootable unit: eligible hostile of the class, d > 0, d <= R when limited, the
+        independent crowding check; first in order on ties; no visibility or arc (part A 2.1)."""
+        best: "Regiment | None" = None
+        best_distance = 0
+        for other in self.battle.regiments.values():
+            if (other is unit or not self._eligible(other) or not self._hostile(unit, other)
+                    or not self._of_class(other, class_operand)):
+                continue
+            distance = self._distance(unit, other)
+            if distance == 0 or (limited and distance > self._weapon_range(unit)):
+                continue
+            if best is not None and distance >= best_distance:
+                continue
+            if unit.independent and self._crowded_by_friend(unit, other):
+                continue
+            best, best_distance = other, distance
+        return best.identifier if best is not None else None
+
+    def _find_target(self, state: UnitScriptState, unit_id: str, class_operand: int, limited: bool) -> None:
+        """FindTarget family: target := the result, cleared when none; condition true iff found (part A 2.2)."""
+        unit = self.battle.regiments.get(unit_id)
+        found = self._weapon_target_search(unit, class_operand, limited) if unit is not None else None
+        state.current_target = (found, 0) if found is not None else None
+        state.cond_flags = found is not None
+
+    def op_FindTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FindTarget: nearest shootable unit within weapon range (part A 2.2)."""
+        self._find_target(state, unit_id, 0, limited=True)
+        return state.pc + 1
+
+    def op_FindTargetOfClass(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FindTargetOfClass C: as FindTarget, of class C (part A 2.2)."""
+        self._find_target(state, unit_id, operand or 0, limited=True)
+        return state.pc + 2
+
+    def op_FindTargetAnyRange(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FindTargetAnyRange: nearest shootable unit, no range limit (part A 2.2)."""
+        self._find_target(state, unit_id, 0, limited=False)
+        return state.pc + 1
+
+    def op_FindTargetOfClassAnyRange(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """FindTargetOfClassAnyRange C: nearest shootable unit of class C, no range limit (part A 2.2)."""
+        self._find_target(state, unit_id, operand or 0, limited=False)
+        return state.pc + 2
+
+    def op_FindNewTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FindNewTarget: within weapon range; stores the result only when it differs from the current
+        target, condition true iff it changed; a failed search keeps the target (part A 2.2)."""
+        unit = self.battle.regiments.get(unit_id)
+        found = self._weapon_target_search(unit, 0, limited=True) if unit is not None else None
+        current = state.current_target[0] if state.current_target else None
+        changed = found is not None and found != current
+        if changed and found is not None:
+            state.current_target = (found, 0)
+        state.cond_flags = changed
+        return state.pc + 1
+
+    def _nearest_pick(self, unit: "Regiment", class_operand: int) -> str | None:
+        """Nearest enemy over the whole field: eligible hostile of the class, no range, visibility or
+        d = 0 exclusion; first in order on ties (part A 3.1)."""
+        best: "Regiment | None" = None
+        best_distance = 0
+        for other in self.battle.regiments.values():
+            if (other is unit or not self._eligible(other) or not self._hostile(unit, other)
+                    or not self._of_class(other, class_operand)):
+                continue
+            distance = self._distance(unit, other)
+            if best is None or distance < best_distance:
+                best, best_distance = other, distance
+        return best.identifier if best is not None else None
+
+    def _target_nearest(self, state: UnitScriptState, unit_id: str, class_operand: int) -> None:
+        unit = self.battle.regiments.get(unit_id)
+        found = self._nearest_pick(unit, class_operand) if unit is not None else None
+        if found is not None:
+            state.current_target = (found, 0)
+        state.cond_flags = found is not None
+
+    def op_TargetNearestEnemy(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """TargetNearestEnemy: target := the nearest enemy, condition true; none keeps the target, false
+        (part A 3.2)."""
+        self._target_nearest(state, unit_id, 0)
+        return state.pc + 1
+
+    def op_TargetNearestEnemyOfClass(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """TargetNearestEnemyOfClass C: as TargetNearestEnemy, of class C (part A 3.2)."""
+        self._target_nearest(state, unit_id, operand or 0)
+        return state.pc + 2
+
+    def op_RetargetNearestEnemy(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """RetargetNearestEnemy: store the nearest enemy only when it differs from the target; condition
+        true iff it changed (part A 3.2)."""
+        unit = self.battle.regiments.get(unit_id)
+        found = self._nearest_pick(unit, 0) if unit is not None else None
+        current = state.current_target[0] if state.current_target else None
+        changed = found is not None and found != current
+        if changed and found is not None:
+            state.current_target = (found, 0)
+        state.cond_flags = changed
+        return state.pc + 1
+
+    def _in_side_set(self, unit: "Regiment", other: "Regiment", main_only: bool) -> bool:
+        """Part A 4.1 step 2. Enemy set: a player searcher takes enemy and allied units, an enemy searcher
+        player and allied units, an allied searcher enemy units. Main: the opposing army only."""
+        if main_only:
+            return other.side == (Side.PLAYER if unit.side == Side.ENEMY else Side.ENEMY)
+        if unit.side == Side.NEUTRAL:
+            return other.side == Side.ENEMY
+        return other.side != unit.side and other.side in (Side.PLAYER, Side.ENEMY, Side.NEUTRAL)
+
+    def _attack_pick(self, state: UnitScriptState, unit_id: str, class_operand: int = 0, by_axis: bool = False,
+                     main_only: bool = False, visible_only: bool = False) -> None:
+        """The attack-the-nearest routine: false in deployment; smallest key (distance, or the signed axis
+        key min(Sx - Cx, Sy - Cy)) wins, ties to the LAST in unit order; queues event 0x04 (source = the
+        pick) to the unit itself and leaves the current target alone (part A 4.1)."""
+        unit = self.battle.regiments.get(unit_id)
+        if self.battle.phase == "deployment" or unit is None:
+            state.cond_flags = False
+            return
+        best: "Regiment | None" = None
+        best_key = 0.0
+        for other in self.battle.regiments.values():
+            if (other is unit or not self._eligible(other) or not self._in_side_set(unit, other, main_only)
+                    or not self._of_class(other, class_operand)):
+                continue
+            if visible_only and not self._sees(unit, other):
+                continue
+            key = (min(unit.x - other.x, unit.y - other.y) if by_axis else self._distance(unit, other))
+            if best is None or key <= best_key:
+                best, best_key = other, key
+        if best is not None:
+            self.event_bus.queue_event(unit_id, Event(code=0x04, source=best.identifier))
+        state.cond_flags = best is not None
+
+    def op_AttackNearestEnemyOfClass(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """AttackNearestEnemyOfClass C (part A 4)."""
+        self._attack_pick(state, unit_id, class_operand=operand or 0)
+        return state.pc + 2
+
+    def op_AttackNearestEnemyByAxis(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """AttackNearestEnemyByAxis: prefers the candidate furthest towards +X or +Y (part A 4)."""
+        self._attack_pick(state, unit_id, by_axis=True)
+        return state.pc + 1
+
+    def op_AttackNearestVisibleEnemyByAxis(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """AttackNearestVisibleEnemyByAxis: the axis pick among the units the searcher sees (part A 4)."""
+        self._attack_pick(state, unit_id, by_axis=True, visible_only=True)
+        return state.pc + 1
+
+    def op_AttackNearestMainEnemy(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """AttackNearestMainEnemy: nearest unit of the opposing army, allied units excluded (part A 4)."""
+        self._attack_pick(state, unit_id, main_only=True)
+        return state.pc + 1
+
+    def op_AttackNearestVisibleMainEnemy(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """AttackNearestVisibleMainEnemy: as AttackNearestMainEnemy among the units it sees (part A 4)."""
+        self._attack_pick(state, unit_id, main_only=True, visible_only=True)
+        return state.pc + 1
+
+    def op_AttackUnitAtNode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """AttackUnitAtNode N: attack the building at node N (part A 5). Not modelled: buildings are not
+        units in this engine, so the search never finds one and the condition is false; anchored or
+        held units fail first as in the report."""
+        state.cond_flags = False
+        return state.pc + 2
+
+    def op_ReactToThreat(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """ReactToThreat: switch to the stored threat when it strictly outscores the current target and the
+        unit sees it within +-60 degrees (part A 6). In melee the unit withdraws, which routs it (Not
+        modelled: the disengage from rolling stock or furniture). Otherwise target := threat, slot cleared,
+        and the approach point -- one footprint radius out from the threat on the side the unit comes
+        from -- is recorded in `approach_point` (PROVISIONAL: the engine's route is not edited; the
+        attack script's own movement aims at the target). A threat charging this unit queues event 0x07
+        and leaves the condition false."""
+        state.cond_flags = False
+        unit = self.battle.regiments.get(unit_id)
+        threat = self.battle.regiments.get(state.threat) if state.threat is not None else None
+        if self.battle.phase == "deployment" or unit is None or threat is None:
+            return state.pc + 1
+        if unit.attack_target is not None or unit.routing or unit.braced or "CantMelee" in threat.psychology:
+            return state.pc + 1
+        current = self.battle.regiments.get(state.current_target[0]) if state.current_target else None
+        current_score = (self._threat_score(unit, current, state.threat_range)
+                         if current is not None and state.threat_range > 0 else 0.0)
+        if not current_score < state.threat_score or not self._sees(unit, threat, REACT_VIEW_CONE):
+            return state.pc + 1
+        if unit.in_melee:
+            from . import combat
+            combat.start_rout(unit, self.battle)
+            return state.pc + 1
+        state.current_target = (threat.identifier, 0)
+        state.threat = None
+        state.approach_point = self._approach_point(unit, threat)
+        if threat.attack_target == unit_id:
+            self.event_bus.queue_event(unit_id, Event(code=0x07, source=threat.identifier))
+        else:
+            state.cond_flags = True
+        return state.pc + 1
+
+    def _approach_point(self, unit: "Regiment", threat: "Regiment") -> tuple[float, float]:
+        """One footprint radius out from the threat's centre on its front, right, rear or left side,
+        whichever faces the unit (PROVISIONAL sector boundaries: 90 degrees centred on each side)."""
+        relative = (self._bearing(threat, unit) - int(threat.direction)) % 512
+        side = ((relative + 64) // 128) % 4 * 128 + int(threat.direction)
+        angle = side * math.tau / 512
+        radius = threat.bounding_radius()
+        return threat.x + radius * math.sin(angle), threat.y + radius * math.cos(angle)
+
+    def op_ReactEnemySpotted(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """ReactEnemySpotted: the "enemy sighted" bark of a unit that spotted a hidden enemy, only for units
+        not in the enemy army; no condition, target or threat change (part A 7). Not modelled: the bark
+        itself (no React speech table for it yet), so this is a no-op."""
         return state.pc + 1
 
     # ===== Formation, rally and grid opcodes (notes/movement_formation.md, Part B) =====
@@ -1700,11 +2006,6 @@ class ScriptInterpreter:
         """TargetValid: test if current target is still valid."""
         # Simplified: assume target is valid
         state.cond_flags = 1 if state.current_target else 0
-        return state.pc + 1
-
-    def op_KeepThreat(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """KeepThreat: keep current threat (don't search for new one)."""
         return state.pc + 1
 
     def op_IfThreatOutweighsWorth(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,

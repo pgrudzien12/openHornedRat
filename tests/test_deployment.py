@@ -295,13 +295,15 @@ class DeploymentLifecycleTests(unittest.TestCase):
         enemy["set"].update(x=600, y=700)
         data["armies"] = [{"count": 1, "units": [enemy]}]
         battle = Battle.from_script(data, script_dll=ScriptData(words))
+        state = battle.event_bus.unit_states["enemy"]
         for _ in range(5):
             battle.tick()
-        self.assertIsNone(battle.regiments["enemy"].attack_target)
-        self.assertEqual(battle.event_bus.unit_states["enemy"].cond_flags, 0)
+        self.assertEqual([event.code for event in state.event_queue], [])
+        self.assertEqual(state.cond_flags, 0)
         battle.start_battle()
         battle.tick()
-        self.assertEqual(battle.regiments["enemy"].attack_target, "player0")
+        # The search queues "attack target" (0x04, source = the pick) to itself; its handler attacks.
+        self.assertEqual([(event.code, event.source) for event in state.event_queue][-1:], [(0x04, "player0")])
 
     def test_given_mission_state_changes_then_they_do_not_start_battle_or_release_its_barrier(self):
         words = [instruction("SetBattleState"), 2, instruction("IfBattleState"), 2,
