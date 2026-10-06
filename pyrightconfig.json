@@ -24,6 +24,7 @@
   "reportOptionalMemberAccess": "none",
   "disableTaggedHints": true,
   "strict": [
+    "whshr/steering.py",
     "whshr/paths.py",
     "whshr/debrief_rules.py",
     "whshr/debrief_screen.py",
