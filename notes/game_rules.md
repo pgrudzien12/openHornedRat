@@ -1004,7 +1004,7 @@ script each tick (the per-tick script step, called from the battle tick).
 | 0x36 | `AIQuery` case 12 | 🟡 | mission scripts |
 | 0x37 | op 0x63 | event sent to the enemy side | mission scripts |
 | 0x38 | `AIQuery` cases 19/20 | battle state 4 → 5 (broadcast) | |
-| 0x35 | animation event step (`PlayUnitAnimation 3 53 1`) | a fanatic's jump reached its event step | BF039 script 7 (`script_animation_sound.md` §2.2) |
+| 0x35 | animation event step (`PlayUnitAnimation 3 53 1`) | a squig hopper's hop reached its event step | BF039 script 7 (`script_animation_sound.md` §2.2, `script_spawn_move.md` §4) |
 | 0x30 | pairing, withdraw | alone in a combat grid / disengaged | leave grid, re-form |
 
 Mission scripts mostly add cases for 0x03, 0x04, 0x05, 0x13, 0x14, 0x15 and 0x1B.
@@ -1165,7 +1165,7 @@ Per-battle detail and the BF001 walkthrough are retained in private research not
   `0x100` and switches it to script 170, which teleports it to node 24 and removes it from the battle: the unit has
   got inside the walls. The gate itself (a rolling stock unit) is excluded.
 - **Mission-only events**: 0x05, 0x14/0x15, 0x33, 0x37 and 0x38 are used only by the fanatic battles and the two
-  siege battles; event 0x35 is posted by the fanatics' own walk animation and handled only by BF039 script 7
+  siege battles; event 0x35 is posted by the squig hoppers' own walk animation and handled only by BF039 script 7
   (`script_animation_sound.md` §2.2).
 
 ### Player orders and the command panel ✅
@@ -2380,11 +2380,13 @@ no model of its parent unit (`parent_unit`) is within reach, then is out. Each u
 - artillery: the crew as above plus D6 rolls against the machine, then the fanatic **dies**; rolling stock:
   D6 rolls, dies; buildings and scenery: dies; other special units: wounded automatically, dies;
 - some terrain areas remove or kill it.
-The release step (opcodes 216/217) clears `CantMelee` and runs the same collision with armour saves.
+(Opcodes 216/217, `FanaticJump`/`FanaticRelease`, are **not** fanatic opcodes despite their names: they are the
+Squig Hopper hop of BF039, `script_spawn_move.md` §4–§5.)
 Fanatics are hidden template units tagged `0xABC0`; the parent unit's script spawns three copies with opcode 0xD3
 (lateral offsets 0, −20, +20, parent link set). Each copy loops `Query 18` every 5 ticks (→ `FanaticUpdate`);
-opcode 0xD8 is a 2D6 × 8 unit jump. `behaviour_code` (behaviour code) is set only by opcode 0x33. 🟡 The event of the
-parent script that triggers the spawn was not traced.
+fanatics move with `Query 17` (`script_queries.md` §10). `behaviour_code` (behaviour code) is set only by opcode 0x33.
+The spawn is triggered by event 0x33 from the parent's periodic behaviour 16/20, once per parent
+(`script_spawn_move.md` §0, §2).
 WFB: D6 S5 hits per unit touched, 2D6" moves, dies on a double; here damage scales with the models within ½".
 
 ### Winds of magic and casting ✅
@@ -2604,7 +2606,7 @@ research unless marked Wine.
 | R27 | **Fanatics** | ✅ hits and death conditions (section 8.7); 🟡 movement and behaviour assignment (R45). | — | done |
 | R43 | **Animation instruction stream** | ✅ per-object animation bytecode, 59 opcodes (section 4); 🟡 opcode names. | Name the opcodes when animations are implemented. | low |
 | R44 | **Shooting flags** | ✅ `unit_flags2` bit 0 anchors machines, bit 3 never set, `unit_flags 0x80000` hidden, `0x100` set by library script 152 on event 0x36 when objective index 7 exists (units leaving the battle, R60). | — | done |
-| R45 | **Fanatic release and movement** | ✅ spawned as three copies by opcode 0xD3, `Query 18` loop, jump opcode 0xD8 (section 8.7); 🟡 spawn trigger event. | Trace the parent script event. | low |
+| R45 | **Fanatic release and movement** | ✅ spawned as three copies by opcode 0xD3 on event 0x33, `Query 17` wander, `Query 18` loop (section 8.7, `script_spawn_move.md`). | — | done |
 | R46 | **Obstruction geometry** | ✅ `asin(radius / d)` angular half-width (section 8.3). | — | done |
 | R47 | **Doom diver remains** | ✅ corpse decal, no game effect (section 8.6). | — | done |
 | R48 | **Withdraw condition** | ✅ only against rolling stock/furniture with no other enemy; otherwise the unit routs (Player orders). | — | done |

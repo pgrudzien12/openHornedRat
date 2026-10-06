@@ -4,6 +4,9 @@ Public implementation report for GitHub issue #47 (epic #1, area `mission-script
 Describes observable behaviour only. Status: ✅ radius rule, ✅ node selection by `id`,
 ✅ destinations are around the node centre (not around the unit).
 
+> **Batch 9 check:** `script_spawn_move.md` §8 corrects the random-draw order and the exact destination formula,
+> notes that the original has no zero-radius guard, and answers when a model counts as "in formation" again.
+
 ## Answer
 
 The wander distance is **not a constant**. It is the `radius` value of the selected node (the `radius`

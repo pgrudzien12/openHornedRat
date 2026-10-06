@@ -137,8 +137,8 @@ current model count**). A previous request is overwritten without posting anythi
 
 - Shipped: `7 34 4` and `7 35 4` (library 115/117: a volley — every 4th model posts event 34 or 35, which the
   shooting scripts turn into projectiles; `game_rules.md` volley rule) and `3 53 1` (BF039 scripts 7 and 9, the
-  Night Goblin fanatics: the fanatic's walk program ends with an event step 🟡 (one family has an event step in its
-  walk program; matching it to the fanatic sprite is by elimination), so every jump posts event 53, which script 7
+  **Squig Hoppers** (correction: BF039's seven units are all Squig Hoppers, not fanatics; `script_spawn_move.md` §0):
+  the squig hopper's walk program ends with an event step, so every hop posts event 53, which script 7
   catches to jump again).
 - Divisor 0 is never shipped; treat it as invalid (the event step divides by it).
 - Models that are frozen, dead before reaching the event step, or still finishing another one-shot when the request
@@ -347,7 +347,7 @@ contact, rout …). Other classes get none.
 ## 5. Corrections to `game_rules.md`
 
 - "Unit behaviour scripts and events", event table row 0x35 and the sentence "event 0x35 is never handled by any
-  script": **wrong**. Event 0x35 (53) is posted by the fanatics' walk animation through `PlayUnitAnimation 3 53 1`
+  script": **wrong**. Event 0x35 (53) is posted by the squig hoppers' walk animation through `PlayUnitAnimation 3 53 1`
   and handled by BF039 script 7 (`CaseEvent 53` → release/jump again). Both places now say so.
 
 ## 6. Open items 🟡
@@ -355,5 +355,5 @@ contact, rout …). Other classes get none.
 - Exact list of the "forced-run" states that make the rest action walk (charging is certain).
 - Whether the power paid for a refused cast order is refunded (magic batch).
 - `IfCasting`'s class test excludes non-Wizard casters; confirm in play with the Orc shaman on a Wyvern.
-- The fanatic family's walk program is identified by elimination (the only non-pose program with an event step).
+- (Settled in batch 9: the family with the walk-program event step is the Squig Hopper's.)
 - `StartUnitLoopSound`'s third operand: fade behaviour of the copy.
