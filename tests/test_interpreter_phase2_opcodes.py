@@ -279,67 +279,59 @@ class MoraleReactionTests(unittest.TestCase):
         self.interp.op_FearWhenCharged(state, None, [], "target", 0, None)
         self.assertEqual(state.cond_flags, 0)
 
-    def test_fear_when_charged_terror_always_triggers_without_immunity(self):
-        self.charger.psychology = frozenset({"CauseTerror"})
+    def _charged(self, rng=None):
+        """Handle event 0x07 from a charger that is still charging (notes/script_grid_events.md 2)."""
+        self.charger.attack_target = "target"
         state = self.battle.event_bus.unit_states["target"]
         state.current_event = interpreter.Event(code=0x07, source="charger")
-        self.interp.op_FearWhenCharged(state, None, [], "target", 0, None)
-        self.assertEqual(state.cond_flags, 1)
+        self.interp.op_FearWhenCharged(state, None, [], "target", 0, rng)
+        return state, [event.code for event in state.event_queue]
+
+    def test_fear_when_charged_terror_queues_flight_but_the_condition_reports_bracing_room(self):
+        self.charger.psychology = frozenset({"CauseTerror"})
+        state, queued = self._charged()
+        self.assertEqual((state.cond_flags, queued, state.current_target), (1, [0x0D], ("charger", 0)))
 
     def test_fear_when_charged_terror_is_ignored_with_frenzy(self):
         self.charger.psychology = frozenset({"CauseTerror"})
         self.target.psychology = frozenset({"Frenzy"})
-        state = self.battle.event_bus.unit_states["target"]
-        state.current_event = interpreter.Event(code=0x07, source="charger")
-        self.interp.op_FearWhenCharged(state, None, [], "target", 0, None)
-        self.assertEqual(state.cond_flags, 0)
+        state, queued = self._charged()
+        self.assertEqual(queued, [])
 
     def test_fear_when_charged_fear_is_ignored_with_cant_break(self):
         self.charger.psychology = frozenset({"CauseFear"})
         self.target.psychology = frozenset({"CantBreak"})
-        state = self.battle.event_bus.unit_states["target"]
-        state.current_event = interpreter.Event(code=0x07, source="charger")
-        self.interp.op_FearWhenCharged(state, None, [], "target", 0, None)
-        self.assertEqual(state.cond_flags, 0)
+        state, queued = self._charged()
+        self.assertEqual(queued, [])
 
-    def test_fear_when_charged_fear_runs_a_leadership_test(self):
+    def test_fear_when_charged_fear_runs_a_leadership_test_that_sets_fear_passed(self):
         self.charger.psychology = frozenset({"CauseFear"})
-        state = self.battle.event_bus.unit_states["target"]
-        state.current_event = interpreter.Event(code=0x07, source="charger")
-        # Deterministic seed: just confirm it runs and produces a boolean-like cond_flags result,
-        # without asserting a specific roll outcome (that belongs to whshr.combat's own tests).
-        self.interp.op_FearWhenCharged(state, None, [], "target", 0, self.battle.rng)
-        self.assertIn(state.cond_flags, (0, 1))
+        state, queued = self._charged(self.battle.rng)
+        self.assertEqual(state.fear_passed, queued == [])
 
-    def test_fear_when_charged_pass_braces_the_unit_against_the_charger(self):
-        # game_rules.md "Braced": no fear/terror rule applies here, so the test passes outright and
-        # the target halts, dropping any order in flight, and records the charger.
+    def test_fear_when_charged_does_not_brace_by_itself(self):
+        # Bracing is the script's: StoreEventInfo, then Query 7 in script 161 (notes/script_queries.md 5).
         self.target.target_x, self.target.target_y = 400.0, 400.0
+        state, queued = self._charged()
+        self.assertEqual((state.cond_flags, self.target.braced, self.target.target_x), (1, False, 400.0))
+
+    def test_fear_when_charged_keeps_an_existing_target(self):
+        state = self.battle.event_bus.unit_states["target"]
+        state.current_target = ("other", 0)
+        state, _ = self._charged()
+        self.assertEqual(state.current_target, ("other", 0))
+
+    def test_fear_when_charged_ignores_a_charger_that_stopped(self):
         state = self.battle.event_bus.unit_states["target"]
         state.current_event = interpreter.Event(code=0x07, source="charger")
         self.interp.op_FearWhenCharged(state, None, [], "target", 0, None)
-        self.assertEqual(state.cond_flags, 0)
-        self.assertTrue(self.target.braced)
-        self.assertEqual(self.target.braced_target, "charger")
-        self.assertIsNone(self.target.target_x)
-        self.assertIsNone(self.target.target_y)
-        self.assertIsNone(self.target.attack_target)
+        self.assertEqual((state.cond_flags, state.current_target), (0, None))
 
-    def test_fear_when_charged_pass_turns_to_face_the_charger(self):
-        state = self.battle.event_bus.unit_states["target"]
-        state.current_event = interpreter.Event(code=0x07, source="charger")
-        self.interp.op_FearWhenCharged(state, None, [], "target", 0, None)
-        # charger sits due east (+x) of target -- 0 = north/+Y, clockwise, so east is 128.
-        self.assertEqual(self.target.direction, 128)
-
-    def test_fear_when_charged_fail_does_not_brace(self):
+    def test_fear_when_charged_in_melee_still_tests_but_reports_false(self):
         self.charger.psychology = frozenset({"CauseTerror"})
-        state = self.battle.event_bus.unit_states["target"]
-        state.current_event = interpreter.Event(code=0x07, source="charger")
-        self.interp.op_FearWhenCharged(state, None, [], "target", 0, None)
-        self.assertEqual(state.cond_flags, 1)
-        self.assertFalse(self.target.braced)
-        self.assertIsNone(self.target.braced_target)
+        self.target.in_melee = True
+        state, queued = self._charged()
+        self.assertEqual((state.cond_flags, queued), (0, [0x0D]))
 
 
 class EventSourceIsARegimentIdentifierTests(unittest.TestCase):

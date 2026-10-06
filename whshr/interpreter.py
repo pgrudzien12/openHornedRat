@@ -152,6 +152,9 @@ class UnitScriptState:
     behaviour_period: int = 0  # SetBehaviour's period P; 0 disables the periodic decision
     behaviour_countdown: int = 0  # updates left before the next decision (notes/deployment.md 5.3)
     charge_sound: tuple[int, int] | None = None  # (packet, effect) of the running charge sound (Query 24)
+    # A passed fear test spares further fear tests until the next charge clears it (game_rules.md "Fear and
+    # terror"; notes/script_grid_events.md 0).
+    fear_passed: bool = False
     # (see op_SetBehaviour -- there is no confirmed public evidence for when/how often a declared
     # library behaviour like 15/TrackThreat actually gets invoked versus a unit's own script opcodes
     # driving targeting directly, so nothing currently acts on this field automatically)
@@ -2073,14 +2076,39 @@ class ScriptInterpreter:
             state.cond_flags = True
         return state.pc + 1
 
-    def op_TakeEventTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """TakeEventTarget: use the source of the current event as target."""
-        if state.current_event.source:
-            state.current_target = (state.current_event.source, 0)
-            state.cond_flags = 1
-        else:
-            state.cond_flags = 0
+    def op_TakeEventTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """TakeEventTarget (0x3A, 0x88, 0xAF; notes/script_grid_events.md 1.2). Nothing in deployment (false).
+        Otherwise the pending spell always becomes the event's argument (<= 0 = none). With a source unit: refused
+        (false) while the taker is charging, in melee, broken or pursuing, and by 0x3A also for a broken source;
+        accepted -> braced off, target := source, aim point recorded, true. Without a source: an item-marked
+        argument keeps an existing target, else target := none and target point := the event point; true.
+        PROVISIONAL: the aim point goes to `approach_point` instead of replacing the final waypoint, because the
+        engine starts moving when its route changes and this opcode must not start a move."""
+        if self.battle.phase == "deployment":
+            state.cond_flags = False
+            return state.pc + 1
+        event = state.current_event
+        state.pending_spell = event.parameter if event.parameter > 0 else None
+        unit = self.battle.regiments.get(unit_id)
+        source = self.battle.regiments.get(event.source) if event.source is not None else None
+        if source is not None and unit is not None:
+            refuses_broken = behaviour.opcode_of(script_words[state.pc]) == 0x3A if state.pc < len(script_words) else True
+            if (unit.attack_target is not None or unit.in_melee or unit.routing
+                    or (refuses_broken and source.routing)):
+                state.cond_flags = False
+                return state.pc + 1
+            unit.braced, unit.braced_target = False, None
+            state.current_target = (source.identifier, 0)
+            aim = self._charge_aim_point(unit, source)
+            state.approach_point = (float(aim[0]), float(aim[1]))
+            state.cond_flags = True
+            return state.pc + 1
+        item_marked = event.parameter < 0 or bool(event.parameter & 256)
+        if not (item_marked and state.current_target is not None):
+            state.current_target = None
+            state.target_point = (float(event.x), float(event.y)) if event.x >= 0 and event.y >= 0 else None
+        state.cond_flags = True
         return state.pc + 1
 
     # ===== Placeholder opcodes (stubs for future implementation) =====
@@ -2207,6 +2235,7 @@ class ScriptInterpreter:
             target_id = state.current_target[0]
             if target_id in self.battle.regiments:
                 regiment.attack_target = target_id
+                state.fear_passed = False  # a new charge clears it (notes/script_grid_events.md 0)
                 # Battle.tick() handles the actual charging movement
         return state.pc + 1
 
@@ -2573,46 +2602,121 @@ class ScriptInterpreter:
             combat.start_rout(regiment, self.battle)
         return state.pc + 1
 
-    def op_FearWhenCharged(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """FearWhenCharged: fear/terror test on being charged (game_rules.md opcode 0x42, run on
-        event 0x07 "you are being charged"). Sets cond_flags to 1 when the test fails (the unit
-        should flee) -- matching event 0x07's documented handling ("fear/terror test op 0x42, then
-        brace"), i.e. a script normally reacts to cond_flags=1 here by routing (e.g. via RunAway).
-
-        Simplified relative to game_rules.md's full rule (no Dread Banner, no "already resisted
-        this enemy" caching of psy bit 14 -- that state doesn't exist in this engine yet): terror
-        applies whenever the charger has CauseTerror and this unit lacks Frenzy/PsyImmune; fear
-        applies whenever the charger has CauseFear and this unit lacks CantBreak/Frenzy/PsyImmune,
-        with a Leadership test (whshr.combat.leadership_test) deciding the outcome.
-        """
-        regiment = self.battle.regiments.get(unit_id)
-        source_id = state.current_event.source
-        charger = self.battle.regiments.get(source_id) if source_id else None
-        if not regiment or not charger:
-            state.cond_flags = 0
+    def op_FearWhenCharged(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FearWhenCharged (on event 0x07, notes/script_grid_events.md 2.1): acts only when the event's source is
+        still charging and the unit is neither broken nor busy casting (else false, nothing). Then the charger
+        becomes the target if the unit has none, fear-passed is cleared and the fear/terror test runs; a refusal
+        queues 0x0D to the unit itself. The condition is "neither charging nor in melee", not the test result.
+        Bracing is the script's (Query 7)."""
+        unit = self.battle.regiments.get(unit_id)
+        charger = self.battle.regiments.get(state.current_event.source or "")
+        if (unit is None or charger is None or not self._charging(charger) or unit.routing
+                or self._busy_casting(unit, state)):
+            state.cond_flags = False
             return state.pc + 1
-        immune = regiment.psychology & {"Frenzy", "PsyImmune"}
-        if "CauseTerror" in charger.psychology and not immune:
-            state.cond_flags = 1
-        elif "CauseFear" in charger.psychology and not immune and "CantBreak" not in regiment.psychology:
+        if state.current_target is None:
+            state.current_target = (charger.identifier, 0)
+        state.fear_passed = False
+        if not self._may_engage(unit, charger, state, rng):
+            self.event_bus.queue_event(unit_id, Event(code=0x0D))
+        state.cond_flags = unit.attack_target is None and not unit.in_melee
+        return state.pc + 1
+
+    def _charging(self, unit: "Regiment") -> bool:
+        """Charging: running at an attack target, not yet fighting and not pursuing a routing unit."""
+        return unit.attack_target is not None and not unit.in_melee and not self._pursuing(unit)
+
+    def _busy_casting(self, unit: "Regiment", state: UnitScriptState) -> bool:
+        """IfCasting's "is casting" (notes/script_animation_sound.md 3.2)."""
+        return unit.unit_class == WIZARD_CLASS and (
+            self._cast_pose_running(unit) or state.pending_spell is not None or state.channelling)
+
+    def _may_engage(self, unit: "Regiment", enemy: "Regiment", state: UnitScriptState, rng: random.Random) -> bool:
+        """MayEngage (game_rules.md "Fear and terror"): terror refuses non-Frenzy, non-PsyImmune units without a
+        roll; fear (unless CantBreak/Frenzy/PsyImmune, or already passed) takes a Leadership test whose pass
+        sets fear-passed. Not modelled: Dread Banners."""
+        immune = bool(unit.psychology & {"Frenzy", "PsyImmune"})
+        if "CauseTerror" in enemy.psychology and not immune:
+            return False
+        if ("CauseFear" in enemy.psychology and not immune and "CantBreak" not in unit.psychology
+                and not state.fear_passed):
             from . import combat
-            state.cond_flags = 0 if combat.leadership_test(regiment.leadership, rng) else 1
-        else:
-            state.cond_flags = 0
-        if state.cond_flags == 0:
-            # game_rules.md "Braced" (flag 0x100000): a passed fear/terror test halts the unit
-            # facing its charger and suppresses move/attack/turn/rank/charge/fire orders -- for
-            # the player exactly like for a script -- until combat.refresh_braced_state or
-            # Battle.order_halt clears it.
-            regiment.target_x = regiment.target_y = None
-            regiment.attack_target = None
-            regiment.braced = True
-            regiment.braced_target = source_id
-            if (charger.x != regiment.x or charger.y != regiment.y):
-                dx, dy = charger.x - regiment.x, charger.y - regiment.y
-                direction = round(math.atan2(dx, dy) * 512 / math.tau) % 512
-                self.battle.turn_to(regiment, direction)
+            state.fear_passed = combat.leadership_test(unit.leadership, rng)
+            return state.fear_passed
+        return True
+
+    def op_ChargeForward(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """ChargeForward: a charge with no target to the point 12 x s_rlmv straight ahead
+        (notes/movement_formation.md 3.6): no fear test and no event 0x07; success clears fear-passed and
+        reveals the unit (true); an anchored unit halts and re-forms (false) (notes/script_grid_events.md 3).
+        PROVISIONAL: the engine has no free-charge state, so the run is an ordinary move to that point. Not
+        modelled: the refusal inside a blocking boundary region."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is None:
+            state.cond_flags = False
+            return state.pc + 1
+        if unit.anchored or unit.held:
+            self.battle.reform_to_ranks(unit, unit.ranks)
+            state.cond_flags = False
+            return state.pc + 1
+        reach = 12 * self._s_rlmv(unit)
+        facing = int(unit.direction)
+        unit.target_x = unit.x + int(_trunc_sin(facing) * reach / 256)
+        unit.target_y = unit.y + int(_trunc_cos(facing) * reach / 256)
+        unit.waypoints = []
+        unit.hidden = False
+        state.fear_passed = False
+        state.cond_flags = True
+        return state.pc + 1
+
+    def op_CheckCollisions(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """CheckCollisions: the collision pass in probe mode (notes/movement_formation.md 3.10,
+        notes/script_grid_events.md 4): nothing is engaged; touching an enemy runs the contact fear test (a
+        refusal makes it the target and queues 0x0D). Condition: anything overlapping. PROVISIONAL: overlap is
+        "centres closer than the two footprint radii" and the push-apart is left to the engine's own pass. Not
+        modelled: event 0x27 for solid objects ahead. A unit leaving the battle is skipped (false)."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is None or state.unit_flags & LEAVING_BATTLE_FLAG:
+            state.cond_flags = False
+            return state.pc + 1
+        touched = False
+        for other in self.battle.regiments.values():
+            if other is unit or not other.active:
+                continue
+            if math.hypot(other.x - unit.x, other.y - unit.y) >= other.bounding_radius() + unit.bounding_radius():
+                continue
+            touched = True
+            if (self._hostile(unit, other) and not unit.routing and not self._leaving(other)
+                    and not self._may_engage(unit, other, state, rng)):
+                state.current_target = (other.identifier, 0)
+                self.event_bus.queue_event(unit_id, Event(code=0x0D))
+        state.cond_flags = touched
+        return state.pc + 1
+
+    def op_SwitchOpponentInGrid(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """SwitchOpponentInGrid (notes/movement_formation.md 7, notes/script_grid_events.md 5): only in melee
+        (else the condition is not written). The first unit in table order that is live, not the current target,
+        hostile and fighting in this unit's fight becomes the target; the models paired with the old target are
+        unpaired (true). None -> false. Not modelled: the attack direction and pairing-mode resets."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is None or not unit.in_melee:
+            return state.pc + 1
+        current = state.current_target[0] if state.current_target else None
+        found = next((other for other in self.battle.regiments.values()
+                      if other is not unit and other.active and other.identifier != current and other.in_melee
+                      and other.melee_group is not None and other.melee_group == unit.melee_group
+                      and self._hostile(unit, other)), None)
+        if found is not None:
+            if current is not None:
+                for model in unit.melee_models:
+                    if model.opponent is not None and model.opponent[0] == current:
+                        model.opponent = None
+            state.current_target = (found.identifier, 0)
+        state.cond_flags = found is not None
         return state.pc + 1
 
     def op_ResetStack(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
