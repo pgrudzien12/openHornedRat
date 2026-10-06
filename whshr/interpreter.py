@@ -249,14 +249,41 @@ class EventBus:
                 unit_state.event_queue.append(event)
 
 
-# PROVISIONAL: react message text by code (game_rules.md §React N); varies by s_race & 7 (race).
-# Race-specific variants are not yet mapped from the public spec; codes 10-14 (shooting/orders)
-# are noted in the spec but their exact strings are unconfirmed.
-_REACT_MESSAGES: dict[int, str] = {
-    1: "Engage!", 2: "CHARGE!", 3: "Destroy them!", 4: "Retreat!",
-    5: "My men fear the beast!", 6: "Flee the abomination!",
-    7: "We fight to the death!", 8: "No mercy!", 17: "Re-group!", 19: "Hold!",
-}
+# React N per (code, race = s_race & 7): GMTXT id, speech packet, effect, marker ("P" not for enemy units, "E" also
+# off screen). Data from notes/script_behaviours.md 3.3; the texts themselves load from the installation.
+def _react_rows() -> dict[tuple[int, int], tuple[int, int, int, str]]:
+    human_elf_dwarf = {
+        5: (34106, 5, 10, ""), 10: (34108, 5, 3, ""), 11: (34109, 5, 4, "P"), 12: (34110, 5, 8, "P"),
+        14: (34112, 5, 5, "P"), 15: (1006, 10, 0, "P"), 16: (1007, 3, 5, "P"), 19: (34115, 5, 16, ""),
+    }
+    rows: dict[tuple[int, int], tuple[int, int, int, str]] = {}
+    for race in (0, 1, 2):
+        for code, entry in human_elf_dwarf.items():
+            rows[(code, race)] = entry
+    rows.update({
+        (1, 0): (34105, 5, 14, "P"), (1, 1): (34105, 5, 14, "P"), (1, 2): (34208, 7, 7, ""),
+        (2, 0): (34102, 5, 0, "P"), (2, 1): (34102, 5, 0, "P"), (2, 2): (34102, 7, 1, ""),
+        (3, 0): (34100, 5, 2, ""), (3, 1): (34101, 5, 2, ""), (3, 2): (34209, 7, 8, ""),
+        (4, 0): (34103, 5, 1, ""), (4, 1): (34104, 5, 1, ""), (4, 2): (34104, 7, 2, ""),
+        (6, 0): (34107, 5, 11, ""), (6, 1): (34107, 0, 0, ""), (6, 2): (34107, 0, 0, ""),
+        (7, 2): (34200, 7, 5, ""), (8, 0): (34113, 5, 17, ""), (8, 2): (34202, 7, 9, ""),
+        (13, 0): (34111, 5, 6, "P"), (13, 1): (34111, 5, 6, "P"), (13, 2): (34203, 7, 0, "P"),
+        (17, 0): (34114, 5, 13, ""), (17, 1): (34114, 5, 13, ""), (17, 2): (34204, 7, 6, ""),
+        (18, 2): (34205, 11, 1, ""), (20, 2): (34201, 16, 0, ""),
+        (1, 3): (34000, 0, 0, ""), (1, 4): (34000, 0, 0, ""),
+        (2, 3): (34002, 6, 4, ""), (2, 4): (34002, 6, 2, ""), (2, 5): (34302, 8, 0, ""), (2, 7): (34400, 9, 2, ""),
+        (3, 3): (34001, 6, 3, ""), (3, 4): (34001, 6, 1, ""), (3, 5): (34302, 8, 3, ""), (3, 7): (34400, 9, 2, ""),
+        (4, 3): (34003, 6, 9, ""), (4, 4): (34003, 6, 8, ""), (4, 5): (34301, 8, 1, ""), (4, 7): (34401, 9, 0, ""),
+        (5, 3): (34004, 0, 0, ""), (5, 4): (34004, 0, 0, ""), (6, 3): (34005, 0, 0, ""), (6, 4): (34005, 0, 0, ""),
+        (8, 3): (34006, 0, 0, ""), (8, 4): (34006, 0, 0, ""), (9, 5): (34300, 0, 0, ""),
+        (18, 5): (34303, 15, 0, "E"),
+    })
+    return rows
+
+
+_REACT_TABLE = _react_rows()
+# Leader portrait expression per React code 0-20 (all races).
+_REACT_EXPRESSIONS = (0, 2, 0, 1, 4, 2, 2, 1, 2, 2, 0, 2, 2, 2, 2, 3, 2, 1, 3, 1, 2)
 
 
 class ScriptInterpreter:
@@ -811,9 +838,8 @@ class ScriptInterpreter:
             rng: random.Random) -> int | None:
         """WaitWhileUnitFlags N: yield (same PC) while any bit of N is set in unit_flags, then fall through.
 
-        The mirror of WaitUntilUnitFlags. Scripts use it with 8 ("routed") to hold a formation back
-        until the unit has rallied (notes/mission_walkthroughs_BF010.md). PROVISIONAL: "any bit" vs
-        "all bits" of a multi-bit mask (the library also passes 0x4008) is not documented publicly.
+        The mirror of WaitUntilUnitFlags: any bit of the mask (notes/script_behaviours.md 3.2). 8 = re-forming;
+        0x4000 = the catch-up re-form walk, not modelled separately (it always comes with re-forming).
         """
         if operand is not None and (state.unit_flags & operand):
             self._should_yield = True
@@ -990,19 +1016,18 @@ class ScriptInterpreter:
         state.cond_flags = bool(state.event_queue)
         return state.pc + 1
 
-    def op_CaseEvent(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """CaseEvent N: skip to the matching Break if current event.code != N."""
-        if operand is not None and state.current_event.code != operand:
-            # Scan forward to the matching Break (simplified: just skip to next Break)
-            pc = state.pc + 1
-            while pc < len(script_words):
-                word = script_words[pc]
-                opcode = behaviour.opcode_of(word)
-                if opcode == 0x6B:  # Break
-                    return pc + 1
-                pc += behaviour.LENGTHS[opcode] if opcode is not None else 1
-        return state.pc + 1
+    def op_CaseEvent(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """CaseEvent N: a matching current event runs the arm (pc + 2); otherwise a raw word scan from the operand
+        finds the first Break opcode word and continues after that Break and its label operand. Not
+        nesting-aware; no condition (notes/script_behaviours.md 3.1)."""
+        if operand is not None and state.current_event.code == operand:
+            return state.pc + 2
+        break_word = behaviour.OPCODE_FLAG | 0x6B
+        for pc in range(state.pc + 1, len(script_words)):
+            if script_words[pc] == break_word:
+                return pc + 2
+        return len(script_words)
 
     def op_Break(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
@@ -2402,19 +2427,165 @@ class ScriptInterpreter:
             state.behaviour_countdown -= 1
             return
         state.behaviour_countdown = state.behaviour_period
-        if self.battle.phase != "deployment" and state.behaviour_id == TRACK_THREAT:
+        if self.battle.phase != "deployment" and state.behaviour_id:
+            self._run_behaviour(unit_id, state, state.behaviour_id)
+
+    def _run_behaviour(self, unit_id: str, state: UnitScriptState, code: int) -> None:
+        """One periodic run of behaviour CODE (notes/script_behaviours.md part 1): the Query case of the same
+        number with its result discarded, so the condition is never written; whatever it queues is handled in
+        this same update."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is None:
+            return
+        saved = state.cond_bits
+        if code == 11:
+            self._detect_threat(unit, state)
+        elif code == 12:
+            self._objective_exit_signal(unit, state)
+            self._detect_threat(unit, state)
+        elif code == 13:
+            self._spot(unit)
+        elif code == 14:
+            self._threat_in_reach(unit, state)
+        elif code in (15, 16, 19, 20):
+            if code in (19, 20):
+                self._siege_exit(unit, state, check_broken=code == 19)
+            if code in (16, 20):
+                self._signal_threat(unit, state)
             self._track_threat(unit_id, state)
+        elif code == 21:
+            self._bombard_nearest(unit, state)
+        elif code == 26:
+            self._doomwheel_bolts(unit)
+        elif code == 27:
+            self._pestilent_breath(unit)
+        elif 1 <= code <= 25:
+            self.op_Query(state, code, [], unit_id, 0, self.battle.rng)
+        state.cond_bits = saved
+
+    def _spot(self, unit: "Regiment") -> None:
+        """Reveal every hidden unit of the opposite army this unit sees; 0x1C to the spotter (source = the
+        revealed unit) and 0x1D to the revealed unit (source = the spotter), both checked
+        (notes/script_behaviours.md 1.0)."""
+        for other in self.battle.regiments.values():
+            if other.hidden and other.active and self._hostile(unit, other) and self._sees(unit, other):
+                other.hidden = False
+                self.event_bus.queue_event(unit.identifier, Event(code=0x1C, source=other.identifier), checked=True)
+                self.event_bus.queue_event(other.identifier, Event(code=0x1D, source=unit.identifier), checked=True)
+
+    def _detect_threat(self, unit: "Regiment", state: UnitScriptState) -> None:
+        """Code 11 (notes/script_behaviours.md 1.3): spot; unless braced, a threat that targets this unit (any
+        threat for an independent unit) closer than the threat range refreshes the stored score and queues 0x03;
+        otherwise only an independent unit re-picks as Query 1. Not modelled: the Doomwheel rider (leader missile
+        code 13), never combined with this code in shipped data."""
+        self._spot(unit)
+        if unit.braced:
+            return
+        threat = self.battle.regiments.get(state.threat) if state.threat is not None else None
+        if (threat is not None and (self._targets(threat, unit.identifier) or unit.independent)
+                and self._octagonal(unit, threat) < state.threat_range):
+            state.threat_score = self._threat_score(unit, threat, state.threat_range)
+            self.event_bus.queue_event(unit.identifier, Event(code=0x03, source=threat.identifier))
+        elif unit.independent:
+            state.threat, state.threat_score = self._best_threat(unit, state.threat_range)
+
+    def _objective_exit_signal(self, unit: "Regiment", state: UnitScriptState) -> None:
+        """Code 12 step 1: inside the active node whose id field is 99 while the battle state is 4 -> 0x36."""
+        node = next((node for node in self.battle.script_nodes if node.active and node.node_id == 99), None)
+        if (node is not None and self.battle.mission_state == 4
+                and (unit.x - node.x) ** 2 + (unit.y - node.y) ** 2 <= node.radius ** 2):
+            self.event_bus.queue_event(unit.identifier, Event(code=0x36))
+
+    def _threat_in_reach(self, unit: "Regiment", state: UnitScriptState) -> None:
+        """Code 14 (notes/script_behaviours.md 1.6): 0x03 when an enemy that is not hidden or marked is closer
+        than the threat range. Not modelled: test 1, the contact attacks nearby chargers make on the unit."""
+        if any(other.active and not other.hidden and self._hostile(unit, other) and not self._leaving(other)
+               and self._octagonal(unit, other) < state.threat_range for other in self.battle.regiments.values()):
+            self.event_bus.queue_event(unit.identifier, Event(code=0x03))
+
+    def _signal_threat(self, unit: "Regiment", state: UnitScriptState) -> None:
+        """Code 16's extra step: a threat closer than the threat range queues 0x33 (source = the threat), even
+        when braced."""
+        threat = self.battle.regiments.get(state.threat) if state.threat is not None else None
+        if threat is not None and self._octagonal(unit, threat) < state.threat_range:
+            self.event_bus.queue_event(unit.identifier, Event(code=0x33, source=threat.identifier))
+
+    def _siege_exit(self, unit: "Regiment", state: UnitScriptState, check_broken: bool) -> None:
+        """Codes 19/20 step 1: battle state 4, (19: not broken), inside node index 14 -> state 5, the global
+        sound 11 and 0x38 to every live unit (notes/script_behaviours.md 1.8)."""
+        if (self.battle.mission_state != 4 or (check_broken and unit.routing)
+                or not self._in_node_area(unit, 14)):
+            return
+        self.battle.mission_state = 5
+        self._sound(unit.identifier, "global", 0, 11, positional=False)
+        for other_id in list(self.battle.regiments):
+            self.event_bus.queue_event(other_id, Event(code=0x38), checked=True)
+
+    def _bombard_nearest(self, unit: "Regiment", state: UnitScriptState) -> None:
+        """Code 21 (the BF014 Dragon): ground fire 0x21 at the nearest player- or enemy-army unit (its own army
+        included, allies excluded) closer than the threat range, first on ties (notes/script_behaviours.md 1.9)."""
+        best: "Regiment | None" = None
+        best_distance = 0
+        for other in self.battle.regiments.values():
+            if other is unit or not other.active or other.side not in (Side.PLAYER, Side.ENEMY):
+                continue
+            distance = self._octagonal(unit, other)
+            if distance < state.threat_range and (best is None or distance < best_distance):
+                best, best_distance = other, distance
+        if best is not None:
+            self.event_bus.queue_event(unit.identifier, Event(code=0x21, x=int(best.x), y=int(best.y)),
+                                       checked=True)
+
+    def _elapsed_and_reload(self, unit: "Regiment") -> tuple[int, int]:
+        """(ticks since the last reload stamp, reload time). The stamp sets `reload_ticks` to the reload time + 1
+        and the engine counts it down, so elapsed = reload + 1 - reload_ticks while it runs. PROVISIONAL: the
+        reload uses the unit's own Initiative and weapon, not the leader block's."""
+        from . import ranged
+        reload = int(ranged.reload_time(unit))
+        if unit.reload_ticks <= 0:
+            return reload + 1, reload
+        return reload + 1 - int(unit.reload_ticks), reload
+
+    def _stamp(self, unit: "Regiment") -> None:
+        from . import ranged
+        unit.reload_ticks = ranged.reload_time(unit) + 1
+
+    def _doomwheel_bolts(self, unit: "Regiment") -> None:
+        """Code 26: once reloaded, stamp and fire three bolts ahead, right and left (notes/script_behaviours.md
+        1.10). Not modelled: the bolts' flight and damage; they are recorded as a battle event."""
+        elapsed, reload = self._elapsed_and_reload(unit)
+        if elapsed <= reload:
+            return
+        self._stamp(unit)
+        facing = int(unit.direction) % 512
+        headings = [facing, (facing + 128) % 512, (facing + 384) % 512]
+        self.battle.events.append(BattleEvent(f"{unit.name} fires lightning bolts", "doomwheel_bolts",
+                                              regiment=unit.identifier, headings=headings))
+
+    def _pestilent_breath(self, unit: "Regiment") -> None:
+        """Code 27: ready once elapsed > trunc(reload / (models div 4 + 1)); a full reload stamps, a partial one
+        does not; the cloud goes to the unit position + (off, off) with off from two draws (the original's
+        same-offset quirk, notes/script_behaviours.md 1.10). Not modelled: the spell effect; the innate cast is
+        recorded as a spell event."""
+        elapsed, reload = self._elapsed_and_reload(unit)
+        if not elapsed > reload // (unit.models // 4 + 1):
+            return
+        if elapsed > reload:
+            self._stamp(unit)
+        heading = self.battle.rng.randrange(512)
+        offset = (((self.battle.rng.randrange(360) + 180) >> 1) * heading) >> 8
+        self.battle.events.append(BattleEvent(f"{unit.name} breathes pestilence", "spell", regiment=unit.identifier,
+                                              spell=24, x=unit.x + offset, y=unit.y + offset))
 
     def _track_threat(self, unit_id: str, state: UnitScriptState) -> None:
         """Behaviour 15 (notes/script_queries.md 12.1): reveal hidden enemies in view; with no threat pick the
         best as Query 1 does; with a threat and not braced, queue 0x03 (source = the threat, stored score
         not refreshed) when its recomputed score outweighs the unit's worth, else re-pick keeping the old
-        threat unless another unit scores strictly more. PROVISIONAL: the spotting step is the battle's
-        general reveal pass. Not modelled: the other periodic behaviour codes."""
+        threat unless another unit scores strictly more."""
         unit = self.battle.regiments.get(unit_id)
         if unit is None:
             return
-        self.battle.refresh_visibility()
+        self._spot(unit)
         threat = self.battle.regiments.get(state.threat) if state.threat is not None else None
         if threat is None:
             state.threat, state.threat_score = self._best_threat(unit, state.threat_range)
@@ -2440,20 +2611,28 @@ class ScriptInterpreter:
                 best, best_score = other, score
         return (best.identifier if best is not None else None), (best_score if best is not None else 0)
 
-    def op_React(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """React N: display a battle message/voice with leader portrait (game_rules.md §React N).
-
-        The actual text varies by s_race & 7; this table covers the code-level semantics only.
-        PROVISIONAL: race-specific variants (e.g. "WAARRGGH!" for code 2) are not yet mapped.
-        """
-        regiment = self.battle.regiments.get(unit_id)
-        if regiment is not None:
-            msg = _REACT_MESSAGES.get(operand or 0, f"React {operand}")
-            self.battle.events.append(BattleEvent(
-                f"{regiment.name}: {msg}", "react",
-                regiment=unit_id, code=operand, sender=regiment.name, message=msg))
-        return state.pc + 1
+    def op_React(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """React N (notes/script_behaviours.md 3.3): the unit's race row gives a game-text id and an optional
+        speech cue. Nothing without text. An enemy-army unit's reaction is dropped when marked "not for enemy
+        units", else shown only when marked "also off screen" or the unit is on screen. Shown = the message
+        (loaded from the installation's GMTXT by id), the leader portrait expression and the speech cue,
+        non-positional. PROVISIONAL: "on screen" is read as "visible to the player and not hidden"."""
+        unit = self.battle.regiments.get(unit_id)
+        entry = _REACT_TABLE.get((operand or 0, unit.race if unit is not None and unit.race is not None else 0))
+        if unit is None or entry is None:
+            return state.pc + 2
+        text_id, packet, effect, marker = entry
+        if unit.side == Side.ENEMY and (marker == "P" or (marker != "E" and (unit.hidden or not unit.visible_to_player))):
+            return state.pc + 2
+        resources: dict[int, str] = getattr(self.battle, "text_resources", {}) or {}
+        message = resources.get(text_id, f"GMTXT {text_id}")
+        self.battle.events.append(BattleEvent(
+            f"{unit.name}: {message}", "react", regiment=unit_id, code=operand, sender=unit.name, message=message,
+            text_id=text_id, expression=_REACT_EXPRESSIONS[(operand or 0) % len(_REACT_EXPRESSIONS)]))
+        if packet:
+            self._sound(unit_id, "play", packet, effect, positional=False)
+        return state.pc + 2
 
     def op_RemoveFromBattle(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:

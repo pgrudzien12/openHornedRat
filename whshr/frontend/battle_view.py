@@ -551,7 +551,7 @@ class BattleView(SceneView[BattleScene]):
                 code = event.data.get("code")
                 if isinstance(code, int):
                     self.missile_sounds.play(code, impact=event.kind == "projectile_impact")
-            if hasattr(event, "kind") and event.kind in {"ranged_message", "projectile_hit"}:
+            if hasattr(event, "kind") and event.kind in {"ranged_message", "projectile_hit", "message"}:
                 text_id = event.data.get("text_id")
                 message = self.scene.battle.text_resources.get(text_id, str(event)) if isinstance(text_id, int) else str(event)
                 if "%s" in message:

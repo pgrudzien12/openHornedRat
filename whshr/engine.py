@@ -167,6 +167,7 @@ class Regiment:
     psychology: frozenset[str] = frozenset()  # psy_status flag names, e.g. {"CantBreak", "CantRally"}
     hud_class: str | None = None  # "inf"/"arch"/"art"/"wiz"/"mon"; see HUD_CLASS_BY_RACE_TYPE
     unit_class: int | None = None  # s_race class; wagons use a four-deep movement layout
+    race: int | None = None  # s_race & 7: 0 Human, 1 Elven, 2 Dwarven, 3 Goblinoid, 4 Orc, 5 Skaven, 6 Peasant, 7 big
     points: int = 0  # s_pntval: experience gained by the killer, and the AI's per-model worth unit
     # (game_rules.md: unit worth = size x s_pntval x 12 artillery / 8 wizard / 4 monster / 1)
     # set:whoami as one byte: the persistent campaign regiment id (0 for ordinary mission units),
@@ -479,6 +480,7 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
         "psychology": psychology,
         "hud_class": hud_class,
         "unit_class": race >> 3 if race is not None else None,
+        "race": race & 7 if race is not None else None,
         "airborne": hud_class == "arch" and firing_code == 17,
         "points": stat_int(fields, "s_pntval") or 0,
     }
