@@ -1,7 +1,11 @@
 """Acceptance cases from notes/movement_boundaries_route_finding.md."""
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
+from whshr.battle_log import BattleLogger
 from whshr.engine import Battle, Regiment
 from whshr.navigation import boundaries_from_views, point_route
 from whshr.rules import Side
@@ -80,6 +84,31 @@ class BoundaryGeometryTests(unittest.TestCase):
 
 
 class BattleNavigationTests(unittest.TestCase):
+    def test_blocked_route_records_one_warning_with_obstacle_and_boundary_context(self):
+        unit = Regiment("u", "U", -1, 50, 128, Side.PLAYER, models=1, ranks=1)
+        obj = {"x": 25, "y": 50, "radius": 15, "status": ["os_active", "os_solid"]}
+        edge = rectangle("bnd_BATTLEEDGE", 0, 0, 100, 100)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "battle.jsonl"
+            logger = BattleLogger(path)
+            battle = Battle(100, 100, [unit], objects=[obj], boundaries=[edge], script_logger=logger)
+            battle.order_move("u", 80, 50)
+            battle.tick()
+            self.assertFalse(unit.moving)
+            battle.order_move("u", 80, 50)
+            battle.tick()
+            logger.close()
+            records = [json.loads(line) for line in path.read_text().splitlines()]
+
+        self.assertEqual(len(records), 1)
+        warning = records[0]
+        self.assertEqual((warning["type"], warning["code"]), ("warning", "route_blocked"))
+        self.assertEqual((warning["unit_id"], warning["obstacle"]), ("u", "object:0"))
+        self.assertEqual(warning["target"], [80, 50])
+        self.assertEqual(warning["tick"], 0)
+        self.assertTrue(warning["outside_boundary"])
+        self.assertTrue(all(score >= 12000 for score in warning["detour_scores"]))
+
     def test_forbidden_centre_is_corrected_halfway_each_tick(self):
         unit = Regiment("u", "U", 330, 200, 0, Side.PLAYER, models=1, ranks=1)
         battle = Battle(500, 500, [unit], boundaries=[square("bnd_SOLID")])

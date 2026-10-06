@@ -112,6 +112,17 @@ class BattleLogger:
     def write_event(self, tick: int, battle_event: BattleEvent) -> None:
         self._write(battle_event.as_record(tick))
 
+    def write_route_warning(self, tick: int, *, unit_id: str, order: str, start: tuple[float, float],
+                            target: tuple[float, float], obstacle: str, detour_scores: tuple[float, float],
+                            outside_boundary: bool) -> None:
+        """Record a movement order whose two local detours were both rejected."""
+        self._write({
+            "type": "warning", "code": "route_blocked", "tick": tick,
+            "unit_id": unit_id, "order": order, "start": start, "target": target,
+            "obstacle": obstacle, "detour_scores": detour_scores,
+            "outside_boundary": outside_boundary,
+        })
+
     def write_opcode(self, tick: int, *, unit_id: str, script_id: int, pc: int, opcode: int, opcode_name: str,
                      operand: int | None, outcome: str, state: Record) -> None:
         """One dispatched bytecode instruction (only when `trace_scripts` is on).

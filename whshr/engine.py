@@ -543,6 +543,8 @@ class Battle:
         self.view_angle: float | None = None
         self._snapped_view_angle: float | None = None
         self.rng = random.Random(seed)
+        self.script_logger = script_logger
+        self._warned_blocked_routes: set[tuple[str, TurnKey, str]] = set()
         self.events: list[BattleEvent] = []  # battle events emitted by the most recent tick
         self.pending_feedback: list[BattleEvent] = []
         self.text_resources: dict[int, str] = {}
@@ -1519,6 +1521,18 @@ class Battle:
                                      routing=order_key[0] == "flee") for side in (-1, 1)]
         if trials[0][0] >= 12000 and trials[1][0] >= 12000:
             regiment.avoid_target = None
+            warning_key = (regiment.identifier, order_key, obstacle[0])
+            if (self.script_logger is not None and self.script_logger.enabled
+                    and warning_key not in self._warned_blocked_routes):
+                self._warned_blocked_routes.add(warning_key)
+                self.script_logger.write_route_warning(
+                    max(0, self.update_count - 1), unit_id=regiment.identifier, order=str(order_key[0]),
+                    start=start, target=target, obstacle=obstacle[0],
+                    detour_scores=(trials[0][0], trials[1][0]),
+                    outside_boundary=any(
+                        boundary.forbidden(start) for boundary in self.navigation_boundaries
+                        if boundary.solid or boundary.inverse or boundary.battle_edge),
+                )
             return target if order_key[0] == "flee" else None
         selected = 1 if trials[1][0] <= trials[0][0] else 0
         regiment.avoid_target = trials[selected][1]

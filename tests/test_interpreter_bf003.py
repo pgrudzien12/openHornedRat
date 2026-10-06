@@ -118,7 +118,7 @@ class BF003ReinforcementTests(unittest.TestCase):
         self.assertFalse(self.wolfriders.active)
 
     def test_wolfriders_appear_after_60_ticks(self):
-        """Test that Wolfriders become visible at tick 60 (9 seconds)."""
+        """Test the modeled Wolfrider activation after 60 ticks (~6 seconds)."""
         interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
         state = self.battle.event_bus.unit_states["enemy_1"]
 
