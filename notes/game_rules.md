@@ -1189,7 +1189,7 @@ variants are documented in [deployment.md §3–4](deployment.md#3-player-intera
 | 0x15 | Charge (war horn) | event 0x06 → script 106 `ChargeForward` (op 0x4F): a charge **straight ahead**, reach 12 × `s_rlmv`, not inside `0xB0` regions |
 | 0x16 | Fire (crossed bow) + click; Ctrl = Gyrocopter bomb | `OrderFire` (section 8.1) |
 | 0x17 | Magic (chaos star) + spell + click | cast (focused unit) |
-| 0x19 | Halt (open hand) | halt and re-form, "Hold!" |
+| 0x19 | Halt (open hand) | halt and re-form, "Hold!" (the halt is refused for broken or pursuing units, which only shout) |
 | 0x1A | **Independent** (head in profile; idle panel) | toggles unit flag bit 27 |
 | 0x1B | **Fight harder** (flexed arm; melee panels only) | sets unit flag bit 30 on the focused unit |
 
@@ -2106,7 +2106,8 @@ with event 0x10 when:
 - the target is gone, rallied or died;
 - the chase budget runs out (not with `AlwaysPursue`): `min(2 × distance, 120)` at first, then changed at
   each update by `(previous distance − distance) − 4`;
-- the next step would leave the battle area;
+- a probe one collision radius ahead of the front rank lies outside every BattleEdge area (re-aim, budget,
+  restraint and this probe run only on segment-boundary ticks; `pursuit_map_edge.md`);
 - the restraint test at the scheduled segment is passed, which is only rolled while the rally-attempt flag
   is on (player order 0x14). **AI units never test**; they chase until one of the other conditions ends it.
 
