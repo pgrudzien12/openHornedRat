@@ -225,6 +225,9 @@ class Regiment:
     flight_complete: bool = False
     flight_complete_tick: int = -1
     avoid_target: Point | None = None
+    # notes/obstacle_steering.md section 5 ("On failure") and section 6: updates left in a route pause. While
+    # positive the regiment keeps its order but does not advance along its move.
+    route_pause_ticks: int = 0
     route_speed: float = 0.0  # anchor travel on the previous movement update; scattering models do not count
     fire_posts: int = 0  # fire events posted by this volley's shooters so far (consumed by combat)
     fire_post_positions: list[Point] = field(default_factory=list[Point])
@@ -729,6 +732,54 @@ class Battle:
         frame = formation.footprint_frame(*regiment.block())
         return frame[0], frame[1]
 
+    @staticmethod
+    def route_reference_point(regiment: Regiment) -> Point:
+        """The regiment's front-rank position: the point route scans, steer points, trials and waypoint
+        distances are measured from (notes/obstacle_steering.md section 2; notes/movement_boundaries_route_finding.md,
+        "A moving regiment has several relevant positions"). Unlike `formation_centre`, which sits
+        ``(ranks - 1) * 6`` units behind it along the facing and serves only collision and edge correction."""
+        return regiment.x, regiment.y
+
+    def route_unit_relation(self, mover: Regiment, other: Regiment,
+                            trial: bool) -> Literal["block", "ignore", "pause"]:
+        """How `other`'s footprint affects `mover`'s route once the geometric obstacle test has selected it
+        (notes/obstacle_steering.md section 3 item 6 and section 6 item 3; notes/bf003_peasant_move_obstruction.md,
+        relationship table). "pause" means the mover waits 54 updates (`pause_route`) instead of detouring.
+        `trial` is true while a plan trial runs, when enemy units are not obstacles."""
+        if mover.is_wagon:
+            return "ignore"
+        mover_state = self.event_bus.unit_states.get(mover.identifier)
+        # PROVISIONAL: the report gives no measure for the threat range; the octagonal distance is used, and an
+        # unset range (0) means no limit.
+        dx = abs(mover.x - other.x)
+        dy = abs(mover.y - other.y)
+        distance = max(dx, dy) + math.ceil(min(dx, dy) / 2)
+        if mover_state is not None and mover_state.threat_range > 0 and distance >= mover_state.threat_range:
+            return "ignore"
+        other_state = self.event_bus.unit_states.get(other.identifier)
+        if other_state is not None and other_state.unit_flags & interpreter.LEAVING_BATTLE_FLAG:
+            return "ignore"
+        if can_fight(mover.side, other.side):
+            return "ignore" if trial or other.hidden or other.routing else "block"
+        if mover.attack_target == other.identifier or (
+                mover.melee_group is not None and mover.melee_group == other.melee_group):
+            return "ignore"
+        faster = mover.route_speed > other.route_speed
+        turn = abs(mover.direction - other.direction) % 512
+        turn = min(turn, 512 - turn)
+        if turn < 64:
+            return "block" if faster else "ignore"
+        if faster:
+            return "block"
+        s_rlmv = mover.speed_per_tick * 16 / MOVING_FREELY_K
+        return "pause" if distance < 16 * s_rlmv else "block"
+
+    def pause_route(self, regiment: Regiment, ticks: int = 54) -> None:
+        """Pause `regiment`'s move for `ticks` updates, keeping its destination, waypoints, attack target and
+        order (notes/obstacle_steering.md section 5 "On failure" and section 6 items 2-3). Movement resumes
+        afterwards; a new order or a halt clears the pause (PROVISIONAL: the notes are silent on that)."""
+        regiment.route_pause_ticks = max(0, ticks)
+
     def begin_deployment_drag(self, identifier: str, x: float, y: float) -> None:
         regiment = self.regiments[identifier]
         if (self.phase != "deployment" or regiment.side != Side.PLAYER or not regiment.active
@@ -839,6 +890,7 @@ class Battle:
             raise ValueError(f"{identifier} is not player-controlled")
         if regiment.routing:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
+        regiment.route_pause_ticks = 0  # a new order ends a route pause
         if regiment.braced:
             raise ValueError(f"{identifier} is braced against a charge and cannot be ordered")
         if regiment.anchored:
@@ -889,6 +941,7 @@ class Battle:
         if not target.active:
             raise ValueError(f"{target_id} is no longer on the field")
         regiment.target_x = regiment.target_y = None
+        regiment.route_pause_ticks = 0
         regiment.clear_shooting()
         regiment.attack_target = target_id
         regiment.route_follows_unit = False
@@ -905,6 +958,7 @@ class Battle:
         if regiment.in_melee:
             raise ValueError(f"{identifier} is in melee and cannot be ordered")
         regiment.target_x = regiment.target_y = None
+        regiment.route_pause_ticks = 0
         regiment.attack_target = None
         regiment.charge_started_target = None
         regiment.turn_order_key = None
@@ -1293,6 +1347,9 @@ class Battle:
                 moved = self._advance_toward(regiment, (regiment.flee_x, regiment.flee_y),
                                              regiment.speed_for_mode(FLEEING_K) * move_scale, arrive=False,
                                              order_key=("flee",), scale=scale)
+            elif regiment.route_pause_ticks > 0 and (regiment.attack_target or regiment.moving):
+                regiment.route_pause_ticks -= 1  # route pause: keep the order, do not advance
+                regiment.route_speed = 0.0
             elif regiment.attack_target:
                 target = self.regiments.get(regiment.attack_target)
                 if target is None or not target.active:
@@ -1324,6 +1381,7 @@ class Battle:
                     regiment.turn_order_key = None
             else:
                 regiment.turn_order_key = regiment.turn_mode = None
+                regiment.route_pause_ticks = 0
             if regiment.in_melee or not (regiment.routing or regiment.attack_target or regiment.moving):
                 regiment.route_speed = 0.0
             if regiment.attack_target is None and not regiment.in_melee:
