@@ -95,7 +95,25 @@ class BattleNavigationTests(unittest.TestCase):
                "status": ["os_active", "os_solid"]}
         battle = Battle(500, 500, [unit], objects=[obj])
         battle.tick()
-        self.assertGreaterEqual(abs(unit.x - 200), 30 + unit.bounding_radius())
+        self.assertAlmostEqual(abs(unit.x - 200), (30 + unit.bounding_radius()) / 2)
+
+    def test_no_guide_keeps_requested_destination_behind_boundary(self):
+        unit = Regiment("u", "U", 200, 200, 128, Side.PLAYER, models=1, ranks=1)
+        battle = Battle(500, 500, [unit], boundaries=[square("bnd_SOLID")])
+        battle.order_move("u", 400, 200)
+        self.assertEqual((unit.target_x, unit.target_y), (400, 200))
+        for _ in range(120):
+            battle.tick()
+        self.assertEqual((unit.target_x, unit.target_y), (400, 200))
+        self.assertLess(unit.x, 310)
+
+    def test_open_solid_line_does_not_replace_no_guide_target(self):
+        unit = Regiment("u", "U", 150, 200, 128, Side.PLAYER, models=1, ranks=1)
+        wall = {"status": ["bnd_ACTIVE", "bnd_SOLID"],
+                "lines": [[200, 100, 200, 300]]}
+        battle = Battle(500, 500, [unit], boundaries=[wall])
+        battle.order_move("u", 250, 200)
+        self.assertEqual((unit.target_x, unit.target_y), (250, 200))
 
     def test_point_order_uses_guide_and_reaches_destination(self):
         unit = Regiment("u", "U", 50, 200, 128, Side.PLAYER, models=1, ranks=1,
@@ -126,6 +144,115 @@ class BattleNavigationTests(unittest.TestCase):
         for _ in range(100):
             battle.tick()
         self.assertEqual((unit.x, unit.y), (350, 200))
+
+    def test_moving_object_recalculates_detour_and_clear_path_resumes_direct_move(self):
+        unit = Regiment("u", "U", 100, 200, 128, Side.PLAYER, models=1, ranks=1,
+                        speed_per_tick=0)
+        obj = {"x": 200, "y": 200, "radius": 40,
+               "status": ["os_active", "os_solid"]}
+        battle = Battle(500, 500, [unit], objects=[obj])
+        battle.order_move("u", 350, 200)
+        battle.tick()
+        first = unit.avoid_target
+        self.assertIsNotNone(first)
+        obj["x"] = 210
+        battle.tick()
+        self.assertNotEqual(unit.avoid_target, first)
+        obj["y"] = 350
+        battle.tick()
+        self.assertIsNone(unit.avoid_target)
+        self.assertEqual((unit.target_x, unit.target_y), (350, 200))
+
+    def test_moving_obstacle_can_change_the_cheaper_steering_side(self):
+        unit = Regiment("u", "U", 100, 200, 128, Side.PLAYER, models=1, ranks=1,
+                        speed_per_tick=0)
+        obj = {"x": 200, "y": 200, "radius": 40,
+               "status": ["os_active", "os_solid"]}
+        battle = Battle(500, 500, [unit], objects=[obj])
+        battle.order_move("u", 350, 200)
+        battle.tick()
+        self.assertGreater(unit.avoid_target[1], 200)
+        obj["y"] = 205
+        battle.tick()
+        self.assertLess(unit.avoid_target[1], 200)
+
+    def test_routing_unit_steers_around_solid_scenery(self):
+        unit = Regiment("u", "U", 100, 200, 128, Side.PLAYER, models=1, ranks=1,
+                        speed_per_tick=5, routing=True, flee_x=1000, flee_y=200)
+        obj = {"x": 200, "y": 200, "radius": 40,
+               "status": ["os_active", "os_solid"]}
+        battle = Battle(500, 500, [unit], objects=[obj],
+                        boundaries=[rectangle("bnd_BATTLEEDGE", 0, 0, 500, 500)])
+        battle.tick()
+        self.assertIsNotNone(unit.avoid_target)
+        self.assertNotEqual(unit.y, 200)
+        for _ in range(100):
+            battle.tick()
+        self.assertGreater(unit.x, 300)
+
+    def test_frontal_scenery_contact_ends_charge_and_pushes_half_overlap(self):
+        charger = Regiment("c", "C", 190, 200, 128, Side.PLAYER, models=1, ranks=1,
+                           speed_per_tick=0, attack_target="e", charge_started_target="e")
+        enemy = Regiment("e", "E", 400, 200, 0, Side.ENEMY, models=1, ranks=1)
+        obj = {"x": 200, "y": 200, "radius": 40,
+               "status": ["os_active", "os_solid"]}
+        battle = Battle(500, 500, [charger, enemy], objects=[obj])
+        battle.tick()
+        self.assertIsNone(charger.attack_target)
+        self.assertTrue(any(event.kind == "charge_end" for event in battle.events))
+        target_events = battle.event_bus.unit_states["e"].event_queue
+        self.assertEqual([(event.code, event.source) for event in target_events], [(0x09, "c")])
+
+    def test_non_battleedge_boundary_ends_charge(self):
+        charger = Regiment("c", "C", 305, 200, 128, Side.PLAYER, models=1, ranks=1,
+                           speed_per_tick=0, attack_target="e", charge_started_target="e")
+        enemy = Regiment("e", "E", 450, 200, 0, Side.ENEMY, models=1, ranks=1)
+        battle = Battle(500, 500, [charger, enemy], boundaries=[square("bnd_SOLID")])
+        battle.tick()
+        self.assertIsNone(charger.attack_target)
+        self.assertTrue(any(event.kind == "charge_end" for event in battle.events))
+        target_events = battle.event_bus.unit_states["e"].event_queue
+        self.assertEqual([(event.code, event.source) for event in target_events], [(0x09, "c")])
+
+    def test_obstruction_during_approach_does_not_end_charge_order(self):
+        for boundary, objects in [([square("bnd_SOLID")], []),
+                                  ([], [{"x": 200, "y": 200, "radius": 40,
+                                         "status": ["os_active", "os_solid"]}])]:
+            with self.subTest(boundary=bool(boundary)):
+                x = 305 if boundary else 190
+                charger = Regiment("c", "C", x, 200, 128, Side.PLAYER, models=1,
+                                   ranks=1, speed_per_tick=0, attack_target="e")
+                enemy = Regiment("e", "E", 450, 200, 0, Side.ENEMY, models=1, ranks=1)
+                battle = Battle(500, 500, [charger, enemy], boundaries=boundary, objects=objects)
+                battle.tick()
+                self.assertEqual(charger.attack_target, "e")
+                self.assertIsNone(charger.charge_started_target)
+                self.assertFalse(any(event.kind == "charge_end" for event in battle.events))
+                self.assertFalse(any(event.code == 0x09 for event in
+                                     battle.event_bus.unit_states["e"].event_queue))
+
+    def test_scenery_contact_behind_charger_keeps_charge(self):
+        charger = Regiment("c", "C", 210, 200, 128, Side.PLAYER, models=1, ranks=1,
+                           speed_per_tick=0, attack_target="e")
+        enemy = Regiment("e", "E", 400, 200, 0, Side.ENEMY, models=1, ranks=1)
+        obj = {"x": 190, "y": 200, "radius": 40,
+               "status": ["os_active", "os_solid"]}
+        battle = Battle(500, 500, [charger, enemy], objects=[obj])
+        battle.tick()
+        self.assertEqual(charger.attack_target, "e")
+        self.assertFalse(any(event.kind == "charge_end" for event in battle.events))
+
+    def test_friendly_push_translates_models_with_the_anchor(self):
+        standing = Regiment("s", "S", 200, 200, 0, Side.PLAYER, models=1, ranks=1)
+        moving = Regiment("m", "M", 210, 200, 0, Side.PLAYER, models=1, ranks=1,
+                          target_x=350, target_y=200)
+        battle = Battle(500, 500, [standing, moving])
+        before = moving.model_positions()[0]
+        old_x, old_y = moving.x, moving.y
+        battle._resolve_collisions()
+        self.assertNotEqual((moving.x, moving.y), (old_x, old_y))
+        self.assertAlmostEqual(moving.positions[0][0], before[0] + moving.x - old_x)
+        self.assertAlmostEqual(moving.positions[0][1], before[1] + moving.y - old_y)
 
     def test_obstruction_scan_uses_authored_object_order(self):
         obstacles = [("far", (300, 100), 20), ("near", (170, 100), 20)]
@@ -175,6 +302,17 @@ class BattleNavigationTests(unittest.TestCase):
                 break
         self.assertTrue(unit.flight_departed)
         self.assertTrue(unit.flight_complete)
+        self.assertTrue(unit.fled)
+
+    def test_routing_without_battle_edge_completes_at_first_edge_check(self):
+        unit = Regiment("u", "U", 200, 200, 128, Side.PLAYER, models=1, ranks=1,
+                        speed_per_tick=0, routing=True, flee_x=1000, flee_y=200)
+        battle = Battle(500, 500, [unit])
+        battle.tick()
+        self.assertTrue(unit.flight_departed)
+        self.assertTrue(unit.flight_complete)
+        self.assertFalse(unit.fled)
+        battle.tick()
         self.assertTrue(unit.fled)
 
 

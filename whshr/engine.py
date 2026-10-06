@@ -218,7 +218,6 @@ class Regiment:
     flight_complete: bool = False
     flight_complete_tick: int = -1
     avoid_target: Point | None = None
-    avoid_key: tuple[str, str] | None = None
     fire_posts: int = 0  # fire events posted by this volley's shooters so far (consumed by combat)
     volley_countdown: int | None = None  # remaining fire-event decrements expected in the current volley
     volley_age: int = 0  # ticks elapsed since the current volley was ordered; drives the resolve window
@@ -797,7 +796,7 @@ class Battle:
         points = navigation.point_route((regiment.x, regiment.y), goal, self.navigation_boundaries)
         regiment.target_x, regiment.target_y = points[0]
         regiment.waypoints = points[1:]
-        regiment.avoid_target = regiment.avoid_key = None
+        regiment.avoid_target = None
 
     def order_attack(self, identifier: str, target_id: str) -> None:
         """Order a player regiment to charge a non-player regiment into contact (game_rules.md,
@@ -1289,7 +1288,7 @@ class Battle:
             regiment.target_x = regiment.target_y = None
             regiment.waypoints.clear()
             regiment.attack_target = regiment.charge_started_target = None
-            regiment.avoid_target = regiment.avoid_key = None
+            regiment.avoid_target = None
             return False
         dx, dy = steering_target[0] - regiment.x, steering_target[1] - regiment.y
         distance = math.hypot(dx, dy)
@@ -1327,8 +1326,6 @@ class Battle:
         return True
 
     def _steering_target(self, regiment: Regiment, target: Point, order_key: TurnKey) -> Point | None:
-        if order_key[0] == "flee":
-            return target
         start = self.formation_centre(regiment)
         if math.dist(start, target) < 1e-9:
             return target
@@ -1340,6 +1337,8 @@ class Battle:
                                   (float(obj.get("x") or 0), float(obj.get("y") or 0)),
                                   float(obj.get("radius") or 0)))
         for other in self.regiments.values():
+            if order_key[0] == "flee":
+                break  # flight steers around scenery; unit contact has its own rout response
             if other is regiment or not other.active or (order_key[0] == "charge" and
                                                         order_key[1] == other.identifier):
                 continue
@@ -1347,23 +1346,18 @@ class Battle:
                               other.bounding_radius()))
         obstacle = self._first_route_obstacle(start, target, obstacles, regiment.bounding_radius())
         if obstacle is None:
-            regiment.avoid_target = regiment.avoid_key = None
+            regiment.avoid_target = None
             return target
-        key, _, _ = obstacle
-        if regiment.avoid_key != (order_key[0], key) or regiment.avoid_target is None:
-            best_score = math.inf
-            best_point: Point | None = None
-            for side in (-1, 1):
-                score, point = self._score_detour(start, target, regiment.direction,
-                                                  obstacle, side, obstacles, regiment.bounding_radius())
-                if score <= best_score:  # exact tie keeps the second side tested
-                    best_score, best_point = score, point
-            if best_score >= 12000 or best_point is None:
-                return None
-            regiment.avoid_target = best_point
-            regiment.avoid_key = order_key[0], key
+        trials = [self._score_detour(start, target, regiment.direction, obstacle, side,
+                                     obstacles, regiment.bounding_radius(),
+                                     routing=order_key[0] == "flee") for side in (-1, 1)]
+        if trials[0][0] >= 12000 and trials[1][0] >= 12000:
+            regiment.avoid_target = None
+            return target if order_key[0] == "flee" else None
+        selected = 1 if trials[1][0] <= trials[0][0] else 0
+        regiment.avoid_target = trials[selected][1]
         if math.dist(start, regiment.avoid_target) <= max(regiment.speed_per_tick, 3):
-            regiment.avoid_target = regiment.avoid_key = None
+            regiment.avoid_target = None
             return target
         return regiment.avoid_target
 
@@ -1388,15 +1382,17 @@ class Battle:
 
     def _score_detour(self, start: Point, target: Point, facing: float,
                       obstacle: tuple[str, Point, float], side: int,
-                      obstacles: Sequence[tuple[str, Point, float]], own_radius: float
+                      obstacles: Sequence[tuple[str, Point, float]], own_radius: float,
+                      routing: bool = False
                       ) -> tuple[float, Point]:
         current = start
         score = 0.0
         first_point = start
         seen: set[str] = set()
-        for _ in range(12):
+        while True:
             key, centre, radius = obstacle
             if key in seen:
+                score += 12000  # no progress around the same live obstruction
                 break
             seen.add(key)
             dx, dy = target[0] - current[0], target[1] - current[1]
@@ -1418,7 +1414,7 @@ class Battle:
             if any(boundary.forbidden(point) or
                    navigation.first_crossing(current, point, [boundary]) is not None
                    for boundary in self.navigation_boundaries
-                   if boundary.solid or boundary.inverse or boundary.battle_edge):
+                   if boundary.solid or boundary.inverse or (boundary.battle_edge and not routing)):
                 score += 12000
                 break
             current, facing = point, heading
@@ -1432,7 +1428,7 @@ class Battle:
         if any(boundary.forbidden(target) or
                navigation.first_crossing(current, target, [boundary]) is not None
                for boundary in self.navigation_boundaries
-               if boundary.solid or boundary.inverse or boundary.battle_edge):
+               if boundary.solid or boundary.inverse or (boundary.battle_edge and not routing)):
             score += 12000
         return score, first_point
 
@@ -1788,11 +1784,26 @@ class Battle:
                 ux, uy = (dx / distance, dy / distance) if distance > 1e-6 else (1.0, 0.0)
                 share = overlap / yielding
                 if first_yields:
-                    first.x -= ux * share
-                    first.y -= uy * share
+                    self._translate_regiment(first, -ux * share, -uy * share)
                 if second_yields:
-                    second.x += ux * share
-                    second.y += uy * share
+                    self._translate_regiment(second, ux * share, uy * share)
+
+    @staticmethod
+    def _translate_regiment(regiment: Regiment, dx: float, dy: float) -> None:
+        regiment.x += dx
+        regiment.y += dy
+        regiment.positions = [(x + dx, y + dy) for x, y in regiment.positions]
+
+    def _end_charge_on_obstruction(self, regiment: Regiment, description: str) -> None:
+        target_id = regiment.attack_target
+        if target_id is None or regiment.charge_started_target != target_id:
+            return
+        regiment.attack_target = regiment.charge_started_target = None
+        regiment.turn_order_key = regiment.turn_mode = None
+        self.event_bus.queue_event(target_id, interpreter.Event(code=0x09, source=regiment.identifier))
+        self.events.append(BattleEvent(
+            f"{regiment.name}'s charge ends at {description}.", "charge_end",
+            regiment=regiment.identifier))
 
     def _correct_boundaries(self, regiment: Regiment) -> None:
         for boundary in self.navigation_boundaries:
@@ -1806,15 +1817,8 @@ class Battle:
             nearest = boundary.nearest(centre)
             dx = math.trunc((nearest[0] - centre[0]) / 2)
             dy = math.trunc((nearest[1] - centre[1]) / 2)
-            regiment.x += dx
-            regiment.y += dy
-            regiment.positions = [(x + dx, y + dy) for x, y in regiment.positions]
-            if boundary.battle_edge and regiment.attack_target is not None:
-                regiment.attack_target = regiment.charge_started_target = None
-                regiment.turn_order_key = None
-                self.events.append(BattleEvent(
-                    f"{regiment.name}'s charge ends at the table edge.", "charge_end",
-                    regiment=regiment.identifier))
+            self._translate_regiment(regiment, dx, dy)
+            self._end_charge_on_obstruction(regiment, "a movement boundary")
 
     def _correct_solid_objects(self, regiment: Regiment) -> None:
         centre = self.formation_centre(regiment)
@@ -1829,11 +1833,13 @@ class Battle:
             if distance >= radius or radius <= 0:
                 continue
             ux, uy = (dx / distance, dy / distance) if distance > 1e-9 else (1.0, 0.0)
-            push = radius - distance
+            if regiment.charge_started_target == regiment.attack_target and regiment.attack_target is not None:
+                bearing = round(math.atan2(ox - centre[0], oy - centre[1]) * 512 / math.tau) % 512
+                if abs(self._turn_delta(regiment.direction, bearing)) <= 64:
+                    self._end_charge_on_obstruction(regiment, "solid scenery")
+            push = (radius - distance) / 2
             shift_x, shift_y = ux * push, uy * push
-            regiment.x += shift_x
-            regiment.y += shift_y
-            regiment.positions = [(x + shift_x, y + shift_y) for x, y in regiment.positions]
+            self._translate_regiment(regiment, shift_x, shift_y)
             centre = centre[0] + shift_x, centre[1] + shift_y
 
     def _check_flight_edges(self) -> None:

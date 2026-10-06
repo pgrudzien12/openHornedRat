@@ -128,11 +128,11 @@ field-size rule.
 
 | Situation | Expected visible outcome | Qualification |
 |---|---|---|
-| Ordinary move aimed straight through a closed solid or inverse-solid boundary | A usable guide line can provide a detour. Otherwise the destination is limited to the boundary or a nearby allowed point; the unit can slide, stop short, or become stuck. | The point order and ongoing footprint correction can give different visual clearance. |
+| Ordinary move aimed straight through a closed solid or inverse-solid boundary | A usable guide line can provide a detour. Without one, the requested destination remains the route target, while boundary correction can make the unit slide, stop short, or become stuck. | The point order and ongoing footprint correction can give different visual clearance. |
 | Ordinary move near an endpoint / convex corner | A route can pass around the end when there is room, then head toward the target again. | Authored guide lines can change the chosen path. |
 | Ordinary move into a deep concave pocket | A direct route crossing the boundary does not cause an automatic search around its corners; without a usable guide route, boundary correction can hold the unit at the pocket wall. | A Nav line whose ends can be reached without another boundary crossing can supply waypoints around the pocket. |
 | Solid scenery footprint or another unit on the line to the goal | Tests two steering sides around the first blocking footprint, uses the lower scored side, and retests while moving. If both sides score at least 12,000, the current route attempt gives up. | A moving unit can alter the result; enemy contact follows combat rules. |
-| Ordinary unit at BattleEdge | A destination outside is clipped and the footprint is pressed back toward the playable area. It remains active. | Individual models may protrude. |
+| Ordinary unit at BattleEdge | It remains active and its footprint centre is corrected toward the playable area when outside. A point order beyond the edge can remain its route target if no guide replaces that direct leg. | Individual models may protrude. |
 | Charging unit at BattleEdge | Boundary correction ends the charge and moves the centre halfway toward the nearest edge point on that update; the unit stays active. | The final centre depends on its position and any later collision pushes. |
 | Routing unit at BattleEdge | Flight may pass the edge. Once its reference point is checked outside, other units drop it as a target. When a point one collision-footprint radius behind it is also outside, flight completes. It disappears on the first later update when its models have no pending motion. | The two edge findings may happen at the same periodic check or at different checks; disappearance is at least one update later. |
 
@@ -160,7 +160,9 @@ An exact length tie keeps the first candidate in the `.BTS` boundary order.
 It does not combine vertices from different guides to find a global shortest
 route. If the direct leg is clear, it is used without a guide. This guide rule
 comes from the game's movement behavior; `.BTS` supplies the lines and their
-order, not a per-map route-selection script.
+order, not a per-map route-selection script. If no usable guide candidate exists,
+the requested destination remains the point target; later boundary correction
+can keep the unit from reaching it.
 
 **Scenery and unit avoidance.** The first blocking live footprint found in
 collision-object order along the current leg prompts two trial detours, one

@@ -29,7 +29,7 @@ work; each epic links back to one file here.
 | [`mission_scripts.md`](mission_scripts.md) | No in-engine interpreter for the original's unit-behaviour bytecode; units don't patrol, ambush, wait for triggers, or arrive as scripted reinforcements | Mission scripts & scripted events |
 | [`deployment.md`](deployment.md) | No pre-battle deployment stage; player units are placed at their `.BTS` positions instead of hidden + player-placed | Pre-battle deployment |
 | [`neutral_units.md`](neutral_units.md) | No third-party/neutral faction handling; a mission's non-player, non-enemy units (e.g. peasants) currently fight as ordinary enemies | Neutral units & side relations |
-| [`terrain_navigation.md`](terrain_navigation.md) | No terrain-aware movement blocking or off-table removal; routed units can enter terrain the original would block and never leave the field | Terrain navigation & unit removal |
+| [`terrain_navigation.md`](terrain_navigation.md) | Boundary, guide, routed-exit, live avoidance, and collision responses are implemented; exact steering trajectories still need game comparison | Terrain navigation & unit removal |
 | [`objectives_win_lose.md`](objectives_win_lose.md) | Battle end condition is a flat "one side fully routed" instead of the mission's own `.BTS` objective letters | Mission objectives & win/lose |
 | [`formation_movement.md`](formation_movement.md) | Units turn/reverse by snapping instead of wheeling; no per-formation turn exceptions (monsters, wagons); no break-and-turn stagger pause on rout | Formation & movement fidelity |
 | [`formation_resort.md`](formation_resort.md) | Rank changes/re-forms aren't a distinct process: no nearest-match re-slotting, no flat-speed re-form mover, no place-swap rule | Formation re-sorting |

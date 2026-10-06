@@ -94,10 +94,10 @@ def point_route(start: Point, goal: Point, boundaries: Sequence[Boundary]) -> li
     """Use an authored line guide when a direct point route crosses a movement region.
 
     This deliberately searches only supplied guides, not an inferred navigation mesh.
-    If none is usable, limit the point order at its first boundary contact.
+    If none is usable, keep the requested point. Per-tick boundary correction
+    can then slide the regiment along the obstruction or hold it there.
     """
-    hit = first_crossing(start, goal, boundaries)
-    if hit is None:
+    if first_crossing(start, goal, boundaries) is None:
         return [goal]
     best_route: list[Point] | None = None
     best_length = math.inf
@@ -126,15 +126,7 @@ def point_route(start: Point, goal: Point, boundaries: Sequence[Boundary]) -> li
             best_route, best_length = candidate, length
     if best_route is not None:
         return best_route
-    contact = hit[1]
-    distance = math.dist(start, contact)
-    if distance <= 1e-6:
-        return [start]
-    # Leave a small margin on the approach side so half-open edge parity does
-    # not repeatedly reclassify the final point as forbidden.
-    ratio = max(0.0, (distance - 0.01) / distance)
-    return [(start[0] + (contact[0] - start[0]) * ratio,
-             start[1] + (contact[1] - start[1]) * ratio)]
+    return [goal]
 
 
 def _nearest_on_guide(point: Point, lines: Sequence[Segment]) -> tuple[Point, int]:
