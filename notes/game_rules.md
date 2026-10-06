@@ -1003,7 +1003,7 @@ script each tick (the per-tick script step, called from the battle tick).
 | 0x36 | `AIQuery` case 12 | 🟡 | mission scripts |
 | 0x37 | op 0x63 | event sent to the enemy side | mission scripts |
 | 0x38 | `AIQuery` cases 19/20 | battle state 4 → 5 (broadcast) | |
-| 0x35 | – | unused (no script handles it) | |
+| 0x35 | animation event step (`PlayUnitAnimation 3 53 1`) | a fanatic's jump reached its event step | BF039 script 7 (`script_animation_sound.md` §2.2) |
 | 0x30 | pairing, withdraw | alone in a combat grid / disengaged | leave grid, re-form |
 
 Mission scripts mostly add cases for 0x03, 0x04, 0x05, 0x13, 0x14, 0x15 and 0x1B.
@@ -1164,7 +1164,8 @@ Per-battle detail and the BF001 walkthrough are retained in private research not
   `0x100` and switches it to script 170, which teleports it to node 24 and removes it from the battle: the unit has
   got inside the walls. The gate itself (a rolling stock unit) is excluded.
 - **Mission-only events**: 0x05, 0x14/0x15, 0x33, 0x37 and 0x38 are used only by the fanatic battles and the two
-  siege battles; **event 0x35 is never handled by any script** (unused).
+  siege battles; event 0x35 is posted by the fanatics' own walk animation and handled only by BF039 script 7
+  (`script_animation_sound.md` §2.2).
 
 ### Player orders and the command panel ✅
 
