@@ -943,8 +943,9 @@ script each tick (the per-tick script step, called from the battle tick).
 - **More from the catalogue** ✅: after `ExecuteOrder` applies a player order, the interpreter drops the target and
   restarts the unit's script at its restart point (op 0x1E). `SetThreatRange` (0x31) sets `threat_range`, used by the AI
   threat score (`UnitScore`): `worth × (range − d) / trunc(range / 4)` with the octagonal distance
-  `d = max(|dx|, |dy|) + min(|dx|, |dy|) / 2`, 0 for friends, broken, `CantMelee` or hidden units and beyond the
-  range; ×4 if the enemy targets this unit, or ×32 instead if it is also charging (see "Routes, collisions and
+  `d = max(|dx|, |dy|) + ceil(min(|dx|, |dy|) / 2)` (integer), 0 for non-hostile units, units in melee, broken or
+  pursuing, and at or beyond the range (hidden units are excluded by the searches, not by the score; the score is a
+  16-bit value, `script_queries.md` §0.3); ×4 if the enemy targets this unit, or ×32 instead if it is also charging (see "Routes, collisions and
   visibility"). Node opcodes move to a node (0x1F), face it (0x20), teleport to it (0x49), place and re-form there
   (0x4A) and scatter models around nodes (0x48). 0x4C, 0x5C, 0x5D are instant 90°/180° turns, 0x4B a wheel.
   Events 0x14/0x15 are reports from a unit to its linked parent (op 0x65), 0x33 comes from op 0x66 and 0x37 from
@@ -971,7 +972,7 @@ script each tick (the per-tick script step, called from the battle tick).
 | Event | Sent by | Meaning | Default handling (library) |
 |---|---|---|---|
 | 0x01 | op 0xD9 | script signal | return from script |
-| 0x03 | threat detection (Query 11/12) | enemy to fight | op 0x39 → attack script 159 |
+| 0x03 | threat detection (behaviours 11/12, also 14–16, 19, 20 and `SendEventSelfIfTrue 3`) | enemy to fight | op 0x39 → attack script 159 |
 | 0x04 | attack order | attack target | op 0x3A → approach script 158 |
 | 0x06 | `ExecuteOrder` | charge order | script 106 (React 2) |
 | 0x07 | charge start, threat reaction, contact handler | you are being charged | fear/terror test op 0x42, then brace (script 161) |
@@ -1658,7 +1659,7 @@ its target is redirected instead (the game: event 0x1A to the old target, 0x07 t
 
 Engagement is refused when either unit is **broken** (`0x2000`, "Can't engage a broken unit"), when the
 target's collision record is **routing** (record bit `0x400`, set by `StartRout` and cleared by any
-re-form), when the target carries flag the relevant data (🟡 no writer found, R70), when the two are on the
+re-form), when the target carries flag the relevant data (set while Flying Bower lifts the caster's unit, R70; 🟡 other writers not searched), when the two are on the
 same side and the target is not the current opponent, or when the grid pool is exhausted (event 0x0C).
 
 **Creation and joining**: when unit A engages B, A joins B's
@@ -2206,7 +2207,7 @@ BF001's scripted flight.
 - The shipped use is the "being charged" (event 0x07) handler in library scripts 151 and 153–156:
   `StoreEventInfo`, then the fear-when-charged test (a failure queues flight), then, if the unit is not itself
   charging, on the grid or broken, a switch to the **brace script** (161).
-- The only reader is the brace query at the top of script 161. It acts only if the unit is not broken and the
+- The only reader is the brace query at the top of script 161. It acts only if the unit is not already braced and the
   remembered code is **0x07**: it clears the remembered code (so one stored event braces at most once), makes the
   remembered sender — the charger — the unit's target, sets the braced state and stops the models' walking. No
   other opcode reads the slot.
