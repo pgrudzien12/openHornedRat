@@ -48,6 +48,7 @@ INDEPENDENT_FLAG = 0x8000000  # script operand of TestUnitFlags 0x8000000: the p
 # ReacquireEventSource respects (notes/threat_events_nodes.md, part B 1).
 CASTING_SEQUENCE_FLAG2 = 2
 WIZARD_CLASS = 5  # s_race class Wizard (game_rules.md section 3)
+TRACK_THREAT = 15  # SetBehaviour code of the standard threat-tracking AI (notes/script_queries.md 12.1)
 CAST_ONLY_TARGET_FLAG = 0x4000000  # SetUnitFlags operand: CastPending drops the target after the cast
 LEAVING_BATTLE_FLAG = 0x100  # SetUnitFlags 256: the unit is leaving the battle (objective G, game_rules.md R60)
 VIEW_CONE = 71  # +-50 degrees in 1/512 turn, doubled while the looker is in melee (game_rules.md visibility)
@@ -147,7 +148,10 @@ class UnitScriptState:
     pending_arrival: bool = False  # a MoveToNode order is in flight; see
     # ScriptInterpreter._update_arrival_flag, which sets ARRIVED_FLAG on unit_flags once the
     # regiment stops moving, so a WaitUntilUnitFlags(ARRIVED_FLAG) loop can unblock
-    behaviour_id: int | None = None  # declared by SetBehaviour; recorded only, not auto-run
+    behaviour_id: int | None = None  # periodic behaviour code declared by SetBehaviour (0 or None = none)
+    behaviour_period: int = 0  # SetBehaviour's period P; 0 disables the periodic decision
+    behaviour_countdown: int = 0  # updates left before the next decision (notes/deployment.md 5.3)
+    charge_sound: tuple[int, int] | None = None  # (packet, effect) of the running charge sound (Query 24)
     # (see op_SetBehaviour -- there is no confirmed public evidence for when/how often a declared
     # library behaviour like 15/TrackThreat actually gets invoked versus a unit's own script opcodes
     # driving targeting directly, so nothing currently acts on this field automatically)
@@ -239,52 +243,6 @@ class EventBus:
                 unit_state.event_queue.append(event)
 
 
-class LibraryBehaviors:
-    """Standard library behaviors (scripts 100-170) that are used across missions.
-
-    Behavior 15 (TrackThreat) is the primary AI for 290+ missions:
-    Keep the best threat and attack when its score exceeds the unit's worth.
-    """
-
-    def __init__(self, interpreter: "ScriptInterpreter") -> None:
-        self.interpreter = interpreter
-
-    def track_threat(self, unit_id: str, state: UnitScriptState, tick_count: int, rng: random.Random) -> None:
-        """Behavior 15: TrackThreat AI - seek and attack best threat.
-
-        Threat score = worth × (range − distance) / round(range / 4)
-        Only attack if score > unit's worth (simplified: always attack if threat found).
-        Distance metric: octagonal (max(|dx|, |dy|) + min(|dx|, |dy|) / 2).
-        """
-        battle = self.interpreter.battle
-        if battle.phase == "deployment":
-            return
-        battle.refresh_visibility()
-        regiment = battle.regiments.get(unit_id)
-        if not regiment or regiment.side == Side.PLAYER or not regiment.active:
-            return
-
-        # Find best threat (nearest active, different-side regiment): a script that assigns this
-        # library behaviour to a neutral unit has already made the targeting decision explicitly, so
-        # this is not gated by rules.hostile_sides.
-        best_threat: str | None = None
-        best_distance = float('inf')
-
-        for other_id, other in battle.regiments.items():
-            if other.side == regiment.side or not other.active:
-                continue
-            dx = other.x - regiment.x
-            dy = other.y - regiment.y
-            distance = max(abs(dx), abs(dy)) + min(abs(dx), abs(dy)) / 2.0  # octagonal
-            if distance < best_distance:
-                best_threat = other_id
-                best_distance = distance
-
-        if best_threat:
-            state.current_target = (best_threat, 0)
-            regiment.attack_target = best_threat
-
-
 # PROVISIONAL: react message text by code (game_rules.md §React N); varies by s_race & 7 (race).
 # Race-specific variants are not yet mapped from the public spec; codes 10-14 (shooting/orders)
 # are noted in the spec but their exact strings are unconfirmed.
@@ -311,7 +269,6 @@ class ScriptInterpreter:
         self.battle = battle
         self.event_bus = event_bus
         self.script_dll = script_dll
-        self.behaviors = LibraryBehaviors(self)
         self.logger = logger  # whshr.battle_log.BattleLogger, or None; see write_opcode
         self._reported_gaps: set[tuple[str, int, int]] = set()  # (unit_id, script_id, opcode): a missing/broken opcode already
         # surfaced as a BattleEvent once, so a tight retry loop doesn't spam the same complaint
@@ -476,6 +433,7 @@ class ScriptInterpreter:
         if state.script_dll is None:
             state.script_dll = self.script_dll
 
+        self._periodic_behaviour(unit_id, state)
         self._preempt_for_pending_event(state)
 
         # Fetch the script words from the DLL
@@ -622,33 +580,52 @@ class ScriptInterpreter:
 
     @staticmethod
     def _unit_worth(regiment: "Regiment") -> int:
-        """game_rules.md: unit worth = size x s_pntval x 12 artillery / 8 wizard / 4 monster / 1,
-        read by AI target scoring (UnitScore)."""
-        multiplier = {"art": 12, "wiz": 8, "mon": 4}.get(regiment.hud_class or "", 1)
+        """game_rules.md: unit worth = size x s_pntval x 12 artillery / 8 wizard / 4 monster / 1, by the unit's
+        current class (so SetClass changes it), falling back to the HUD class when the class is unknown."""
+        by_class = {4: 12, 5: 8, 6: 4}
+        if regiment.unit_class is not None:
+            multiplier = by_class.get(regiment.unit_class, 1)
+        else:
+            multiplier = {"art": 12, "wiz": 8, "mon": 4}.get(regiment.hud_class or "", 1)
         return regiment.models * regiment.points * multiplier
 
-    def _threat_score(self, regiment: "Regiment", other: "Regiment", threat_range: float) -> float:
-        """game_rules.md's UnitScore: worth x (range - d) / trunc(range / 4), octagonal distance
-        d = max(|dx|, |dy|) + min(|dx|, |dy|) / 2; 0 for friends, broken (routing), CantMelee, or
-        beyond range. The documented x4 ("enemy targets this unit") / x32 ("also charging") score
-        multipliers collapse into a single x4 here: this engine's attack_target field does not
-        distinguish "targeting" from "charging" as separate states (setting it always implies a
-        charge order, Battle._advance_regiments), so the two documented cases are not distinguishable.
-        Hidden units are not excluded (no bit is currently read for that here) -- a known gap.
-        """
-        if other.side == regiment.side or not other.active or other.routing or "CantMelee" in other.psychology:
-            return 0.0
-        dx, dy = other.x - regiment.x, other.y - regiment.y
-        d = max(abs(dx), abs(dy)) + min(abs(dx), abs(dy)) / 2.0
-        if d > threat_range:
-            return 0.0
-        divisor = math.trunc(threat_range / 4)  # trunc, not round (notes/threat_events_nodes.md, part A)
-        if divisor <= 0:
-            return 0.0
-        score = self._unit_worth(other) * (threat_range - d) / divisor
-        if other.attack_target == regiment.identifier:
-            score *= 4.0
-        return score
+    @staticmethod
+    def _octagonal(unit: "Regiment", other: "Regiment") -> int:
+        """Integer octagonal distance, half rounded up: max(|dx|, |dy|) + ceil(min / 2)
+        (notes/script_queries.md 0.3)."""
+        dx, dy = abs(int(other.x - unit.x)), abs(int(other.y - unit.y))
+        return max(dx, dy) + (min(dx, dy) + 1) // 2
+
+    def _pursuing(self, other: "Regiment") -> bool:
+        """Chasing a routing unit (an attack target that is broken)."""
+        chased = self.battle.regiments.get(other.attack_target) if other.attack_target is not None else None
+        return chased is not None and chased.routing
+
+    def _targets(self, other: "Regiment", unit_id: str) -> bool:
+        """`other`'s current target (script slot or charge target) is the unit."""
+        other_state = self.event_bus.unit_states.get(other.identifier)
+        return other.attack_target == unit_id or (
+            other_state is not None and other_state.current_target is not None
+            and other_state.current_target[0] == unit_id)
+
+    def _threat_score(self, regiment: "Regiment", other: "Regiment | None", threat_range: float) -> int:
+        """UnitScore (notes/script_queries.md 0.3): 0 for none, a unit that is not hostile, in melee, broken
+        or pursuing, or with R - d <= 0; else trunc(worth x (R - d) / trunc(R / 4)), x4 when it targets this
+        unit, x32 instead when it is also charging. Kept as a signed 16-bit value, so the multiplications
+        wrap as in the original (PROVISIONAL: never observed in play). Hidden units are not excluded here;
+        the searches filter them."""
+        if (other is None or not other.active or not self._hostile(regiment, other) or other.in_melee
+                or other.routing or self._pursuing(other)):
+            return 0
+        reach = int(threat_range) - self._octagonal(regiment, other)
+        divisor = int(threat_range) // 4
+        if reach <= 0 or divisor <= 0:
+            return 0
+        score = self._unit_worth(other) * reach // divisor
+        if self._targets(other, regiment.identifier):
+            charging = other.attack_target is not None and not self._pursuing(other)
+            score *= 32 if charging else 4
+        return ((score + 0x8000) & 0xFFFF) - 0x8000
 
     # ===== Core control-flow opcodes =====
 
@@ -662,7 +639,9 @@ class ScriptInterpreter:
         handler wrongly treated the operand as a script id and pc reset target, which silently
         hijacked every unit onto script 128/64 (garbage or an unrelated library script) the moment
         it ran -- the cause of a real regression where no scripted enemy ever moved.
+        It does reset the periodic behaviour countdown (notes/deployment.md 5.3).
         """
+        state.behaviour_countdown = 0
         return state.pc + 1
 
     def op_Restart(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -2036,42 +2015,62 @@ class ScriptInterpreter:
                 target.bounding_radius(), 256, self.battle.boundaries, self.battle.objects)
         return state.pc + 1
 
-    def op_TargetValid(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """TargetValid: test if current target is still valid."""
-        # Simplified: assume target is valid
-        state.cond_flags = 1 if state.current_target else 0
-        return state.pc + 1
-
-    def op_IfThreatOutweighsWorth(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """IfThreatOutweighsWorth: test whether the best-scoring enemy within threat_range outweighs
-        this unit's own worth -- the actual decision gate behind library behaviour 15, TrackThreat
-        (game_rules.md: "keep the best threat and attack it when its score exceeds the unit's
-        worth"). Confirmed used by a real BF003 playthrough's Goblin Wolfriders script, in the exact
-        Query 1/IfThreatOutweighsWorth/SendEventSelfIfTrue/AttackNearestFlag40Unit sequence
-        game_rules.md documents behaviour 15 as using.
-
-        Requires SetThreatRange to have set state.threat_range first; with no range set (0), or no
-        regiment found for this unit, conservatively sets cond_flags to 0 (no threat) rather than
-        guessing.
-        """
-        regiment = self.battle.regiments.get(unit_id)
-        if not regiment or state.threat_range <= 0:
-            state.cond_flags = 0
+    def op_TargetValid(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """TargetValid: is it safe to shoot at the aim point (the target's position, or the target point when
+        there is no target or aim-at-point is on)? An independent unit refuses when another friendly unit's
+        centre is within its footprint radius + 24 of the aim point; a crossbow unit (missile code 2) refuses
+        when a non-hostile unit stands on the line of fire. No range, arc or broken test
+        (target_queries.md section 3). PROVISIONAL: blast radii above 24 are not modelled, and the line test
+        is "the segment passes within the unit's footprint radius"."""
+        unit = self.battle.regiments.get(unit_id)
+        target = self.battle.regiments.get(state.current_target[0]) if state.current_target else None
+        aim = ((target.x, target.y) if target is not None and not state.aim_at_point else state.target_point)
+        if unit is None or aim is None:
+            state.cond_flags = False
             return state.pc + 1
-        best_score = max(
-            (self._threat_score(regiment, other, state.threat_range)
-             for other in self.battle.regiments.values() if other is not regiment),
-            default=0.0)
-        state.cond_flags = 1 if best_score > self._unit_worth(regiment) else 0
+        friends = [other for other in self.battle.regiments.values()
+                   if other is not unit and other is not target and other.active and not self._hostile(unit, other)]
+        crowded = unit.independent and any(
+            math.hypot(other.x - aim[0], other.y - aim[1]) < other.bounding_radius() + 24 for other in friends)
+        blocked = unit.missile_code == 2 and any(
+            self._segment_distance((unit.x, unit.y), aim, (other.x, other.y)) < other.bounding_radius()
+            for other in friends)
+        state.cond_flags = not (crowded or blocked)
         return state.pc + 1
 
-    def op_TargetGone(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """TargetGone: test if target is no longer visible/alive."""
-        # For now, assume target still exists
-        state.cond_flags = 0
+    @staticmethod
+    def _segment_distance(start: tuple[float, float], end: tuple[float, float], point: tuple[float, float]) -> float:
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length = dx * dx + dy * dy
+        t = 0.0 if length == 0 else max(0.0, min(1.0, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length))
+        return math.hypot(point[0] - start[0] - t * dx, point[1] - start[1] - t * dy)
+
+    def op_IfThreatOutweighsWorth(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """IfThreatOutweighsWorth: condition := the threat slot holds a unit whose UnitScore, recomputed now,
+        is strictly above the unit's own worth. No scan, nothing else written (notes/script_queries.md 12.1)."""
+        unit = self.battle.regiments.get(unit_id)
+        threat = self.battle.regiments.get(state.threat) if state.threat is not None else None
+        state.cond_flags = (unit is not None and threat is not None
+                            and self._threat_score(unit, threat, state.threat_range) > self._unit_worth(unit))
+        return state.pc + 1
+
+    def op_TargetGone(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """TargetGone: when the current event comes from the current target: outside melee queue 0x19 to
+        itself (false); in melee switch to another engaged enemy (false) or, with none, leave the grid
+        (true). Any other case is false (notes/script_queries.md B5)."""
+        unit = self.battle.regiments.get(unit_id)
+        gone = state.current_event.source
+        state.cond_flags = False
+        if unit is None or state.current_target is None or gone is None or state.current_target[0] != gone:
+            return state.pc + 1
+        if not unit.in_melee:
+            self.event_bus.queue_event(unit_id, Event(code=0x19))
+        elif not self._switch_opponent(state, unit, gone):
+            self._leave_grid(unit)
+            state.cond_flags = True
         return state.pc + 1
 
     def op_TakeEventTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -2289,29 +2288,62 @@ class ScriptInterpreter:
                 model.scatter_target = None
         return state.pc + 1
 
-    def op_SetBehaviour(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """SetBehaviour N: record which library AI behavior (e.g. 15 = TrackThreat) governs this
-        unit. Does NOT invoke it.
-
-        A prior version of this handler called LibraryBehaviors.track_threat() immediately and
-        unconditionally the moment this opcode ran -- which, since SetBehaviour appears near the
-        very start of a unit's script (before any SetWait/Wait/MoveToNode that should gate its
-        first action), set regiment.attack_target on tick 0 regardless of what the rest of the
-        script does. Battle._advance_regiments checks attack_target before an ordinary move order,
-        so this silently overrode every later movement/wait instruction. Confirmed against a real
-        BF003 playthrough: the reinforcement Goblin Wolfriders regiment attacked from the first
-        tick instead of respecting its own SetWait 60 gate.
-
-        There is no confirmed public documentation of exactly when/how often a declared library
-        behavior is meant to run relative to a unit's own script instructions, so this is
-        deliberately left as a no-op recording rather than a guessed re-implementation. A script's
-        own AttackNearestEnemy/AttackNearestVisibleEnemy/FindTarget* calls (now implemented) are
-        what actually drive targeting; see notes/interpreter_gameplay_integration.md.
-        """
+    def op_SetBehaviour(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """SetBehaviour CODE P: store the periodic behaviour and its period and reset the countdown, so the
+        first decision comes at the next update (notes/deployment.md 5.3)."""
         state.behaviour_id = operand
-        return state.pc + 1
+        state.behaviour_period = script_words[state.pc + 2] if state.pc + 2 < len(script_words) else 0
+        state.behaviour_countdown = 0
+        return state.pc + 3
 
+    def _periodic_behaviour(self, unit_id: str, state: UnitScriptState) -> None:
+        """At the start of a script update: a zero countdown makes the decision due and reloads it with P
+        (the behaviour itself is skipped during deployment), a positive one only counts down; P = 0
+        disables it (notes/deployment.md 5.3)."""
+        if not state.behaviour_period:
+            return
+        if state.behaviour_countdown > 0:
+            state.behaviour_countdown -= 1
+            return
+        state.behaviour_countdown = state.behaviour_period
+        if self.battle.phase != "deployment" and state.behaviour_id == TRACK_THREAT:
+            self._track_threat(unit_id, state)
+
+    def _track_threat(self, unit_id: str, state: UnitScriptState) -> None:
+        """Behaviour 15 (notes/script_queries.md 12.1): reveal hidden enemies in view; with no threat pick the
+        best as Query 1 does; with a threat and not braced, queue 0x03 (source = the threat, stored score
+        not refreshed) when its recomputed score outweighs the unit's worth, else re-pick keeping the old
+        threat unless another unit scores strictly more. PROVISIONAL: the spotting step is the battle's
+        general reveal pass. Not modelled: the other periodic behaviour codes."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is None:
+            return
+        self.battle.refresh_visibility()
+        threat = self.battle.regiments.get(state.threat) if state.threat is not None else None
+        if threat is None:
+            state.threat, state.threat_score = self._best_threat(unit, state.threat_range)
+            return
+        if unit.braced:
+            return
+        score = self._threat_score(unit, threat, state.threat_range)
+        if score > self._unit_worth(unit):
+            self.event_bus.queue_event(unit_id, Event(code=0x03, source=threat.identifier))
+        else:
+            state.threat, state.threat_score = self._best_threat(unit, state.threat_range, threat, score)
+
+    def _best_threat(self, unit: "Regiment", threat_range: float, keep: "Regiment | None" = None,
+                     keep_score: int = 0) -> tuple[str | None, int]:
+        """Highest UnitScore among live units that are not hidden or marked, in unit order, first on ties,
+        starting from `keep` and its score (Query 1 starts from none and 0, so a pick must score > 0)."""
+        best, best_score = keep, keep_score
+        for other in self.battle.regiments.values():
+            if other is unit or not other.active or other.hidden or self._leaving(other):
+                continue
+            score = self._threat_score(unit, other, threat_range)
+            if score > best_score:
+                best, best_score = other, score
+        return (best.identifier if best is not None else None), (best_score if best is not None else 0)
 
     def op_React(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
@@ -2603,35 +2635,175 @@ class ScriptInterpreter:
         state.pc = state.restart_pc
         return state.pc
 
-    def op_Query(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """Query N: ask the AI routine (cases 11-14 for threat detection)."""
-        # Simplified: Query is used by FindTarget* opcodes to ask "is there a valid target?"
-        # For now, set cond_flags based on operand (TODO: implement real threat scoring)
-        if operand is not None:
-            # Cases 11-14: threat detection queries
-            # Set cond_flags to indicate whether a threat exists (simplified: always false for now)
-            state.cond_flags = 0
-        return state.pc + 1
+    def op_Query(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """Query N: run AI case N; it always writes the condition, and only cases 1, 3, 6, 7, 9 and 10 can
+        be true (notes/script_queries.md part A). Not modelled: case 8 (the engine resolves contacts in its
+        own engagement pass) and case 18 (no fanatic model); both stay false."""
+        cases = {1: self._query_best_threat, 3: self._query_attack_marked, 5: self._query_tell_target,
+                 6: self._query_prefer_source, 7: self._query_brace, 8: self._query_contact,
+                 9: self._query_assist_friend, 10: self._query_assist_threat, 17: self._query_wander,
+                 22: self._query_unit_left, 23: self._query_unit_left, 24: self._query_charge_sound}
+        unit = self.battle.regiments.get(unit_id)
+        case = cases.get(operand or 0)
+        state.cond_flags = unit is not None and case is not None and case(state, unit, rng)
+        return state.pc + 2
 
-    def op_IfObjective(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """IfObjective N: test if objective letter N is defined in the battle."""
-        # TODO: check battle's objective letters (from .BTS file)
-        # For now, assume objectives A-F always exist (simplified)
-        if operand is not None and operand < 6:  # A=0, B=1, ..., F=5
-            state.cond_flags = 1
-        else:
-            state.cond_flags = 0
-        return state.pc + 1
+    def _query_best_threat(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
+        """Case 1: threat slot and stored score := the best threat, cleared when none; nothing in deployment."""
+        if self.battle.phase == "deployment":
+            return False
+        state.threat, state.threat_score = self._best_threat(unit, state.threat_range)
+        return state.threat is not None
 
-    def op_IfClass(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """IfClass N: test if this unit's class matches N."""
-        # TODO: check regiment's class from HUD_CLASS_BY_RACE_TYPE
-        # For now, simplified: set cond_flags based on class
-        state.cond_flags = 1  # assume matches for now
-        return state.pc + 1
+    def _query_attack_marked(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
+        """Case 3: the nearest marked, unbroken unit of the opposite army (hidden allowed, whole field, first
+        on ties) -> event 0x04 to itself; true after the send attempt even if deployment refused it."""
+        best: "Regiment | None" = None
+        best_distance = 0
+        for other in self.battle.regiments.values():
+            if other.active and self._hostile(unit, other) and not other.routing and self._leaving(other):
+                distance = self._octagonal(unit, other)
+                if best is None or distance < best_distance:
+                    best, best_distance = other, distance
+        if best is None:
+            return False
+        self.event_bus.queue_event(unit.identifier, Event(code=0x04, source=best.identifier), checked=True)
+        return True
+
+    def _query_tell_target(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
+        """Case 5: event 0x05 to the current target, direct path; always false."""
+        if state.current_target is not None:
+            self.event_bus.queue_event(state.current_target[0], Event(code=0x05, source=unit.identifier))
+        return False
+
+    def _query_prefer_source(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
+        """Case 6: the event's source becomes the threat when it is not hidden and scores strictly more than
+        the current threat recomputed now."""
+        source = self.battle.regiments.get(state.current_event.source or "")
+        if source is None or source.hidden:
+            return False
+        new = self._threat_score(unit, source, state.threat_range)
+        threat = self.battle.regiments.get(state.threat) if state.threat is not None else None
+        if not self._threat_score(unit, threat, state.threat_range) < new:
+            return False
+        state.threat, state.threat_score = source.identifier, new
+        return True
+
+    def _query_brace(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
+        """Case 7: an unbraced unit whose remembered event is 0x07 clears that code, targets the charger and
+        braces. Not modelled: the reset of the models' movement locks."""
+        remembered = state.remembered_event
+        if unit.braced or remembered is None or remembered[1] != 0x07 or remembered[0] is None:
+            return False
+        state.remembered_event = (remembered[0], 0)
+        state.current_target = (remembered[0], 0)
+        unit.braced, unit.braced_target = True, remembered[0]
+        return True
+
+    def _query_contact(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
+        """Case 8: always false (the contact handler is the engine's engagement pass here)."""
+        return False
+
+    def _assist(self, state: UnitScriptState, unit: "Regiment", target_id: str | None, distance: int) -> bool:
+        if target_id is None or state.current_target is not None or not distance < state.threat_range:
+            return False
+        self.event_bus.queue_event(unit.identifier, Event(code=0x04, source=target_id), checked=True)
+        return True
+
+    def _query_assist_friend(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
+        """Case 9: the event's source F has a target T, F is closer than the threat range and the unit has no
+        target -> event 0x04 (source T) to itself, true."""
+        friend = self.battle.regiments.get(state.current_event.source or "")
+        friend_state = self.event_bus.unit_states.get(friend.identifier) if friend is not None else None
+        if friend is None:
+            return False
+        target = (friend_state.current_target[0] if friend_state is not None and friend_state.current_target
+                  else friend.attack_target)
+        return self._assist(state, unit, target, self._octagonal(unit, friend))
+
+    def _query_assist_threat(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
+        """Case 10: as case 9 with T = the friend's threat, and the distance measured to T."""
+        friend_state = self.event_bus.unit_states.get(state.current_event.source or "")
+        threat = (self.battle.regiments.get(friend_state.threat)
+                  if friend_state is not None and friend_state.threat is not None else None)
+        if threat is None:
+            return False
+        return self._assist(state, unit, threat.identifier, self._octagonal(unit, threat))
+
+    def _query_wander(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
+        """Case 17: turn by 128 - trunc(rand(512) / 2), jump (rand(4) + 4) x 12 along the new heading (the
+        models stay) and re-form. Not modelled: the re-form end event 0x34 that repeats it."""
+        unit.direction = (int(unit.direction) + 128 - rng.randrange(512) // 2) % 512
+        step = (rng.randrange(4) + 4) * 12
+        angle = unit.direction * math.tau / 512
+        unit.x += step * math.sin(angle)
+        unit.y += step * math.cos(angle)
+        self.battle.reform_to_ranks(unit, unit.ranks)
+        return False
+
+    def _query_unit_left(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
+        """Cases 22/23: forget the event's source X as threat and parent; if X is the target, outside melee
+        queue 0x19 to itself, in melee switch to another opponent in contact or leave the grid (+ 0x19)."""
+        gone = state.current_event.source
+        if gone is None:
+            return False
+        if state.threat == gone:
+            state.threat = None
+        if state.parent_id == gone:
+            state.parent_id = None
+        if state.current_target is not None and state.current_target[0] == gone:
+            if not unit.in_melee or not self._switch_opponent(state, unit, gone):
+                if unit.in_melee:
+                    self._leave_grid(unit)
+                self.event_bus.queue_event(unit.identifier, Event(code=0x19))
+        return False
+
+    def _query_charge_sound(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
+        """Case 24: start the charge sound from packet 2 unless one runs: effect 1 for Infantry and Archers,
+        13 for Cavalry (PROVISIONAL: 14 for the non-Human, Elven or Dwarven races is not told apart, the
+        race is not kept), none for other classes. Not modelled: stopping it when the charge ends."""
+        effect = {1: 1, 3: 1, 2: 13}.get(unit.unit_class or 0)
+        if state.charge_sound is None and effect is not None:
+            state.charge_sound = (2, effect)
+            self._sound(unit.identifier, "charge_start", 2, effect, positional=True)
+        return False
+
+    def _switch_opponent(self, state: UnitScriptState, unit: "Regiment", gone: str) -> bool:
+        """In melee: the first model paired with a hostile unit other than `gone` that is still fighting gives
+        the new target; pairings with `gone` are dropped. Not modelled: the reset of the pairing mode and
+        attack direction."""
+        for model in unit.melee_models:
+            if model.opponent is None or model.opponent[0] == gone:
+                continue
+            other = self.battle.regiments.get(model.opponent[0])
+            if other is not None and other.in_melee and self._hostile(unit, other):
+                for paired in unit.melee_models:
+                    if paired.opponent is not None and paired.opponent[0] == gone:
+                        paired.opponent = None
+                state.current_target = (other.identifier, 0)
+                return True
+        return False
+
+    def _leave_grid(self, unit: "Regiment") -> None:
+        from . import combat
+        combat.leave_grid(self.battle, unit)
+
+    def op_IfObjective(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IfObjective N: condition := the battle file defines the objective letter with index N (1 = A ...
+        7 = G); whether it is met is not tested (notes/script_queries.md B4)."""
+        index = operand or 0
+        state.cond_flags = 1 <= index <= 26 and chr(ord("A") + index - 1) in self.battle.objective_letters
+        return state.pc + 2
+
+    def op_IfClass(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IfClass CODE: condition := the unit's class code (class x 8, race not compared) equals CODE
+        (notes/script_queries.md B1)."""
+        unit = self.battle.regiments.get(unit_id)
+        state.cond_flags = unit is not None and unit.unit_class is not None and unit.unit_class * 8 == operand
+        return state.pc + 2
 
     def op_IfTag(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
@@ -3357,24 +3529,30 @@ class ScriptInterpreter:
         # TODO: implement parent unit tracking
         return state.pc + 1
 
-    def op_SetClass(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """SetClass N: change unit class (0=Monster, 1=Infantry, 3=Archer, etc.)."""
-        # TODO: modify regiment.hud_class based on unit type
-        if operand is not None:
-            # Map class number to HUD class name
-            class_names = {0: "mon", 1: "inf", 3: "arch", 15: "art", 19: "wiz"}
-            regiment = self.battle.regiments.get(unit_id)
-            if regiment and operand in class_names:
-                regiment.hud_class = class_names[operand]
-        return state.pc + 1
+    def op_SetClass(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """SetClass CODE: false when the unit already has class code CODE; otherwise its class becomes
+        CODE / 8 (race kept) and the condition is true. A crew that stops being Artillery loses its
+        war-machine anchor (notes/script_queries.md B2). Not modelled: the HUD class and panel refresh."""
+        unit = self.battle.regiments.get(unit_id)
+        code = operand or 0
+        changed = unit is not None and (unit.unit_class or 0) * 8 != code
+        if unit is not None and changed:
+            unit.unit_class = code >> 3
+            if unit.unit_class != 4 and unit.anchored:
+                unit.clear_anchor()
+        state.cond_flags = changed
+        return state.pc + 2
 
-    def op_IfMachineDestroyed(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """IfMachineDestroyed: test if an artillery machine is destroyed."""
-        # TODO: check if specific war machine model is destroyed
-        state.cond_flags = 0  # simplified: never destroyed
+    def op_IfMachineDestroyed(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """IfMachineDestroyed: condition := the unit has no leader model (the machine of a war machine is its
+        leader), or the leader has taken all its wounds (notes/script_queries.md B3). PROVISIONAL: the engine
+        keeps no leader wounds, so a leader counts as dead only when the whole unit is."""
+        unit = self.battle.regiments.get(unit_id)
+        state.cond_flags = unit is None or not (unit.has_leader or unit.anchored) or unit.destroyed
         return state.pc + 1
 
     # For any other opcode not explicitly handled, the dispatcher will raise NotImplementedError,
     # which is caught and logged by the run() method, allowing partial mission execution.
+

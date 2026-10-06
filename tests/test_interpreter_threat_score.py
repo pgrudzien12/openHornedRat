@@ -51,9 +51,10 @@ class ThreatScoreTests(unittest.TestCase):
         enemy.routing = True
         self.assertEqual(self.interp._threat_score(self.regiment, enemy, threat_range=100), 0.0)
 
-    def test_cant_melee_enemy_scores_zero(self):
-        enemy = Regiment("enemy", "E", 10, 0, 0, Side.PLAYER, models=10, points=5, hud_class="inf",
-                          psychology=frozenset({"CantMelee"}))
+    def test_an_enemy_in_melee_scores_zero(self):
+        # notes/script_queries.md 0.3: the exclusions are in melee, broken and pursuing (not CantMelee).
+        enemy = Regiment("enemy", "E", 10, 0, 0, Side.PLAYER, models=10, points=5, hud_class="inf")
+        enemy.in_melee = True
         self.assertEqual(self.interp._threat_score(self.regiment, enemy, threat_range=100), 0.0)
 
     def test_beyond_range_scores_zero(self):
@@ -72,12 +73,12 @@ class ThreatScoreTests(unittest.TestCase):
         far_score = self.interp._threat_score(self.regiment, far, threat_range=100)
         self.assertGreater(near_score, far_score)
 
-    def test_a_target_that_is_already_charging_this_unit_scores_higher(self):
+    def test_a_unit_charging_this_unit_scores_thirty_two_times(self):
         enemy = Regiment("enemy", "E", 50, 0, 0, Side.PLAYER, models=10, points=5, hud_class="inf")
         baseline = self.interp._threat_score(self.regiment, enemy, threat_range=100)
         enemy.attack_target = "r"
         boosted = self.interp._threat_score(self.regiment, enemy, threat_range=100)
-        self.assertEqual(boosted, baseline * 4.0)
+        self.assertEqual(boosted, baseline * 32)
 
     def test_zero_threat_range_never_divides_by_zero(self):
         enemy = Regiment("enemy", "E", 1, 0, 0, Side.PLAYER, models=10, points=5, hud_class="inf")
@@ -118,6 +119,7 @@ class IfThreatOutweighsWorthTests(unittest.TestCase):
             Regiment("enemy", "E", 10, 0, 0, Side.PLAYER, models=30, points=30, hud_class="inf"))
         state = battle.event_bus.unit_states["r"]
         state.threat_range = 200
+        interp.op_Query(state, 1, [], "r", 0, None)  # the slot is filled by Query 1, not by the test itself
 
         interp.op_IfThreatOutweighsWorth(state, None, [], "r", 0, None)
 

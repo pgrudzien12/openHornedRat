@@ -503,6 +503,8 @@ class Battle:
         self.phase: Literal["deployment", "battle"] = "deployment" if deploy else "battle"
         self.paused = False
         self.mission_state = 0  # script choreography, independent of the player-visible phase
+        # The objective letters the battle file defines (MISSIONINFO Objective: lines), read by IfObjective.
+        self.objective_letters: frozenset[str] = frozenset()
         self.deployment_regions = deployment.regions(boundaries)
         self.deployment_region: deployment.Region | None = None
         self.deployment_drag: deployment.Drag | None = None
@@ -646,11 +648,14 @@ class Battle:
                 elif isinstance(script_value, (int, float)):
                     script_ids[identifier] = int(script_value)
         mission: View = source.get("mission") or {}
-        return cls(field_data["width"], field_data["height"], regiments, seed=seed,
+        battle = cls(field_data["width"], field_data["height"], regiments, seed=seed,
                    script_dll=script_dll, script_ids=script_ids, script_logger=script_logger, nodes=nodes,
                    script_nodes=script_nodes,
                    deploy=bool(mission.get("deploy_troops")), boundaries=source.get("boundaries") or (),
                    objects=source.get("objects") or ())
+        battle.objective_letters = frozenset(str(entry[0]).upper() for entry in mission.get("objectives") or ()
+                                             if entry)
+        return battle
 
     def start_battle(self) -> None:
         """Confirm deployment once, retaining placements and prepared orders (§5)."""

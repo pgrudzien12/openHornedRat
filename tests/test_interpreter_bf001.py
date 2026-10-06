@@ -97,18 +97,19 @@ class BF001InterpreterTests(unittest.TestCase):
         self.assertEqual(len(battle.event_bus.unit_states["player_1"].event_queue), 0)
 
     def test_track_threat_behavior(self):
-        """Test that TrackThreat behavior finds and sets a target."""
+        """Behaviour 15 with an empty threat slot picks the best threat and changes nothing else
+        (notes/script_queries.md 12.1)."""
+        self.player_unit.points = 5
         battle = Battle(500, 500, self.regiments, seed=1995)
         interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
         state = battle.event_bus.unit_states["enemy_0"]
+        state.threat_range = 240
 
-        # Run TrackThreat behavior
-        interp.behaviors.track_threat("enemy_0", state, 10, battle.rng)
+        interp._track_threat("enemy_0", state)
 
-        # Enemy should have set the player as target
-        self.assertIsNotNone(state.current_target)
-        self.assertEqual(state.current_target[0], "player_1")
-        self.assertEqual(self.enemy_1.attack_target, "player_1")
+        self.assertEqual(state.threat, "player_1")
+        self.assertIsNone(state.current_target)
+        self.assertIsNone(self.enemy_1.attack_target)
 
     def test_opcode_handler_unit_flags(self):
         """Test SetUnitFlags and ClearUnitFlags opcodes."""
@@ -218,18 +219,6 @@ class BF001InterpreterTests(unittest.TestCase):
         # Note: actual engagement depends on distance and ENGAGE_DISTANCE threshold
         self.assertIsNotNone(battle)
 
-    def test_targeting_opcodes(self):
-        """Test targeting-related opcodes."""
-        interp = interpreter.ScriptInterpreter(None, None, None)
-        state = interpreter.UnitScriptState()
-        script_words = []
-
-        # TargetValid
-        state.current_target = ("enemy", 0)
-        interp.op_TargetValid(state, None, script_words, "test", 0, None)
-        self.assertEqual(state.cond_flags, 1)  # target is valid
-
-
 class BF001ScenarioTests(unittest.TestCase):
     """Integration tests simulating BF001 choreography patterns."""
 
@@ -254,15 +243,13 @@ class BF001ScenarioTests(unittest.TestCase):
         interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
         state = battle.event_bus.unit_states["enemy_0"]
 
-        # Simulate script: InitUnit, TrackThreat behavior, SendEventToOwnSideIfTrue
+        # Simulate script: InitUnit, AttackNearestEnemy, SendEventToOwnSideIfTrue
         interp.op_InitUnit(state, 128, [], "enemy_0", 0, battle.rng)
-        interp.behaviors.track_threat("enemy_0", state, 0, battle.rng)
-        state.cond_flags = 1  # assume attack condition is true
+        interp.op_AttackNearestEnemy(state, None, [], "enemy_0", 0, battle.rng)
         interp.op_SendEventToOwnSideIfTrue(state, 0x11, [], "enemy_0", 0, battle.rng)
 
-        # Verify result
-        self.assertIsNotNone(enemy0.attack_target)
-        self.assertEqual(enemy0.attack_target, "player_1")
+        # The attack goes through the unit's own "attack target" event (notes/threat_events_nodes.md 4.1)
+        self.assertEqual([(event.code, event.source) for event in state.event_queue][:1], [(0x04, "player_1")])
 
     def test_bf001_dormant_unit_pattern(self):
         """Simulate BF001 Enemy Unit 1 (dormant/waiting unit).

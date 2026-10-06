@@ -169,11 +169,14 @@ class BF003AIBehaviorTests(unittest.TestCase):
         interp.op_SetThreatRange(state, 240, [], "enemy_0", 0, self.battle.rng)
         self.assertEqual(state.threat_range, 240)
 
-        # Run TrackThreat behavior
-        interp.behaviors.track_threat("enemy_0", state, 10, self.battle.rng)
-
-        # Should have targeted player
-        self.assertEqual(self.stickers.attack_target, "player_1")
+        self.player.points = 5
+        # The player is 300 away (octagonal): outside 240, so behaviour 15 finds no threat yet...
+        interp._track_threat("enemy_0", state)
+        self.assertIsNone(state.threat)
+        # ...and picks it once inside the range (notes/script_queries.md 1, 12.1).
+        self.player.x, self.player.y = 300, 300
+        interp._track_threat("enemy_0", state)
+        self.assertEqual(state.threat, "player_1")
 
     def test_wolfriders_wider_threat_range(self):
         """Test that Wolfriders have wider threat range (400 vs 240)."""
