@@ -1092,7 +1092,8 @@ class Battle:
         # Run behaviour scripts via the bytecode interpreter (issue #3); a mission-less/synthetic
         # battle has no interpreter and so no automatic orders (only explicit Battle.order_* calls).
         if self.interpreter:
-            for unit_id, state in self.event_bus.unit_states.items():
+            # A snapshot: SpawnUnit may add units while scripts run (they start next tick).
+            for unit_id, state in list(self.event_bus.unit_states.items()):
                 self.interpreter.run(unit_id, state, self.update_count - 1, self.rng)
             if self.phase == "battle":
                 self.interpreter.raise_charge_events()

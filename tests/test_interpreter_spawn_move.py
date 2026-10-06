@@ -1,0 +1,156 @@
+"""SpawnUnit, FollowParent, the squig hop, ReformBlock and the scatter formula (notes/script_spawn_move.md)."""
+
+import random
+import unittest
+
+from tests.script_helpers import word
+from whshr import interpreter, nodes
+from whshr.engine import Battle, Regiment
+from whshr.interpreter import Event
+from whshr.nodes import ScriptNode
+from whshr.rules import Side
+
+
+class Draws(random.Random):
+    """A random source that returns scripted `randrange` values in order."""
+
+    def __init__(self, *values):
+        super().__init__(0)
+        self.values = list(values)
+
+    def randrange(self, *args, **kwargs):
+        return self.values.pop(0)
+
+
+class MoveTestCase(unittest.TestCase):
+    def make(self, *units):
+        self.battle = Battle(5000, 5000, list(units), seed=1995)
+        self.bus = self.battle.event_bus
+        self.interp = interpreter.ScriptInterpreter(self.battle, self.bus, None)
+
+    def call(self, unit_id, name, *operands, rng=None):
+        state = self.bus.unit_states[unit_id]
+        state.pc = 0
+        words = [word(name), *operands]
+        return getattr(self.interp, "op_" + name)(state, operands[0] if operands else None, words, unit_id, 0,
+                                                  rng or self.battle.rng)
+
+
+class ReformBlockTests(MoveTestCase):
+    def test_rank_table(self):
+        for models, ranks in ((1, 1), (5, 1), (8, 2), (11, 2), (12, 3), (16, 3), (20, 3), (22, 4), (32, 4)):
+            with self.subTest(models=models):
+                unit = Regiment("u", "U", 500, 500, 0, Side.ENEMY, models=models, ranks=1)
+                self.make(unit)
+                self.call("u", "ReformBlock")
+                self.assertEqual(unit.ranks, ranks)
+
+    def test_refused_while_charging_and_condition_kept(self):
+        unit = Regiment("u", "U", 500, 500, 0, Side.ENEMY, models=12, ranks=1, attack_target="x")
+        self.make(unit)
+        self.bus.unit_states["u"].cond_flags = 1
+        self.call("u", "ReformBlock")
+        self.assertEqual((unit.ranks, bool(self.bus.unit_states["u"].cond_flags)), (1, True))
+
+
+class FollowParentTests(MoveTestCase):
+    def test_vectors(self):
+        rows = [((500, 1000), 128, 72, (572, 1000)), ((500, 1000), 0, 72, (500, 1072)), ((0, 0), 64, 36, (25, 25))]
+        for at, facing, distance, expected in rows:
+            with self.subTest(facing=facing):
+                parent = Regiment("p", "P", *at, facing, Side.ENEMY, models=5, ranks=1)
+                child = Regiment("c", "C", 900, 900, 0, Side.NEUTRAL, models=5, ranks=1)
+                self.make(parent, child)
+                self.bus.unit_states["c"].parent_id = "p"
+                self.call("c", "FollowParent", distance)
+                self.assertEqual(((child.x, child.y), child.direction, child.script_action), (expected, facing, 2))
+
+    def test_no_parent_does_nothing(self):
+        child = Regiment("c", "C", 900, 900, 0, Side.NEUTRAL, models=5, ranks=1)
+        self.make(child)
+        self.bus.unit_states["c"].cond_flags = 1
+        self.call("c", "FollowParent", 72)
+        self.assertEqual(((child.x, child.y), bool(self.bus.unit_states["c"].cond_flags)), ((900, 900), True))
+
+
+class SpawnUnitTests(MoveTestCase):
+    def setUp(self):
+        self.template = Regiment("fan", "Fanatic", 50, 50, 0, Side.ENEMY, models=1, ranks=1, hidden=True,
+                                 psychology=frozenset({"CantMelee"}))
+        self.parent = Regiment("p", "P", 500, 1000, 128, Side.ENEMY, models=10, ranks=2)
+        self.threat = Regiment("t", "T", 800, 1000, 0, Side.PLAYER, models=10, ranks=2)
+        self.make(self.template, self.parent, self.threat)
+        self.bus.unit_states["fan"].tag = 0xABC0
+        self.bus.unit_states["p"].current_event = Event(code=0x33, source="t")
+
+    def spawn(self, offset, draw):
+        self.call("p", "SpawnUnit", 0xABC0, 28, 1, offset & 0xFFFF, rng=Draws(draw))
+        return self.battle.regiments[list(self.battle.regiments)[-1]]
+
+    def test_vectors(self):
+        for offset, draw, position, facing in ((0, 0, (548, 1000), 128), (-20, 0, (546, 1021), 108),
+                                               (20, 3, (581, 969), 148)):
+            with self.subTest(offset=offset):
+                copy = self.spawn(offset, draw)
+                self.assertEqual(((copy.x, copy.y), copy.direction), (position, facing))
+        state = self.bus.unit_states[copy.identifier]
+        self.assertEqual((state.script_id, state.parent_id, state.tag, copy.hidden), (28, "p", 0, False))
+        self.assertTrue(copy.reforming)
+        self.assertTrue(self.bus.unit_states["p"].cond_flags)
+
+    def test_without_a_template_nothing_happens(self):
+        self.bus.unit_states["fan"].tag = 0
+        before = len(self.battle.regiments)
+        self.call("p", "SpawnUnit", 0xABC0, 28, 1, 0)
+        self.assertEqual((len(self.battle.regiments), bool(self.bus.unit_states["p"].cond_flags)), (before, False))
+
+    def test_the_copy_runs_from_the_next_tick(self):
+        self.spawn(0, 0)
+        self.battle.tick()  # iterating the script states must survive a unit added mid-tick
+
+
+class SquigHopTests(MoveTestCase):
+    def setUp(self):
+        self.squig = Regiment("s", "S", 500, 1000, 0, Side.ENEMY, models=5, ranks=1)
+        self.target = Regiment("t", "T", 500, 1300, 0, Side.PLAYER, models=5, ranks=1)
+        self.make(self.squig, self.target)
+        self.state = self.bus.unit_states["s"]
+        self.state.current_target = ("t", 0)
+
+    def hop(self, operand, *draws):
+        self.call("s", "FanaticJump", operand, rng=Draws(*draws))
+        return (self.squig.x, self.squig.y), self.squig.direction
+
+    def test_vectors(self):
+        self.assertEqual(self.hop(4, 2, 3, 32), ((500, 1056), 0))
+        self.assertEqual(self.state.hop_counter, 4)
+        self.setUp()
+        self.assertEqual(self.hop(0, 2, 3, 0), ((460, 1039), 448))
+        self.setUp()
+        self.assertEqual(self.hop(0, 2, 3, 63), ((538, 1040), 62))
+
+    def test_double_or_no_target_hops_randomly(self):
+        self.assertEqual(self.hop(0, 5, 5, 300)[1], 300)
+        self.setUp()
+        self.state.current_target = None
+        self.assertEqual(self.hop(0, 1, 4, 0)[1], 0)
+
+    def test_release_counts_misses_down_and_calls_with_no_target(self):
+        self.state.hop_counter = 2
+        self.state.current_target = None
+        self.call("s", "FanaticRelease")
+        self.assertEqual((self.state.hop_counter, bool(self.state.cond_flags)), (1, True))
+        self.call("s", "FanaticRelease")
+        self.assertEqual((self.state.hop_counter, bool(self.state.cond_flags)), (0, False))
+        self.assertEqual([event.code for event in self.state.event_queue], [1, 1])
+
+
+class ScatterFormulaTests(unittest.TestCase):
+    def test_destination_uses_cos_for_x_and_negated_sin_for_y(self):
+        node = ScriptNode(100.0, 100.0, 7, 40)
+        (_index, point), = nodes.scatter_destinations([node], 7, 1, Draws(20, 128))
+        self.assertEqual(point, (100.0, 80.0))  # a = 128: COS 0, SIN 256 -> (0, -20)
+
+
+if __name__ == "__main__":
+    unittest.main()

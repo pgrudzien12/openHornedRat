@@ -155,6 +155,7 @@ class UnitScriptState:
     # A passed fear test spares further fear tests until the next charge clears it (game_rules.md "Fear and
     # terror"; notes/script_grid_events.md 0).
     fear_passed: bool = False
+    hop_counter: int = 0  # squig hops left before a rest (FanaticJump/FanaticRelease, notes/script_spawn_move.md 1)
     # (see op_SetBehaviour -- there is no confirmed public evidence for when/how often a declared
     # library behaviour like 15/TrackThreat actually gets invoked versus a unit's own script opcodes
     # driving targeting directly, so nothing currently acts on this field automatically)
@@ -1718,17 +1719,15 @@ class ScriptInterpreter:
 
     def op_MoveToTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
-        """MoveToTarget: walk to the target's object centre. Refused (false) with no target, while the
-        unit is re-forming or anchored. The destination is fixed until re-issued or re-aimed by
-        IfTargetInChargeReach/ApproachTargetInReach: the unit does not track the target.
-
-        PROVISIONAL: the original never ends this move by distance (it follows a unit until contact);
-        this engine's ordinary arrival rule still applies.
-        """
+        """MoveToTarget: walk to the target unit's object centre (the target point is ignored). Refused (false)
+        with no target unit, while re-forming, anchored or held (notes/movement_formation.md 3.1,
+        notes/script_spawn_move.md 6). The destination is fixed until re-issued or re-aimed by
+        IfTargetInChargeReach/ApproachTargetInReach. PROVISIONAL: the original follows the unit and never
+        ends this move by distance; this engine's ordinary arrival rule still applies (it posts no 0x34)."""
         pair = self._query_pair(state, unit_id)
         unit = pair[0] if pair else None
         state.cond_flags = False
-        if pair is None or unit is None or unit.reforming or unit.anchored or unit.routing:
+        if pair is None or unit is None or unit.reforming or unit.anchored or unit.held or unit.routing:
             return state.pc + 1
         self._start_point_move(unit, self._object_centre(pair[1]), follows_unit=True)
         state.cond_flags = True
@@ -2191,22 +2190,13 @@ class ScriptInterpreter:
                 regiment.target_x = regiment.target_y = None
         return state.pc + 1
 
-    def op_ScatterModelsToNode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """ScatterModelsToNode N: send each model in formation to its own point around node id N.
-
-        notes/scatter_models_to_node.md: N is a node `id` (Battle.script_nodes), not a list position;
-        successive models alternate between the active nodes sharing that id, each getting a
-        destination within the node's own radius (whshr.nodes.scatter_destinations). The regiment's
-        position, order and formation slots are untouched; each model walks there on its own
-        (Battle._advance_models) and stays until the next scatter or SnapModelsToFormation.
-
-        Which models count as "in formation": the report leaves models that are still wandering
-        alone. A model that has reached its destination is treated as available again, because the
-        patrol scripts (e.g. BF003) snap only once, before their loop, yet are seen to wander
-        continuously -- a provisional reading, listed in the report's open points.
-        Deterministic: draws from Battle.rng like every other random decision in the engine.
-        """
+    def op_ScatterModelsToNode(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """ScatterModelsToNode N: send each model in formation to its own point around node id N
+        (notes/scatter_models_to_node.md; corrections in notes/script_spawn_move.md 8). A model is in
+        formation when it is not scattered or has arrived exactly at its scatter destination; a model still
+        walking is skipped. Each scattered model also requests action 2. The condition is not written.
+        Deterministic: draws from Battle.rng like every other random decision in the engine."""
         if operand is not None:
             state.current_node = operand
             regiment = self.battle.regiments.get(unit_id)
@@ -2219,7 +2209,8 @@ class ScriptInterpreter:
                 for model, (_node, point) in zip(available, destinations):
                     model.scatter_target = point
                     model.at_rest = False
-        return state.pc + 1
+                    model.own_request = animation.IDLE
+        return state.pc + 2
 
     def op_ChargeTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
@@ -2303,18 +2294,19 @@ class ScriptInterpreter:
             state.parent_id = self.event_bus.find_by_tag(operand)
         return state.pc + 2
 
-    def op_SnapModelsToFormation(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """SnapModelsToFormation: bring scattered models back into formation.
-
-        Clears every model's ScatterModelsToNode destination (notes/scatter_models_to_node.md), so
-        each walks back to its own formation slot. Used right after the first ScatterModelsToNode in
-        every BF003 peasant regiment's script.
-        """
+    def op_SnapModelsToFormation(self, state: UnitScriptState, operand: int | None, script_words: Words,
+            unit_id: str, tick_count: int, rng: random.Random) -> int | None:
+        """SnapModelsToFormation: place every model at its current target and mark it in formation
+        (notes/script_spawn_move.md 8.2). Right after a scatter that target is the scatter destination, so the
+        shipped `ScatterModelsToNode; SnapModelsToFormation` pair puts the models on their scattered points at
+        once; the next scatter pass then re-scatters them all."""
         regiment = self.battle.regiments.get(unit_id)
         if regiment:
-            for model in regiment.melee_models:
-                model.scatter_target = None
+            positions = regiment.model_positions()
+            for index, model in enumerate(regiment.melee_models):
+                if model.scatter_target is not None and index < len(positions):
+                    positions[index] = model.scatter_target
+                model.at_rest = True
         return state.pc + 1
 
     def op_SetBehaviour(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
@@ -2470,10 +2462,19 @@ class ScriptInterpreter:
             regiment.attack_target = None
         return state.pc + 1
 
-    def op_ReformBlock(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """ReformBlock: reform unit into a tight block formation."""
-        # TODO: adjust regiment.ranks based on available models
+    def op_ReformBlock(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """ReformBlock: re-form into a block of ranks = max(m, min(trunc(N / (sqrt N x 1.15)), N div m)) with
+        m = max(1, trunc(0.75 sqrt N)); refused while fleeing, held or charging; condition not written
+        (notes/script_spawn_move.md 7)."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is None or unit.models <= 0 or unit.routing or unit.held or unit.attack_target is not None:
+            return state.pc + 1
+        n = unit.models
+        root = math.sqrt(n)
+        smallest = max(1, int(0.75 * root))
+        ranks = max(smallest, min(int(n / (root * 1.15)), n // smallest))
+        self.battle.reform_to_ranks(unit, ranks)
         return state.pc + 1
 
     def op_DropTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -3616,21 +3617,137 @@ class ScriptInterpreter:
             regiment.reload_ticks = 0
         return state.pc + 1
 
-    def op_SpawnUnit(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """SpawnUnit N: create Night Goblin Fanatics at current position.
+    def op_FollowParent(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FollowParent D: shift the unit to D units in front of its parent with the parent's facing; the models
+        keep their world positions and walk after it, and the figures are asked to idle (action 2). No parent:
+        nothing. The condition is not written (notes/script_spawn_move.md 3)."""
+        unit = self.battle.regiments.get(unit_id)
+        parent = self.battle.regiments.get(state.parent_id) if state.parent_id is not None else None
+        if unit is not None and parent is not None:
+            facing = int(parent.direction) % 512
+            distance = _signed_word(operand or 0)
+            self._shift_anchor(unit, parent.x + ((_trunc_sin(facing) * distance) >> 8),
+                               parent.y + ((_trunc_cos(facing) * distance) >> 8))
+            unit.direction = facing
+            self._broadcast_action(unit, animation.IDLE)
+        return state.pc + 2
 
-        Only used in BF004_5, BF015, BF034, BF038 (fanatic battles).
-        Fanatics are created with special behavior (0xD3 opcode).
-        """
-        # TODO: implement fanatic spawning
-        # Requires creating new models at a position, which is complex
-        return state.pc + 1
+    @staticmethod
+    def _shift_anchor(unit: "Regiment", x: float, y: float) -> None:
+        """Move the unit position directly; every model keeps its world position, leaves the in-formation
+        state and walks to its slot around the new position (notes/script_spawn_move.md 1)."""
+        unit.model_positions()
+        unit.x, unit.y = x, y
+        for model in unit.melee_models:
+            model.at_rest = False
 
-    def op_FollowParent(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """FollowParent: follow a parent unit (for child units in formation)."""
-        # TODO: implement parent unit tracking
+    def op_SpawnUnit(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """SpawnUnit TAG SCRIPT PLACE OFFSET (notes/script_spawn_move.md 2): copy the first live unit carrying
+        TAG (models, stats, side, psychology), not hidden, untagged, with no target, events or behaviour, running
+        SCRIPT from 0 with the spawner as parent. PLACE 1 stands it trunc(OFFSET / 2) to the spawner's side,
+        faces it OFFSET + the bearing to the current event's source, then makes the wander step forward
+        ((rand(4) + 4) x 12, models left behind) and re-forms. Condition: true, or false with no template.
+        The copy's script starts on the next tick. Not modelled: the "inside the parent, not engageable"
+        footprint state (Query 18, which ends it, is not modelled either)."""
+        words = [script_words[state.pc + k] if state.pc + k < len(script_words) else 0 for k in range(1, 5)]
+        tag, script, place, offset = words[0], words[1], words[2], _signed_word(words[3])
+        spawner = self.battle.regiments.get(unit_id)
+        template_id = self.event_bus.find_by_tag(tag)
+        template = self.battle.regiments.get(template_id) if template_id is not None else None
+        if spawner is None or template is None:
+            state.cond_flags = False
+            return state.pc + 5
+        copy = self._copy_unit(template)
+        self.battle.regiments[copy.identifier] = copy
+        self.event_bus.unit_states[copy.identifier] = UnitScriptState(
+            script_id=script, script_dll=state.script_dll, parent_id=unit_id)
+        if place == 1:
+            facing = int(spawner.direction) % 512
+            lateral = int(offset / 2)
+            copy.x = spawner.x + ((_trunc_cos(facing) * lateral) >> 8)
+            copy.y = spawner.y + ((-_trunc_sin(facing) * lateral) >> 8)
+            source = self.battle.regiments.get(state.current_event.source or "")
+            bearing = self._bearing_from_to((spawner.x, spawner.y), (source.x, source.y)) if source else 256
+            copy.direction = (offset + bearing) % 512
+            copy.model_positions()
+            step = (rng.randrange(4) + 4) * 12
+            heading = int(copy.direction)
+            self._shift_anchor(copy, copy.x + ((_trunc_sin(heading) * step) >> 8),
+                               copy.y + ((_trunc_cos(heading) * step) >> 8))
+            self.battle.reform_to_ranks(copy, copy.ranks)
+        state.cond_flags = True
+        return state.pc + 5
+
+    def _copy_unit(self, template: "Regiment") -> "Regiment":
+        """A fresh copy of a unit: same stats and side, its own model list, no orders, fight or flight state."""
+        import copy as copying
+        import dataclasses
+        number = sum(1 for identifier in self.battle.regiments if identifier.startswith(template.identifier))
+        unit = copying.copy(template)
+        for spec in dataclasses.fields(unit):
+            if isinstance(getattr(unit, spec.name), list):
+                setattr(unit, spec.name, [])
+        unit.identifier = f"{template.identifier}#spawn{number}"
+        unit.hidden = False
+        unit.attack_target = unit.charge_started_target = unit.braced_target = None
+        unit.target_x = unit.target_y = None
+        unit.turn_order_key = None
+        unit.in_melee = unit.routing = unit.fled = unit.braced = unit.reforming = False
+        unit.melee_group = None
+        unit.melee_camp = None
+        unit.script_action, unit.script_action_key = 0, None
+        return unit
+
+    def op_FanaticJump(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FanaticJump N, the squig hop (notes/script_spawn_move.md 4): D = (a + b) x 8 for two d6; heading
+        towards the target +-64 (an even offset) or random on a double or with no target; facing := heading;
+        the landing point, pushed out of buildings and units of the unit's own side group, becomes the unit
+        position with the models left behind. N != 0 sets the hop counter. Condition not written.
+        Not modelled: the projection onto blocking boundaries."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is None:
+            return state.pc + 2
+        first, second = rng.randrange(6) + 1, rng.randrange(6) + 1
+        distance = (first + second) * 8
+        target = self.battle.regiments.get(state.current_target[0]) if state.current_target else None
+        if first == second or target is None:
+            heading = (int(unit.direction) + rng.randrange(512)) % 512
+        else:
+            heading = (self._bearing_from_to((unit.x, unit.y), (target.x, target.y))
+                       + rng.randrange(64) * 2 - 64) % 512
+        unit.direction = heading
+        x = unit.x + ((_trunc_sin(heading) * distance) >> 8)
+        y = unit.y + ((_trunc_cos(heading) * distance) >> 8)
+        own = unit.bounding_radius()
+        for other in self.battle.regiments.values():
+            if other is unit or not other.active or self._hostile(unit, other):
+                continue
+            dx, dy = x - other.x, y - other.y
+            gap = math.hypot(dx, dy)
+            limit = other.bounding_radius() + own / 2
+            if 0 < gap < limit:
+                x, y = other.x + int(dx * limit / gap), other.y + int(dy * limit / gap)
+        self._shift_anchor(unit, x, y)
+        if operand:
+            state.hop_counter = operand & 0xFF
+        return state.pc + 2
+
+    def op_FanaticRelease(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """FanaticRelease, the squig hop landing (notes/script_spawn_move.md 5): clears CantMelee; a landing that
+        wounds or touches something is true and keeps the counter; otherwise the counter drops by one (wrapping
+        0 to 255) and the condition is "still non-zero". With no target, event 0x01 goes to the unit itself.
+        Not modelled: the landing collision and its wounds, so every landing counts as a miss."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is not None:
+            unit.psychology = unit.psychology - {"CantMelee"}
+        state.hop_counter = (state.hop_counter - 1) & 0xFF
+        state.cond_flags = state.hop_counter != 0
+        if state.current_target is None:
+            self.event_bus.queue_event(unit_id, Event(code=0x01))
         return state.pc + 1
 
     def op_SetClass(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,

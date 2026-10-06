@@ -49,8 +49,8 @@ def scatter_destinations(nodes: Sequence[ScriptNode], node_id: int, count: int,
     notes/scatter_models_to_node.md, "Behaviour": the scan runs in list order over active nodes whose
     id equals `node_id`, each destination resuming just after the previous one's node and wrapping
     around, so destinations alternate between every node that shares the id. Each destination lies at
-    a distance uniform over the integers ``0 .. radius - 1`` (the centre for radius 0) and a uniform
-    angle in 512 steps from the node centre. Stops early when no active node has the id.
+    a distance uniform over the integers ``0 .. radius - 1`` (the centre for radius 0, an engine choice: the
+    original has no guard) and a uniform angle in 512 steps, drawn in that order. Stops early when no active node has the id.
     """
     destinations: list[tuple[int, Point]] = []
     start = 0
@@ -62,7 +62,11 @@ def scatter_destinations(nodes: Sequence[ScriptNode], node_id: int, count: int,
             break
         node = nodes[chosen]
         distance = rng.randrange(node.radius) if node.radius > 0 else 0
-        angle = rng.randrange(FULL_TURN) * math.tau / FULL_TURN
-        destinations.append((chosen, (node.x + math.sin(angle) * distance, node.y + math.cos(angle) * distance)))
+        angle = rng.randrange(FULL_TURN)
+        # notes/script_spawn_move.md 8.3: (COS[a] * d >> 8, -(SIN[a] * d) >> 8) with truncated tables and
+        # floor shifts.
+        cos_a = int(256 * math.cos(angle * math.tau / FULL_TURN))
+        sin_a = int(256 * math.sin(angle * math.tau / FULL_TURN))
+        destinations.append((chosen, (node.x + ((cos_a * distance) >> 8), node.y + ((-(sin_a * distance)) >> 8))))
         start = chosen + 1
     return destinations

@@ -141,19 +141,15 @@ class ScatterRadiusEdgeTests(unittest.TestCase):
 
 class ScatterFormationStateTests(unittest.TestCase):
 
-    def test_given_scattered_models_when_snapped_to_formation_then_they_return_to_their_slots(self):
+    def test_given_scattered_models_when_snapped_to_formation_then_they_stand_on_their_scatter_points(self):
+        # notes/script_spawn_move.md 8.2: Snap places each model at its current target, which right after a
+        # scatter is the scatter destination -- the shipped Scatter; Snap pair teleports them there.
         battle = _battle([_node(700, 600, node_id=2, radius=40)],
-                         [_word(SCATTER), 2, _word(0x1A), 400, _word(0x1C), _word(SNAP), behaviour.END],
+                         [_word(SCATTER), 2, _word(SNAP), _word(0x1A), 400, _word(0x1C), behaviour.END],
                          at=(500, 500))
         regiment = battle.regiments["Peasants"]
-        slots = list(regiment.model_positions())
-        for _ in range(300):
-            battle.tick()
-        self.assertTrue(all(math.hypot(x - 700, y - 600) < 43 for x, y in regiment.model_positions()))
-        for _ in range(600):
-            battle.tick()
-        for (x, y), (sx, sy) in zip(regiment.model_positions(), slots):
-            self.assertLess(math.hypot(x - sx, y - sy), 3.5)
+        battle.tick()
+        self.assertTrue(all(math.hypot(x - 700, y - 600) < 41 for x, y in regiment.model_positions()))
 
     def test_given_a_bf003_style_patrol_loop_when_it_runs_then_models_keep_wandering_inside_the_circle(self):
         # Scatter; Snap; PushPC; Scatter; SetWait 5; Wait; Loop -- the shape of every BF003 peasant script.
