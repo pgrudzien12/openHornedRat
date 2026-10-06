@@ -342,6 +342,29 @@ class BattleNavigationTests(unittest.TestCase):
         self.assertAlmostEqual(moving.positions[0][0], before[0] + moving.x - old_x)
         self.assertAlmostEqual(moving.positions[0][1], before[1] + moving.y - old_y)
 
+    def test_player_peasant_overlap_pushes_the_moving_regiment(self):
+        # notes/bf003_peasant_move_obstruction.md acceptance case 4: an actual overlap pushes the normally
+        # active pair; route filtering is not collision immunity.
+        peasants = Regiment("p", "Peasants", 200, 200, 0, Side.NEUTRAL, models=5, ranks=2)
+        infantry = Regiment("i", "Infantry", 215, 200, 0, Side.PLAYER, models=1, ranks=1,
+                            target_x=350, target_y=200)
+        battle = Battle(500, 500, [peasants, infantry])
+        old = (infantry.x, infantry.y)
+        battle._resolve_collisions()
+        self.assertNotEqual((infantry.x, infantry.y), old)
+
+    def test_any_allied_unit_gives_the_same_route_decision_as_peasants(self):
+        # Acceptance case 5: the rule is about side, state and footprint, not about Peasants.
+        decisions = []
+        for name, sprite in (("Peasants", "peasant"), ("Allied Dwarfs", "dwarf")):
+            mover = Regiment("m", "Infantry", 100, 200, 128, Side.PLAYER, models=1, ranks=1)
+            ally = Regiment("a", name, 200, 200, 384, Side.NEUTRAL, models=5, ranks=2, sprite=sprite)
+            battle = Battle(500, 500, [mover, ally])
+            goal = (350, 200)
+            decisions.append((battle.route_unit_relation(mover, ally, False),
+                              battle._steering_target(mover, goal, ("move", *goal))))
+        self.assertEqual(decisions[0], decisions[1])
+
     def test_obstruction_scan_uses_authored_object_order(self):
         from whshr import steering
         obstacles = [steering.Footprint("far", 300, 100, 20), steering.Footprint("near", 170, 100, 20)]
