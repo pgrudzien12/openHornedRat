@@ -164,20 +164,20 @@ order, not a per-map route-selection script. If no usable guide candidate exists
 the requested destination remains the point target; later boundary correction
 can keep the unit from reaching it.
 
-**Scenery and unit avoidance.** The first blocking live footprint found in
-collision-object order along the current leg prompts two trial detours, one
-on each steering side. This need not be the nearest blocker. Each trial
-adds four times its turning angle (in the game's 512-units-per-turn scale) plus
-the distance advanced; its final straight distance to the waypoint also counts.
-A trial step outside the permitted movement regions adds 12,000. A side's trial
-stops after it clears the detected obstructions or its accumulated trial cost
-exceeds 5,999. The shorter trial score wins; an exact tie keeps the *second*
-side tested. Which screen side that is depends on the initially detected
-obstruction and facing. Only when **both final scores are at least 12,000** does
-the route attempt give up. Passing the 5,999 trial cutoff alone does not mean
-the order is rejected: the shorter, still affordable side can be tried. Live
-steering tests obstacles again as the unit moves, so a moving regiment can
-change the path or cause another route attempt.
+**Scenery and unit avoidance.** The full mechanism is in `obstacle_steering.md`. In short:
+- The first blocking footprint in collision-object order (cone, corridor and 256-unit look-ahead tests, from the
+  front-rank point) prompts a **route plan** of two trial detours: the natural side first, then the opposite side.
+- Each trial step steers to a point `D/2` along a heading 1.25 × the obstacle's angular half-width off its bearing,
+  and adds four times the turn (in 1/512 of a turn) plus that step's length. The final straight distance to the
+  waypoint also counts.
+- If a step's **steer point** lies outside the permitted movement regions, the trial's score **becomes** 12,000
+  and the trial ends. The path to the steer point and the final leg are not tested against boundaries.
+- A trial stops when nothing blocks any more or its cost exceeds 5,999. The lower score wins; an exact tie keeps
+  the second (opposite) side. The plan fails only when **both** scores are at least 12,000.
+- The plan runs only when the order is issued, at each new waypoint, and when live steering's steer point leaves
+  the permitted area. It does not run every update.
+- Between plans, **live steering** recomputes the heading every update on the remembered side. A moving regiment
+  whose re-plan fails pauses 54 updates and keeps its order. It is not cancelled.
 
 Unit footprints first pass a relationship and movement filter: allied-side
 units, including player infantry and neutral Peasants, can be passed over when

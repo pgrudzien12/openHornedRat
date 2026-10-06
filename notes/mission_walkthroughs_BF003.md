@@ -25,7 +25,7 @@
 
 ### Phase 2: Goblin Wolfriders (Hidden Reinforcement)
 - **Unit Type:** Fast cavalry
-- **Trigger:** Appears ~9 seconds (60 ticks) into the battle
+- **Script trigger:** `MoveToNode 2` follows a 60-tick wait after battle start (nominally ~6 seconds at 100 ms/tick)
 - **Deployment Location:** Node 2
 - **AI Behavior:** Aggressive (TrackThreat), threat range 400 (wider than Stickers)
 - **Tactics:** Flanking cavalry attack after initial melee starts
@@ -59,9 +59,9 @@ The three peasant groups are non-combatants that must be protected. They are pos
 
 **Peasants** scatter around their assigned nodes and enter patrol behavior.
 
-### 0:09 (60 ticks) — Reinforcements Arrive
+### ~0:06 (60 ticks) — Wolfrider Move Order
 
-**Goblin Wolfriders** become active and move to Node 2. This brings fresh cavalry pressure to the battlefield. The cavalry has a wider threat range (400 vs. Stickers' 240), making them more dangerous from range.
+**Goblin Wolfriders** receive `MoveToNode 2` after the wait. The static script establishes the order time, not the exact position or visibility at that instant. They have a wider threat range (400 vs. Stickers' 240).
 
 ### Ongoing Combat
 
@@ -75,8 +75,8 @@ The player must manage two priorities:
 
 ### Enemy AI
 
-- **Initial Phase (0–9 sec):** Single heavy unit (Stickers) applies focused pressure
-- **Reinforcement Phase (9+ sec):** Cavalry with wider threat range forces spread defense
+- **Initial Phase (before the Wolfrider move order):** Stickers apply focused pressure
+- **After the Wolfrider move order:** Cavalry with wider threat range forces spread defense
 - **Both units use TrackThreat behavior,** meaning they will pursue routed enemies and seek highest-threat targets
 
 ### Peasant Vulnerability
@@ -88,7 +88,7 @@ The player must manage two priorities:
 ### Recommended Tactics
 
 1. **Early Response:** Deploy forces to meet Stickers immediately and prevent it from reaching peasant positions
-2. **Anticipate Reinforcements:** Position reserves or keep forces in reserve to handle Wolfriders at ~9 seconds
+2. **Anticipate Reinforcements:** Position reserves or keep forces in reserve; the Wolfrider move order is scripted after 60 battle ticks (~6 seconds nominally)
 3. **Protect Central Nodes:** Peasants at nodes 2 and 3 are closest to expected cavalry approach; prioritize defense there
 4. **Block Routes:** Use terrain and unit positioning to channel enemy forces away from peasant clusters
 
@@ -120,4 +120,3 @@ A unit is considered protected if:
 3. **Morale effects:** Do peasants route if friends are killed nearby?
 4. **Rally behavior:** Can routed peasants rally, or do they flee immediately?
 5. **Time limit:** Is there a turn limit, or does the battle end when enemies are defeated?
-
