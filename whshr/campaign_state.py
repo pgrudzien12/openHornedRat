@@ -281,16 +281,19 @@ class CampaignState:
         self._sync_army()
 
     def apply_army_book(self, model: "BookModel") -> None:
-        """Army Records Done: the hired flags, men taken as reinforcements and (money variant) the coffers and
-        marching list are kept; the company file is rewritten when anything changed (notes/builtin_widgets.md §2.3)."""
+        """Army Records Done: save company changes and append new hires to the existing march
+        (notes/native-windows.md §10.3.6)."""
         if model.dirty:
             self.company = tuple(with_hired(regiment, model.hired[whoami]) for whoami, regiment in model.company.items())
             self.reinforcements = dict(model.ledger.available)
             self._sync_army()
         if model.pays:
             self.coffers = model.coffers
-            self.march_units = set(model.selection)
-            self.march_order = self.ordered_march_units
+            if model.dirty:
+                prior_order = self.ordered_march_units
+                additions = tuple(whoami for whoami in model.selection if whoami not in self.march_units)
+                self.march_units.update(additions)
+                self.march_order = (*prior_order, *additions)
 
     def abort_army_book(self, model: "BookModel") -> None:
         """Army Records Abort: nothing is written, but a paying book already charged every click, so its coffers

@@ -50,9 +50,11 @@ class RosterBook:
         self.hired: dict[int, bool] = {whoami: regiment.hired or whoami == ALWAYS_FORCED_WHOAMI
                                        for whoami, regiment in self.company.items()}
         self.hired_at_open = dict(self.hired)
-        # HireOnly clears the marching list first, then only the forced regiment is on it.
-        self.selection: list[int] = [whoami for whoami, regiment in self.company.items()
-                                     if whoami == ALWAYS_FORCED_WHOAMI and not regiment.destroyed]
+        # HireOnly starts with an empty list of new hires; Done merges it into the existing march.
+        # The money-free book retains the forced regiment in its local selection.
+        self.selection: list[int] = ([] if pays else
+                                     [whoami for whoami, regiment in self.company.items()
+                                      if whoami == ALWAYS_FORCED_WHOAMI and not regiment.destroyed])
         self.ledger = ReinforcementLedger(self.company, reinforcements)
 
     @property

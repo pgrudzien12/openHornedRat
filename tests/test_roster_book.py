@@ -37,7 +37,7 @@ class HireOnlyBookTests(unittest.TestCase):
 
         self.assertTrue(model.hired[5])
         self.assertEqual(model.coffers, 1000 - 120)
-        self.assertEqual(model.selection, [2, 5])
+        self.assertEqual(model.selection, [5])
 
     def test_given_a_regiment_hired_this_visit_when_fired_then_the_price_is_refunded(self):
         model = book([regiment(2, for_hire=False), regiment(5, hired=False, base_price=12)])
@@ -47,7 +47,7 @@ class HireOnlyBookTests(unittest.TestCase):
 
         self.assertFalse(model.hired[5])
         self.assertEqual(model.coffers, 1000)
-        self.assertEqual(model.selection, [2])
+        self.assertEqual(model.selection, [])
 
     def test_given_a_regiment_already_hired_when_the_book_opened_then_it_cannot_be_fired(self):
         model = book([regiment(2, for_hire=False), regiment(6, hired=True)])
@@ -96,7 +96,7 @@ class HireOnlyBookTests(unittest.TestCase):
 
         self.assertFalse(model.hired[5])
         self.assertEqual(model.coffers, 1000 - 120)  # the original charged every click at once
-        self.assertEqual(model.selection, [2])
+        self.assertEqual(model.selection, [])
 
     def test_given_nothing_changed_then_the_book_is_not_dirty(self):
         model = book([regiment(2, for_hire=False), regiment(5, hired=False)])
@@ -260,8 +260,32 @@ class CampaignRosterTests(unittest.TestCase):
         self.assertTrue(by_whoami[5].hired)
         self.assertEqual(by_whoami[6].models, 10)
         self.assertEqual(campaign.coffers, 500 - 120)
-        self.assertEqual(campaign.march_units, {2, 5})
+        self.assertEqual(campaign.march_units, {5})
         self.assertEqual(campaign.reinforcements, {6: 1})
+
+    def test_given_holst_hire_then_existing_infantry_stays_in_the_marching_army(self):
+        company = [regiment(2, for_hire=False), regiment(3, for_hire=False),
+                   regiment(27, hired=False, base_price=12)]
+        campaign = self._campaign(company)
+        campaign.march_units = {2, 3}
+        campaign.march_order = (2, 3)
+        model = RosterBook(campaign.company, coffers=campaign.coffers, reinforcements={}, pays=True)
+        model.toggle_hired(27)
+
+        campaign.apply_army_book(model)
+
+        self.assertEqual(campaign.ordered_march_units, (2, 3, 27))
+        self.assertEqual(campaign.march_units, {2, 3, 27})
+
+    def test_given_unchanged_hire_book_then_done_preserves_the_marching_army(self):
+        campaign = self._campaign([regiment(2, for_hire=False), regiment(3, for_hire=False)])
+        campaign.march_units = {2, 3}
+        campaign.march_order = (2, 3)
+        model = RosterBook(campaign.company, coffers=campaign.coffers, reinforcements={}, pays=True)
+
+        campaign.apply_army_book(model)
+
+        self.assertEqual(campaign.ordered_march_units, (2, 3))
 
     def test_given_an_aborted_paying_book_then_the_hire_is_undone_but_the_coffers_stay_charged(self):
         campaign = self._campaign([regiment(2, for_hire=False), regiment(5, hired=False, base_price=12)])
