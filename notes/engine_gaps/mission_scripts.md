@@ -67,6 +67,15 @@ separately from the screen's deployment/normal-play phase.
   tick; a script broadcast (`SetActionState`, `PlayUnitAnimation`) overrides that derivation until the unit's
   activity changes (move/turn start or halt, charge, melee, rout, re-form), approximating the original's
   "request on state change, last write wins".
+- Shooting (2026-10-06, `notes/script_shooting.md`): with behaviour scripts running the engine orders no volley of
+  its own; player Fire orders become the shooter events 0x1E/0x1F/0x20/0x21 (independent Archers 0x24/0x25) and every
+  ordinary projectile is launched by `FireAtTarget`/`FireAt90PercentRange` through `ranged.launch_shot`. Scriptless
+  battles keep the engine-driven volleys of `whshr/ranged.py`.
+- Engagement (2026-10-06, `notes/script_behaviours.md` part 2): with scripts running, touching footprints only raise
+  contact events (0x0B); a fight starts only from the contact handler (`Query 8`) through `Battle.engage_requests`.
+  Units whose handler never reaches `Query 8` do not engage from their own contacts (no fallback, as in the original).
+  PROVISIONAL: the collision re-check state is approximated by "moved, charged or pursued this tick"; the latched-move
+  rollback and push-apart changes are not modelled.
 
 ## BF001 chain: what the scripts do and how the engine reads them
 

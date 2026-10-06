@@ -392,15 +392,31 @@ def resolve_contacts(battle: "Battle") -> None:
     by_id = {r.identifier: r for r in active}
     touching: dict[str, set[str]] = {r.identifier: set() for r in active}
     old_touching = {r.identifier: r.melee_touching for r in active}
+    # With behaviour scripts running, touching footprints only raise contact events (0x0B); a fight starts only
+    # when a unit's contact handler asks for it (Battle.engage_requests; notes/script_behaviours.md 2.0, 2.10).
+    scripted = battle.interpreter is not None
+    contacts: list[tuple["Regiment", "Regiment"]] = []
     for i, first in enumerate(active):
         for second in active[i + 1:]:
             if not may_engage(first, second):
                 continue
             if formation.penetrates(first.block(), second.block()):
+                if scripted:
+                    contacts.append((first, second))
+                    continue
                 if first.camp == second.camp:
                     _split_scripted_pair(first, second)
                 touching[first.identifier].add(second.identifier)
                 touching[second.identifier].add(first.identifier)
+    pending_counter: dict[str, int] = {}
+    if battle.interpreter is not None:
+        battle.interpreter.raise_contacts(contacts)
+        for joiner_id, owner_id, counter in battle.engage_requests:
+            if joiner_id in by_id and owner_id in by_id:
+                touching[joiner_id].add(owner_id)
+                touching[owner_id].add(joiner_id)
+                pending_counter[joiner_id] = counter
+        battle.engage_requests.clear()
 
     for identifier, neighbours in touching.items():
         regiment = by_id[identifier]
@@ -472,7 +488,10 @@ def resolve_contacts(battle: "Battle") -> None:
                 # model at a time, so only the first 1.5 x frontage models to strike get the bonus.
                 # Re-engaging an opponent this regiment was already recorded fighting stores 0 instead.
                 opponent = regiment.attack_target
-                if opponent in touching[identifier]:
+                if scripted:
+                    if identifier in pending_counter:
+                        regiment.charge_counter = pending_counter[identifier]
+                elif opponent in touching[identifier]:
                     if opponent == regiment.last_fought_opponent:
                         regiment.charge_counter = 0
                     else:

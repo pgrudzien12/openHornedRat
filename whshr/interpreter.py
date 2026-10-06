@@ -157,6 +157,10 @@ class UnitScriptState:
     # A passed fear test spares further fear tests until the next charge clears it (game_rules.md "Fear and
     # terror"; notes/script_grid_events.md 0).
     fear_passed: bool = False
+    # The last unit this one was recorded touching, and the one-tick contact latch that stops further contact
+    # events until the handler or a clear step releases it (notes/script_behaviours.md 2.1, 2.5).
+    contact_record: str | None = None
+    contact_latch: bool = False
     hop_counter: int = 0  # squig hops left before a rest (FanaticJump/FanaticRelease, notes/script_spawn_move.md 1)
     # (see op_SetBehaviour -- there is no confirmed public evidence for when/how often a declared
     # library behaviour like 15/TrackThreat actually gets invoked versus a unit's own script opcodes
@@ -380,6 +384,51 @@ class ScriptInterpreter:
     def _is_idle(regiment: "Regiment") -> bool:
         return not (regiment.moving or regiment.waypoints or regiment.attack_target is not None
                     or regiment.turn_order_key is not None or regiment.routing or regiment.in_melee)
+
+    def raise_contacts(self, contacts: list[tuple["Regiment", "Regiment"]]) -> None:
+        """The collision pass with scripts running (notes/script_behaviours.md 2.2): for each touching pair, a unit
+        that moved or charged this tick (PROVISIONAL stand-in for the collision re-check state) runs the
+        fear-on-contact test and, unless latched, gets event 0x0B (checked) with the other unit as its contact
+        record; a troops regiment touched gets the reciprocal 0x0B. Marked units are not touched at all. A latched
+        unit that touches nothing any more is released. Not modelled: push-apart (the engine's own), contact
+        attacks on routers, wagon event 0x27 and the latched-move rollback."""
+        touching: set[str] = set()
+        for first, second in contacts:
+            if self._leaving(first) or self._leaving(second):
+                continue
+            touching.update((first.identifier, second.identifier))
+            if first.melee_group is not None and first.melee_group == second.melee_group:
+                continue
+            for mover, other in ((first, second), (second, first)):
+                if not self._rechecks(mover):
+                    continue
+                self._contact_fear(mover, other)
+                self._record_contact(mover, other)
+                if not (other.is_wagon or other.hud_class in ("art", "mon")):
+                    self._record_contact(other, mover)
+        for unit_id, state in self.event_bus.unit_states.items():
+            if state.contact_latch and unit_id not in touching:
+                state.contact_latch = False
+
+    @staticmethod
+    def _rechecks(unit: "Regiment") -> bool:
+        """PROVISIONAL collision re-check state: the unit moved, charged or pursued this tick."""
+        return unit.moving or bool(unit.waypoints) or unit.attack_target is not None
+
+    def _contact_fear(self, mover: "Regiment", other: "Regiment") -> None:
+        state = self.event_bus.unit_states.get(mover.identifier)
+        if state is None or mover.routing or not self._hostile(mover, other) or state.fear_passed:
+            return
+        if not self._may_engage(mover, other, state, self.battle.rng):
+            state.current_target = (other.identifier, 0)
+            self.event_bus.queue_event(mover.identifier, Event(code=0x0D), checked=True)
+
+    def _record_contact(self, unit: "Regiment", other: "Regiment") -> None:
+        state = self.event_bus.unit_states.get(unit.identifier)
+        if state is None or state.contact_latch:
+            return
+        state.contact_record = other.identifier
+        self.event_bus.queue_event(unit.identifier, Event(code=0x0B), checked=True)
 
     def raise_charge_events(self) -> None:
         """Queue event 0x07 ("you are being charged") to any regiment an attacker has closed to
@@ -2948,6 +2997,8 @@ class ScriptInterpreter:
                 state.current_target = (other.identifier, 0)
                 self.event_bus.queue_event(unit_id, Event(code=0x0D))
         state.cond_flags = touched
+        if not touched:
+            state.contact_latch = False
         return state.pc + 1
 
     def op_SwitchOpponentInGrid(self, state: UnitScriptState, operand: int | None, script_words: Words,
@@ -2996,8 +3047,8 @@ class ScriptInterpreter:
     def op_Query(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
         """Query N: run AI case N; it always writes the condition, and only cases 1, 3, 6, 7, 9 and 10 can
-        be true (notes/script_queries.md part A). Not modelled: case 8 (the engine resolves contacts in its
-        own engagement pass) and case 18 (no fanatic model); both stay false."""
+        be true (notes/script_queries.md part A); case 8 is the contact handler (notes/script_behaviours.md 2.3).
+        Not modelled: case 18 (no fanatic model); it stays false."""
         cases = {1: self._query_best_threat, 3: self._query_attack_marked, 5: self._query_tell_target,
                  6: self._query_prefer_source, 7: self._query_brace, 8: self._query_contact,
                  9: self._query_assist_friend, 10: self._query_assist_threat, 17: self._query_wander,
@@ -3060,8 +3111,88 @@ class ScriptInterpreter:
         return True
 
     def _query_contact(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
-        """Case 8: always false (the contact handler is the engine's engagement pass here)."""
+        """Case 8, the contact handler (notes/script_behaviours.md 2.3): the only place a fight starts. Always
+        false. Not modelled: the cannot-engage state (Flying Bower) and buildings, which are not units here."""
+        other = self.battle.regiments.get(state.contact_record or "")
+        if other is None or not other.active or other.routing:
+            return False
+        state.contact_latch = True
+        current = state.current_target[0] if state.current_target else None
+        if other.is_wagon or other.hud_class == "art":
+            if other.identifier == current:
+                self._engage(unit, other, counter=0, plain=True)
+            elif self._hostile(unit, other):
+                self._redirect(state, unit, other, current)
+            return False
+        if not self._hostile(unit, other) and other.identifier != current:
+            state.contact_latch = False
+            return False
+        if unit.attack_target is not None:  # charging or pursuing
+            if other.identifier != current:
+                self._redirect(state, unit, other, current)
+            elif not self._engage(unit, other):
+                self.event_bus.queue_event(other.identifier, Event(code=0x0C, source=unit.identifier), checked=True)
+        elif current is None:
+            if not unit.routing:
+                state.current_target = (other.identifier, 0)
+                self.event_bus.queue_event(other.identifier, Event(code=0x07, source=unit.identifier), checked=True)
+            state.contact_latch = False
+        elif other.identifier != current:
+            self.event_bus.queue_event(current, Event(code=0x1A, source=unit.identifier), checked=True)
+            if not self._engage_new(unit, other):
+                self.event_bus.queue_event(other.identifier, Event(code=0x0C, source=unit.identifier), checked=True)
+            state.current_target = (other.identifier, 0)
+            state.contact_latch = False
+        elif not self._engage_new(other, unit):
+            self.event_bus.queue_event(unit.identifier, Event(code=0x0C, source=unit.identifier), checked=True)
         return False
+
+    def _redirect(self, state: UnitScriptState, unit: "Regiment", other: "Regiment", current: str | None) -> None:
+        """REDIRECT: the unit charges the contacted unit instead (0x1A to the old target, 0x07 to the new one)."""
+        if current is not None:
+            self.event_bus.queue_event(current, Event(code=0x1A, source=unit.identifier), checked=True)
+        state.current_target = (other.identifier, 0)
+        if not unit.anchored:
+            unit.attack_target = other.identifier
+        self.event_bus.queue_event(other.identifier, Event(code=0x07, source=unit.identifier), checked=True)
+        state.contact_latch = False
+
+    def _engage_new(self, first: "Regiment", second: "Regiment") -> bool:
+        """ENGAGE_NEW(x, y): x joins y's fight when y already fights, else y joins x."""
+        if second.in_melee:
+            return self._engage(first, second)
+        return self._engage(second, first)
+
+    def _engage(self, joiner: "Regiment", owner: "Regiment", counter: int | None = None, plain: bool = False) -> bool:
+        """ENGAGE_AS / ENGAGE_PLAIN (notes/script_behaviours.md 2.3): refused when either is broken; a joiner
+        already fighting succeeds without change (the double-engagement guard); otherwise the joiner joins the
+        owner's fight (or one created around the owner) with a charge counter of floor(1.5 x frontage) (0 for a
+        plain engagement), targets the owner (0x1A to its old target), 0x08 goes to the owner when the joiner
+        was charging, and 0x0A to both. The grid itself is built by combat.resolve_contacts."""
+        if joiner.routing or owner.routing:
+            return False
+        if joiner.in_melee:
+            return True
+        joiner_state = self.event_bus.unit_states.get(joiner.identifier)
+        owner_state = self.event_bus.unit_states.get(owner.identifier)
+        charging = joiner.attack_target is not None
+        if counter is None:
+            counter = int(1.5 * joiner.frontage)
+        self.battle.engage_requests.append((joiner.identifier, owner.identifier, counter))
+        if joiner_state is not None:
+            current = joiner_state.current_target[0] if joiner_state.current_target else None
+            if current != owner.identifier:
+                if current is not None:
+                    self.event_bus.queue_event(current, Event(code=0x1A, source=joiner.identifier), checked=True)
+                joiner_state.current_target = (owner.identifier, 0)
+        if plain and owner_state is not None:
+            owner_state.current_target = (joiner.identifier, 0)
+        if charging and not plain:
+            self.event_bus.queue_event(owner.identifier, Event(code=0x08, source=joiner.identifier), checked=True)
+        self.event_bus.queue_event(owner.identifier, Event(code=0x0A, source=joiner.identifier), checked=True)
+        self.event_bus.queue_event(joiner.identifier, Event(code=0x0A, source=owner.identifier), checked=True)
+        joiner.in_melee = owner.in_melee = True
+        return True
 
     def _assist(self, state: UnitScriptState, unit: "Regiment", target_id: str | None, distance: int) -> bool:
         if target_id is None or state.current_target is not None or not distance < state.threat_range:

@@ -146,8 +146,9 @@ class RaiseChargeEventsTests(unittest.TestCase):
         battle.tick()
 
         target_state = battle.event_bus.unit_states["target"]
-        self.assertEqual(len(target_state.event_queue), 1)
-        self.assertEqual(target_state.event_queue[0].code, 0x07)
+        # The blocks overlap, so the contact pass also sends the reciprocal contact event 0x0B
+        # (notes/script_behaviours.md 2.2); the charge event is raised once.
+        self.assertEqual(sorted(event.code for event in target_state.event_queue), [0x07, 0x0B])
 
     def test_far_away_attack_target_does_not_yet_raise_the_event(self):
         # game_rules.md "Charge": a real charge only reaches `12 * (s_rlmv + 1)` units -- picking a

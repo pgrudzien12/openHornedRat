@@ -563,6 +563,9 @@ class Battle:
             list(script_nodes) if script_nodes is not None
             else [node_table.ScriptNode(x, y, key) for key, (x, y) in self.nodes.items()])
         self.fights: dict[str, combat.Fight] = {}  # group id -> {"next_test_turn", "tally": {True/False}, "breakdown": {...}}
+        # Engagements asked for by the contact handler (Query 8) this tick: (joiner, owner, charge counter). With
+        # scripts running, these are the only way a fight starts (notes/script_behaviours.md 2.0).
+        self.engage_requests: list[tuple[str, str, int]] = []
         self.fight_seq = 0  # counter for fresh whshr.combat fight group ids
         self.result: str | None = None  # None while the battle is ongoing, else "victory" or "defeat"
         # A battle only has a win/lose condition once it actually has both sides (movement-only tests
