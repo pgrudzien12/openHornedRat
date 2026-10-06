@@ -2411,8 +2411,8 @@ WFB: D6 S5 hits per unit touched, 2D6" moves, dies on a double; here damage scal
 - **Checks** (`LaunchEffect`): fewer than 64 active effects; the caster can cast (class Wizard,
   or a leader with `S_BalWeap` 16, e.g. the Orc shaman on a Wyvern); target point within `EffectRange` of the
   unit centre and within **±50° of facing**; unit-target spells need a unit under the point. **No line of
-  sight, no casting roll, no miscast, no reload**; on failure `GMTXT 2021` "…attempted to cast … but failed" and
-  the power is lost. The 2D6 inside `LaunchEffect` is the bolt count of Storm of Shemtek.
+  sight, no casting roll, no miscast, no reload**; on failure `GMTXT 2021` "…attempted to cast … but failed" (shown only
+  for player-army casters) and the power is lost (`script_magic.md`). The 2D6 inside `LaunchEffect` is the bolt count of Storm of Shemtek.
 - 🟡 Holding **Shift** at launch switches several spells to alternative projectiles (Flying Bower then does S3
   hits); it reads the physical keyboard, so it affects AI casts too (probably a developer toggle).
 
@@ -2491,7 +2491,8 @@ spell of its list that it can afford and whose rule passes (`AIChooseSpell`), tu
 casts. The same scripts run for player wizards given an attack order, so they cast automatically from the
 player's pool. Wind Blast and Sapphire Arch are never chosen. The area-spell rule (Conflagration, Flying Bower, Tangling Thorn, Flock of Doom, Da Krunch) is **inverted**:
 `NonFriendNearPoint` returns 1 whenever a non-friendly unit is within the radius of the point, and the target unit
-itself is at distance 0, so the **AI never casts these spells at a unit target**.
+itself is at distance 0, so the **AI never casts these spells at a unit target** (the only exception is a target
+temporarily not counted as a ground unit; full chooser rules in `script_magic.md` §2).
 
 ## 9. Deviations from Warhammer Fantasy Battle 4th edition
 
