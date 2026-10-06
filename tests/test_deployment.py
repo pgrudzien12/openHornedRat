@@ -156,6 +156,42 @@ class DeploymentPlacementTests(unittest.TestCase):
         battle.tick()
         self.assertGreater(self.centre(r)[0], 200)
 
+    def test_given_solid_tree_object_then_deployment_drag_pushes_the_regiment_out(self):
+        battle = self.battle()
+        regiment = battle.regiments["player0"]
+        tree = {"name": "Tree", "x": 190, "y": 100, "radius": 30,
+                "status": ["os_active", "os_solid"]}
+        battle.objects.append(tree)
+        battle.begin_deployment_drag("player0", 100, 100)
+        battle.update_deployment_drag(160, 100)  # first-zone acquisition proposes (190, 100)
+        battle.tick()
+        cx, cy = self.centre(regiment)
+        self.assertAlmostEqual(cy, 100)
+        self.assertGreater(cx, 220)
+        self.assertGreaterEqual(cx - tree["x"], tree["radius"] + regiment.bounding_radius() - 0.1)
+
+    def test_given_non_solid_tree_then_deployment_drag_keeps_the_proposed_centre(self):
+        for status in (["os_active"], ["os_solid"]):
+            with self.subTest(status=status):
+                battle = self.battle()
+                regiment = battle.regiments["player0"]
+                battle.objects.append({"name": "Tree", "x": 190, "y": 100,
+                                       "radius": 30, "status": status})
+                battle.begin_deployment_drag("player0", 100, 100)
+                battle.update_deployment_drag(160, 100)
+                battle.tick()
+                self.assertEqual(self.centre(regiment), (190, 100))
+
+    def test_given_tree_at_zone_edge_then_solid_push_follows_clipping(self):
+        battle = self.battle([region(0, 0, 200, 200)])
+        regiment = battle.regiments["player0"]
+        battle.objects.append({"name": "Tree", "x": 190, "y": 100, "radius": 30,
+                               "status": ["os_active", "os_solid"]})
+        battle.begin_deployment_drag("player0", 100, 100)
+        battle.update_deployment_drag(190, 100)
+        battle.tick()
+        self.assertGreater(self.centre(regiment)[0], 200)
+
     def test_given_inverted_region_then_outside_is_allowed_and_inside_target_is_clipped(self):
         battle = self.battle([region(200, 200, 400, 400, ["bnd_INVSOLID"])])
         r = battle.regiments["player0"]

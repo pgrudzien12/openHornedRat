@@ -147,6 +147,9 @@ all collision adjustments. Collision correction follows zone clipping, with up t
 correction passes and **no final deployment-zone clamp**. A collision may therefore push
 the centre outside the zone, and the next placement update may pull it back before another
 collision correction. This does not guarantee complete separation after a difficult overlap.
+The dragged regiment is corrected against active solid object circles as well as other
+regiments on each pass. A visible tree without an authored solid object circle does not
+block placement by itself (see `movement_boundaries_route_finding.md`).
 Exact visible outcomes and point-on-edge inclusion remain in §7.
 
 The remembered region is shared across selections and drags for the deployment phase;

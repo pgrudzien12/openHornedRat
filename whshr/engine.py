@@ -1924,6 +1924,8 @@ class Battle:
             for regiment in regiments:
                 self._correct_boundaries(regiment)
                 self._correct_solid_objects(regiment)
+        else:
+            self._correct_solid_objects(self.regiments[deployment_id])
         for i, first in enumerate(regiments):
             for second in regiments[i + 1:]:
                 if first.in_melee or second.in_melee:
