@@ -59,6 +59,14 @@ separately from the screen's deployment/normal-play phase.
 - `whshr/ai.py`'s placeholder `ENGAGE_DISTANCE` rule should be replaced by the interpreter driving standard
   library behaviour 15 (`TrackThreat`) for AI-controlled units, once threat scoring (already documented in
   game_rules.md's "Routes, collisions and visibility" section) is ported.
+- Superseded (2026-10-06, `notes/threat_events_nodes.md` part A 4.1): the `AttackNearest*` family no longer
+  writes the current target or starts a charge itself. It queues event 0x04 ("attack target", source = the pick)
+  to the searching unit, and the library 0x04 handler (`TakeEventTarget`, then attack script 158) takes it. A
+  unit whose script has no 0x04 handler therefore no longer attacks on `AttackNearestEnemy` alone.
+- Script animation (`notes/script_animation_sound.md` 0.1): the engine still derives each model's action every
+  tick; a script broadcast (`SetActionState`, `PlayUnitAnimation`) overrides that derivation until the unit's
+  activity changes (move/turn start or halt, charge, melee, rout, re-form), approximating the original's
+  "request on state change, last write wins".
 
 ## BF001 chain: what the scripts do and how the engine reads them
 
