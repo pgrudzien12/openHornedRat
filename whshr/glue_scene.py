@@ -233,13 +233,14 @@ class GlueScene(Scene):
         if isinstance(event, GlueInput):
             if event.kind == "hotspot-release" and self._caravan_open():
                 return self._leave_caravan(event.target)
+            if event.kind == "hotspot-release" and self.window is not None and event.target:
+                if event.target.casefold() == "encyclopediabook":
+                    return self._open_encyclopedia()
+                if event.target.casefold() == "magicbook":
+                    return self._open_magic_book()
             if event.kind == "hotspot-release" and self.window == "STARTCARAVAN" and event.target:
                 if event.target.casefold() == "armybook":
                     return self._open_army_book(hire_only=False)
-                if event.target.casefold() == "magicbook":
-                    return self._open_magic_book()
-                if event.target.casefold() == "encyclopediabook":
-                    return self._open_encyclopedia()
                 if event.target.casefold() == "loadsavewindow":
                     return self._open_save_dialog()
                 if event.target.casefold() == "abortgame":
