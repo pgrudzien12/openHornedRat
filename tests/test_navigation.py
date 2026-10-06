@@ -448,3 +448,20 @@ class MarkedUnitCollisionTests(unittest.TestCase):
         old = (infantry.x, infantry.y)
         battle._resolve_collisions()
         self.assertEqual((infantry.x, infantry.y), old)
+
+
+class ReformCasualtyTests(unittest.TestCase):
+    def test_a_casualty_during_a_re_form_does_not_crash_its_completion(self):
+        # Playtest crash: KeyError on a slot of the old layout when the re-form completed after a model died.
+        from whshr import combat
+        unit = Regiment("u", "U", 500, 500, 0, Side.PLAYER, models=12, ranks=3, speed_per_tick=2.25)
+        battle = Battle(1000, 1000, [unit], seed=1995)
+        unit.model_positions()
+        battle.reform_to_ranks(unit, 2)
+        combat.kill_models(unit, [0], battle, 2)
+        for _ in range(600):
+            battle.tick()
+            if not unit.reforming:
+                break
+        self.assertFalse(unit.reforming)
+        self.assertEqual(len(unit.positions), unit.models)

@@ -1871,6 +1871,12 @@ class Battle:
             # would immediately send every model chasing a different slot again.
             raster_index = {offset: index for index, offset in
                             enumerate(formation.block_slots(regiment.models, regiment.ranks))}
+            if any(slot not in raster_index for slot in regiment.reform_slots):
+                # A casualty during the re-form left slots of the old, larger layout: re-slot the survivors into the
+                # current layout from where they stand instead of mapping slots that no longer exist.
+                regiment.reform_slots = _slot_offsets(formation.reform_assignment(
+                    regiment.x, regiment.y, regiment.direction, regiment.models, regiment.ranks, regiment.positions))
+                return True
             order = sorted(range(len(regiment.reform_slots)), key=lambda i: raster_index[regiment.reform_slots[i]])
             regiment.positions = [regiment.positions[i] for i in order]
             regiment.melee_models = [regiment.melee_models[i] for i in order]
