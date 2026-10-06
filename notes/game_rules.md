@@ -994,7 +994,7 @@ script each tick (the per-tick script step, called from the battle tick).
 | 0x1B | op 0x53 | enemy routed while not in melee with it | queue 0x19 |
 | 0x1C / 0x1D | the game | hidden unit spotted / was spotted | ops 0x40 / 0x41 |
 | 0x1E | shooting order | missions only | |
-| 0x27 | collision pass | enemy footprint straight ahead | missions only |
+| 0x27 | collision pass | a wagon (rolling stock) touches a footprint within ±45° of its facing (`script_behaviours.md` §2.2) | missions only |
 | 0x2B / 0x2C / 0x2D | order 0x17, casting animation end | cast a spell / launch it / use an item | casting scripts 132, 133, 142 (section 8.8) |
 | 0x31 / 0x32 | Madness | became mad / madness ended | scripts 149 / 168 |
 | 0x34 | movement | destination reached | |
@@ -1642,6 +1642,9 @@ position):
   **penetration**, not mere proximity: there is no "reach" constant and no facing or arc requirement.
   (The 12 / 18 / 24 reach values belong to the contact attacks of section 7.7, not to engagement.)
 
+**Corrected in `script_behaviours.md` Part 2** (exact collision pass, contact handler, latch, which handlers reach
+`Query 8`, charge counter, stationary units); the summary below is kept for orientation.
+
 Engagement is then a **two-step handshake**, not instantaneous. On the first overlapping tick
 the game only records the opponent in `engaged_enemy` and sends event 0x0D (gated by the fear/terror test
 the game and by not being braced); a unit with no prior opponent gets event 0x07 ("you are being
@@ -1651,7 +1654,8 @@ which calls the contact handler the game — and only there, on a **later** cont
 (`unit_flags |= 0x1000000`, cleared on every refusal) stops the handler re-firing every tick of overlap.
 
 **Neither movement nor an order is required** ✅: nothing in the contact path reads a velocity, a
-destination or an order code, so two stationary touching enemies engage as well. A charge or pursuit
+destination or an order code, so two stationary touching enemies engage as well — **but only if a collision pass runs for one of them** (a unit
+that stands still runs none; `script_behaviours.md` §2.6). A charge or pursuit
 order (`unit_flags & 0x8080`) only decides *who* receives the `floor(1.5 × frontage)` charge counter and
 whether the defender gets the flank/rear event 8. A charging unit that bumps something that is **not**
 its target is redirected instead (the game: event 0x1A to the old target, 0x07 to the new one,
