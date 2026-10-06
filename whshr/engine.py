@@ -744,8 +744,31 @@ class Battle:
         ``(ranks - 1) * 6`` units behind it along the facing and serves only collision and edge correction."""
         return regiment.x, regiment.y
 
-    def route_unit_relation(self, mover: Regiment, other: Regiment,
-                            trial: bool) -> Literal["block", "ignore", "pause"]:
+    def route_effective_speed(self, regiment: Regiment) -> float:
+        """The speed the route filter compares (notes/obstacle_steering.md section 6): the unit's travel speed while
+        it is not pausing and has a move, flight, pursuit or charge under way; 0 otherwise. PROVISIONAL: the
+        travel speed is the free-move speed, the charge speed while charging and the flight speed while broken."""
+        if regiment.route_pause_ticks > 0:
+            return 0.0
+        if regiment.routing:
+            return regiment.speed_for_mode(FLEEING_K)
+        if regiment.attack_target is not None:
+            return regiment.speed_for_mode(CHARGING_K)
+        if regiment.moving or regiment.waypoints:
+            return regiment.speed_per_tick
+        return 0.0
+
+    def route_heading(self, regiment: Regiment) -> float:
+        """A unit's route heading: towards its steer point while steering, else towards its waypoint, else its
+        facing (notes/obstacle_steering.md section 6)."""
+        point = regiment.avoid_target or ((regiment.target_x, regiment.target_y)
+                                          if regiment.target_x is not None and regiment.target_y is not None else None)
+        if point is None:
+            return float(regiment.direction)
+        return math.atan2(point[0] - regiment.x, point[1] - regiment.y) * 512 / math.tau % 512
+
+    def route_unit_relation(self, mover: Regiment, other: Regiment, trial: bool,
+                            mover_speed: float | None = None) -> Literal["block", "ignore", "pause"]:
         """How `other`'s footprint affects `mover`'s route once the geometric obstacle test has selected it
         (notes/obstacle_steering.md section 3 item 6 and section 6 item 3; notes/bf003_peasant_move_obstruction.md,
         relationship table). "pause" means the mover waits 54 updates (`pause_route`) instead of detouring.
@@ -768,8 +791,11 @@ class Battle:
         if mover.attack_target == other.identifier or (
                 mover.melee_group is not None and mover.melee_group == other.melee_group):
             return "ignore"
-        faster = mover.route_speed > other.route_speed
-        turn = abs(mover.direction - other.direction) % 512
+        # Effective speeds and route headings (notes/obstacle_steering.md section 6); `mover_speed` overrides the
+        # mover's, e.g. 0 for the plan made at the moment of a new order.
+        own_speed = self.route_effective_speed(mover) if mover_speed is None else mover_speed
+        faster = own_speed > self.route_effective_speed(other)
+        turn = abs(self.route_heading(mover) - self.route_heading(other)) % 512
         turn = min(turn, 512 - turn)
         if turn < 64:
             return "block" if faster else "ignore"
@@ -1565,10 +1591,10 @@ class Battle:
         footprints, units = self._route_footprints(regiment, order_key)
         own_radius = float(int(regiment.bounding_radius()))
 
-        def blocks(trial: bool) -> Callable[[steering.Footprint], bool]:
+        def blocks(trial: bool, mover_speed: float | None = None) -> Callable[[steering.Footprint], bool]:
             def test(footprint: steering.Footprint) -> bool:
                 other = units.get(footprint.key)
-                return other is None or self.route_unit_relation(regiment, other, trial) == "block"
+                return other is None or self.route_unit_relation(regiment, other, trial, mover_speed) == "block"
             return test
 
         def permitted(point: Point) -> bool:
@@ -1576,9 +1602,11 @@ class Battle:
                            if boundary.solid or boundary.inverse or (boundary.battle_edge and not fleeing))
 
         if regiment.route_planned_for != (order_key, target):
+            # At a new order the mover has no move under way yet, so its effective speed is 0 (section 6).
+            new_order = regiment.route_planned_for is None or regiment.route_planned_for[0] != order_key
             regiment.route_planned_for = (order_key, target)
             plan = steering.plan(start, int(regiment.direction) % 512, target, footprints, own_radius,
-                                 blocks(True), permitted)
+                                 blocks(True, 0.0 if new_order else None), permitted)
             regiment.route_side = plan.side
             if not plan.ok:
                 self._warn_blocked_route(regiment, order_key, start, target, footprints, own_radius, plan)
@@ -1587,10 +1615,7 @@ class Battle:
         pause_hit = steering.scan(start, target, footprints, own_radius,
                                   lambda fp: fp.key in units and self.route_unit_relation(
                                       regiment, units[fp.key], False) == "pause")
-        # PROVISIONAL: the pause is a rule of live movement (section 6 item 3); at the order a stationary mover's
-        # near same-side unit is simply not an obstacle (notes/bf003_peasant_move_obstruction.md).
-        if (pause_hit is not None and regiment.route_speed > 0
-                and steering.scan(start, target, footprints, own_radius, blocks(False)) is None):
+        if pause_hit is not None and steering.scan(start, target, footprints, own_radius, blocks(False)) is None:
             self.pause_route(regiment)
             return target
         steer = steering.steer(start, target, footprints, own_radius, blocks(False),

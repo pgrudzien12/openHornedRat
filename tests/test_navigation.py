@@ -237,11 +237,13 @@ class BattleNavigationTests(unittest.TestCase):
         goal = (350, 200)
         key = ("move", *goal)
         self.assertEqual(battle._steering_target(mover, goal, key), goal)
-        mover.route_speed = 5
+        mover.target_x, mover.target_y = goal  # moving: its effective speed beats the stationary ally
+        mover.route_planned_for = (key, goal)  # live steering, not the plan at the order
         self.assertIsNotNone(battle._steering_target(mover, goal, key))
         self.assertIsNotNone(mover.avoid_target)
 
-        mover.route_speed = 0
+        mover.target_x = mover.target_y = None
+        mover.route_planned_for = None
         ally.direction = 0  # differing headings: nearby slower units are passed over
         ally.x = 115
         self.assertEqual(battle._steering_target(mover, goal, key), goal)

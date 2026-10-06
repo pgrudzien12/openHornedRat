@@ -190,3 +190,34 @@ class PlanTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CorrectionTests(unittest.TestCase):
+    """notes/obstacle_steering.md section 8 rows added with the trial-rescan and turn-cost answers."""
+
+    def test_bf003_trial_two_rescan_is_replaced_by_the_second_circle(self):
+        # notes/bf003_wolfriders_route.md section 3 step 5: the opposite side meets (1074, 1243) r 59 on the rescan.
+        footprints = [_circle(967, 1221, 67, "object:a"), _circle(1074, 1243, 59, "object:b")]
+        st = steer((1113, 1420), (719, 970), footprints, 30, _all, remembered_side=-1, facing=373)
+        assert st is not None
+        self.assertEqual(st.heading, 222)
+        self.assertEqual(st.distance, 100)  # trunc(sqrt(181.2^2 + 89^2) / 2) = trunc(100.9); the report rounds to ~101
+        self.assertAlmostEqual(st.point[0], 1153, delta=2)
+        self.assertAlmostEqual(st.point[1], 1328, delta=2)
+
+    def test_bf003_plan_still_passes_west(self):
+        footprints = [_circle(967, 1221, 67, "object:a"), _circle(1074, 1243, 59, "object:b")]
+        result = plan((1113, 1420), 373, (719, 970), footprints, 30, _all, lambda p: p[0] <= 1080)
+        self.assertEqual((result.ok, result.side), (True, 1))
+        self.assertGreaterEqual(result.scores[1], 12000)
+
+    def test_trial_turn_cost_is_wrapped(self):
+        # facing 500, steer heading 10: the turn counts 22, not 490 (cost 4 x turn + steer distance).
+        start, waypoint = (0.0, 0.0), (0.0, 400.0)
+        circle = _circle(0, 100, 20)
+        st = steer(start, waypoint, [circle], 10, _all, remembered_side=1, facing=500)
+        assert st is not None
+        result = plan(start, 500, waypoint, [circle], 10, _all, _anywhere)
+        wrapped = min((st.heading - 500) % 512, 512 - (st.heading - 500) % 512)
+        self.assertLess(wrapped, 256)
+        self.assertLess(min(result.scores), 4 * 256 + 400 + 200)

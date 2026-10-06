@@ -1,3 +1,4 @@
+import math
 """BDD scenarios for the route-planning inputs (notes/obstacle_steering.md sections 2, 3, 5, 6 and
 notes/bf003_peasant_move_obstruction.md): reference point, unit relationship filter, route pause."""
 import unittest
@@ -73,18 +74,40 @@ class RouteUnitRelationTests(unittest.TestCase):
         self.mover.melee_group = self.ally.melee_group = "g"
         self.assertEqual(self.rel(self.ally), "ignore")
 
+    @staticmethod
+    def _move(unit):
+        """Give a unit a move along its facing: its effective speed is then its travel speed (section 6)."""
+        angle = unit.direction * math.tau / 512
+        unit.target_x, unit.target_y = unit.x + 100 * math.sin(angle), unit.y + 100 * math.cos(angle)
+
     def test_similar_direction_blocks_only_when_mover_is_faster(self):
         self.ally.direction = 63
         self.assertEqual(self.rel(self.ally), "ignore")  # both stationary
-        self.mover.route_speed = 1.0
+        self._move(self.mover)
         self.assertEqual(self.rel(self.ally), "block")
-        self.mover.route_speed = self.ally.route_speed = 1.0
-        self.assertEqual(self.rel(self.ally), "ignore")
+        self._move(self.ally)
+        self.assertEqual(self.rel(self.ally), "ignore")  # equally fast
 
     def test_opposing_direction_faster_mover_blocks(self):
         self.ally.direction = 64
-        self.mover.route_speed = 1.0
+        self._move(self.mover)
         self.assertEqual(self.rel(self.ally), "block")
+
+    def test_a_stationary_friend_never_pauses_a_moving_mover(self):
+        self.ally.direction = 256
+        self._move(self.mover)
+        self.assertEqual(self.rel(self.ally), "block")
+
+    def test_a_near_friend_moving_as_fast_pauses_the_mover(self):
+        self.ally.direction = 256
+        self._move(self.mover)
+        self._move(self.ally)
+        self.assertEqual(self.rel(self.ally), "pause")
+
+    def test_the_plan_at_a_new_order_treats_the_mover_as_stationary(self):
+        self.ally.direction = 256
+        self._move(self.mover)
+        self.assertEqual(self.battle.route_unit_relation(self.mover, self.ally, True, mover_speed=0.0), "pause")
 
     def test_opposing_direction_near_unit_pauses_using_s_rlmv_not_frontage(self):
         self.ally.direction = 256

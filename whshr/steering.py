@@ -5,19 +5,18 @@ sections 3 (scan), 4 (steering response) and 5 (route plan).  Angles are in
 1/512 of a turn, 0 = +Y, clockwise (128 = +X).
 
 PROVISIONAL choices (the note leaves these open):
-- the running turn total of section 4 starts at 0 and only counts the heading
-  changes between successive steering responses of one call;
+- the running turn total of section 4 adds the plain, unwrapped |previous H - new H|,
+  starting from the facing (the note marks the first baseline open);
 - a hard cap of 64 rescans per steering call is treated like the full-circle
   give-up (safety net, not from the note);
-- ``steer`` does not use ``facing`` (the give-up turn-back heading is applied
-  by ``plan``);
+- the give-up turn-back heading of a trial is applied by ``plan``;
 - a give-up ``Steer`` returned to a live caller carries the straight heading to
   the waypoint, the reference point as its point and the last stored distance;
 - inside a trial the chosen side is forced for every steering response of that
   trial, not only the first;
 - trial give-up point: reference point + 2 * stored distance along facing + 256,
   halved by the table rule (i.e. the stored distance is used as D/2);
-- the trial turn cost uses the literal |H - facing| without angle wrap;
+- the trial turn cost is the wrapped smallest angle between H and the facing (0..256);
 - a trial that ends at the 5,999 limit keeps its score and adds the waypoint
   distance like any other; the loop is also capped at 1000 steps.
 """
@@ -149,11 +148,8 @@ def steer(
     remembered_side: int = 0,
     facing: int = 0,
 ) -> Steer | None:
-    """Steering response (section 4); None when nothing blocks.
-
-    ``facing`` is accepted for the caller's convenience and not used here.
-    """
-    del facing
+    """Steering response (section 4); None when nothing blocks. Each rescan starts again from ``ref`` with the
+    current steer heading and distance, and a later blocker's response replaces the earlier one."""
     hit = scan(ref, waypoint, footprints, own_radius, blocks)
     if hit is None:
         return None
@@ -162,13 +158,13 @@ def steer(
     if side == 0:
         side = 1 if (wp_heading - hit.bearing) % _TURN <= _HALF else -1
     total = 0
-    prev = wp_heading
+    prev = facing % _TURN
     stored = 0
     for _ in range(_MAX_STEERS):
         heading = (hit.bearing + side * ((5 * hit.half_width) >> 2)) % _TURN
         full = math.sqrt(hit.distance**2 + hit.combined_radius**2)
         stored = int(full / 2)
-        total += _diff(heading, prev)
+        total += abs(heading - prev)
         prev = heading
         if total > _TURN:
             return Steer(wp_heading, ref, stored, side, True)
@@ -193,7 +189,7 @@ def _trial(
     face = facing
     score = 0.0
     for _ in range(_MAX_TRIAL_STEPS):
-        st = steer(pos, waypoint, footprints, own_radius, blocks, remembered_side=side)
+        st = steer(pos, waypoint, footprints, own_radius, blocks, remembered_side=side, facing=face)
         if st is None:
             break
         heading = st.heading
@@ -204,7 +200,7 @@ def _trial(
         if not permitted(point):
             score = _FORBIDDEN
             break
-        score += 4 * abs(heading - face) + st.distance
+        score += 4 * _diff(heading, face) + st.distance
         pos = point
         face = heading
         if score > _TRIAL_LIMIT:
