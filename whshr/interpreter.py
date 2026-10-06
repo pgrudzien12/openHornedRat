@@ -2380,6 +2380,63 @@ class ScriptInterpreter:
             regiment.side = side_of_code(operand)
         return state.pc + 2
 
+    def _in_node_area(self, regiment: "Regiment", node: int) -> bool:
+        """The regiment's centre lies in the circle of `[NODES]` entry `node` (0-based file position):
+        dx^2 + dy^2 <= radius^2, inclusive and untruncated; `dir` and status are ignored, and a missing
+        node is never entered (notes/threat_events_nodes.md, part C 1-2 and 4.4)."""
+        if not 0 <= node < len(self.battle.script_nodes):
+            return False
+        area = self.battle.script_nodes[node]
+        return (regiment.x - area.x) ** 2 + (regiment.y - area.y) ** 2 <= area.radius ** 2
+
+    def _units_in_battle(self) -> list[tuple[str, "Regiment"]]:
+        """Every unit not destroyed, fled off the field or removed by a script, in unit-table order;
+        hidden, broken and engaged units included (notes/threat_events_nodes.md, part C 3)."""
+        return [(unit_id, regiment) for unit_id, regiment in self.battle.regiments.items() if regiment.active]
+
+    def op_IfInNodeArea(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IfInNodeArea N: condition := the running unit is in node N's area (notes/threat_events_nodes.md,
+        part C 4.1)."""
+        regiment = self.battle.regiments.get(unit_id)
+        state.cond_flags = regiment is not None and self._in_node_area(regiment, operand or 0)
+        return state.pc + 2
+
+    def op_IfAnyUnitInNodeArea(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IfAnyUnitInNodeArea N: condition := any unit in the battle, of any side and in any state, the
+        running unit included, is in node N's area (notes/threat_events_nodes.md, part C 4.2)."""
+        state.cond_flags = any(self._in_node_area(regiment, operand or 0)
+                               for _, regiment in self._units_in_battle())
+        return state.pc + 2
+
+    def op_IfSideUnitInNodeArea(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IfSideUnitInNodeArea SIDE N EXCLUDE: condition := a unit of the absolute side code SIDE (low
+        byte: 0 player, 64 allied, 128 enemy; low five bits set never match) that shows none of the
+        EXCLUDE unit-flag states (as TestUnitFlags reads them) is in node N's area
+        (notes/threat_events_nodes.md, part C 4.3). Not modelled: building pseudo-units (side 32), which
+        are not regiments here."""
+        side_code = (operand or 0) & 0xFF
+        node = script_words[state.pc + 2] if state.pc + 2 < len(script_words) else -1
+        exclude = script_words[state.pc + 3] if state.pc + 3 < len(script_words) else 0
+        wanted = side_of_code(side_code) if side_code in (0, 0x40, 0x80) else None
+        found = False
+        for other_id, regiment in self._units_in_battle():
+            if regiment.side != wanted or not self._in_node_area(regiment, node):
+                continue
+            other_state = self.event_bus.unit_states.get(other_id)
+            if exclude and other_state is not None:
+                self._mirror_engine_flags(other_id, other_state)
+                if other_state.unit_flags & exclude:
+                    continue
+            elif exclude & BROKEN_FLAG and regiment.routing:
+                continue
+            found = True
+            break
+        state.cond_flags = found
+        return state.pc + 4
+
     def op_IfEventSource(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """IfEventSource: test if current event came from a specific source.
