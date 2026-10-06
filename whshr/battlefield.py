@@ -285,6 +285,9 @@ class Battlefield:
     sheets: dict[str, SpriteSheet]  # troop sprite resource name (casefolded) -> SpriteSheet
     ui_sheets: dict[str, SpriteSheet]  # global HUD and per-unit portrait/banner sheets
     missing_scenery: list[str]
+    effect_meshes: dict[str, Mesh] = field(default_factory=dict)
+    ground_texture_count: int = 0
+    scenery_texture_count: int = 0
 
     @property
     def width(self) -> int:
@@ -401,7 +404,8 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
                 ui_resources.append((resource, base))
                 if resource == banner and base:
                     banner_bases[base] = None
-    for resource, base in (("ICONS", "ICONS"), ("BACKALL", "BACKALL"), ("GENBATT", "GENBATT"), (planmap, planmap),
+    for resource, base in (("ICONS", "ICONS"), ("BACKALL", "BACKALL"), ("GENBATT", "GENBATT"),
+                           (planmap, planmap),
                            (portrait_bg, portrait_bg), *ui_resources):
         loaded_ui = ui_by_base.get(base) if base is not None else None
         if resource and loaded_ui is not None:
@@ -416,5 +420,7 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
             atlas_sheets.append(banner_sheet)
     atlas_size, atlas = build_atlas(atlas_sheets)
     palette = load_rgb_palette(game.binary_file((script["field"]["palette"] or "standard") + ".PAL"))
+    effects = {mesh["name"].split(".")[0].casefold(): mesh for mesh in scenery["meshes"]
+               if mesh["name"].casefold().startswith(("arrows", "boltbur", "flames", "fire", "ex", "spear"))}
     return Battlefield(script, terrain, vertices, size, layers, palette, atlas_size, atlas, sheets, ui_sheets,
-                       sorted(set(missing)))
+                       sorted(set(missing)), effects, len(ground["textures"]), len(scenery["textures"]))

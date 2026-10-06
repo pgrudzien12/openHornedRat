@@ -3,15 +3,16 @@
 
 Controls: arrow keys or WASD pan, Q/E rotate, Page Up/Page Down tilt, mouse wheel zooms, middle-drag
 rotates, Home resets the camera. Left-click any regiment (player or enemy) to select it - a player
-regiment tints yellow and can then be given orders (via the HUD's Move/Attack buttons, or the
+regiment tints yellow and can then be given orders (via the HUD's Move/Attack/Fire buttons, or the
 right-click shortcut below); an enemy regiment only shows its HUD readout/banner/minimap highlight,
-never orders, since whshr.engine.Battle's order_move/order_attack/order_halt and
+never orders, since whshr.engine.Battle's player order guards and
 Hud._button_enabled() both refuse commands for a non-player regiment. Right-drag pans the camera;
 a right-button press and release without dragging is instead a direct move/attack shortcut for the
 current selection, bypassing the HUD buttons. Escape deselects.
 """
 
 from collections import deque
+from array import array
 from collections.abc import Sequence
 from dataclasses import replace
 import math
@@ -23,7 +24,7 @@ import zengl
 
 from .. import animation, picking
 from ..battle3d import SPRITE_DEPTH_BIAS
-from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, sprite_direction, view_angle
+from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, bake_mesh, sprite_direction, view_angle
 from ..camera import BattleCamera
 from ..formation import SPRITE_PIXEL_WORLD_UNITS
 from ..rules import Side
@@ -32,6 +33,7 @@ from ..battle3d import Projection
 from ..battlefield import SpriteSheet
 from ..scenes import SceneEvent
 from .cursors import GameCursors
+from .ranged_sound import MissileSounds
 from .gpu import Gpu
 from .scene_view import SceneView
 from .hud import Hud
@@ -45,15 +47,11 @@ TILT_SPEED = 30.0  # degrees per second
 WHEEL_ZOOM = 0.9
 DRAG_ROTATE = 0.3  # degrees per pixel
 CLICK_DRAG_THRESHOLD = 4  # pixels; a right button press/release closer than this counts as a click
-# notes/game_rules.md "Feedback": 4 custom cursors (default, attack, fire, magic), GMCUR.DLL's 4
-# RT_GROUP_CURSOR resources, IDs 100-103 (notes/pe_resources.md). Confirmed shapes (in-game,
-# 2026): default = hand, attack = sword, fire = bow/arrow (magic's shape not seen yet). The DLL's
-# own group->id mapping is not otherwise named, so which numeric id is which shape is PROVISIONAL
-# and, per the first round of visual testing, WRONG as shipped (100 showed the arrow/fire shape
-# where the hand/default shape was expected) - this table needs the real ids. Get them with
-# `python3 scripts/pe_extract.py "$WARFB/FILE/DLL/GMCUR.DLL" extracted/pe_resources/GMCUR` (repo
-# root), then check extracted/pe_resources/GMCUR/cursor/*.png against groups.json's id lists.
-BATTLE_CURSOR_GROUPS: dict[str, int] = {"default": 100, "attack": 101, "fire": 102, "magic": 103}
+# Public ranged handoff §5: installed GMCUR groups are Fire 100, default 101, Attack 102, Magic 103.
+BATTLE_CURSOR_GROUPS: dict[str, int] = {"default": 101, "attack": 102, "fire": 100, "magic": 103}
+MISSILE_MESH = {"arrow": "arrows1", "arrow_alt": "arrows2", "bolt": "arrows3",
+                "cannon": "spear1", "mortar": "spear2", "rock": "spear3",
+                "diver": "spear4", "bomb": "flames1"}
 BANNER_MARKER_RAISE = 4.0  # mesh units: above a 64-pixel troop sprite, below the camera's horizon
 SPRITE_MID_HEIGHT = BANNER_MARKER_RAISE / 2  # mesh units: halfway up that ~64px sprite, for picking
 EVENT_LOG_LINES = 3  # battle events shown in the debug overlay (whshr.engine.Battle.events, per tick)
@@ -228,6 +226,14 @@ class BattleView(SceneView[BattleScene]):
             vertex_buffers=zengl.bind(self.vertex_buffer, VERTEX_FORMAT, 0, 1, 2, 3),
             vertex_count=len(field.vertices) // VERTEX_FLOATS,
         )
+        self.effect_capacity = 65536
+        self.effect_buffer = ctx.buffer(size=self.effect_capacity * VERTEX_FLOATS * 4)
+        self.effects = ctx.pipeline(
+            vertex_shader=MESH_VERTEX_SHADER, fragment_shader=MESH_FRAGMENT_SHADER,
+            layout=[camera_layout, {"name": "textures", "binding": 0}],
+            resources=mesh_resources, depth=depth, framebuffer=[target.color, target.depth],
+            vertex_buffers=zengl.bind(self.effect_buffer, VERTEX_FORMAT, 0, 1, 2, 3), vertex_count=0,
+        )
         clamp: Any = {**nearest, "wrap_x": "clamp_to_edge", "wrap_y": "clamp_to_edge"}
         sprite_resources: list[Any] = [camera_resource,
                                        {"type": "sampler", "binding": 0, "image": self.atlas, **clamp},
@@ -245,6 +251,9 @@ class BattleView(SceneView[BattleScene]):
         self.hud.bind_battle(scene.battle)
 
         installation = self.options.get("installation")
+        loaded_packets = scene.field.script.get("load", {}).get("loadsfx", ())
+        self.missile_sounds = MissileSounds(installation,
+                                            any(str(name).casefold() == "missile" for name in loaded_packets))
         self.cursors = GameCursors(installation, dll="GMCUR.DLL") if installation is not None else None
         self._cursor_mode: str | None = None
         self._set_cursor("default")
@@ -317,7 +326,7 @@ class BattleView(SceneView[BattleScene]):
                 if action in {"next_regiment", "prev_regiment"}:
                     return self._cycle_regiment(1 if action == "next_regiment" else -1)
                 order = self.hud.press(action)
-                if action in {"move", "attack", "face_point"}:
+                if action in {"move", "attack", "fire", "face_point"}:
                     self.order_mode = action
                     self._set_cursor(action if action != "face_point" else "move")
                     return (("prepare_move",),) if deploying and action == "move" else ()
@@ -448,6 +457,8 @@ class BattleView(SceneView[BattleScene]):
             return (("attack", regiment_id),)
         if mode == "move":
             return (("move_to", x, y),)
+        if mode == "fire":
+            return (("fire", regiment_id, (x, y), bool(pygame.key.get_mods() & pygame.KMOD_CTRL)),)
         if mode == "face_point":
             return (("face_point", x, y),)
         return ()
@@ -508,6 +519,9 @@ class BattleView(SceneView[BattleScene]):
             return (("attack", target_id),)
         if mode == "move":
             return (("move_to", *world),) if world is not None else ()
+        if mode == "fire":
+            return (("fire", target_id, tuple(world) if world is not None else None,
+                     bool(pygame.key.get_mods() & pygame.KMOD_CTRL)),)
         return ()
 
     def _log_cannot(self, order: str) -> None:
@@ -520,6 +534,7 @@ class BattleView(SceneView[BattleScene]):
         self.event_log.append(f"Cannot {order}!")
 
     def animate(self, seconds: float) -> None:
+        self.scene.battle.ctrl_held = bool(pygame.key.get_mods() & pygame.KMOD_CTRL)
         keys = pygame.key.get_pressed()
         right = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
         forward = (keys[pygame.K_UP] or keys[pygame.K_w]) - (keys[pygame.K_DOWN] or keys[pygame.K_s])
@@ -532,6 +547,24 @@ class BattleView(SceneView[BattleScene]):
             self.camera.tilt(tilt * TILT_SPEED * seconds)
         self.scene.battle.set_view_angle(view_angle(self.camera.yaw))
         for event in self.scene.battle.events:
+            if hasattr(event, "kind") and event.kind in {"projectile_launch", "projectile_impact"}:
+                code = event.data.get("code")
+                if isinstance(code, int):
+                    self.missile_sounds.play(code, impact=event.kind == "projectile_impact")
+            if hasattr(event, "kind") and event.kind in {"ranged_message", "projectile_hit"}:
+                text_id = event.data.get("text_id")
+                message = self.scene.battle.text_resources.get(text_id, str(event)) if isinstance(text_id, int) else str(event)
+                if "%s" in message:
+                    named = event.data.get("target") or event.data.get("regiment")
+                    named_regiment = self.scene.battle.regiments.get(named) if isinstance(named, str) else None
+                    display_name = event.data.get("target_name") or (named_regiment.name if named_regiment else None)
+                    if isinstance(display_name, str):
+                        try:
+                            message = message % display_name
+                        except (TypeError, ValueError):
+                            pass
+                self.battle_log.append(("", message))
+                self.log_scroll = 0
             if hasattr(event, "kind") and event.kind == "react":
                 sender = event.data.get("sender", "")
                 message = event.data.get("message", str(event))
@@ -549,6 +582,41 @@ class BattleView(SceneView[BattleScene]):
             f"selected {selected}",
         )
         return lines + tuple(self.event_log)
+
+    def _effect_vertices(self) -> array[float]:
+        """Bake active installed scenery effect meshes at projectile positions each frame."""
+        field = self.scene.field
+        meshes = getattr(field, "effect_meshes", {})
+        vertices = array("f")
+
+        def append(name: str, x: float, y: float, z: float, dx: float = 0, dy: float = 1) -> None:
+            mesh = meshes.get(name)
+            if mesh is None or len(vertices) // VERTEX_FLOATS >= self.effect_capacity - 512:
+                return
+            angle = math.atan2(dx, dy)
+            cos, sin = math.cos(angle), math.sin(angle)
+
+            def transform(v: Sequence[float]) -> tuple[float, float, float]:
+                return (x / WORLD_PER_MESH + v[0]*cos + v[2]*sin,
+                        z / WORLD_PER_MESH + v[1],
+                        y / WORLD_PER_MESH - v[0]*sin + v[2]*cos)
+
+            def rotate(v: Sequence[float]) -> tuple[float, float, float]:
+                return (v[0]*cos + v[2]*sin, v[1], -v[0]*sin + v[2]*cos)
+
+            bake_mesh(mesh, field.ground_texture_count, field.scenery_texture_count,
+                      transform, rotate, out=vertices)
+
+        for p in self.scene.battle.projectiles:
+            append(MISSILE_MESH.get(p.visual, "arrows1"), p.x, p.y, p.z, p.x1-p.x0, p.y1-p.y0)
+        for p in self.scene.battle.innate_projectiles:
+            family = "fire" if p.code == 14 else "flames" if p.code == 15 else "boltbur"
+            append(f"{family}{1 + p.elapsed % 4}", p.x, p.y,
+                   self.scene.battle.ground_height(p.x, p.y) + 8, p.x1-p.x0, p.y1-p.y0)
+        for x, y, _code, started in self.scene.battle.impact_effects:
+            frame = min(8, 1 + self.scene.battle.tick_count - started)
+            append(f"ex{frame}", x, y, self.scene.battle.ground_height(x, y))
+        return vertices
 
     def _instances(self) -> bytes:
         field, yaw, selected_id, data = self.scene.field, self.camera.yaw, self.scene.selected_id, bytearray()
@@ -645,6 +713,12 @@ class BattleView(SceneView[BattleScene]):
         self.soldiers = sum(regiment.models for regiment in self.scene.battle.regiments.values()
                             if regiment.active)
         self.mesh.render()
+        effect_vertices = self._effect_vertices()
+        if effect_vertices:
+            self.effect_buffer.write(effect_vertices.tobytes())
+        self.effects.vertex_count = len(effect_vertices) // VERTEX_FLOATS
+        if self.effects.vertex_count:
+            self.effects.render()
         self.sprites.render()
         self.hud.set_selected(self.scene.selected_id)
         log_list = list(self.battle_log)
@@ -660,7 +734,8 @@ class BattleView(SceneView[BattleScene]):
         self.hud.draw(width, height, self.camera)
 
     def release(self) -> None:
-        for resource in (self.mesh, self.sprites, self.vertex_buffer, self.instance_buffer, self.camera_buffer,
+        for resource in (self.mesh, self.effects, self.sprites, self.vertex_buffer, self.effect_buffer,
+                         self.instance_buffer, self.camera_buffer,
                          self.textures, self.atlas, self.palette):
             self.gpu.ctx.release(resource)
         self.hud.release()

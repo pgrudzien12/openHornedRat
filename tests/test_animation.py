@@ -450,15 +450,16 @@ class WalkDesyncAndFireCadenceTests(unittest.TestCase):
         # (old code gave ceil(5/4)=2 for 10 models in 2 ranks; correct is ceil(10/4)=3).
         for models, ranks, expected in ((10, 1, 3), (16, 1, 4), (10, 2, 3)):
             archer = Regiment("a", "A", 0, 0, 0, Side.PLAYER, models=models, ranks=ranks)
-            archer.missile_range, archer.missile_code, archer.bs = 720.0, 2, 5
+            archer.missile_range, archer.missile_code, archer.shooting_code, archer.bs = 720.0, 2, 2, 5
+            archer.hud_class = "arch"
             enemy = Regiment("e", "E", 0, 300, 0, Side.ENEMY, models=10, ranks=2)
             battle = Battle(2000, 2000, [archer, enemy], seed=2)
+            battle.order_fire("a", "e")
+            shots = 0
             for _ in range(12):
                 battle.tick()
-                shot = [e for e in battle.events if getattr(e, "kind", "") == "shooting"]
-                if shot:
-                    break
-            self.assertEqual(shot[0].data["shots"], expected, f"models={models} ranks={ranks}")
+                shots += sum(e.kind == "projectile_launch" for e in battle.events)
+            self.assertEqual(shots, expected, f"models={models} ranks={ranks}")
 
     def test_given_repeated_reload_cycles_when_volleys_resolve_then_every_volley_fires_the_same_count(self):
         from whshr import combat
@@ -467,12 +468,20 @@ class WalkDesyncAndFireCadenceTests(unittest.TestCase):
         # models free-run the shoot/stand cycle out of step with the next countdown and only a
         # fraction of them arrive inside its resolve window.
         archer = Regiment("a", "A", 0, 0, 0, Side.PLAYER, models=10, ranks=2)
-        archer.missile_range, archer.missile_code, archer.bs = 720.0, 2, 5
-        enemy = Regiment("e", "E", 0, 300, 0, Side.ENEMY, models=10, ranks=2)
+        archer.missile_range, archer.missile_code, archer.shooting_code, archer.bs = 720.0, 2, 2, 5
+        archer.hud_class = "arch"
+        enemy = Regiment("e", "E", 0, 300, 0, Side.ENEMY, models=10, ranks=2,
+                         psychology=frozenset({"CantDie"}))
         battle = Battle(2000, 2000, [archer, enemy], seed=0)
-        shots = []
-        for _ in range(1000):
+        battle.order_fire("a", "e")
+        shots, current = [], 0
+        for _ in range(400):
             battle.tick()
-            shots.extend(e.data["shots"] for e in battle.events if getattr(e, "kind", "") == "shooting")
+            if any(e.kind == "volley" for e in battle.events):
+                if current:
+                    shots.append(current)
+                current = 0
+            current += sum(e.kind == "projectile_launch" for e in battle.events)
+        shots.append(current)
         self.assertGreaterEqual(len(shots), 3, "expected several volleys within 1000 ticks")
         self.assertTrue(all(s == 3 for s in shots), shots)

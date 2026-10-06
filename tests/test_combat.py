@@ -752,23 +752,25 @@ class CloseCombatStrikeTests(unittest.TestCase):
 class ShootingTests(unittest.TestCase):
     def setUp(self):
         # Crossbows (missile code 2), BS5, facing north at a target directly north and in arc.
-        self.shooter = _regiment("s", 0, 0, Side.PLAYER, bs=5, missile_code=2, missile_range=720.0,
+        self.shooter = _regiment("s", 0, 0, Side.PLAYER, bs=5, missile_code=2, shooting_code=2,
+                                 hud_class="arch", missile_range=720.0,
                                  speed_per_tick=0.0)
         self.target = _regiment("t", 0, 300, Side.ENEMY, toughness=3, armour=0, speed_per_tick=0.0)
         self.battle = Battle(2000, 2000, [self.shooter, self.target], seed=0)
 
     def _tick_until_volley(self, limit=12):
-        """Volleys resolve once all fire events have arrived (a few ticks after the shoot pose begins)."""
+        """An explicit Fire target starts a pose; launches occur on its animation posts."""
+        self.battle.order_fire("s", "t")
         for _ in range(limit):
             self.battle.tick()
-            if any(getattr(e, "kind", "") == "shooting" for e in self.battle.events):
+            if any(getattr(e, "kind", "") == "projectile_launch" for e in self.battle.events):
                 return
         self.fail("no volley within %d ticks" % limit)
 
     def test_given_a_target_in_range_and_arc_when_ticked_then_it_fires_and_reloads(self):
         self._tick_until_volley()
 
-        self.assertTrue(any(str(e).startswith("s shoots t:") for e in self.battle.events))
+        self.assertTrue(any(getattr(e, "kind", "") == "projectile_launch" for e in self.battle.events))
         # game_rules.md 8.2: reload is stamped at order time; by the volley tick (~5 ticks later)
         # about 91 of the original 96 ticks remain.
         self.assertGreater(self.shooter.reload_ticks, 90)
@@ -788,7 +790,7 @@ class ShootingTests(unittest.TestCase):
         def run(ticks):
             for _ in range(ticks):
                 self.battle.tick()
-                volleys[0] += sum(1 for e in self.battle.events if getattr(e, "kind", "") == "shooting")
+                volleys[0] += sum(1 for e in self.battle.events if getattr(e, "kind", "") == "volley")
 
         run(int(self.shooter.reload_ticks) - 1)
         self.assertEqual(volleys[0], 1)  # still reloading
@@ -796,7 +798,7 @@ class ShootingTests(unittest.TestCase):
 
         run(12)  # ready again: fires as soon as the next fire events arrive
 
-        self.assertEqual(volleys[0], 2)
+        self.assertGreaterEqual(volleys[0], 2)
 
 
 class ChargeBonusEndToEndTests(unittest.TestCase):

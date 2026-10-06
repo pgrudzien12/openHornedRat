@@ -2232,17 +2232,22 @@ class ScriptInterpreter:
 
     def op_FireAtTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """FireAtTarget: mark the current target for shooting.
-
-        Must NOT set regiment.attack_target: that field means "melee charge target" to both
-        Battle._advance_regiments (charges the unit into melee range of it) and
-        combat.resolve_shooting (which explicitly skips any unit with attack_target set, since it
-        already does its own independent nearest-in-arc-and-range targeting). A prior version set
-        it here too, which silently made every scripted FireAtTarget order charge the shooter into
-        melee instead of holding position and shooting -- and resolve_shooting would then skip the
-        unit regardless, on top of that. There is nothing else to do here in this simplified engine:
-        the actual target for the shot is combat.resolve_shooting's own search, not script-directed.
-        """
+        """Choose the script's current target for the shared ranged loop, never a melee charge."""
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment is not None and state.aim_at_point and state.target_point is not None:
+            regiment.shooting_target = None
+            regiment.shooting_point = state.target_point
+            regiment.shooting_mode = "ground"
+        elif regiment is not None and state.current_target:
+            target_id = state.current_target[0]
+            if target_id in self.battle.regiments:
+                regiment.shooting_target = target_id
+                regiment.shooting_point = None
+                regiment.shooting_mode = "target"
+        elif regiment is not None and state.target_point is not None:
+            regiment.shooting_target = None
+            regiment.shooting_point = state.target_point
+            regiment.shooting_mode = "ground"
         return state.pc + 1
 
     def op_KillAllModels(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -3603,7 +3608,8 @@ class ScriptInterpreter:
             rng: random.Random) -> int | None:
         """ReadyToFire: test if unit can shoot (not reloading)."""
         regiment = self.battle.regiments.get(unit_id)
-        if regiment and regiment.missile_range and regiment.reload_ticks <= 0:
+        if regiment and regiment.missile_range and regiment.reload_ticks <= 0 and \
+                (regiment.hud_class != "art" or (regiment.machine_alive and regiment.models >= 2)):
             state.cond_flags = 1
         else:
             state.cond_flags = 0
@@ -3776,4 +3782,3 @@ class ScriptInterpreter:
 
     # For any other opcode not explicitly handled, the dispatcher will raise NotImplementedError,
     # which is caught and logged by the run() method, allowing partial mission execution.
-

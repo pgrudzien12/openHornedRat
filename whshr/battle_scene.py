@@ -5,10 +5,11 @@ import os
 from os import PathLike
 from . import battle_log, behaviour, combat, payments, skirmish_log
 from .assets import AssetId
-from .battlefield import Battlefield, sprite_files
+from .battlefield import Battlefield, WORLD_PER_MESH, sprite_files
 from .clock import FixedStepClock
 from .debrief_screen import UnitOutcome
 from .engine import Battle, DEFAULT_SEED, Side
+from .battle_events import BattleEvent
 from .script import View
 from .skirmish_log import SkirmishLogger
 from .result_scene import ResultScene
@@ -63,6 +64,9 @@ class BattleScene(Scene):
         self.logger = battle_log.BattleLogger(path, trace_scripts=bool(os.environ.get("WHSHR_TRACE_SCRIPTS")))
         self.battle = Battle.from_script(self.field.script, seed=self.seed, script_dll=script_dll,
                                          script_logger=self.logger)
+        self.battle.ground_height = lambda x, y: self.field.ground_height(x, y) * WORLD_PER_MESH
+        if context.glue is not None:
+            self.battle.text_resources = context.glue.strings("GMTXT")
         self.initial_models = {identifier: regiment.models for identifier, regiment in self.battle.regiments.items()}
         self.no_battle = bool(getattr(context, "no_battle", False))
         if self.no_battle:
@@ -175,6 +179,28 @@ class BattleScene(Scene):
                     self.battle.order_attack(self.selected_id, target_id)
                 except ValueError:
                     pass  # not an enemy regiment, the selection is routing, or the target is gone
+        elif kind == "fire":
+            target_id, point = args[:2]
+            bomb = bool(args[2]) if len(args) > 2 else False
+            if self.selected_id is not None:
+                try:
+                    object_index = None
+                    if target_id is None and point is not None:
+                        for index, obj in enumerate(self.battle.shooting_objects):
+                            radius = float(obj.get("radius") or 0)
+                            if radius > 0 and ((float(obj.get("x") or 0)-point[0])**2
+                                               + (float(obj.get("y") or 0)-point[1])**2) < radius**2:
+                                object_index = index
+                                break
+                    text_id = self.battle.order_fire(self.selected_id, target_id, point,
+                                                     object_index=object_index, bomb=bomb)
+                    if text_id is not None:
+                        self.battle.pending_feedback.append(BattleEvent(
+                            f"GMTXT {text_id}", "ranged_message", regiment=self.selected_id,
+                            target=target_id, target_name=(self.battle.shooting_objects[object_index].get("name")
+                                                           if object_index is not None else None), text_id=text_id))
+                except ValueError:
+                    pass
         elif kind == "halt":
             if self.selected_id is not None:
                 try:

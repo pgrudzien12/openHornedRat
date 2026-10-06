@@ -11,10 +11,8 @@ wraps around over several ticks.
 
 Simplifications common to this module (documented placeholders, not traced values):
 - No hatred re-rolls, magic items or monster return blows (game_rules.md 5.2, 5.4-5.6).
-- Multi-wound models die on their first failed save (no per-model wound tracking).
-- Shooting hit chance is a documented BS-based placeholder (`SHOOT_TO_HIT`), not the original's
-  geometric scatter/flight simulation (game_rules.md 8.1-8.3); only basic bow-type missile codes are
-  modelled as shooters (`engine.ARCHER_MISSILE_CODES`), never artillery or special weapons.
+- Melee still treats a failed save as a lethal hit; ranged wounds are tracked per model in
+  `whshr.ranged`.
 - Break tests are timed and scored per the traced rules (game_rules.md 6.2): tallies accumulate rank
   and direction bonuses plus kills each strike; the first result comes two turns after contact, later
   ones every turn after that (the original varies this by Initiative). Rally follows game_rules.md 7.4's
@@ -32,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from . import animation, battle_grid, formation
 from .battle_events import BattleEvent
-from .rules import EXPECTED_ARMOUR_SAVE, Side, hostile_sides, may_engage, wfb_to_hit, wfb_to_wound
+from .rules import EXPECTED_ARMOUR_SAVE, Side, may_engage, wfb_to_hit, wfb_to_wound
 from .interpreter import Event
 
 if TYPE_CHECKING:
@@ -49,14 +47,7 @@ FLEE_SAFE_DISTANCE = 160.0  # game_rules.md 7.4: no rally attempt while an enemy
 # game_rules.md 7.7: a pursuing or charging unit makes automatic contact attacks on models within this
 # reach (18 for cavalry and 24 for monsters are not modelled: the engine has no unit class).
 CONTACT_REACH = 12.0
-SHOOT_ARC_HALF = 64  # +/- 45 degrees (of 512), game_rules.md 8.1 "Arc of fire"
 DIRECTION_BONUS: dict[int, int] = {0: 0, 1: 1, 2: 2, 3: 1}  # front, flank, rear, flank (game_rules.md 6.1)
-# Placeholder shooting to-hit chart by BS (game_rules.md 8.1 says shooting is geometric, not a WS-style
-# chart; this substitutes a simple, documented BS-based die target so "hits by BS" is deterministic).
-SHOOT_TO_HIT: dict[int, int] = {1: 6, 2: 5, 3: 4, 4: 4, 5: 3, 6: 3, 7: 2, 8: 2, 9: 2, 10: 2}
-MISSILE_STRENGTH: dict[int, int] = {1: 3, 2: 4, 9: 4, 18: 3, 19: 3}  # game_rules.md 8.3 table, archer codes only
-# game_rules.md 8.2 reload formula constants, by missile code.
-RELOAD_K: dict[int, int] = {1: 7, 2: 4, 9: 10, 18: 8, 19: 6}
 
 
 def _d6(rng: random.Random) -> int:
@@ -93,7 +84,7 @@ def apply_casualties(regiment: "Regiment", count: int, rng: random.Random, battl
     if count <= 0 or regiment.models <= 0 or "CantDie" in regiment.psychology:
         return 0
     count = min(count, regiment.models)
-    positions = regiment.model_positions()
+    positions = list(regiment.model_positions())
     indices = (rng.sample(range(len(positions)), count) if count < len(positions)
                else list(range(len(positions))))
     return kill_models(regiment, indices, battle=battle, death_kind=death_kind)
@@ -111,17 +102,21 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
     `death_kind` is the damage type of the killing wound (game_rules.md "Figure animation", "Death
     kinds": 0 ordinary, 1 fire, 2 missile / slain outright, 3 warpfire). Kinds 1-3 collapse in one tick;
     kinds 1 and 3 then burn (`animation.burns_on_death`) instead of leaving the family's own corpse.
-    Callers: close combat and contact attacks pass 0, shooting passes 2. Fire spells, dragon breath,
-    flamestorm, warpfire and fanatics do not exist in the engine yet, so kinds 1 and 3 are only
-    reachable through `resolve_death_blast` and direct calls.
+    Callers: close combat and contact attacks pass 0; ordinary shooting passes 2; innate
+    breath, warpfire and death blasts pass their fire or warpfire kind.
     """
     indices = list(indices)
     if not indices or regiment.models <= 0 or "CantDie" in regiment.psychology:
         return 0
-    positions = regiment.model_positions()
+    positions = list(regiment.model_positions())
     victims = sorted({index for index in indices if 0 <= index < len(positions)}, reverse=True)
     if not victims:
         return 0
+    if regiment.hud_class == "art" and regiment.has_leader and 0 in victims:
+        regiment.machine_alive = False
+        regiment.clear_anchor()
+        regiment.shooting_mode = regiment.shooting_target = None
+        regiment.volley_countdown = None
     grid = _grid_of(battle, regiment)
     dead_uids: set[int] = set()
     for index in victims:
@@ -146,6 +141,15 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
             del regiment.reform_slots[index]
     regiment.models -= len(victims)
     _unpair_dead(battle, regiment, dead_uids)
+    sprite = (regiment.sprite or "").casefold()
+    if death_kind not in (animation.DEATH_FIRE, animation.DEATH_WARPFIRE):
+        if "warpfire" in sprite:
+            puffs, final = warpfire_death_schedule(*positions[victims[-1]])
+            battle.death_blasts.extend((battle.tick_count + delay, "puff", px, py)
+                                       for delay, px, py in puffs)
+            battle.death_blasts.append((battle.tick_count + final, "warpfire", *positions[victims[-1]]))
+        elif "giant" in sprite:
+            battle.death_blasts.append((battle.tick_count, "giant", *positions[victims[-1]]))
     return len(victims)
 
 
@@ -881,124 +885,9 @@ def resolve_rally(battle: "Battle") -> None:
 
 
 def resolve_shooting(battle: "Battle") -> None:
-    """Missile regiments (game_rules.md 8.1-8.3, simplified: only bow-type codes, a BS-based hit chart
-    instead of geometric scatter) fire at the nearest enemy in range and front arc when not in melee.
-
-    A volley is an N-event countdown (N = model count; 1 for artillery) that starts the moment a
-    regiment is eligible and reload is ready. Reload is stamped at order time so it does not cancel
-    fire events already in flight. Posts arrive one per 4 countdown decrements (1 for artillery) and
-    accumulate over 5 ticks; on tick 5 (or when the countdown is exhausted sooner) the full batch
-    of posts fires as one volley event (game_rules.md 8.1 and "Figure animation")."""
-    for regiment in battle.regiments.values():
-        if regiment.reload_ticks > 0:
-            regiment.reload_ticks = max(0.0, regiment.reload_ticks - 1)
-        if not regiment.missile_range or not regiment.active or regiment.hidden or regiment.in_melee or regiment.routing:
-            continue
-        # Reload, moving and charging only gate STARTING a volley; a volley already in flight keeps
-        # its posted events (game_rules.md 8.1: a posted launch event always fires its projectile).
-        in_flight = (regiment.volley_countdown is not None or regiment.volley_age > 0
-                     or regiment.fire_posts > 0)
-        if regiment.attack_target is not None and not in_flight:
-            continue
-        target = _shooting_target(battle, regiment)
-        if target is None:
-            regiment.fire_posts = 0
-            regiment.volley_countdown = None
-            regiment.volley_age = 0
-            continue
-        # Start a volley: no volley in progress, not moving, reload done.
-        if (regiment.attack_target is None and regiment.volley_countdown is None and regiment.volley_age == 0
-                and not regiment.moving and regiment.reload_ticks <= 0):
-            regiment.volley_countdown = 1 if regiment.hud_class == "art" else regiment.models
-            regiment.reload_ticks = _reload_ticks(regiment)
-        # The resolve window closes when the countdown is exhausted naturally (all expected fire events
-        # arrived) or after 5 ticks (handles dead-model stalls where countdown > 0 never reaches 0).
-        volley_window_closed = (regiment.volley_age >= 5 or
-                                (regiment.volley_countdown is None and regiment.volley_age > 0))
-        if not volley_window_closed:
-            continue
-        shots = regiment.fire_posts
-        regiment.fire_posts = 0
-        regiment.volley_countdown = None
-        regiment.volley_age = 0
-        if shots == 0:
-            continue
-        distance = math.hypot(target.x - regiment.x, target.y - regiment.y)
-        strength = (MISSILE_STRENGTH.get(regiment.missile_code, regiment.strength)
-                    if regiment.missile_code is not None else regiment.strength)
-        hit_need = SHOOT_TO_HIT.get(max(1, min(10, regiment.bs)), 4)
-        wound_need = wfb_to_wound(strength, target.toughness)
-        threshold = _armour_threshold(target.armour, strength)
-        kills = 0
-        rolls: list[Roll] = []
-        if wound_need <= 6:
-            for _ in range(shots):
-                hit_roll = _d6(battle.rng)
-                if hit_roll < hit_need:
-                    rolls.append({"hit": hit_roll, "wound": None, "save": None, "result": "missed"})
-                    continue
-                wound_roll = _d6(battle.rng)
-                if wound_roll < wound_need:
-                    rolls.append({"hit": hit_roll, "wound": wound_roll, "save": None, "result": "no_wound"})
-                    continue
-                save_roll = _d6(battle.rng)
-                if save_roll >= threshold:
-                    rolls.append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "saved"})
-                    continue
-                rolls.append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "killed"})
-                kills += 1
-        # Pass the battle so a model shot out of a melee also releases whoever was fighting it.
-        apply_casualties(target, kills, battle.rng, battle=battle, death_kind=animation.DEATH_MISSILE)
-        battle.events.append(BattleEvent(
-            f"{regiment.name} shoots {target.name}: {kills} casualties." if kills else
-            f"{regiment.name} shoots {target.name}: no casualties.", "shooting",
-            shooter=regiment.identifier, target=target.identifier, distance=distance,
-            range=regiment.missile_range, shots=shots, hit_need=hit_need, wound_need=wound_need,
-            save_need=threshold, rolls=rolls, kills=kills))
-        battle.events.append(BattleEvent(
-            f"{regiment.name} reloads: ready in {regiment.reload_ticks:.0f} ticks.", "reload",
-            regiment=regiment.identifier, reload_ticks=regiment.reload_ticks))
-
-
-def _shooting_target(battle: "Battle", regiment: "Regiment") -> "Regiment | None":
-    """The nearest active hostile regiment in range and front arc (game_rules.md 8.1). Restricted to
-    `rules.hostile_sides` rather than simply "a different side" so a neutral regiment with a missile
-    weapon (notes/neutral_units.md's NPC artillery) never opens fire on its own, and is never
-    auto-targeted either -- shooting here is autonomous engine behaviour, not a scripted order."""
-    reach = regiment.missile_range
-    if reach is None:
-        return None
-    best: "Regiment | None" = None
-    best_distance = math.inf
-    for enemy in battle.regiments.values():
-        if enemy.side not in hostile_sides(regiment.side) or not enemy.active or enemy.hidden or enemy.routing:
-            continue
-        dx, dy = enemy.x - regiment.x, enemy.y - regiment.y
-        distance = math.hypot(dx, dy)
-        if distance >= reach or distance < 1e-6:
-            continue
-        bearing = round(math.atan2(dx, dy) * 512 / math.tau) % 512
-        offset = (bearing - regiment.direction + 256) % 512 - 256
-        if abs(offset) > SHOOT_ARC_HALF:
-            continue
-        if distance < best_distance:
-            best, best_distance = enemy, distance
-    return best
-
-
-def _reload_ticks(regiment: "Regiment") -> float:
-    """game_rules.md 8.2: base = (10 - min(I, 10)) * 18, reduced by a weapon-specific constant k."""
-    base = (10 - min(regiment.initiative, 10)) * 18
-    k = RELOAD_K.get(regiment.missile_code) if regiment.missile_code is not None else None
-    if k:
-        if k < 3:
-            reduction = 9 * k
-        elif k < 6:
-            reduction = 6 * k + 6
-        else:
-            reduction = (2 * k - 10) * 9 / 5 + 36
-        base = max(base - reduction, 18)
-    return base
+    """Advance ordinary missiles and consume animation posts via the shared ranged path."""
+    from . import ranged
+    ranged.tick(battle)
 
 
 # Death blasts (game_rules.md "Figure animation", end of the death-kind section).

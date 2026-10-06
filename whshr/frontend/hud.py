@@ -6,9 +6,8 @@ sub-window slots, per-state button sets, minimap, readout, feedback). Everything
 frame of the installation's ICONS sheet (225 frames); nothing here is procedurally drawn chrome
 invented by the engine.
 
-Order dispatch: `whshr.engine.Battle` currently implements only move/attack/halt as player orders
-(the spec's ranks/facing/charge/withdraw/rally/magic/fire/items/independent/fight-harder orders
-have no engine-side counterpart yet; ROADMAP.md M3/M4 is where the order system itself grows).
+Order dispatch: `whshr.engine.Battle` implements move, attack, Fire, halt, ranks, facing and
+Independent controls. Other panel orders remain disabled until their engine paths exist.
 Buttons for orders without engine support still render at their documented position and icon (so
 the panel looks and navigates correctly) but are disabled; panel-state *navigation* (which
 sub-panel is shown) is implemented in full, since that is pure UI state independent of which
@@ -80,7 +79,7 @@ COMMAND_FRAMES: dict[str, tuple[int, int]] = {
 }
 # Commands whshr.engine.Battle can actually carry out today; everything else in COMMAND_FRAMES
 # renders (and, where it is a set-entry button, still navigates the panel) but is disabled.
-ORDER_SUPPORTED: set[str] = {"move", "attack", "halt", "ranks_up", "ranks_down",
+ORDER_SUPPORTED: set[str] = {"move", "attack", "fire", "halt", "ranks_up", "ranks_down",
                    "turn_left", "turn_right", "about_face", "face_point", "independent"}
 # Buttons that only change which sub-panel is shown (pure HUD state, always clickable when present).
 SET_ENTRY: dict[str, str] = {"move": "move", "attack": "attack", "ranks_subset": "ranks", "facing_subset": "facing",
@@ -381,6 +380,8 @@ class Hud:
             return False
         if name == "halt":
             return regiment.moving
+        if name == "fire":
+            return regiment.hud_class in {"arch", "art"} and bool(regiment.missile_range)
         return True
 
     # ------------------------------------------------------------------ hit testing
@@ -429,12 +430,12 @@ class Hud:
             return None
         if name in SET_ENTRY and not (self.battle is not None and self.battle.phase == "deployment"):
             self.panel_set = SET_ENTRY[name]
-        if name in ("move", "attack", "face_point"):
+        if name in ("move", "attack", "fire", "face_point"):
             self.pending_order = name
         elif name == "back":
             # notes/game_rules.md: "Any completed order or Back returns to idle."
             self.pending_order = None
-        if name in ORDER_SUPPORTED and name not in ("move", "attack", "face_point"):
+        if name in ORDER_SUPPORTED and name not in ("move", "attack", "fire", "face_point"):
             return name
         return None
 

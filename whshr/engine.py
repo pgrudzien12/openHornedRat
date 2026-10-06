@@ -4,9 +4,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import math
 import random
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
-from . import animation, battle_grid, behaviour, combat, deployment, formation, interpreter, navigation, visibility
+from . import animation, battle_grid, behaviour, combat, deployment, formation, interpreter, navigation, ranged, visibility
 from . import magic
 from . import nodes as node_table
 from .battle_events import BattleEvent
@@ -41,9 +41,8 @@ MODEL_STEP_SCALE = 2.4 / 256
 # units, and a single step is capped at 1 world unit (only the fastest units ever reach that cap).
 REFORM_DECEL_DISTANCE = 6.0
 REFORM_STEP_CAP = 1.0
-# Basic bow-type missile codes this engine models as shooters (game_rules.md 8.1/8.3): artillery and
-# special weapons (cannons, mortars, breath weapons, ...) are not modelled in this simplified engine.
-ARCHER_MISSILE_CODES = {1, 2, 9, 18, 19}
+# Ordinary missile codes from the public ranged handoff; innate attacks use a separate effect pool.
+ARCHER_MISSILE_CODES = {1, 2, 5, 6, 7, 8, 9, 11, 12, 17, 18, 19}
 # Default combat profile for a regiment without a decoded profile (WS/BS/S/T/W/I/A/Ld); an ordinary
 # human infantryman, matching DEFAULT_S_RLMV's M4 I3 example.
 DEFAULT_PROFILE: dict[str, int] = {"WS": 3, "BS": 3, "S": 3, "T": 3, "W": 1, "I": 3, "A": 1, "Ld": 7}
@@ -111,6 +110,7 @@ class ModelState:
     pending_action: int | None = None  # action queued behind a running one-shot script
     drawn_facing: float | None = None  # facing (0-511) the sprite direction is drawn from; None until first set
     fire_event: bool = False  # animation reached its fire point on this tick (whshr.animation)
+    wounds_taken: int = 0
     # The model's own pending action request (0 = none), consumed at its next update; it beats the
     # unit's broadcast for that tick (notes/script_animation_sound.md, 0.2).
     own_request: int = 0
@@ -146,6 +146,7 @@ class Regiment:
     walking: bool = False  # true while the anchor or any model is still travelling
     independent: bool = False
     hidden: bool = False
+    airborne: bool = False
     waypoints: list[Point] = field(default_factory=list[Point])
     route_follows_unit: bool = False
 
@@ -224,6 +225,13 @@ class Regiment:
     flight_complete_tick: int = -1
     avoid_target: Point | None = None
     fire_posts: int = 0  # fire events posted by this volley's shooters so far (consumed by combat)
+    fire_post_positions: list[Point] = field(default_factory=list[Point])
+    shooting_target: str | None = None
+    shooting_object: int | None = None
+    shooting_point: Point | None = None
+    shooting_mode: str | None = None  # target, search, ground, or building
+    volley_aim: Point | None = None
+    machine_alive: bool = True
     volley_countdown: int | None = None  # remaining fire-event decrements expected in the current volley
     volley_age: int = 0  # ticks elapsed since the current volley was ordered; drives the resolve window
     reload_ticks: float = 0.0  # ticks remaining before a missile regiment may shoot again
@@ -285,6 +293,15 @@ class Regiment:
         """Hook for an artillery misfire explosion, the only thing that frees an anchored war machine.
         The engine has no misfire mechanic yet, so nothing calls this."""
         self.anchor_cleared = True
+
+    def clear_shooting(self) -> None:
+        """Cancel a selected aim and any unposted pose events when another order replaces it."""
+        self.shooting_target = self.shooting_point = self.shooting_mode = None
+        self.shooting_object = None
+        self.volley_countdown = None
+        self.volley_age = 0
+        self.fire_posts = 0
+        self.fire_post_positions.clear()
 
     @property
     def animation_family(self) -> str:
@@ -437,9 +454,8 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
     mount = MOUNT_PROFILES.get(mount_code) if mount_code is not None and 8 <= armour <= 13 else None
     move_stat = mount["M"] if mount is not None else profile.get("M")
     weapon_class = stat_int(fields, "s_weap")
-    missile_code = stat_int(fields, "S_BalWeap")
-    missile_range = (MISSILE_RANGES.get(missile_code)
-                     if missile_code is not None and missile_code in ARCHER_MISSILE_CODES else None)
+    firing_code = _shooting_code(unit)
+    missile_range = MISSILE_RANGES.get(firing_code or 0)
     psy_status = unit.get("set", {}).get("psy_status")
     psychology = frozenset(f for f in str(psy_status or "").split("|") if f)
     side = stat_int(fields, "s_side")
@@ -458,11 +474,12 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
         "armour": armour,
         "mount": mount_code,
         "strength_bonus": EXPECTED_WEAPON_BONUS.get(weapon_class, 0) if weapon_class is not None else 0,
-        "missile_code": missile_code if missile_range else None,
+        "missile_code": firing_code if missile_range else None,
         "missile_range": missile_range,
         "psychology": psychology,
         "hud_class": hud_class,
         "unit_class": race >> 3 if race is not None else None,
+        "airborne": hud_class == "arch" and firing_code == 17,
         "points": stat_int(fields, "s_pntval") or 0,
     }
 
@@ -487,7 +504,8 @@ class Battle:
                  script_dll: behaviour.ScriptDll | None = None, script_ids: Mapping[str, int] | None = None,
                  script_logger: BattleLogger | None = None, nodes: Mapping[int, Point] | None = None,
                  script_nodes: Sequence[node_table.ScriptNode] | None = None,
-                 deploy: bool = False, boundaries: Sequence[View] = (), objects: Sequence[View] = ()) -> None:
+                 deploy: bool = False, boundaries: Sequence[View] = (), objects: Sequence[View] = (),
+                 scenery: Sequence[View] = ()) -> None:
         if width <= 0 or height <= 0:
             raise ValueError("battle dimensions must be positive")
         self.width = width
@@ -511,11 +529,26 @@ class Battle:
         self.boundaries = list(boundaries)
         self.navigation_boundaries = navigation.boundaries_from_views(boundaries)
         self.objects = list(objects)
+        # Radius is a replaceable engine choice for placed furniture without a parsed footprint.
+        self.shooting_objects = list(objects) + [
+            {"x": item.get("x"), "y": item.get("y"),
+             "radius": 24 if any(word in str(item.get("name", "")).casefold()
+                                  for word in ("tower", "house", "wall")) else 12,
+             "status": ["os_solid"], "name": item.get("name")}
+            for item in scenery]
         # Camera rotation in 1/512 turns, set by the frontend; wagons snap to it (see set_view_angle).
         self.view_angle: float | None = None
         self._snapped_view_angle: float | None = None
         self.rng = random.Random(seed)
         self.events: list[BattleEvent] = []  # battle events emitted by the most recent tick
+        self.pending_feedback: list[BattleEvent] = []
+        self.text_resources: dict[int, str] = {}
+        self.projectiles: list[Any] = []
+        self.innate_projectiles: list[Any] = []
+        self.impact_effects: list[Any] = []
+        self.death_blasts: list[Any] = []
+        self.ctrl_held = False
+        self.ground_height: Callable[[float, float], float] = lambda x, y: 0.0
         # {node id: (x, y)} from the battle's own [NODES] section (whshr.script.load_battle),
         # BTS world coordinates; read by the interpreter's MoveToNode/FaceNode/TeleportToNode/
         # PlaceAtNode opcodes (issue #3/#46). Empty for a synthetic/nodeless battle.
@@ -652,7 +685,7 @@ class Battle:
                    script_dll=script_dll, script_ids=script_ids, script_logger=script_logger, nodes=nodes,
                    script_nodes=script_nodes,
                    deploy=bool(mission.get("deploy_troops")), boundaries=source.get("boundaries") or (),
-                   objects=source.get("objects") or ())
+                   objects=source.get("objects") or (), scenery=source.get("scenery") or ())
         battle.objective_letters = frozenset(str(entry[0]).upper() for entry in mission.get("objectives") or ()
                                              if entry)
         return battle
@@ -813,6 +846,7 @@ class Battle:
                 self.append_waypoint(identifier, x, y)
             return
         regiment.waypoints.clear()
+        regiment.clear_shooting()
         regiment.attack_target = None
         regiment.charge_started_target = None
         regiment.turn_order_key = None
@@ -847,6 +881,7 @@ class Battle:
         if not target.active:
             raise ValueError(f"{target_id} is no longer on the field")
         regiment.target_x = regiment.target_y = None
+        regiment.clear_shooting()
         regiment.attack_target = target_id
         regiment.route_follows_unit = False
         regiment.turn_order_key = None
@@ -867,9 +902,52 @@ class Battle:
         regiment.turn_order_key = None
         regiment.waypoints.clear()
         regiment.route_follows_unit = False
+        regiment.clear_shooting()
         # game_rules.md "Braced": Halt is the one order still accepted while braced, and clears it.
         regiment.braced = False
         regiment.braced_target = None
+
+    def order_fire(self, identifier: str, target_id: str | None = None,
+                   point: Point | None = None, *, script: bool = False,
+                   object_index: int | None = None, bomb: bool = False) -> int | None:
+        """Select a lasting object or one ground attempt; return a GMTXT feedback id."""
+        self._require_battle_order()
+        unit = self.regiments[identifier]
+        if not script and unit.side != Side.PLAYER:
+            raise ValueError("only player units accept player Fire")
+        if not script and unit.hud_class not in {"arch", "art"}:
+            raise ValueError("unit has no Fire control")
+        if (unit.shooting_code or unit.missile_code) not in ARCHER_MISSILE_CODES and not script:
+            raise ValueError("unit has no ordinary missile weapon")
+        if unit.routing or unit.in_melee or unit.braced or unit.attack_target:
+            raise ValueError("unit is busy")
+        if bomb and unit.shooting_code == 17 and unit.hud_class == "arch":
+            if not unit.airborne:
+                return 2020
+            point, target_id, object_index = (unit.x, unit.y), None, None
+        if target_id == identifier:
+            mode, feedback = "search", 2017 if unit.independent else 2009
+            target_id = None
+        elif target_id is not None:
+            target = self.regiments.get(target_id)
+            if target is None or not target.active or target.hidden:
+                raise ValueError("target cannot be picked")
+            mode, feedback = "target", 2008
+        elif object_index is not None and 0 <= object_index < len(self.shooting_objects):
+            mode, feedback = "building", 2007
+        elif point is not None:
+            mode, feedback = "ground", None
+        else:
+            raise ValueError("Fire needs a target or point")
+        unit.target_x = unit.target_y = None
+        unit.waypoints.clear()
+        unit.turn_order_key = None
+        unit.clear_shooting()
+        unit.shooting_target = target_id
+        unit.shooting_object = object_index
+        unit.shooting_point = point
+        unit.shooting_mode = mode
+        return feedback
 
     def resolve_no_battle(self) -> None:
         """No-battle mode (a campaign-progression shortcut, not a game rule): skip this fight and
@@ -901,6 +979,7 @@ class Battle:
         if regiment.attack_target is not None or regiment.in_melee:
             raise ValueError(f"{identifier} is charging or in melee and cannot be ordered")
         self._begin_reform(regiment, formation.clamp_ranks(regiment.models, ranks))
+        regiment.clear_shooting()
         if self.phase == "deployment":
             self._snap_deployment_layout(regiment)
             self.refresh_visibility()
@@ -922,6 +1001,7 @@ class Battle:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
         if regiment.in_melee:
             raise ValueError(f"{identifier} is in melee and cannot be ordered")
+        regiment.clear_shooting()
         return regiment
 
     def order_turn_left(self, identifier: str) -> None:
@@ -1036,6 +1116,9 @@ class Battle:
                 "reforming": regiment.reforming,
                 "melee_touching": sorted(regiment.melee_touching),
                 "attack_target": regiment.attack_target, "reload_ticks": regiment.reload_ticks,
+                "shooting_target": regiment.shooting_target,
+                "shooting_point": list(regiment.shooting_point) if regiment.shooting_point is not None else None,
+                "shooting_mode": regiment.shooting_mode, "machine_alive": regiment.machine_alive,
                 "braced": regiment.braced, "braced_target": regiment.braced_target,
                 # Battle-grid occupancy (game_rules.md 5.7): how many models hold a cell, how many
                 # have walked into it and are paired, and how many are waiting for a cell to free up.
@@ -1079,11 +1162,17 @@ class Battle:
     def tick(self, seconds: float = TICK_SECONDS) -> None:
         if seconds <= 0:
             raise ValueError("tick duration must be positive")
-        self.events = []
+        self.events = self.pending_feedback
+        self.pending_feedback = []
         self.update_count += 1
         if self.paused:
             return
         if self.result is not None:
+            # Remaining missiles and death poses continue after the victory condition is met.
+            for regiment in self.regiments.values():
+                self._step_burning(regiment)
+                self._step_dying(regiment)
+            ranged.finish_tick(self)
             self.tick_count += 1
             return
         scale = seconds / TICK_SECONDS
@@ -1700,20 +1789,20 @@ class Battle:
             regiment.volley_age += 1
             if regiment.volley_age >= 6:
                 regiment.volley_countdown = None
-        volley_divisor = 1 if regiment.hud_class == "art" else 4
+        special_shot = regiment.shooting_code in {14, 15} or (regiment.shooting_code == 17 and regiment.hud_class != "arch")
+        volley_divisor = 1 if regiment.hud_class == "art" or special_shot else 4
         # A script's broadcast holds until the unit's activity changes (notes/script_animation_sound.md,
         # 0.1); a model's own request beats it for one update (0.2).
         if regiment.script_action and regiment.script_action_key != regiment.activity_key():
             regiment.script_action = 0
-        for model in regiment.melee_models:
+        for model_index, model in enumerate(regiment.melee_models):
             if model.own_request:
                 requested, model.own_request = model.own_request, 0
             elif regiment.script_action:
                 requested = regiment.script_action
             elif regiment.in_melee:
                 requested = animation.FIGHT if model.opponent is not None else animation.WEAPON_READY
-            elif regiment.missile_range and not regiment.moving and not regiment.attack_target \
-                    and regiment.reload_ticks <= 1:
+            elif regiment.volley_countdown is not None and (regiment.hud_class != "art" and not special_shot or model_index == 0):
                 requested = animation.SHOOT
             elif not model.at_rest:
                 requested = animation.WALK
@@ -1731,6 +1820,7 @@ class Battle:
                 regiment.volley_countdown -= 1
                 if regiment.volley_countdown % volley_divisor == 0:
                     regiment.fire_posts += 1
+                    regiment.fire_post_positions.append(regiment.positions[model_index])
                 if regiment.volley_countdown == 0:
                     regiment.volley_countdown = None
 
