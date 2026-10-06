@@ -2128,8 +2128,10 @@ facing without one.
 
 `StartRout`: movement state `0x100`, leaves the combat grid, **loses `Frenzy`**, gets the
 broken flag `0x2000`, sends event 0x0F to every enemy unit and schedules the rally attempts.
-`FleeingUnitUpdate` moves the unit; `RoutRoute` probes one step ahead and deflects the
-heading by ±0x20 (of 512) around obstacles. Once outside the battle area the unit sends event 0x0E and is
+`FleeingUnitUpdate` moves the unit along its current facing; once per flee period it re-routes from that
+facing: a probe 256 units ahead, snapped clear of solid and inverse-solid areas, with extra ±0x20 (of 512) turns
+until the line is clear, then footprint steering (`flight_solid_obstacles.md`). Routing units get no boundary
+correction. Once outside the battle area the unit sends event 0x0E and is
 then removed alive (every model counts in `s_routed`). 🟡 Speeds: the flee counter uses `s_rlmv`, the
 distance per tick comes from the generic mover the game (not traced).
 
