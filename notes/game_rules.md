@@ -2268,7 +2268,7 @@ battle clock (19 per segment, 100 ms each).
   modifier; **shooting into close combat is allowed** (hits are geometric, friends near the target can be
   hit). Crossbows alone refuse to shoot when a non-enemy unit stands on the line of fire (`TargetValid`).
 - `ReadyToFire` order: hold-fire bit `unit_flags2 & 8` → reload (`GMTXT 2003`) → machine present
-  (`2015` "Artillery destroyed!") → at least 2 crew (`2016`). `GMTXT 2000` "Missiles fired!" is never used.
+  (`2015` "Artillery destroyed!") → at least 2 crew (`2016`; in fact at least 2 models, `script_shooting.md`). `GMTXT 2000` "Missiles fired!" is never used.
 
 ### Reload time ✅
 
@@ -2281,7 +2281,8 @@ if k: reduction = 9k (k < 3) | 6k + 6 (3 ≤ k < 6) | (2k − 10) × 9 / 5 + 36 
 Artillery with fewer than 4 models: base += (4 − size) × 36
 ```
 
-The last shot is stamped at every volley (`shot_segment` segment, `shot_tick` tick, `shot_turn` turn). Examples: Orc
+The last shot is stamped at every volley **and again at every projectile launched** (so the next volley counts from the
+last arrow; `script_shooting.md` §1.3) (`shot_segment` segment, `shot_tick` tick, `shot_turn` turn). Examples: Orc
 Arrer Boyz (I2) 101 ticks, crossbows I3 96, Goblin short bows I2 98, Wood Elves I6 18 (about once per segment),
 artillery crews I3 126 and I2 144 (artillery reads the crew block, whose weapon code is 0). An I2 bow unit
 fires about twice per turn; WFB fires every turn.
