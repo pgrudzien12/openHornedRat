@@ -164,6 +164,9 @@ class Regiment:
     unit_class: int | None = None  # s_race class; wagons use a four-deep movement layout
     points: int = 0  # s_pntval: experience gained by the killer, and the AI's per-model worth unit
     # (game_rules.md: unit worth = size x s_pntval x 12 artillery / 8 wizard / 4 monster / 1)
+    # set:whoami as one byte: the persistent campaign regiment id (0 for ordinary mission units),
+    # addressed by SendEventToUnitId (notes/threat_events_nodes.md, part B 0.1).
+    whoami: int = 0
 
     # Combat/order state (whshr.combat).
     attack_target: str | None = None  # identifier of an enemy regiment this regiment is charging
@@ -507,7 +510,6 @@ class Battle:
         # set:script= value; a regiment absent from it starts on the shared library script
         # (behaviour.PLAYER_SCRIPT), matching the original's own default for units with no explicit
         # set:script= line.
-        self.unit_tags: dict[int, str] = {}  # tag -> regiment identifier, filled by the SetTag opcode
         self.script_dll = script_dll
         self.event_bus = interpreter.EventBus(self)
         script_ids = script_ids or {}
@@ -599,6 +601,7 @@ class Battle:
                     banner=resource_name(unit.get("banner")),
                     portrait=resource_name(leader.get("portrait")),
                     hidden=bool(unit.get("hidden", False)),
+                    whoami=int(position.get("whoami") or 0) & 0xFF,
                     **_decode_combat_profile(unit),
                 ))
                 script_value = position.get("script")

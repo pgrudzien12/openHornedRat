@@ -163,7 +163,7 @@ class UnitTaggingTests(unittest.TestCase):
         interp.op_SetTag(state, tag, [], "cargo_1", 0, None)
 
         # Verify tag registry exists and contains the mapping
-        self.assertEqual(self.battle.unit_tags[tag], "cargo_1")
+        self.assertEqual(self.battle.event_bus.find_by_tag(tag), "cargo_1")
 
     def test_attack_tagged_finds_and_targets_unit(self):
         """Test that AttackTagged finds a tagged unit and sets it as target."""

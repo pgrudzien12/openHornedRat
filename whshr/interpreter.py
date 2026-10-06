@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 from . import behaviour, nodes, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
-from .rules import Side
+from .rules import Side, side_of_code
 
 if TYPE_CHECKING:
     from .engine import Battle, Regiment
@@ -43,6 +43,11 @@ WAIT_OPCODE = 0x1C  # Wait: blocking ticks are not traced (see ScriptInterpreter
 IN_MELEE_FLAG = 0x200
 REFORMING_FLAG = 0x8  # script operand of WaitWhileUnitFlags 8: the models are re-forming
 BROKEN_FLAG = 0x2000  # script operand of TestUnitFlags 0x2000/0xa000: the unit is broken (routing)
+INDEPENDENT_FLAG = 0x8000000  # script operand of TestUnitFlags 0x8000000: the player made the unit independent
+# Script-owned busy states (SetUnitFlags2 operands of the library shooting and casting scripts), which
+# ReacquireEventSource respects (notes/threat_events_nodes.md, part B 1).
+CASTING_SEQUENCE_FLAG2 = 2
+SHOOTING_SEQUENCE_FLAG2 = 4
 
 
 REPEAT_ENTRY = 0  # tag of a RepeatStart entry on the script stack: (body start, count, tag)
@@ -123,6 +128,7 @@ class UnitScriptState:
     # library behaviour like 15/TrackThreat actually gets invoked versus a unit's own script opcodes
     # driving targeting directly, so nothing currently acts on this field automatically)
     parent_id: str | None = None  # set by SetParentByTag; the regiment this unit follows/reports to
+    tag: int = 0  # runtime-only 16-bit tag set by SetTag, 0 = no tag (notes/threat_events_nodes.md, part B 0.1)
 
     # Interrupt handling (SetInterruptScript/CallInterruptScript/ReturnInterrupt)
     interrupt_return: tuple[int, int] | None = None  # (script_id, pc) to resume after ReturnInterrupt, set by
@@ -151,36 +157,43 @@ class EventBus:
         self.battle = battle
         self.unit_states: dict[str, UnitScriptState] = {}  # {unit_identifier: UnitScriptState}
 
-    def queue_event(self, recipient_id: str, event: Event, route: str = "self") -> None:
-        """Queue an event to a recipient or broadcast to a side.
+    def is_live(self, unit_id: str) -> bool:
+        """A scripted unit still in the battle: not destroyed, not routed off the field and not removed
+        by a script. Routed, hidden and off-field-waiting units are live (notes/threat_events_nodes.md,
+        part B 0.1)."""
+        regiment = self.battle.regiments.get(unit_id)
+        return unit_id in self.unit_states and regiment is not None and regiment.active
 
-        route: "self" (single recipient), "side" (own-side broadcast), "enemy" (enemy-side broadcast)
+    def find_by_tag(self, tag: int) -> str | None:
+        """The first live unit in unit-table order carrying `tag`; tag 0 never matches (part B 0.1)."""
+        if not tag:
+            return None
+        return next((unit_id for unit_id in self.battle.regiments
+                     if self.is_live(unit_id) and self.unit_states[unit_id].tag == tag), None)
+
+    def queue_event(self, recipient_id: str, event: Event, route: str = "self", checked: bool = False) -> None:
+        """Queue an event to a recipient or broadcast to a side (notes/threat_events_nodes.md, part B 0.2).
+
+        route: "self" (single recipient), "side" (own-side broadcast), "enemy" (enemy-side broadcast).
+        Records go to the head of each recipient's LIFO queue and are dropped for a recipient that is not
+        live. `checked` sends (and both broadcasts) are also refused during the deployment phase.
+        Broadcast sides split units by the enemy side alone: neutral units share the player's side.
         """
-        if recipient_id not in self.unit_states:
+        if (checked or route != "self") and self.battle.phase == "deployment":
             return
-        state = self.unit_states[recipient_id]
-
         if route == "self":
-            state.event_queue.append(event)
-        elif route == "side":
-            # Broadcast to all units on the same side as recipient
-            regiment = self.battle.regiments.get(recipient_id)
-            if regiment:
-                for unit_id, unit_state in self.unit_states.items():
-                    other = self.battle.regiments.get(unit_id)
-                    if other and other.side == regiment.side:
-                        unit_state.event_queue.append(event)
-        elif route == "enemy":
-            # Broadcast to every unit of a different side (notes/neutral_units.md leaves the exact
-            # routing to/from a neutral side as an open research question -- "does event 0x13 route to
-            # NPC allies?" -- so this keeps the direct two-sided "not my side" generalisation rather
-            # than guessing a narrower rule).
-            regiment = self.battle.regiments.get(recipient_id)
-            if regiment:
-                for unit_id, unit_state in self.unit_states.items():
-                    other = self.battle.regiments.get(unit_id)
-                    if other and other.side != regiment.side:
-                        unit_state.event_queue.append(event)
+            if self.is_live(recipient_id):
+                self.unit_states[recipient_id].event_queue.append(event)
+            return
+        regiment = self.battle.regiments.get(recipient_id)
+        if regiment is None:
+            return
+        sender_enemy = regiment.side == Side.ENEMY
+        same = route == "side"
+        for unit_id, unit_state in self.unit_states.items():
+            other = self.battle.regiments.get(unit_id)
+            if other and self.is_live(unit_id) and ((other.side == Side.ENEMY) == sender_enemy) == same:
+                unit_state.event_queue.append(event)
 
 
 class LibraryBehaviors:
@@ -316,6 +329,12 @@ class ScriptInterpreter:
             state.unit_flags |= BROKEN_FLAG
         else:
             state.unit_flags &= ~BROKEN_FLAG
+        # Independent: the library handler re-forms a non-independent player unit instead of
+        # counter-attacking (notes/threat_events_nodes.md, part B 1).
+        if regiment.independent:
+            state.unit_flags |= INDEPENDENT_FLAG
+        else:
+            state.unit_flags &= ~INDEPENDENT_FLAG
         # "Halted": scripts wait on it (WaitUntilUnitFlags 16) to learn a move, turn or charge is over
         # (notes/movement_formation.md, section 1.3). It holds while the unit has nothing to do and is
         # dropped as soon as it travels, turns, charges or routes.
@@ -1892,9 +1911,8 @@ class ScriptInterpreter:
         Example: BF001 Unit 2 uses AttackTagged 0xabc0 to hunt the tagged cargo unit.
         """
         if operand is not None:
-            # Look up which unit has this tag (simplified: assume only one tagged unit)
-            if operand in self.battle.unit_tags:
-                target_id = self.battle.unit_tags[operand]
+            target_id = self.event_bus.find_by_tag(operand)
+            if target_id is not None:
                 state.current_target = (target_id, 0)
                 regiment = self.battle.regiments.get(unit_id)
                 if regiment and not regiment.anchored:
@@ -1906,28 +1924,20 @@ class ScriptInterpreter:
 
     def op_SetTag(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """SetTag TAG: mark this unit with a tag.
-
-        Tags are used to identify specific units for special behavior
-        (e.g., cargo in escort missions, objectives in special scenarios).
-        """
-        if operand is not None:
-            self.battle.unit_tags[operand] = unit_id
-        return state.pc + 1
+        """SetTag TAG: give this unit TAG, replacing any older tag, unless a live unit (itself included)
+        already carries it; then nothing happens (notes/threat_events_nodes.md, part B 0.1)."""
+        if operand is not None and self.event_bus.find_by_tag(operand) is None:
+            state.tag = operand
+        return state.pc + 2
 
     def op_SetParentByTag(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """SetParentByTag TAG: find the unit registered with TAG (SetTag) and set it as this unit's
-        parent (state.parent_id), for FollowParent/SendEventToParent.
-
-        Confirmed used by every BF003 regiment traced this session (Stickers, Wolfriders, all three
-        peasant regiments each SetParentByTag another unit early in their scripts) -- exact
-        real-world meaning of the parent relationship for those specific missions is not otherwise
-        documented, but recording it is unambiguous and this is what FollowParent already expects.
-        """
+        """SetParentByTag TAG: parent := the live unit carrying TAG now, or none when there is no such
+        unit. The link is stored, not re-resolved when tags change later (notes/threat_events_nodes.md,
+        part B 0.1)."""
         if operand is not None:
-            state.parent_id = self.battle.unit_tags.get(operand)
-        return state.pc + 1
+            state.parent_id = self.event_bus.find_by_tag(operand)
+        return state.pc + 2
 
     def op_SnapModelsToFormation(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
@@ -2289,17 +2299,86 @@ class ScriptInterpreter:
 
     def op_IfTag(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """IfTag TAG: test if this unit has the specified tag."""
-        # TODO: implement unit tagging system
-        state.cond_flags = 0  # no tags implemented yet
-        return state.pc + 1
+        """IfTag TAG: condition := this unit's own tag equals TAG (notes/threat_events_nodes.md, part B 0.1)."""
+        state.cond_flags = operand is not None and state.tag == operand
+        return state.pc + 2
 
     def op_IfTagExists(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """IfTagExists TAG: test if any unit has this tag."""
-        # TODO: implement unit tagging system
-        state.cond_flags = 0  # no tags implemented yet
-        return state.pc + 1
+        """IfTagExists TAG: condition := a live unit carries TAG (notes/threat_events_nodes.md, part B 0.1)."""
+        state.cond_flags = operand is not None and self.event_bus.find_by_tag(operand) is not None
+        return state.pc + 2
+
+    def op_SetTargetByTag(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """SetTargetByTag TAG: target := the live unit carrying TAG, condition true; none found leaves the
+        target unchanged, condition false. No range, side, visibility or broken test, no event and no
+        route (notes/threat_events_nodes.md, part B 6)."""
+        target_id = self.event_bus.find_by_tag(operand or 0)
+        if target_id is not None:
+            state.current_target = (target_id, 0)
+        state.cond_flags = target_id is not None
+        return state.pc + 2
+
+    def op_SendEventToTag(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """SendEventToTag TAG CODE: checked send of CODE (source = this unit) to the live unit carrying
+        TAG, of any side, possibly itself; nothing when none (notes/threat_events_nodes.md, part B 3)."""
+        recipient = self.event_bus.find_by_tag(operand or 0)
+        if recipient is not None and state.pc + 2 < len(script_words):
+            self.event_bus.queue_event(recipient, Event(code=script_words[state.pc + 2], source=unit_id),
+                                       checked=True)
+        return state.pc + 3
+
+    def op_SendEventToParent(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """SendEventToParent CODE: queue CODE (source = this unit) to the stored parent, also during
+        deployment; dropped when there is no parent or it is no longer live
+        (notes/threat_events_nodes.md, part B 2)."""
+        if state.parent_id is not None and operand is not None:
+            self.event_bus.queue_event(state.parent_id, Event(code=operand, source=unit_id))
+        return state.pc + 2
+
+    def op_SendEventToUnitId(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """SendEventToUnitId WHOAMI CODE: queue CODE (source = this unit) to the first live unit in table
+        order whose set:whoami byte equals WHOAMI; no deployment check (notes/threat_events_nodes.md,
+        part B 4)."""
+        wanted = (operand or 0) & 0xFF
+        recipient = next((other for other, regiment in self.battle.regiments.items()
+                          if regiment.whoami == wanted and self.event_bus.is_live(other)), None)
+        if recipient is not None and state.pc + 2 < len(script_words):
+            self.event_bus.queue_event(recipient, Event(code=script_words[state.pc + 2], source=unit_id))
+        return state.pc + 3
+
+    def op_ReacquireEventSource(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """ReacquireEventSource P: when the current event came from the current target and the unit is not
+        charging, in melee, or busy with a shooting or casting sequence, send itself (checked) event 0x39
+        if P is set and the unit is not independent, else 0x04, with the target as source. Leaves the
+        condition alone (notes/threat_events_nodes.md, part B 1)."""
+        source = state.current_event.source
+        regiment = self.battle.regiments.get(unit_id)
+        if (source is None or regiment is None or state.current_target is None
+                or state.current_target[0] != source):
+            return state.pc + 2
+        busy = state.unit_flags2 & (SHOOTING_SEQUENCE_FLAG2 | CASTING_SEQUENCE_FLAG2)
+        if regiment.attack_target is not None or regiment.in_melee or busy:
+            return state.pc + 2
+        code = 0x39 if operand and not regiment.independent else 0x04
+        self.event_bus.queue_event(unit_id, Event(code=code, source=source), checked=True)
+        return state.pc + 2
+
+    def op_SetSide(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """SetSide V: the unit's side becomes the one V's side bits name (shipped: 64 = neutral/allied).
+        Script, target, parent, tag and other units' targeting of it are unchanged; every rule reads the
+        new side from now on (notes/threat_events_nodes.md, part B 5). Not modelled: V's low bits, which
+        would alter the unit type code (no shipped operand has any), and the furniture side bit."""
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment is not None and operand is not None and not operand & 0x20:
+            regiment.side = side_of_code(operand)
+        return state.pc + 2
 
     def op_IfEventSource(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
