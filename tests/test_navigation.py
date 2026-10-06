@@ -85,17 +85,19 @@ class BoundaryGeometryTests(unittest.TestCase):
 
 class BattleNavigationTests(unittest.TestCase):
     def test_blocked_route_records_one_warning_with_obstacle_and_boundary_context(self):
-        unit = Regiment("u", "U", -1, 50, 128, Side.PLAYER, models=1, ranks=1)
-        obj = {"x": 25, "y": 50, "radius": 15, "status": ["os_active", "os_solid"]}
-        edge = rectangle("bnd_BATTLEEDGE", 0, 0, 100, 100)
+        # Both trial steer points lie outside the narrow solid corridor (notes/obstacle_steering.md section 5);
+        # the unit itself also starts outside it.
+        unit = Regiment("u", "U", 80, -1, 128, Side.PLAYER, models=1, ranks=1)
+        obj = {"x": 250, "y": 100, "radius": 110, "status": ["os_active", "os_solid"]}
+        edge = rectangle("bnd_SOLID", 0, 0, 500, 200)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "battle.jsonl"
             logger = BattleLogger(path)
-            battle = Battle(100, 100, [unit], objects=[obj], boundaries=[edge], script_logger=logger)
-            battle.order_move("u", 80, 50)
+            battle = Battle(500, 200, [unit], objects=[obj], boundaries=[edge], script_logger=logger)
+            battle.order_move("u", 420, 100)
             battle.tick()
             self.assertFalse(unit.moving)
-            battle.order_move("u", 80, 50)
+            battle.order_move("u", 420, 100)
             battle.tick()
             logger.close()
             records = [json.loads(line) for line in path.read_text().splitlines()]
@@ -104,7 +106,7 @@ class BattleNavigationTests(unittest.TestCase):
         warning = records[0]
         self.assertEqual((warning["type"], warning["code"]), ("warning", "route_blocked"))
         self.assertEqual((warning["unit_id"], warning["obstacle"]), ("u", "object:0"))
-        self.assertEqual(warning["target"], [80, 50])
+        self.assertEqual(warning["target"], [420, 100])
         self.assertEqual(warning["tick"], 0)
         self.assertTrue(warning["outside_boundary"])
         self.assertTrue(all(score >= 12000 for score in warning["detour_scores"]))
@@ -168,8 +170,7 @@ class BattleNavigationTests(unittest.TestCase):
         battle = Battle(500, 500, [unit], objects=[obj])
         battle.order_move("u", 350, 200)
         battle.tick()
-        self.assertIsNotNone(unit.avoid_target)
-        self.assertGreater(unit.avoid_target[1], 200)  # equal trial scores retain second side
+        self.assertIsNotNone(unit.avoid_target)  # steering round the circle (notes/obstacle_steering.md section 4)
         for _ in range(100):
             battle.tick()
         self.assertEqual((unit.x, unit.y), (350, 200))
@@ -192,7 +193,8 @@ class BattleNavigationTests(unittest.TestCase):
         self.assertIsNone(unit.avoid_target)
         self.assertEqual((unit.target_x, unit.target_y), (350, 200))
 
-    def test_moving_obstacle_can_change_the_cheaper_steering_side(self):
+    def test_moving_obstacle_keeps_the_remembered_steering_side(self):
+        # notes/obstacle_steering.md sections 1 and 6: the plan runs at the order; live steering keeps its side.
         unit = Regiment("u", "U", 100, 200, 128, Side.PLAYER, models=1, ranks=1,
                         speed_per_tick=0)
         obj = {"x": 200, "y": 200, "radius": 40,
@@ -200,10 +202,11 @@ class BattleNavigationTests(unittest.TestCase):
         battle = Battle(500, 500, [unit], objects=[obj])
         battle.order_move("u", 350, 200)
         battle.tick()
-        self.assertGreater(unit.avoid_target[1], 200)
-        obj["y"] = 205
+        side = unit.route_side
+        below = unit.avoid_target[1] < 200
+        obj["y"] = 195 if below else 205
         battle.tick()
-        self.assertLess(unit.avoid_target[1], 200)
+        self.assertEqual((unit.route_side, unit.avoid_target[1] < 200), (side, below))
 
     def test_stationary_bf003_infantry_accepts_move_past_near_peasants(self):
         # The logged infantry centre is almost tangent to the first Peasant
@@ -242,7 +245,8 @@ class BattleNavigationTests(unittest.TestCase):
         ally.direction = 0  # differing headings: nearby slower units are passed over
         ally.x = 115
         self.assertEqual(battle._steering_target(mover, goal, key), goal)
-        ally.x = 200  # distant slower units may obstruct
+        ally.x = 300  # beyond 16 x s_rlmv (notes/obstacle_steering.md section 6): a slower unit obstructs
+        mover.route_planned_for = None
         battle._steering_target(mover, goal, key)
         self.assertIsNotNone(mover.avoid_target)
 
@@ -337,9 +341,10 @@ class BattleNavigationTests(unittest.TestCase):
         self.assertAlmostEqual(moving.positions[0][1], before[1] + moving.y - old_y)
 
     def test_obstruction_scan_uses_authored_object_order(self):
-        obstacles = [("far", (300, 100), 20), ("near", (170, 100), 20)]
-        found = Battle._first_route_obstacle((100, 100), (400, 100), obstacles, 6)
-        self.assertEqual(found[0], "far")
+        from whshr import steering
+        obstacles = [steering.Footprint("far", 300, 100, 20), steering.Footprint("near", 170, 100, 20)]
+        found = steering.scan((100, 100), (400, 100), obstacles, 6, lambda footprint: True)
+        self.assertEqual(found.footprint.key if found else None, "far")
 
     def test_both_detours_outside_permitted_area_stop_the_move(self):
         unit = Regiment("u", "U", 80, 100, 128, Side.PLAYER, models=1, ranks=1)
@@ -367,6 +372,9 @@ class BattleNavigationTests(unittest.TestCase):
         battle = Battle(10000, 400, [unit], objects=[obj],
                         boundaries=[rectangle("bnd_SOLID", 0, 0, 10000, 400)])
         battle.order_move("u", 9000, 200)
+        battle.tick()
+        self.assertTrue(unit.moving)  # out of the 256 look-ahead at the order: no detour yet
+        unit.x = 6000.0
         battle.tick()
         self.assertTrue(unit.moving)
         self.assertIsNotNone(unit.avoid_target)

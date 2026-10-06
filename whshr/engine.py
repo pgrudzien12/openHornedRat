@@ -7,7 +7,7 @@ import random
 from typing import Any, Callable, Literal
 
 from . import animation, battle_grid, behaviour, combat, deployment, formation, interpreter, navigation, ranged, visibility
-from . import magic
+from . import magic, steering
 from . import nodes as node_table
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
@@ -224,7 +224,11 @@ class Regiment:
     flight_departed: bool = False
     flight_complete: bool = False
     flight_complete_tick: int = -1
-    avoid_target: Point | None = None
+    avoid_target: Point | None = None  # the current live steer point, or None when heading straight for the waypoint
+    # notes/obstacle_steering.md sections 4-6: the side the route plan chose (0 = none yet), kept for live steering,
+    # and the (order, waypoint) the last plan was made for, so the plan runs only at an order or a new waypoint.
+    route_side: int = 0
+    route_planned_for: tuple[TurnKey, Point] | None = None
     # notes/obstacle_steering.md section 5 ("On failure") and section 6: updates left in a route pause. While
     # positive the regiment keeps its order but does not advance along its move.
     route_pause_ticks: int = 0
@@ -918,6 +922,7 @@ class Battle:
         regiment.target_x, regiment.target_y = points[0]
         regiment.waypoints = points[1:]
         regiment.avoid_target = None
+        regiment.route_side, regiment.route_planned_for = 0, None
 
     def order_attack(self, identifier: str, target_id: str) -> None:
         """Order a player regiment to charge a non-player regiment into contact (game_rules.md,
@@ -1502,6 +1507,7 @@ class Battle:
             regiment.waypoints.clear()
             regiment.attack_target = regiment.charge_started_target = None
             regiment.avoid_target = None
+            regiment.route_side, regiment.route_planned_for = 0, None
             return False
         dx, dy = steering_target[0] - regiment.x, steering_target[1] - regiment.y
         distance = math.hypot(dx, dy)
@@ -1543,132 +1549,113 @@ class Battle:
         return True
 
     def _steering_target(self, regiment: Regiment, target: Point, order_key: TurnKey) -> Point | None:
-        start = self.formation_centre(regiment)
+        """Where the regiment heads this update (notes/obstacle_steering.md). The two-trial route plan runs only
+        when the order or the waypoint changes (a new order, the next waypoint) and when live steering's steer
+        point leaves the permitted area; every update, live steering turns round what lies ahead on the side the
+        plan chose. Distances and scans use the front-rank reference point (section 2).
+
+        A failed plan at an order or a new waypoint ends the move (the regiment halts); a failed boundary-forced
+        re-plan while moving pauses it 54 updates with its order kept (section 5 "On failure"). A same-side unit
+        the relationship filter answers with "pause" also pauses the mover 54 updates (section 6 item 3). Flight
+        steers round scenery only and ignores the battle edge."""
+        start = self.route_reference_point(regiment)
         if math.dist(start, target) < 1e-9:
             return target
-        obstacles: list[tuple[str, Point, float]] = []
+        fleeing = order_key[0] == "flee"
+        footprints, units = self._route_footprints(regiment, order_key)
+        own_radius = float(int(regiment.bounding_radius()))
+
+        def blocks(trial: bool) -> Callable[[steering.Footprint], bool]:
+            def test(footprint: steering.Footprint) -> bool:
+                other = units.get(footprint.key)
+                return other is None or self.route_unit_relation(regiment, other, trial) == "block"
+            return test
+
+        def permitted(point: Point) -> bool:
+            return not any(boundary.forbidden(point) for boundary in self.navigation_boundaries
+                           if boundary.solid or boundary.inverse or (boundary.battle_edge and not fleeing))
+
+        if regiment.route_planned_for != (order_key, target):
+            regiment.route_planned_for = (order_key, target)
+            plan = steering.plan(start, int(regiment.direction) % 512, target, footprints, own_radius,
+                                 blocks(True), permitted)
+            regiment.route_side = plan.side
+            if not plan.ok:
+                self._warn_blocked_route(regiment, order_key, start, target, footprints, own_radius, plan)
+                regiment.avoid_target = None
+                return target if fleeing else None
+        pause_hit = steering.scan(start, target, footprints, own_radius,
+                                  lambda fp: fp.key in units and self.route_unit_relation(
+                                      regiment, units[fp.key], False) == "pause")
+        # PROVISIONAL: the pause is a rule of live movement (section 6 item 3); at the order a stationary mover's
+        # near same-side unit is simply not an obstacle (notes/bf003_peasant_move_obstruction.md).
+        if (pause_hit is not None and regiment.route_speed > 0
+                and steering.scan(start, target, footprints, own_radius, blocks(False)) is None):
+            self.pause_route(regiment)
+            return target
+        steer = steering.steer(start, target, footprints, own_radius, blocks(False),
+                               remembered_side=regiment.route_side, facing=int(regiment.direction) % 512)
+        if steer is None:
+            regiment.route_side = 0
+            regiment.avoid_target = None
+            return target
+        regiment.route_side = steer.side
+        if steer.gave_up:
+            regiment.avoid_target = None
+            return target
+        if not permitted(steer.point):
+            plan = steering.plan(start, int(regiment.direction) % 512, target, footprints, own_radius,
+                                 blocks(True), permitted)
+            if not plan.ok:
+                self.pause_route(regiment)
+                return target
+            regiment.route_side = plan.side
+            steer = steering.steer(start, target, footprints, own_radius, blocks(False),
+                                   remembered_side=regiment.route_side, facing=int(regiment.direction) % 512)
+            if steer is None or steer.gave_up:
+                return target
+        regiment.avoid_target = steer.point
+        return steer.point
+
+    def _route_footprints(self, regiment: Regiment, order_key: TurnKey
+                          ) -> tuple[list[steering.Footprint], dict[str, Regiment]]:
+        """Live footprints in collision-object order (solid scenery, then the other regiments by their collision
+        centre), and the regiments behind the unit footprints. A charge's own target and routing regiments are
+        not obstacles; flight only steers round scenery (notes/obstacle_steering.md section 3)."""
+        footprints: list[steering.Footprint] = []
         for index, obj in enumerate(self.objects):
             flags = {str(flag).casefold() for flag in obj.get("status") or ()}
             if {"os_active", "os_solid"}.issubset(flags):
-                obstacles.append((f"object:{index}",
-                                  (float(obj.get("x") or 0), float(obj.get("y") or 0)),
-                                  float(obj.get("radius") or 0)))
+                footprints.append(steering.Footprint(f"object:{index}", float(obj.get("x") or 0),
+                                                     float(obj.get("y") or 0), float(int(obj.get("radius") or 0))))
+        units: dict[str, Regiment] = {}
+        if order_key[0] == "flee":
+            return footprints, units
         for other in self.regiments.values():
-            if order_key[0] == "flee":
-                break  # flight steers around scenery; unit contact has its own rout response
-            if other is regiment or not other.active or (order_key[0] == "charge" and
-                                                        order_key[1] == other.identifier):
+            if (other is regiment or not other.active or other.routing
+                    or (order_key[0] == "charge" and order_key[1] == other.identifier)):
                 continue
-            if not can_fight(regiment.side, other.side):
-                turn = abs(self._turn_delta(regiment.direction, other.direction))
-                if regiment.route_speed <= other.route_speed:
-                    if turn < 64:
-                        continue
-                    dx = abs(start[0] - self.formation_centre(other)[0])
-                    dy = abs(start[1] - self.formation_centre(other)[1])
-                    if max(dx, dy) + math.floor(min(dx, dy) / 2) <= 16 * regiment.frontage:
-                        continue
-            obstacles.append((f"unit:{other.identifier}", self.formation_centre(other),
-                              other.bounding_radius()))
-        obstacle = self._first_route_obstacle(start, target, obstacles, regiment.bounding_radius())
-        if obstacle is None:
-            regiment.avoid_target = None
-            return target
-        trials = [self._score_detour(start, target, regiment.direction, obstacle, side,
-                                     obstacles, regiment.bounding_radius(),
-                                     routing=order_key[0] == "flee") for side in (-1, 1)]
-        if trials[0][0] >= 12000 and trials[1][0] >= 12000:
-            regiment.avoid_target = None
-            warning_key = (regiment.identifier, order_key, obstacle[0])
-            if (self.script_logger is not None and self.script_logger.enabled
-                    and warning_key not in self._warned_blocked_routes):
-                self._warned_blocked_routes.add(warning_key)
-                self.script_logger.write_route_warning(
-                    max(0, self.update_count - 1), unit_id=regiment.identifier, order=str(order_key[0]),
-                    start=start, target=target, obstacle=obstacle[0],
-                    detour_scores=(trials[0][0], trials[1][0]),
-                    outside_boundary=any(
-                        boundary.forbidden(start) for boundary in self.navigation_boundaries
-                        if boundary.solid or boundary.inverse or boundary.battle_edge),
-                )
-            return target if order_key[0] == "flee" else None
-        selected = 1 if trials[1][0] <= trials[0][0] else 0
-        regiment.avoid_target = trials[selected][1]
-        if math.dist(start, regiment.avoid_target) <= max(regiment.speed_per_tick, 3):
-            regiment.avoid_target = None
-            return target
-        return regiment.avoid_target
+            key = f"unit:{other.identifier}"
+            centre = self.formation_centre(other)
+            footprints.append(steering.Footprint(key, centre[0], centre[1], float(int(other.bounding_radius())),
+                                                 troops=not (other.is_wagon or other.hud_class in ("art", "mon"))))
+            units[key] = other
+        return footprints, units
 
-    @staticmethod
-    def _first_route_obstacle(start: Point, target: Point,
-                              obstacles: Sequence[tuple[str, Point, float]], own_radius: float
-                              ) -> tuple[str, Point, float] | None:
-        dx, dy = target[0] - start[0], target[1] - start[1]
-        length2 = dx * dx + dy * dy
-        if length2 < 1e-9:
-            return None
-        # Object order wins over geometric nearness, as in the public movement report.
-        for key, centre, radius in obstacles:
-            radius += own_radius
-            if radius <= 0:
-                continue
-            t = ((centre[0] - start[0]) * dx + (centre[1] - start[1]) * dy) / length2
-            if 0 < t < 1 and math.hypot(start[0] + t * dx - centre[0],
-                                        start[1] + t * dy - centre[1]) < radius:
-                return key, centre, radius
-        return None
-
-    def _score_detour(self, start: Point, target: Point, facing: float,
-                      obstacle: tuple[str, Point, float], side: int,
-                      obstacles: Sequence[tuple[str, Point, float]], own_radius: float,
-                      routing: bool = False
-                      ) -> tuple[float, Point]:
-        current = start
-        score = 0.0
-        first_point = start
-        seen: set[str] = set()
-        while True:
-            key, centre, radius = obstacle
-            if key in seen:
-                score += 12000  # no progress around the same live obstruction
-                break
-            seen.add(key)
-            dx, dy = target[0] - current[0], target[1] - current[1]
-            length = math.hypot(dx, dy)
-            if length < 1e-9:
-                break
-            ux, uy = dx / length, dy / length
-            separation = math.dist(current, centre)
-            # Offset enough that the connector from the current position clears
-            # the footprint circle, including when it is close to the mover.
-            offset = (radius * separation / math.sqrt(separation * separation - radius * radius) + 3
-                      if separation > radius + 1e-9 else radius + 8)
-            point = (centre[0] - side * uy * offset, centre[1] + side * ux * offset)
-            if first_point == start:
-                first_point = point
-            heading = round(math.atan2(point[0] - current[0], point[1] - current[1])
-                            * 512 / math.tau) % 512
-            score += 4 * abs(self._turn_delta(facing, heading)) + math.dist(current, point)
-            if any(boundary.forbidden(point) or
-                   navigation.first_crossing(current, point, [boundary]) is not None
-                   for boundary in self.navigation_boundaries
-                   if boundary.solid or boundary.inverse or (boundary.battle_edge and not routing)):
-                score += 12000
-                break
-            current, facing = point, heading
-            if score > 5999:
-                break
-            next_obstacle = self._first_route_obstacle(current, target, obstacles, own_radius)
-            if next_obstacle is None:
-                break
-            obstacle = next_obstacle
-        score += math.dist(current, target)
-        if any(boundary.forbidden(target) or
-               navigation.first_crossing(current, target, [boundary]) is not None
-               for boundary in self.navigation_boundaries
-               if boundary.solid or boundary.inverse or (boundary.battle_edge and not routing)):
-            score += 12000
-        return score, first_point
+    def _warn_blocked_route(self, regiment: Regiment, order_key: TurnKey, start: Point, target: Point,
+                            footprints: Sequence[steering.Footprint], own_radius: float, plan: steering.Plan) -> None:
+        """One battle-log warning per unit, order and first obstacle when both route trials fail."""
+        hit = steering.scan(start, target, footprints, own_radius, lambda footprint: True)
+        obstacle = hit.footprint.key if hit is not None else "-"
+        warning_key = (regiment.identifier, order_key, obstacle)
+        if self.script_logger is None or not self.script_logger.enabled or warning_key in self._warned_blocked_routes:
+            return
+        self._warned_blocked_routes.add(warning_key)
+        self.script_logger.write_route_warning(
+            max(0, self.update_count - 1), unit_id=regiment.identifier, order=str(order_key[0]),
+            start=start, target=target, obstacle=obstacle, detour_scores=plan.scores,
+            outside_boundary=any(boundary.forbidden(start) for boundary in self.navigation_boundaries
+                                 if boundary.solid or boundary.inverse or boundary.battle_edge))
 
     def nearest_enemy(self, regiment: Regiment) -> Regiment | None:
         """The nearest active regiment of a *different* side, whatever it is (used for a rout's flee
