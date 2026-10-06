@@ -62,7 +62,11 @@ hold:
      - Units in the "leaving the battle" state are ignored.
      - **Enemy** units are ignored during **plan trials** (§5) and when hidden or broken. They block otherwise.
      - **Same-side** units: the current target (or its group) never blocks; the rest follow the speed and heading
-       rules.
+       rules, using each unit's **route heading** (its steer heading while steering, else its waypoint heading) and
+       its **effective speed**. Effective speed is the unit's current travel speed if it is not pausing and it has an
+       active move, flight, pursuit or follow-a-unit order, or is charging, broken or pursuing. It is **0** for a
+       unit with no such order, even if its models are walking. A mover that has just been given a move order has a
+       non-zero effective speed from its first moving update, before it has advanced.
 
 ## 4. The steering response to a blocking footprint
 
@@ -75,8 +79,12 @@ When the scan finds a blocking footprint (bearing `b`, half-width `h`, `d'`, `R`
 3. **Steer distance:** `D = sqrt(d'² + R²)`. The **steer point** is the reference point plus
    `(SIN[H] × D / 512, COS[H] × D / 512)`, i.e. **D/2** along `H`. The stored steer distance is that half length,
    truncated.
-4. **Repeat the scan** with `ref = H` and reach = steer distance. If another footprint blocks, steer again on the
-   same side and add the absolute heading change to a running total. Stop when nothing blocks.
+4. **Repeat the scan** with `ref = H` and reach = the steer distance, again from the **same reference point**
+   (steer points are not chained). If another footprint blocks, steer again on the same side. Its heading, steer
+   point and steer distance **replace** the previous ones, and the plain difference `|previous H − new H|` (not
+   wrapped across 0/512) is added to a running total. Stop when nothing blocks. The result of the response is the
+   **last** steer heading, steer point and steer distance. 🟡 The running total's first baseline is not well
+   defined in the trial version; use the facing.
 5. **Full circle.** If the running total exceeds **512**, the regiment gives up steering for this update.
    - Live: it heads straight for the waypoint and leaves the rest to physical collision.
    - Trial: the steer heading becomes facing + 256 (turn back) 🟡.
@@ -91,12 +99,15 @@ succeeds at once with no side remembered. Otherwise it runs **two trials** with 
 saved and restored afterwards: trial 1 on the **natural side**, trial 2 on the **opposite side**. Each trial
 repeats the following until it ends:
 
-1. **Steering response (§4)** from the current trial position, giving a steer point and heading. Enemy units are
-   not obstacles during trials.
+1. **Steering response (§4)** from the current trial position, **including the rescan loop** of §4 step 4, giving
+   one final steer point and heading. The trial's side (natural for trial 1, opposite for trial 2) is used for
+   **every** steering response in that trial; it is never re-derived inside a trial. Enemy units are not obstacles
+   during trials.
 2. **Region test on the steer point only.** If the steer point is **outside the permitted area**, the trial's
    score is **set to 12,000** and the trial ends.
 3. **Advance.** Otherwise:
-   - score += `4 × |H − facing| + steer distance`;
+   - score += `4 × turn + steer distance`, where `turn` is the **smallest** angle between `H` and the trial facing
+     (`(H − facing) mod 512`, and `512 −` that when it exceeds 256, so 0…256);
    - the trial position becomes the steer point and the trial facing becomes `H`;
    - the waypoint heading and distance are recomputed from there;
    - steering state is cleared.
@@ -131,9 +142,14 @@ For a moving regiment, every update:
    direction of travel.
 2. If steering is active and the steer point lies **outside the permitted area**, run the full plan (§5). If the
    plan fails, pause 54 updates.
-3. If a **same-side** unit was found **near** while the two units' travel directions differ by at least 45° and the
-   mover is not faster, the mover **pauses 54 updates** instead of detouring. "Near" means octagonal distance
-   `< 16 × the mover's speed stat` (`s_rlmv`).
+3. If a **same-side** unit was found **near** while the two units' route headings differ by at least 45° and the
+   mover's effective speed (§3 item 6) is **not greater** than the other unit's, the mover **pauses 54 updates**
+   instead of detouring. "Near" means octagonal distance `< 16 × the mover's speed stat` (`s_rlmv`).
+   - This check belongs to live updates only. A route plan (§5) ignores it, and at the moment of the order the
+     mover has no move order yet, so a near same-side unit is simply not an obstacle then.
+   - From the first moving update the mover's effective speed is non-zero. A **stationary** same-side unit
+     (effective speed 0) can therefore never cause the pause. It is an ordinary obstacle instead, because the mover
+     is faster. The pause needs the other unit to be under a move-type order at a speed at least the mover's.
 4. If the needed turn exceeds **64**, the regiment first turns on the spot for half the turn's value in updates.
 5. Within **32** of the waypoint it takes the next waypoint and plans again (§5).
    - If the straight line from the regiment to the **last** waypoint crosses no boundary, the intermediate
@@ -173,3 +189,8 @@ original carries on.
 | both trial steer points outside the permitted area | plan at order | both 12,000 → regiment stays halted |
 | moving regiment whose steer point drifts outside | live update | re-plan; on failure pause 54 updates and keep the order |
 | equal trial results | plan | the opposite-of-natural side wins |
+| trial on side −1 meets footprint A, steers to H1; with ref = H1 and reach = its steer distance footprint B blocks | trial step | B's response replaces A's: steer heading H2, steer point from B; the region test uses B's steer point; running total += `|H1 − H2|` |
+| trial facing 500, steer heading 10 | trial cost | turn = 22 (wrapped), not 490 |
+| mover just ordered to move (no step taken yet), stationary same-side unit 40 away, headings 90° apart | live update | mover effective speed > 0 = the other unit's: the unit is an ordinary obstacle if it passes the scan; no pause |
+| same, but the other unit is moving at the mover's speed or faster | live update | pause 54 updates |
+| same pair at the moment the order is issued | plan | not an obstacle, no pause |

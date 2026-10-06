@@ -59,10 +59,19 @@ not run for this report; the detour side and the arrival tick are computed from 
      circle blocks.
    - The natural side is +1 (314 − 307 = 7 ≤ 256).
    - **Trial 1 (natural side):** heading 307 + trunc(5 × 32 / 4) = **347**, steer distance
-     D/2 = sqrt(246.8² + 97²)/2 = 132.6. Steer point ≈ **(994, 1362)**, inside the field, so the trial carries on
-     from there round the west side of the wood.
-   - **Trial 2 (opposite side):** heading 307 − 40 = **267**. Steer point ≈ **(1095, 1289)**, which is east of the
-     edge line x = 1080, so the score is **12,000** at once.
+     D/2 = sqrt(246.8² + 97²)/2 = 132.6 (stored 132). The rescan with ref 347 and reach 132 finds nothing else:
+     the (967, 1221) circle is now 40 off (≥ 32), and the (1074, 1243) circle (radius 59, combined 89, distance
+     181.2, bearing 273, half-width 41) is 74 off. Steer point ≈ **(994, 1362)**, inside the field, so the trial
+     carries on from there round the west side of the wood.
+   - **Trial 2 (opposite side):** the first response gives heading 307 − 40 = 267 (steer distance 132). The rescan
+     with ref 267 and reach 132 is blocked by the **(1074, 1243)** circle:
+     - it is 6 off its bearing 273, inside its half-width 41;
+     - it is within the corridor, since 132 > 181.2 − 89;
+     - it is within the look-ahead, at 181 < 256.
+
+     Its response on the same side gives heading 273 − trunc(5 × 41 / 4) = **222** and steer distance
+     sqrt(181.2² + 89²)/2 = 101. That steer point, ≈ **(1153, 1328)**, replaces the first one. It is east of the
+     edge line x = 1080, so the score is **12,000**.
 6. **Choice.** Trial 1 wins, and its side (+1, west of the (967, 1221) circle) is remembered for live steering. The
    move starts on this update. The plan would fail only if both trials scored 12,000.
 7. **Afterwards, every update while moving.** Live steering retests obstacles. The regiment's collision and edge
@@ -105,7 +114,7 @@ Optional unit tests:
 
 | before | action | expected |
 |---|---|---|
-| unit at (1113, 1420) facing 373, three-rank 12-model block; circle (967, 1221) r 67 | plan a route to (719, 970) | no usable guide; one waypoint (719, 970); trial 1 (heading 347, steer point ≈ (994, 1362)) viable; trial 2 (heading 267, steer point ≈ (1095, 1289)) scores 12,000; move accepted on the west side |
+| unit at (1113, 1420) facing 373, three-rank 12-model block; circle (967, 1221) r 67 | plan a route to (719, 970) | no usable guide; one waypoint (719, 970); trial 1 (heading 347, steer point ≈ (994, 1362)) viable; trial 2 (heading 267, then 222 after the rescan meets the (1074, 1243) circle; steer point ≈ (1153, 1328)) scores 12,000; move accepted on the west side |
 | same unit, but the only obstacle's first steer points on both sides lie east of x = 1080 | plan the same route | both trials score 12,000; the route attempt gives up |
 | centre at x = 1081 (one unit outside), moving | collision pass | correction `trunc(1 / 2) = 0`; the centre stays at 1081 |
 
