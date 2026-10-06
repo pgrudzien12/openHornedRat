@@ -228,6 +228,13 @@ class Regiment:
     # notes/obstacle_steering.md sections 4-6: the side the route plan chose (0 = none yet), kept for live steering,
     # and the (order, waypoint) the last plan was made for, so the plan runs only at an order or a new waypoint.
     route_side: int = 0
+    # notes/pursuit_map_edge.md: chasing a routing unit (set when a fight's routed opponent is pursued). It is not a
+    # charge: the edge correction only pushes a pursuer, and a segment check stops it. The chase budget and the last
+    # measured distance follow game_rules.md "Pursuit".
+    pursuing: bool = False
+    pursuit_budget: int | None = None
+    pursuit_distance: int = 0
+    pursuit_point: Point | None = None  # the chase point set at the last segment tick (None until the first one)
     route_planned_for: tuple[TurnKey, Point] | None = None
     # notes/obstacle_steering.md section 5 ("On failure") and section 6: updates left in a route pause. While
     # positive the regiment keeps its order but does not advance along its move.
@@ -920,6 +927,8 @@ class Battle:
             raise ValueError(f"{identifier} is not player-controlled")
         if regiment.routing:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
+        if regiment.pursuing:  # notes/pursuit_map_edge.md 5: move, attack, turn, rank and halt orders do nothing
+            raise ValueError(f"{identifier} is pursuing and cannot be ordered")
         regiment.route_pause_ticks = 0  # a new order ends a route pause
         if regiment.braced:
             raise ValueError(f"{identifier} is braced against a charge and cannot be ordered")
@@ -960,6 +969,8 @@ class Battle:
             raise ValueError(f"{identifier} is not player-controlled")
         if regiment.routing:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
+        if regiment.pursuing:  # notes/pursuit_map_edge.md 5: move, attack, turn, rank and halt orders do nothing
+            raise ValueError(f"{identifier} is pursuing and cannot be ordered")
         if regiment.braced:
             raise ValueError(f"{identifier} is braced against a charge and cannot be ordered")
         if regiment.anchored:
@@ -986,6 +997,8 @@ class Battle:
             raise ValueError(f"{identifier} is not player-controlled")
         if regiment.routing:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
+        if regiment.pursuing:  # notes/pursuit_map_edge.md 5: move, attack, turn, rank and halt orders do nothing
+            raise ValueError(f"{identifier} is pursuing and cannot be ordered")
         if regiment.in_melee:
             raise ValueError(f"{identifier} is in melee and cannot be ordered")
         regiment.target_x = regiment.target_y = None
@@ -1090,6 +1103,8 @@ class Battle:
             raise ValueError("this class has no deployment rank controls")
         if regiment.routing:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
+        if regiment.pursuing:  # notes/pursuit_map_edge.md 5: move, attack, turn, rank and halt orders do nothing
+            raise ValueError(f"{identifier} is pursuing and cannot be ordered")
         if regiment.held:
             raise ValueError(f"{identifier} is held and cannot be ordered")
         if regiment.attack_target is not None or regiment.in_melee:
@@ -1115,6 +1130,8 @@ class Battle:
             raise ValueError(f"{identifier} is not player-controlled")
         if regiment.routing:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
+        if regiment.pursuing:  # notes/pursuit_map_edge.md 5: move, attack, turn, rank and halt orders do nothing
+            raise ValueError(f"{identifier} is pursuing and cannot be ordered")
         if regiment.in_melee:
             raise ValueError(f"{identifier} is in melee and cannot be ordered")
         regiment.clear_shooting()
@@ -1323,6 +1340,7 @@ class Battle:
         combat.resolve_contacts(self)
         combat.refresh_braced_state(self)
         if self.tick_count % combat.SEGMENT_TICKS == 0:
+            self._update_pursuits()
             combat.resolve_melee(self)
             combat.resolve_contact_attacks(self)  # game_rules.md 7.7, once per segment
             combat.resolve_rally(self)
@@ -1394,7 +1412,11 @@ class Battle:
                             model.freeze_ticks = (model.stagger & 7) + 1
                             model.current_speed = 0.0
                         regiment.charge_started_target = target.identifier
-                    moved = self._advance_toward(regiment, (target.x, target.y),
+                    # A pursuer runs straight at the chase point set at the last segment tick
+                    # (notes/pursuit_map_edge.md 2); a charge re-aims at its target every update.
+                    chase = (regiment.pursuit_point if regiment.pursuing and regiment.pursuit_point is not None
+                             else (target.x, target.y))
+                    moved = self._advance_toward(regiment, chase,
                                                  regiment.speed_for_mode(CHARGING_K) * move_scale, arrive=False,
                                                  order_key=("charge", target.identifier), scale=scale)
             elif regiment.target_x is not None and regiment.target_y is not None:
@@ -2045,6 +2067,58 @@ class Battle:
                 if second_yields:
                     self._translate_regiment(second, ux * share, uy * share)
 
+    def _update_pursuits(self) -> None:
+        """The once-per-segment pursuit update (notes/pursuit_map_edge.md 2): a pursuit stops when the target is no
+        longer a live routing unit, when the chase budget runs out (not with AlwaysPursue; first min(2 x distance,
+        120), then + previous distance - distance - 4), or when the probe one collision radius ahead of the front
+        rank along the facing lies inside no BattleEdge area (or the battle has none). Not modelled: the restraint
+        test of the rally-attempt state (there is no Rally order yet)."""
+        edges = [boundary for boundary in self.navigation_boundaries if boundary.battle_edge]
+        for regiment in self.regiments.values():
+            if not regiment.pursuing or not regiment.active or regiment.routing:
+                continue
+            target = self.regiments.get(regiment.attack_target) if regiment.attack_target is not None else None
+            if target is None or not target.active or not target.routing:
+                self._stop_pursuit(regiment)
+                continue
+            distance = int(math.hypot(target.x - regiment.x, target.y - regiment.y))
+            if regiment.pursuit_budget is None:
+                regiment.pursuit_budget = min(2 * distance, 120)
+            else:
+                regiment.pursuit_budget += regiment.pursuit_distance - distance - 4
+            regiment.pursuit_distance = distance
+            if regiment.pursuit_budget <= 0 and "AlwaysPursue" not in regiment.psychology:
+                self._stop_pursuit(regiment)
+                continue
+            facing = int(regiment.direction) % 512
+            radius = int(regiment.bounding_radius())
+            probe = (regiment.x + math.trunc(round(256 * math.sin(facing * math.tau / 512)) * radius / 256),
+                     regiment.y + math.trunc(round(256 * math.cos(facing * math.tau / 512)) * radius / 256))
+            if not any(not edge.forbidden(probe) for edge in edges):
+                self._stop_pursuit(regiment)
+                continue
+            # Re-aim (section 2 step 3): the route goes to the fugitive and the pursuer then runs straight until the
+            # next segment tick. PROVISIONAL: the chase point is placed on the same line well beyond the fugitive, so
+            # a pursuer that reaches the fugitive keeps running past it instead of circling.
+            gap = max(math.hypot(target.x - regiment.x, target.y - regiment.y), 1e-6)
+            beyond = 1000.0 / gap
+            regiment.pursuit_point = (target.x + (target.x - regiment.x) * beyond,
+                                      target.y + (target.y - regiment.y) * beyond)
+
+    def _stop_pursuit(self, regiment: Regiment) -> None:
+        """Event 0x10 ("stop pursuing") to the pursuer: with behaviour scripts, its library handler shouts, stops
+        and re-forms in place (notes/pursuit_map_edge.md 4); without scripts the engine does the same at once."""
+        state = self.event_bus.unit_states.get(regiment.identifier)
+        if self.interpreter is not None and state is not None:
+            self.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x10))
+            return
+        regiment.pursuing = False
+        regiment.pursuit_budget = regiment.pursuit_point = None
+        regiment.attack_target = regiment.charge_started_target = None
+        regiment.target_x = regiment.target_y = None
+        regiment.waypoints.clear()
+        self.reform_to_ranks(regiment, regiment.ranks)
+
     def _marked(self, regiment: Regiment) -> bool:
         state = self.event_bus.unit_states.get(regiment.identifier)
         return state is not None and bool(state.unit_flags & interpreter.LEAVING_BATTLE_FLAG)
@@ -2079,7 +2153,8 @@ class Battle:
             dx = math.trunc((nearest[0] - centre[0]) / 2)
             dy = math.trunc((nearest[1] - centre[1]) / 2)
             self._translate_regiment(regiment, dx, dy)
-            self._end_charge_on_obstruction(regiment, "a movement boundary")
+            if not regiment.pursuing:  # notes/pursuit_map_edge.md 3: the correction only pushes a pursuer
+                self._end_charge_on_obstruction(regiment, "a movement boundary")
 
     def _correct_solid_objects(self, regiment: Regiment) -> None:
         centre = self.formation_centre(regiment)

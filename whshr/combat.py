@@ -773,6 +773,8 @@ def _react_to_rout(routed: "Regiment", opponents: Sequence["Regiment"], group_id
             continue
         opponent.attack_target = routed.identifier
         opponent.target_x = opponent.target_y = None
+        opponent.pursuing = True  # notes/pursuit_map_edge.md: a pursuit, not a charge
+        opponent.pursuit_budget = opponent.pursuit_point = None
         battle.events.append(BattleEvent(
             f"{opponent.name} pursues {routed.name}!", "pursuit_start",
             regiment=opponent.identifier, target=routed.identifier))

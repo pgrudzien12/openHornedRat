@@ -1703,6 +1703,7 @@ class ScriptInterpreter:
         unit.flee_x = unit.flee_y = None
         unit.attack_target = None
         unit.charge_started_target = None
+        unit.pursuing, unit.pursuit_budget, unit.pursuit_point = False, None, None
         unit.braced = False
         unit.braced_target = None
         unit.target_x = unit.target_y = None
@@ -3152,6 +3153,7 @@ class ScriptInterpreter:
         if current is not None:
             self.event_bus.queue_event(current, Event(code=0x1A, source=unit.identifier), checked=True)
         state.current_target = (other.identifier, 0)
+        unit.pursuing, unit.pursuit_budget, unit.pursuit_point = False, None, None  # it becomes a charge
         if not unit.anchored:
             unit.attack_target = other.identifier
         self.event_bus.queue_event(other.identifier, Event(code=0x07, source=unit.identifier), checked=True)
