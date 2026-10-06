@@ -433,3 +433,18 @@ class BattleNavigationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MarkedUnitCollisionTests(unittest.TestCase):
+    def test_a_marked_unit_is_not_pushed_and_does_not_push(self):
+        # notes/script_behaviours.md 2.2: a marked (leaving the battle) unit, such as BF003's peasants, is not touched
+        # by the collision pass, so a moving regiment walks through it instead of being shoved back every tick.
+        from whshr import interpreter
+        peasants = Regiment("p", "Peasants", 200, 200, 0, Side.NEUTRAL, models=5, ranks=2)
+        infantry = Regiment("i", "Infantry", 215, 200, 0, Side.PLAYER, models=1, ranks=1,
+                            target_x=350, target_y=200)
+        battle = Battle(500, 500, [peasants, infantry])
+        battle.event_bus.unit_states["p"].unit_flags |= interpreter.LEAVING_BATTLE_FLAG
+        old = (infantry.x, infantry.y)
+        battle._resolve_collisions()
+        self.assertEqual((infantry.x, infantry.y), old)

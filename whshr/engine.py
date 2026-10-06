@@ -2014,6 +2014,10 @@ class Battle:
             for second in regiments[i + 1:]:
                 if first.in_melee or second.in_melee:
                     continue
+                if deployment_id is None and (self._marked(first) or self._marked(second)):
+                    # notes/script_behaviours.md 2.2: a marked unit (the script's "leaving the battle" state, set on
+                    # BF003's peasants and other non-combatants) is not touched at all: no push, no contact.
+                    continue
                 if may_engage(first, second) and deployment_id is None:
                     # A pair that can actually fight never pushes apart: a charging regiment must be
                     # free to close all the way to footprint contact (combat.resolve_contacts), not
@@ -2040,6 +2044,10 @@ class Battle:
                     self._translate_regiment(first, -ux * share, -uy * share)
                 if second_yields:
                     self._translate_regiment(second, ux * share, uy * share)
+
+    def _marked(self, regiment: Regiment) -> bool:
+        state = self.event_bus.unit_states.get(regiment.identifier)
+        return state is not None and bool(state.unit_flags & interpreter.LEAVING_BATTLE_FLAG)
 
     @staticmethod
     def _translate_regiment(regiment: Regiment, dx: float, dy: float) -> None:

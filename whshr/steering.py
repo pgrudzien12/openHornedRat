@@ -6,7 +6,10 @@ sections 3 (scan), 4 (steering response) and 5 (route plan).  Angles are in
 
 PROVISIONAL choices (the note leaves these open):
 - the running turn total of section 4 adds the plain, unwrapped |previous H - new H|,
-  starting from the facing (the note marks the first baseline open);
+  starting from the waypoint heading that the first scan uses (the note marks the first
+  baseline open and suggests the facing; a facing baseline makes a turn across the 0/512
+  seam count as nearly a full circle, e.g. facing 475 -> heading 42 as 433, so trials gave
+  up spuriously);
 - a hard cap of 64 rescans per steering call is treated like the full-circle
   give-up (safety net, not from the note);
 - the give-up turn-back heading of a trial is applied by ``plan``;
@@ -158,7 +161,7 @@ def steer(
     if side == 0:
         side = 1 if (wp_heading - hit.bearing) % _TURN <= _HALF else -1
     total = 0
-    prev = facing % _TURN
+    prev = wp_heading
     stored = 0
     for _ in range(_MAX_STEERS):
         heading = (hit.bearing + side * ((5 * hit.half_width) >> 2)) % _TURN

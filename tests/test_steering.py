@@ -221,3 +221,14 @@ class CorrectionTests(unittest.TestCase):
         wrapped = min((st.heading - 500) % 512, 512 - (st.heading - 500) % 512)
         self.assertLess(wrapped, 256)
         self.assertLess(min(result.scores), 4 * 256 + 400 + 200)
+
+
+class SeamTests(unittest.TestCase):
+    def test_a_turn_across_the_0_512_seam_does_not_count_as_a_full_circle(self):
+        # BF003 playtest: infantry at (655, 774) facing 475 attacking the Wolfriders at (726, 982) past three trees.
+        # With the facing as the turn-total baseline, 475 -> 42 counted as 433 and the short west trial gave up.
+        trees = [_circle(809, 824, 58, "object:3"), _circle(736, 865, 44, "object:4"),
+                 _circle(680, 860, 17, "object:13")]
+        result = plan((655, 774), 475, (726, 982), trees, 33, _all, _anywhere)
+        self.assertEqual(result.side, -1)
+        self.assertLess(result.scores[0], 1000)
