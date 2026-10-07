@@ -581,18 +581,18 @@ class Hud:
         hits = self._marker_hits(pos)
         return hits[-1].identifier if hits else None
 
-    def click_minimap_tab(self, pos: Sequence[float]) -> bool:
-        """Handle a click on a marker-display-mode tab or the book; returns True if one was hit."""
+    def click_minimap_tab(self, pos: Sequence[float]) -> str | None:
+        """Handle a click on a marker-display-mode tab or the book: "tab", "book" or None when neither was hit."""
         if self._draw_size is None or not self._minimap_screen_rect().collidepoint(pos):
-            return False
+            return None
         native = self._native_map_point(pos)
         for index, ((x, y), _frames) in enumerate(MINIMAP_TABS):
             rect = pygame.Rect(x, y, *MINIMAP_TAB_SIZE)
             if rect.collidepoint(native):
                 self.marker_mode = MARKER_MODES[index]
-                return True
+                return "tab"
         book_rect = pygame.Rect(MINIMAP_BOOK_POS[0], MINIMAP_BOOK_POS[1], *MINIMAP_BOOK_SIZE)
-        return bool(book_rect.collidepoint(native))
+        return "book" if book_rect.collidepoint(native) else None
 
     def _regiment_dot_frame(self, regiment: "Regiment") -> int:
         if regiment.in_melee or regiment.attack_target is not None:

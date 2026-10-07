@@ -5,6 +5,7 @@ the rest of the engine's rendering), so these tests exercise the pure logic that
 gets drawn (panel state, slot layout, hit testing, minimap marker selection) rather than pixel
 output.
 """
+import struct
 import sys
 import types
 import unittest
@@ -755,6 +756,14 @@ class BattleViewHudInputTests(unittest.TestCase):
         self.assertEqual(view.events(event), (("select", "enemy"),))
         view._ground_click.assert_not_called()
 
+    def test_given_a_minimap_book_click_then_it_opens_the_objectives_book(self):
+        hud = self._hud_mock(click_minimap_tab=lambda pos: "book")
+        view = self._view(hud)
+        event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+
+        self.assertEqual(view.events(event), (("objectives_book",),))
+        view._ground_click.assert_not_called()
+
     def test_given_a_minimap_tab_click_then_it_is_consumed_without_a_ground_or_move_order(self):
         hud = self._hud_mock(click_minimap_tab=lambda pos: True)
         view = self._view(hud)
@@ -1167,3 +1176,35 @@ class CameraMarkerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ItemMarkerTests(unittest.TestCase):
+    """notes/battle_end_objectives.md 12.2: a sparkle over each item still to be picked up, the snowman variant in
+    battles that load snow scenery."""
+
+    def _view(self, marks, furniture=(), update_count=0):
+        view = BattleView.__new__(BattleView)
+        sheet = SimpleNamespace(name="SPARKLE", frames=[SimpleNamespace(anchor_x=16.0, anchor_y=32.0)] * 13,
+                                rects=[(index * 32, 0, 32, 32) for index in range(13)])
+        view.scene = SimpleNamespace(
+            battle=SimpleNamespace(objectives=SimpleNamespace(item_marks=marks), update_count=update_count),
+            field=SimpleNamespace(ui_sheets={"sparkle": sheet}, script={"load": {"loadfurn": list(furniture)}},
+                                  ground_height=lambda x, y: 0.0))
+        return view
+
+    def frames(self, view):
+        data = view._item_markers()
+        return [int(values[3] // 32) for values in struct.iter_unpack("10f", data)]
+
+    def test_one_sparkle_per_pending_item_cycling_frames_0_to_4(self):
+        view = self._view({"K": (240.0, 480.0), "X": (24.0, 24.0)}, update_count=12)
+        self.assertEqual(self.frames(view), [1, 1])  # tick 12 -> step 6 -> frame 6 % 5
+        view.scene.battle.update_count = 8
+        self.assertEqual(self.frames(view), [4, 4])
+
+    def test_snow_battles_use_the_second_variant(self):
+        view = self._view({"K": (240.0, 480.0)}, furniture=("SnwRock2",), update_count=4)
+        self.assertEqual(self.frames(view), [7])
+
+    def test_no_marker_once_picked_up(self):
+        self.assertEqual(self._view({})._item_markers(), b"")

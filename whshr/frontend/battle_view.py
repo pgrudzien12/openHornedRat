@@ -33,6 +33,7 @@ from ..battle3d import Projection
 from ..battlefield import SpriteSheet
 from ..scenes import SceneEvent
 from .cursors import GameCursors
+from .battle_sound import BattleSounds
 from .ranged_sound import MissileSounds
 from .gpu import Gpu
 from .scene_view import SceneView
@@ -178,6 +179,10 @@ def _atlas_rect(sheet: SpriteSheet, index: int) -> tuple[int, int, int, int]:
     return rect
 
 
+# Snow scenery that selects the sparkle marker's second variant (notes/battle_end_objectives.md 12.2).
+SNOW_FURNITURE = frozenset({"d_snwwatchtower", "snwrock1", "snwrock2", "snwrock3", "snwrock4"})
+
+
 class BattleView(SceneView[BattleScene]):
     background = SKY
 
@@ -254,6 +259,7 @@ class BattleView(SceneView[BattleScene]):
         loaded_packets = scene.field.script.get("load", {}).get("loadsfx", ())
         self.missile_sounds = MissileSounds(installation,
                                             any(str(name).casefold() == "missile" for name in loaded_packets))
+        self.battle_sounds = BattleSounds(installation, loaded_packets)
         self.cursors = GameCursors(installation, dll="GMCUR.DLL") if installation is not None else None
         self._cursor_mode: str | None = None
         self._set_cursor("default")
@@ -304,7 +310,10 @@ class BattleView(SceneView[BattleScene]):
             return (("end_drag",), ("deselect",)) if deploying else (("deselect",),)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.hud.set_pressed(None)
-            if self.hud.click_minimap_tab(event.pos):
+            minimap_hit = self.hud.click_minimap_tab(event.pos)
+            if minimap_hit == "book":
+                return (("objectives_book",),)
+            if minimap_hit:
                 return ()
             # A regiment's banner marker can hang outside the strict inner map-area rect (it is
             # anchored 8px left, 24px above its dot - notes/game_rules.md), so minimap_position()
@@ -571,6 +580,9 @@ class BattleView(SceneView[BattleScene]):
                 self.battle_log.append((f"{sender}:", message))
                 self.log_scroll = 0  # auto-scroll to newest on a new message
         self.event_log.extend(str(event) for event in self.scene.battle.events)
+        battle_sounds: BattleSounds | None = getattr(self, "battle_sounds", None)  # tests build views without __init__
+        if battle_sounds is not None:
+            battle_sounds.handle(self.scene.battle.events)
 
     def status(self) -> Sequence[str]:
         camera, scene = self.camera, self.scene
@@ -681,6 +693,7 @@ class BattleView(SceneView[BattleScene]):
                     center_y / WORLD_PER_MESH,
                     *rect, frame.width / 2, frame.height, selected,
                 )))
+        data += self._item_markers()
         # The original promotes the focused banner in z-order and leaves it promoted after deselecting.
         order: list[str] = getattr(self, "_banner_order", [])  # tests build views without __init__
         identifiers = list(self.scene.battle.regiments)
@@ -694,6 +707,25 @@ class BattleView(SceneView[BattleScene]):
         for _, instance in sorted(banner_instances, key=lambda pair: rank[pair[0]]):
             data.extend(instance)
         return bytes(data[:self.capacity * INSTANCE.size])
+
+    def _item_markers(self) -> bytes:
+        """The sparkle over each item still to be picked up (notes/battle_end_objectives.md 12.2): effect set
+        `Sparkle`, variant 1 (frames 0-4) or, in a battle that loads snow scenery, variant 2 (frames 5-12).
+        PROVISIONAL: the frames cycle one per two battle ticks (the original's timing was not traced)."""
+        objectives = getattr(self.scene.battle, "objectives", None)
+        sheet = self.scene.field.ui_sheets.get("sparkle")
+        if objectives is None or not objectives.item_marks or sheet is None or not sheet.rects:
+            return b""
+        furniture = {str(name).casefold() for name in self.scene.field.script.get("load", {}).get("loadfurn", ())}
+        snow = bool(furniture & SNOW_FURNITURE)
+        first, count = (5, 8) if snow else (0, 5)
+        number = min(first + (self.scene.battle.update_count // 2) % count, len(sheet.frames) - 1)
+        frame, rect = sheet.frames[number], _atlas_rect(sheet, number)
+        field, data = self.scene.field, bytearray()
+        for x, y in objectives.item_marks.values():
+            data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
+                                  *rect, frame.anchor_x, frame.anchor_y, 0.0)
+        return bytes(data)
 
     def draw(self) -> None:
         super().draw()

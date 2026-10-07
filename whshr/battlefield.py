@@ -389,6 +389,7 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
     load_ui("ICONS")
     load_ui("BACKALL")
     load_ui("GENBATT")  # battle-effects set: burning figures and charred corpses (animation.BURN_SEQUENCES)
+    load_ui("SPARKLE")  # effect set 3: the item marker of objectives K/X (notes/battle_end_objectives.md 12.2)
     planmap = script["field"].get("planmap")
     load_ui(planmap)
     portrait_bg = script["field"].get("portrait_bg")
@@ -405,6 +406,7 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
                 if resource == banner and base:
                     banner_bases[base] = None
     for resource, base in (("ICONS", "ICONS"), ("BACKALL", "BACKALL"), ("GENBATT", "GENBATT"),
+                           ("SPARKLE", "SPARKLE"),
                            (planmap, planmap),
                            (portrait_bg, portrait_bg), *ui_resources):
         loaded_ui = ui_by_base.get(base) if base is not None else None
@@ -413,6 +415,8 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
     # Banner frame 2 is an in-world regiment marker, so these sheets also need atlas rectangles.
     if ui_by_base.get("GENBATT") is not None:
         banner_bases["GENBATT"] = None
+    if ui_by_base.get("SPARKLE") is not None:
+        banner_bases["SPARKLE"] = None  # drawn in the world, so it needs atlas rectangles too
     atlas_sheets = [sheet for sheet in by_base.values() if sheet is not None]
     for base in banner_bases:
         banner_sheet = ui_by_base.get(base)

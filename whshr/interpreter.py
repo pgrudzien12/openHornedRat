@@ -2562,12 +2562,13 @@ class ScriptInterpreter:
 
     def _siege_exit(self, unit: "Regiment", state: UnitScriptState, check_broken: bool) -> None:
         """Codes 19/20 step 1: battle state 4, (19: not broken), inside node index 14 -> state 5, the global
-        sound 11 and 0x38 to every live unit (notes/script_behaviours.md 1.8)."""
+        sound 11 and 0x38 to every live unit (notes/script_behaviours.md 1.8). The sound is the Zhufbar packet's
+        (11) effect 0, as for the same transition by the siege Z rule (notes/battle_end_objectives.md 4.4)."""
         if (self.battle.mission_state != 4 or (check_broken and unit.routing)
                 or not self._in_node_area(unit, 14)):
             return
         self.battle.mission_state = 5
-        self._sound(unit.identifier, "global", 0, 11, positional=False)
+        self._sound(unit.identifier, "global", 11, 0, positional=False)
         for other_id in list(self.battle.regiments):
             self.event_bus.queue_event(other_id, Event(code=0x38), checked=True)
 
@@ -3257,12 +3258,24 @@ class ScriptInterpreter:
     def _query_charge_sound(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
         """Case 24: start the charge sound from packet 2 unless one runs: effect 1 for Infantry and Archers,
         13 for Cavalry (PROVISIONAL: 14 for the non-Human, Elven or Dwarven races is not told apart, the
-        race is not kept), none for other classes. Not modelled: stopping it when the charge ends."""
+        race is not kept), none for other classes. `stop_ended_charge_sounds` stops it when the charge ends."""
         effect = {1: 1, 3: 1, 2: 13}.get(unit.unit_class or 0)
         if state.charge_sound is None and effect is not None:
             state.charge_sound = (2, effect)
             self._sound(unit.identifier, "charge_start", 2, effect, positional=True)
         return False
+
+    def stop_ended_charge_sounds(self) -> None:
+        """The charge sound stops when the charge ends: halt, contact, rout or removal
+        (notes/script_animation_sound.md §4); the unit may then start a new one on its next charge."""
+        for unit_id, state in self.event_bus.unit_states.items():
+            if state.charge_sound is None:
+                continue
+            unit = self.battle.regiments.get(unit_id)
+            if (unit is None or not unit.active or unit.attack_target is None or unit.in_melee
+                    or unit.routing):
+                self._sound(unit_id, "charge_stop", *state.charge_sound, positional=False)
+                state.charge_sound = None
 
     def _switch_opponent(self, state: UnitScriptState, unit: "Regiment", gone: str) -> bool:
         """In melee: the first model paired with a hostile unit other than `gone` that is still fighting gives

@@ -290,6 +290,34 @@ class BookTests(unittest.TestCase):
         self.assertEqual(objectives.book_text_ids(), [1005])
 
 
+class BookAndSoundTests(unittest.TestCase):
+    def test_the_book_lists_the_objectives_before_the_decision_and_repeats_the_message_after(self):
+        battle = make([["R", 1, 0], ["A", 0, 0], ["B", 80, 0]], regiment("p", Side.PLAYER), regiment("e", Side.ENEMY))
+        battle.open_book()
+        self.assertEqual([e.data["text_id"] for e in battle.pending_feedback], [1004, 33000, 33026])
+        battle.pending_feedback.clear()
+        battle.regiments["e"].models = 0
+        at_boundary(battle)
+        battle.open_book()
+        self.assertEqual([(e.kind, e.data.get("text_id"), e.data.get("effect")) for e in battle.pending_feedback],
+                         [("message", 1005, None), ("sound", None, 9)])
+
+    def test_the_charge_sound_stops_when_the_charge_ends(self):
+        attacker = regiment("a", Side.PLAYER, unit_class=1)
+        battle = make([["A", 0, 0]], attacker, regiment("e", Side.ENEMY, y=500), scripted=True)
+        assert battle.interpreter is not None
+        state = battle.event_bus.unit_states["a"]
+        state.charge_sound = (2, 1)
+        attacker.attack_target = "e"
+        battle.interpreter.stop_ended_charge_sounds()
+        self.assertEqual(kinds(battle, "sound"), [])
+        attacker.in_melee = True  # contact ends the charge
+        battle.interpreter.stop_ended_charge_sounds()
+        self.assertEqual([(e.data["cue"], e.data["packet"], e.data["effect"]) for e in kinds(battle, "sound")],
+                         [("charge_stop", 2, 1)])
+        self.assertIsNone(state.charge_sound)
+
+
 class ReactWrapperTests(unittest.TestCase):
     def test_react_outside_a_script_matches_the_opcode(self):
         battle = make([["A", 0, 0]], regiment("p", Side.PLAYER, race=0), scripted=True)

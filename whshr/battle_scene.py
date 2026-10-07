@@ -123,6 +123,8 @@ class BattleScene(Scene):
         elif kind == "pause":
             if self.battle.phase == "battle" and not self.battle.can_leave:
                 self.battle.paused = not self.battle.paused
+        elif kind == "objectives_book":
+            self.battle.open_book()
         elif kind == "leave_battle":
             if self.battle.can_leave:  # the tent button (notes/battle_end_objectives.md 7)
                 self.battle.leave()

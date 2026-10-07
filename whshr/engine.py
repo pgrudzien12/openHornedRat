@@ -1357,6 +1357,8 @@ class Battle:
         self._check_flight_edges()
         combat.resolve_contacts(self)
         combat.refresh_braced_state(self)
+        if self.interpreter:
+            self.interpreter.stop_ended_charge_sounds()
         if self.tick_count % combat.SEGMENT_TICKS == 0:
             self._update_pursuits()
             combat.resolve_melee(self)
@@ -2049,6 +2051,17 @@ class Battle:
         self.result = "defeat" if self.objectives.defeat else "victory"
         self.events.append(BattleEvent("The army leaves the battlefield.", "result", result=self.result,
                                        counts=self.side_counts(), letter=self.objectives.decided))
+
+    def open_book(self) -> None:
+        """The minimap book (notes/battle_end_objectives.md 6 and 8): the objective list before the decision,
+        afterwards "Mission complete." and the speech again. Shown from the next tick."""
+        if self.objectives is None:
+            return
+        if self.decided and not self.objectives.defined("U"):
+            self.objectives.announce(self, self.pending_feedback)
+            return
+        for text_id in self.objectives.book_text_ids():
+            self.pending_feedback.append(BattleEvent(f"message {text_id}", "message", text_id=text_id))
 
     def react(self, identifier: str, code: int) -> None:
         """A React reaction outside the unit's script (an objective's pickup or warning)."""

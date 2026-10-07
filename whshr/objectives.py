@@ -187,15 +187,16 @@ class Objectives:
                                          letter=letter, defeat=self.defeat))
         self.announce(battle)
 
-    def announce(self, battle: Battle) -> None:
+    def announce(self, battle: Battle, sink: list[BattleEvent] | None = None) -> None:
         """GMTXT 1005 and the complete/failed speech; in U battles only the failed speech (section 6 step 2)."""
+        events = battle.events if sink is None else sink
         failed = self._met("Z") and not self.siege
         if not self.defined("U"):
-            battle.events.append(BattleEvent("Mission complete.", "message", text_id=MISSION_COMPLETE_TEXT))
+            events.append(BattleEvent("Mission complete.", "message", text_id=MISSION_COMPLETE_TEXT))
         elif not self._met("Z"):
             return
         effect = HUM_FAILED if failed else HUM_COMPLETE
-        battle.events.append(BattleEvent(f"sound play {HUMBTL_PACKET}/{effect}", "sound", cue="play",
+        events.append(BattleEvent(f"sound play {HUMBTL_PACKET}/{effect}", "sound", cue="play",
                                          packet=HUMBTL_PACKET, effect=effect, position=None))
 
     # ------------------------------------------------------------------ final pass (mode 3)
