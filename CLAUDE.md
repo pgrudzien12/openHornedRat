@@ -63,7 +63,7 @@ unknown formats. In short:
 
 ## Repository layout
 
-GitHub repository: https://github.com/pgrudzien12/openHornedRat (private).
+GitHub repository: https://github.com/pgrudzien12/openHornedRat (public).
 `samples/`, `battles/`, `extracted/`, `logs/` and `saves/` are in `.gitignore`: they contain data
 extracted from the game (or, for `logs/`, JSON Lines battle logs, and for `saves/`, engine campaign
 saves — see "Engine saves" below — naming regiments and units from the game) and are kept locally only.
