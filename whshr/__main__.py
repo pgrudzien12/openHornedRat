@@ -123,6 +123,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                                help="with --frames: save the last frame as PNG; do not commit game assets")
     engine_parser.add_argument("--frame-time", type=float,
                                help="fixed seconds per frame instead of wall-clock time (reproducible captures)")
+    engine_parser.add_argument("--profile-frames", action="store_true",
+                               help="print per-window frame timing summaries when leaving glue screens or exiting")
     engine_parser.add_argument("--battle-log", type=Path, default=REPOSITORY_LOGS,
                                help="directory for JSON Lines battle logs (default: logs/)")
     engine_parser.add_argument("--no-battle-log", action="store_true", help="disable battle logging")
@@ -249,7 +251,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = app.run(args.installation, (args.width, args.height), args.skip_intro, args.hidden,
                          args.frames, args.screenshot, args.frame_time, args.battle, args.camera,
                          log_dir, args.seed, args.glue_program, resolve_save_dir(args.save_dir), args.no_battle,
-                         None if args.no_campaign_log else args.campaign_log)
+                         None if args.no_campaign_log else args.campaign_log, args.profile_frames)
         print(f"{result['frames']} frames, {result['ticks']} ticks, final scene {result['scene']}")
         return 0
     if args.command == "viewer":
