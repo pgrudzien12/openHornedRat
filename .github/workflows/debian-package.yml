@@ -199,12 +199,21 @@ jobs:
           path: release
 
       - name: Publish daily prerelease
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ needs.plan.outputs.daily_tag }}
-          target_commitish: ${{ needs.plan.outputs.checkout_ref }}
-          name: Daily build ${{ needs.plan.outputs.daily_date }}
-          prerelease: true
-          make_latest: false
-          body: Automated playtest packages. Asset names identify the source commit. Bring your own legally owned WARFB game files; they are not included.
-          files: release/*.deb
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DAILY_TAG: ${{ needs.plan.outputs.daily_tag }}
+          DAILY_DATE: ${{ needs.plan.outputs.daily_date }}
+          CHECKOUT_REF: ${{ needs.plan.outputs.checkout_ref }}
+        run: |
+          set -euo pipefail
+          assets=(release/*.deb)
+          test "${#assets[@]}" -eq 1
+          if gh release view "$DAILY_TAG" >/dev/null 2>&1; then
+            gh release upload "$DAILY_TAG" "${assets[0]}" --clobber
+          else
+            gh release create "$DAILY_TAG" "${assets[0]}" --target "$CHECKOUT_REF" \
+              --title "Daily build $DAILY_DATE" --prerelease --latest=false \
+              --notes "Automated playtest packages. Asset names identify the source commit. Bring your own legally owned WARFB game files; they are not included."
+          fi
