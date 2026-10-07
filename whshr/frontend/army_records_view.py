@@ -106,7 +106,8 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
         ledger = model.ledger
         state = (self.scene.whoami, self.info, tuple(sorted(model.hired.items())), self.pressed_button,
                  tuple(sorted((whoami, regiment.models) for whoami, regiment in model.company.items())),
-                 tuple(sorted(ledger.offered.items())), tuple(sorted(ledger.taken.items())), model.dirty)
+                 tuple(sorted(ledger.offered.items())), tuple(sorted(ledger.taken.items())),
+                 tuple(sorted(ledger.wounded.items())), model.dirty)
         if state == self.state:
             return
         self.state = state
@@ -260,7 +261,8 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
         """Draw the right-page skull/status group at the documented bottom line (§2.2)."""
         level = min(4, (regiment.points & 31) * 4 // 31)
         self._bitmap_centered(f"Skull{level}", (380, 385))
-        self._label(self._string("BKTXT", 502, regiment.models, 0), 395, 385, BLACK)
+        wounded = self.scene.model.ledger.wounded.get(regiment.whoami, 0)
+        self._label(self._string("BKTXT", 502, regiment.models, wounded), 395, 385, BLACK)
 
     def _buttons(self, regiment: Regiment) -> None:
         for action, x, art, label_id in BUTTONS:

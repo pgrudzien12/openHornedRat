@@ -17,12 +17,12 @@ class ReinforcementLedger:
     def __init__(self, company: dict[int, Regiment], available: Mapping[int, int],
                  wounded: Mapping[int, int] | None = None) -> None:
         self.company = company
-        wounded = wounded or {}
+        self.wounded = {whoami: max(0, count) for whoami, count in (wounded or {}).items()}
         self.available: dict[int, int] = {whoami: count for whoami, count in available.items() if count > 0}
         self.offered: dict[int, int] = {}
         self.taken: dict[int, int] = {}
         for whoami, regiment in company.items():
-            room = regiment.orgsize - regiment.models - max(0, wounded.get(whoami, 0))
+            room = regiment.orgsize - regiment.models - self.wounded.get(whoami, 0)
             self.offered[whoami] = max(0, min(self.available.get(whoami, 0), room))
         self.changed = False
         self._opening = ({whoami: regiment.models for whoami, regiment in company.items()}, dict(self.available))

@@ -307,6 +307,20 @@ class GlueSceneTests(unittest.TestCase):
         self.assertIn(("BKTXT", 501, (100, 10)), calls)
         self.assertIn(("BKTXT", 500, (77,)), calls)
 
+    def test_army_records_status_line_shows_wounded_reserved_for_reinforcements(self):
+        regiment = Regiment(2, "Commander", True, 10, 12, 0,
+                            RosterRow(2, keep=False, for_hire=False, wizard=False, artillery=False, base_price=10))
+        view = ArmyRecordsView.__new__(ArmyRecordsView)
+        view.scene = SimpleNamespace(model=SimpleNamespace(ledger=SimpleNamespace(wounded={2: 1})))
+        calls = []
+        view._bitmap_centered = lambda *_args: None
+        view._label = lambda value, *_args: calls.append(value)
+        view._string = lambda table, text_id, *args: (table, text_id, args)
+
+        view._status_line(regiment)
+
+        self.assertEqual(calls, [("BKTXT", 502, (10, 1))])
+
     def test_leader_box_crops_background_and_portrait_at_the_same_matched_window(self):
         from whshr.portraits import BACKGROUND_SET
 
