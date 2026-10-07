@@ -59,6 +59,8 @@ For each axis, the destination offset is
 
 `(random integer 0 .. 10−min(BS,10)) × independent random sign × spread × distance/max_range`.
 
+Here BS is the regiment's value, including any regiment BS promotion. It is not replaced by the firing figure's or leader's separate BS. See [Leader Ballistic Skill and shooting](leader_ballistic_skill.md) for examples.
+
 For bows/crossbows, `spread = 8`, or 16 when scenery obstructs the straight aim line. For artillery, `spread = 8d` or `8d+8`, where `d` is the first misfire die (1–5 on a fired shot). The scenery test considers buildings, walls, trees and other solid objects between firer and aim point; a shooter inside an object's footprint is not blocked by it. It raises scatter but does not automatically cancel the shot. Randomness and integer rounding should be fixture controlled; the exact rounding at every intermediate product is **uncertain**.
 
 The launch position is the posting archer's model position, or the machine/leader position for Artillery. The projectile's launch height is normally the local ground height; rock lobber and Doom Diver start 24 units above it. The selected target's height affects the desired endpoint, while a ground click uses ground level. **Uncertain:** the target height rule for every model family has not been reduced to a portable formula; use the picked object's geometric centre as an engine choice and keep that choice isolated.
