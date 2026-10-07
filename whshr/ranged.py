@@ -386,7 +386,7 @@ def _destroy_machine(battle: Battle, unit: Regiment) -> None:
             model.wounds_taken += 1
             if model.wounds_taken >= unit.wounds:
                 victims.append(index)
-    combat.kill_models(unit, victims, battle, animation.DEATH_MISSILE)
+    combat.kill_models(unit, victims, battle, animation.DEATH_MISSILE, clear_credit=True)  # misfire: nobody
     if unit.active and not combat.leadership_test(unit.leadership, battle.rng):
         combat.start_rout(unit, battle)
 
@@ -433,7 +433,7 @@ def _damage_innate(battle: Battle, unit: Regiment, p: InnateProjectile) -> None:
     model.wounds_taken += 1
     if model.wounds_taken >= unit.wounds:
         kind = animation.DEATH_FIRE if p.code == 14 else animation.DEATH_WARPFIRE if p.code == 15 else animation.DEATH_MISSILE
-        combat.kill_models(unit, [index], battle, kind)
+        combat.kill_models(unit, [index], battle, kind, killer=p.source)
     if p.code == 14 and unit.active:
         combat.start_rout(unit, battle)
     battle.events.append(BattleEvent("Innate missile hit.", "innate_hit",
@@ -498,7 +498,7 @@ def _damage_unit(battle: Battle, unit: Regiment, projectile: Projectile,
         model.wounds_taken = getattr(model, "wounds_taken", 0) + wounds
         if model.wounds_taken >= unit.wounds:
             victims.add(index)
-    killed = combat.kill_models(unit, victims, battle, animation.DEATH_MISSILE)
+    killed = combat.kill_models(unit, victims, battle, animation.DEATH_MISSILE, killer=projectile.source)
     battle.events.append(BattleEvent(f"{unit.name} is hit by a missile.", "projectile_hit",
                                      regiment=unit.identifier, direct=direct, kills=killed,
                                      text_id=2004 if direct else 2005))

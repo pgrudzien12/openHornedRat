@@ -293,8 +293,8 @@ class BattleScene(Scene):
 
     def _store_played_results(self) -> None:
         """Hand the campaign what the debrief reports: the battle's objective records (or, for a mission-less
-        battle, records derived from the outcome by payments.played_results) and each marching regiment's models, routed and casualties.  The engine does not
-        track kills or experience yet, so those stay 0."""
+        battle, records derived from the outcome by payments.played_results) and each marching regiment's models, routed, casualties, kills and experience gained
+        (notes/casualty_bookkeeping.md 2.4)."""
         campaign = getattr(self.glue_scene, "campaign", None)
         if campaign is None:
             return
@@ -318,7 +318,8 @@ class BattleScene(Scene):
         for whoami, (identifier, regiment) in zip(marching, player):
             routed = regiment.models if regiment.fled else 0
             dead = max(0, self.initial_models[identifier] - regiment.models)
-            outcomes[whoami] = UnitOutcome(regiment.models - routed, routed, dead + routed)
+            outcomes[whoami] = UnitOutcome(regiment.models - routed, routed, dead + routed, regiment.kills,
+                                           regiment.experience_gained)
         campaign.battle_outcome = outcomes
 
     def _casualty_summary(self) -> list[str]:

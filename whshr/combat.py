@@ -34,7 +34,7 @@ from .rules import EXPECTED_ARMOUR_SAVE, Side, may_engage, wfb_to_hit, wfb_to_wo
 from .interpreter import Event
 
 if TYPE_CHECKING:
-    from .engine import Battle, Regiment
+    from .engine import Battle, ModelState, Regiment
 
 Fight = dict[str, Any]  # one shared fight (`Battle.fights[id]`): grid, segment, next_test_turn, rounds, tally, breakdown
 Roll = dict[str, Any]  # one logged die roll sequence (hit / wound / save / result)
@@ -69,7 +69,7 @@ def _armour_threshold(armour: int, strength: int) -> int:
 
 
 def apply_casualties(regiment: "Regiment", count: int, rng: random.Random, battle: "Battle",
-                     death_kind: int = animation.DEATH_ORDINARY) -> int:
+                     death_kind: int = animation.DEATH_ORDINARY, killer: str | None = None) -> int:
     """Remove up to `count` randomly chosen models, turning them into corpses at their positions.
 
     Used where the original does not single out a victim (shooting, spells). Close combat kills the
@@ -87,11 +87,31 @@ def apply_casualties(regiment: "Regiment", count: int, rng: random.Random, battl
     positions = list(regiment.model_positions())
     indices = (rng.sample(range(len(positions)), count) if count < len(positions)
                else list(range(len(positions))))
-    return kill_models(regiment, indices, battle=battle, death_kind=death_kind)
+    return kill_models(regiment, indices, battle=battle, death_kind=death_kind, killer=killer)
+
+
+def pay_credit(battle: "Battle", victim: "Regiment", model: "ModelState") -> None:
+    """A model leaves ``victim`` (killed or removed alive): the unit it credits gains one kill and the victim
+    unit's current ``points`` as experience (notes/casualty_bookkeeping.md 2.0, 2.2).  There is no side test, so
+    friendly fire and a caster slaying its own unit are credited too; a credit naming no unit pays nothing."""
+    credited = battle.regiments.get(model.credit) if model.credit is not None else None
+    if credited is None:
+        return
+    credited.kills += 1
+    credited.experience_gained += victim.points
+
+
+def pay_removal_credits(battle: "Battle", regiment: "Regiment") -> None:
+    """Every model still in ``regiment`` leaves the battle alive (it fled off the map, or a script removed it): each
+    one pays whatever credit it still carries (notes/casualty_bookkeeping.md 2.1, "stale credit")."""
+    for model in regiment.melee_models:
+        pay_credit(battle, regiment, model)
+        model.credit = None
 
 
 def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
-                death_kind: int = animation.DEATH_ORDINARY) -> int:
+                death_kind: int = animation.DEATH_ORDINARY, killer: str | None = None,
+                clear_credit: bool = False) -> int:
     """Remove the named models, leaving corpses where they stood and freeing any grid cells they held.
 
     Unlike a whole-formation reseed, the surviving models keep their identity (`ModelState.uid`) and
@@ -104,6 +124,14 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
     kinds 1 and 3 then burn (`animation.burns_on_death`) instead of leaving the family's own corpse.
     Callers: close combat and contact attacks pass 0; ordinary shooting passes 2; innate
     breath, warpfire and death blasts pass their fire or warpfire kind.
+
+    Kill credit (notes/casualty_bookkeeping.md 2.1): the hit that removes a model names the unit credited with it.
+    ``killer`` (the striking, shooting or casting unit) overwrites each victim's credit; ``clear_credit`` (an
+    artillery misfire) clears it; with neither, the credit the model already carries is paid.  Every removal here
+    is lethal, so the any-wound and lethal-only write rules of the report both reduce to "the killer is credited".
+    PROVISIONAL: the credit is paid when the model leaves the formation, which is when its collapse delay
+    starts, so a model still collapsing when the battle ends counts as a casualty and is credited (the report's
+    2.4 does neither).
     """
     indices = list(indices)
     if not indices or regiment.models <= 0 or "CantDie" in regiment.psychology:
@@ -121,6 +149,11 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
     dead_uids: set[int] = set()
     for index in victims:
         model = regiment.melee_models[index]
+        if clear_credit:
+            model.credit = None
+        elif killer is not None:
+            model.credit = killer
+        pay_credit(battle, regiment, model)
         delay = animation.collapse_delay_ticks(model.stagger, regiment.in_melee, death_kind)
         if delay > 0:
             regiment.dying.append(animation.DyingModel(
@@ -596,7 +629,7 @@ def _strike_with_models(attacker: "Regiment", group_id: str, fight: Fight, turn:
             victims.setdefault(defender.identifier, set()).add(defender_index)
             kills += 1
     for defender_id, indices in victims.items():
-        kill_models(battle.regiments[defender_id], indices, battle=battle)
+        kill_models(battle.regiments[defender_id], indices, battle=battle, killer=attacker.identifier)
     defender = battle.regiments[max(victims, key=lambda key: len(victims[key]))] if victims else pairs[0][2]
     rank_bonus = _rank_bonus(attacker)
     direction_bonus = _direction_bonus(attacker, defender)
@@ -803,7 +836,7 @@ def resolve_contact_attacks(battle: "Battle") -> None:
         victims, rolls = _contact_attack_rolls(attacker, target, battle.rng)
         if not rolls:
             continue
-        killed = kill_models(target, victims, battle=battle)
+        killed = kill_models(target, victims, battle=battle, killer=attacker.identifier)
         battle.events.append(BattleEvent(
             f"{attacker.name} cuts down {killed} fleeing {target.name}."
             if killed else f"{attacker.name} reaches {target.name} but draws no blood.",

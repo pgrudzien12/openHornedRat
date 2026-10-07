@@ -20,7 +20,7 @@ import random
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from . import animation, behaviour, magic, nodes, visibility
+from . import animation, behaviour, combat, magic, nodes, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import Side, side_of_code
@@ -2402,7 +2402,10 @@ class ScriptInterpreter:
         """
         regiment = self.battle.regiments.get(unit_id)
         if regiment:
-            # Instant unit destruction
+            # Instant unit destruction; each model pays the kill credit it carries
+            # (notes/casualty_bookkeeping.md 2.1, killed path).
+            for model in regiment.melee_models:
+                combat.pay_credit(self.battle, regiment, model)
             regiment.models = 0
             regiment.positions = []
             regiment.melee_models = []
@@ -2694,7 +2697,7 @@ class ScriptInterpreter:
         """RemoveFromBattle: remove unit from battle without death."""
         regiment = self.battle.regiments.get(unit_id)
         if regiment:
-            regiment.fled = True  # mark as removed from play
+            self.battle.remove_from_play(regiment)  # removed alive: stale credits are paid
         return state.pc + 1
 
     def op_ExcludeFromArmy(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -2702,7 +2705,7 @@ class ScriptInterpreter:
         """ExcludeFromArmy: exclude unit from army roster (remove without death)."""
         regiment = self.battle.regiments.get(unit_id)
         if regiment:
-            regiment.fled = True  # same effect as RemoveFromBattle
+            self.battle.remove_from_play(regiment)  # removed alive: stale credits are paid
         return state.pc + 1
 
     def op_SetThreatRange(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,

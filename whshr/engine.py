@@ -111,6 +111,9 @@ class ModelState:
     drawn_facing: float | None = None  # facing (0-511) the sprite direction is drawn from; None until first set
     fire_event: bool = False  # animation reached its fire point on this tick (whshr.animation)
     wounds_taken: int = 0
+    # The unit credited with this model when it leaves its regiment, killed or removed alive (identifier, or None):
+    # notes/casualty_bookkeeping.md 2.0-2.1.
+    credit: str | None = None
     # The model's own pending action request (0 = none), consumed at its next update; it beats the
     # unit's broadcast for that tick (notes/script_animation_sound.md, 0.2).
     own_request: int = 0
@@ -170,6 +173,10 @@ class Regiment:
     race: int | None = None  # s_race & 7: 0 Human, 1 Elven, 2 Dwarven, 3 Goblinoid, 4 Orc, 5 Skaven, 6 Peasant, 7 big
     points: int = 0  # s_pntval: experience gained by the killer, and the AI's per-model worth unit
     # (game_rules.md: unit worth = size x s_pntval x 12 artillery / 8 wizard / 4 monster / 1)
+    # This battle's s_kills and s_Exp gain: one kill and the victim unit's `points` per model credited to this unit
+    # when it leaves its regiment (notes/casualty_bookkeeping.md 2.0).
+    kills: int = 0
+    experience_gained: int = 0
     # set:whoami as one byte: the persistent campaign regiment id (0 for ordinary mission units),
     # addressed by SendEventToUnitId (notes/threat_events_nodes.md, part B 0.1).
     whoami: int = 0
@@ -1406,7 +1413,7 @@ class Battle:
                         self._advance_models(regiment, scale)
                     if (self.tick_count > regiment.flight_complete_tick
                             and all(model.at_rest for model in regiment.melee_models)):
-                        regiment.fled = True
+                        self.remove_from_play(regiment)
                         self.events.append(BattleEvent(
                             f"{regiment.name} routs off the battlefield.", "fled",
                             regiment=regiment.identifier, x=regiment.x, y=regiment.y,
@@ -2088,6 +2095,15 @@ class Battle:
             self.events.append(BattleEvent(
                 "Defeat! Your army is destroyed.", "result",
                 result="defeat", counts=self.side_counts()))
+
+    def remove_from_play(self, regiment: Regiment) -> None:
+        """``regiment`` leaves the battle alive (it routed off the map, or a script removed it): it is marked fled,
+        keeping its models as routed, and each model pays the kill credit it still carries
+        (notes/casualty_bookkeeping.md 2.1)."""
+        if regiment.fled:
+            return
+        regiment.fled = True
+        combat.pay_removal_credits(self, regiment)
 
     def _resolve_collisions(self, deployment_id: str | None = None) -> None:
         """Push regiments under orders out of the regiments they overlap (a simplified push-apart;
