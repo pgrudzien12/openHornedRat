@@ -6,8 +6,8 @@ Tracked by GitHub epic #96 (Windows: #97, Ubuntu/Linux: #98, CI + license audit:
 
 Produce packages that bundle this project's own engine code and a Python interpreter,
 so a user doesn't need Python or Python dependencies pre-installed. The Windows installer
-is per-user; Debian and RPM packages use system package managers. These packages provide a
-menu entry, while AppImage is a portable executable.
+is per-user; Debian and RPM packages use system package managers; macOS uses a native
+Installer package. Linux packages provide a menu entry, while AppImage is a portable executable.
 The original game's files/assets are never bundled — see `CLAUDE.md`.
 
 ## Entry point: frozen launcher integration is pending
@@ -124,6 +124,10 @@ Version-tag builds continue to attach to their matching `v*` release. Daily asse
 the source commit in their filenames, since formats may be built from different commits
 on a busy day.
 
+The macOS workflow checks once a week and publishes changed default-branch builds under
+`weekly-YYYYMMDD` (UTC). It can also be run manually at any time. A scheduled run with no
+package-source changes does not start the macOS runner.
+
 ## Debian package (#98)
 
 `.github/workflows/debian-package.yml` checks once a day for package source changes and
@@ -206,3 +210,30 @@ sh packaging/linux/build-rpm.sh 0.0.0~dev1
 The output is in `dist/rpm/`; install it with `sudo dnf install ./dist/rpm/*.rpm`.
 Both new workflows use the same daily source check and manual **Run workflow** option as
 the Debian and Windows workflows. Pending release tags are processed one per day per format.
+
+## macOS
+
+`.github/workflows/macos-package.yml` checks weekly and builds an Apple Silicon (`arm64`)
+`.pkg` on a standard macOS 15 runner only when package sources changed or a version tag
+needs its package. **Run workflow** forces a build on a selected branch or tag. Successful
+default-branch builds appear under **Releases** as a dated weekly prerelease. The installer
+places the frozen engine under `/usr/local/lib/ohr-engine`, a command link at
+`/usr/local/bin/ohr-engine`, and license notices under `/usr/local/share/doc/ohr-engine`.
+Run `ohr-engine /path/to/WARFB` or set `WARFB` to your legally owned game installation.
+
+The package is unsigned and has not been notarized. macOS Gatekeeper may require manual
+approval before installation. Signing for smooth distribution requires an Apple Developer
+ID Application certificate for the executable, a Developer ID Installer certificate for
+the package, and notarization. No signing credentials are stored in the repository.
+
+To build locally on Apple Silicon with Python 3.12 and Xcode command-line tools:
+
+```sh
+python3.12 -m venv /tmp/ohr-build-venv
+/tmp/ohr-build-venv/bin/pip install --only-binary=:all: -r requirements-engine.txt pyinstaller
+/tmp/ohr-build-venv/bin/pyinstaller packaging/linux/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
+sh packaging/macos/build-pkg.sh 0.0.0-dev1
+```
+
+The output is in `dist/macos/`. Intel macOS is not built because the pinned `zengl` release
+has no Intel macOS wheel; an Intel package would need a separate source-build path.
