@@ -206,8 +206,9 @@ and checks every chunk size formula. Both real saves pass.
 
 ### 1.1 Gaining experience (battle) ✅
 
-From `notes/game_rules.md` 3.2: when a model dies, the killing unit's `s_kills` increases by one and
-its `s_Exp` by the victim's `s_pntval`. `GAMEF.DLL` writes both into `debrief.dbf` (`set:s_kills=`,
+When a model leaves its unit (killed, or removed alive), the unit holding the model's credit gains +1 `s_kills` and
+the victim unit's `s_pntval` in `s_Exp`; close combat, contact attacks and fanatics set the credit on any wound,
+missiles, artillery and spells only on the lethal hit (`notes/casualty_bookkeeping.md` §2). `GAMEF.DLL` writes both into `debrief.dbf` (`set:s_kills=`,
 `set:s_Exp=`); e.g. the owner's first battle gave the Grudgebringer Cavalry 11 kills / 165 XP and the
 Infantry 20 kills / 80 XP.
 
@@ -426,6 +427,9 @@ escort, …), 20 `forceunits`, 39 `excludeunits`, 18 `addunit`, 117 `addtroop`.
 
 ### 3.3 Casualties, wounded and disbanding ✅
 
+> **Exact order and timing:** `notes/casualty_bookkeeping.md` §3 (one state machine, worked examples). Corrected
+> below: `Z` clears only this battle's wounded; the heal cap also clears `s_routed`; the commander-dead test.
+
 After a battle (before the debrief screen) and when the debrief is accepted:
 
 1. **Lost models** of a unit = `s_calualties − s_routed`. Of these,
@@ -435,17 +439,18 @@ After a battle (before the debrief screen) and when the debrief is accepted:
    before the army file is written. A regiment's model count for prices is `s_size + s_routed`.
 3. **Wounded come back one mission later**: the previous `wounded` (roster `+0x2C`) is moved to
    `returning` (`+0x30`), the new wounded are stored in `+0x2C`, and
-   the healing step adds `returning` to `s_size`, capped at `s_orgsize` (at the cap it also clears the
-   casualty counters). If the battle's objective `Z` succeeded, all wounded are lost
+   the healing step adds `returning` to `s_size`, capped at `s_orgsize` (at the cap it also clears
+   `s_calualties` and `s_routed`). If the battle's objective `Z` succeeded, this battle's wounded are lost (the
+   returning wounded of the previous battle still heal)
    (`BKTXT 611`, "the wounded could not be recovered" 🟡 for the text link).
 4. **Disbanding** removes a regiment whose `s_size + s_routed` is below `max(1, 20 % of s_orgsize)`,
    unless it is whoami 2 (the Grudgebringer Cavalry with the commander) or has the roster `keep` flag.
 5. **Destroyed**: a regiment counts as destroyed when `s_size + s_routed == 0`, or when it is
    artillery with fewer than 2 models; destroyed regiments cannot be selected ("Wounded").
-6. **The commander never dies outright**: if whoami 2 is destroyed but has wounded, one wounded
+6. **The commander never dies outright**: if whoami 2 is destroyed but has wounded (of this battle), one wounded
    model is returned (`s_routed += 1`, `wounded −= 1`); a `keep` regiment with no models left also gets one model
    back.
-7. **Campaign over**: if whoami 2 still has models, the campaign ends when
+7. **Campaign over**: if whoami 2 still has models, routed or wounded of this battle (`notes/casualty_bookkeeping.md` §3.6), the campaign ends when
    objective `G` or `Y` is present and flagged 1; if it has none, the campaign ends when objective `Z` is
    flagged 1, otherwise the commander gets one model back. The end plays movie `death01` (commander dead) or
    `death02`. 🟡 for the meaning of `G`/`Y`/`Z` (defeat conditions written by the battle).
@@ -508,7 +513,7 @@ referenced by these code paths ⬜.
   (12 + 16), used by "Payment for all men".
 - Surviving units: every living player unit (side bits `0xE0 == 0`) and, when the battle has NPC merging
   enabled, living NPC units with `whoami < 50`. Dead or routed units: the removed-unit list; for
-  such NPCs `s_calualties` is reset to 0. Units keep `set:s_calualties/s_routed/s_kills/s_Exp` and the battle
+  such NPCs only `s_calualties` is reset to 0 (`s_routed`, `s_kills`, `s_Exp` are kept). Units keep `set:s_calualties/s_routed/s_kills/s_Exp` and the battle
   `dir`/`x`/`y`.
 - The owner's file (`bf003`): `A,1` (objective met), `B,1,80,12,100,12`, `C,1,80,7,100,7`, `K,0,13,10,0,39`,
   `R,0,1,0,0,0`, `Z,0,28,2,0,0`; Grudgebringer Cavalry 0 casualties, 11 kills, 165 XP; Infantry 7 casualties
@@ -539,7 +544,8 @@ referenced by these code paths ⬜.
    - "+1 Armour" rewards (1.4);
    - doubled experience, promotions, new experience baselines (1.2, 1.3);
    - mode 2: merge the debrief into `ARMY.MRC`, then heal and disband; modes 3 and 6:
-     the same for `ARMY.MRC` and `MARCH.MRC`, then `MARCH.MRC` is rewritten from the army;
+     the same for `ARMY.MRC` and then, separately, for `MARCH.MRC`, with routed models returned in both
+     (`notes/casualty_bookkeeping.md` §3.5);
    - clears `returning` wounded; control returns to the glue script (typically `addtroop:` lines,
      a movie and `gocaravan:select`).
 7. Glue `debrief:<n>`/`debriefwithsummary:<n>` (tokens `0x87`/`0x8C`, with `iftrue`/`iffalse` variants

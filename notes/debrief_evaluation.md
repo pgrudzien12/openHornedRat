@@ -95,7 +95,8 @@ Run right after every battle (before the debrief screen), on `debrief.dbf` and t
 
 ```
 commander_dead = the Grudgebringer Cavalry regiment (whoami 2, always in the army) is present and has no survivors
-                 (models + routed + wounded == 0)
+                 (models + routed + wounded == 0, wounded = this battle's (s_calualties − s_routed) × 65 // 100;
+                 so only a regiment that lost at most one model can be dead: notes/casualty_bookkeeping.md §3.6)
 if not commander_dead:
     campaign_over = (G present and G.met) or (Y present and Y.met)        # movie "death02"
 else:
@@ -111,7 +112,8 @@ army merge are skipped because the wrapper returns before them.
 
 `Z` is the hidden loss condition (caption "silent"). `met = 1` when every regiment counted at start (player side, plus NPC allies
 when G or I is defined) is dead or has left the field. Consequences: the battle ends (flag `0x1`); the end screen shows failure for
-keys `Z`/`z`; **every "returning wounded" counter of the roster is cleared** (`BKTXT 10063` "the wounded could not be recovered"
+keys `Z`/`z`; **the wounded of this battle are cleared for every roster entry** (the returning wounded of the previous battle are
+kept and still heal at Done; corrected, `notes/casualty_bookkeeping.md` §3.3 P6) (`BKTXT 10063` "the wounded could not be recovered"
 is the matching text op in some lists); `Z` met alone is only game over if the commander regiment is also dead (§3.1).
 
 ### 3.3 `G`, `Y`, `U` ✅ (data) / 🟡 (G's exact test)

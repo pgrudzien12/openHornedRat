@@ -134,9 +134,9 @@ each other (e.g. every `s_mount[2]` equals the separate `s_weap` line). The in-g
 | 37 | `s_armname` | armour name, always 0 | 🟡 by analogy with the next field |
 | 38 | `s_weponame` | weapon name: string `BRTXT 200 + n` | ✅ 22 names checked against their units (1 Spear on Stickers, 11 Halberd, 13 2-H Hammer, 15 Crossbow, 17 Lance on Reiksguard, 25 Scimitar on Clanrats…) |
 | 39 | `s_banner` | unknown, always 0 | ⬜ |
-| 40 | `s_calualties` | models lost | ✅ incremented per model killed; used by the rally test |
-| 41 | `s_routed` | models removed without being killed | 🟡 incremented on the other removal path |
-| 42 | `s_kills` | enemy models killed | ✅ incremented on the killer unit |
+| 40 | `s_calualties` | models lost | ✅ incremented for every model removed from the unit, killed or removed alive; used by the rally test (`notes/casualty_bookkeeping.md` §2) |
+| 41 | `s_routed` | models removed without being killed | ✅ models removed alive: fled off the map, script removal, fanatic terrain, single-piece buildings |
+| 42 | `s_kills` | models credited to this unit | ✅ +1 when a model whose credit this unit holds is removed (any side, removed alive included; `notes/casualty_bookkeeping.md` §2.1) |
 | 43 | `s_Exp` | experience | ✅ killer gains the victim's `s_pntval` |
 
 A leader has its own block of the same layout; the unit record keeps a second copy at `leader_stat_copy`
@@ -2023,8 +2023,8 @@ modifier 0 when a unit is at or below a quarter of its original size.
 Only **deaths** trigger panic ✅: `RemoveModel(unit, slot, killed)` runs the check only when `killed != 0`,
 which the death paths pass (the model death callback at the relevant data and the unit destruction callback at
 the relevant data, both reached through animation callbacks). Removal without death (`killed = 0`: units that
-leave the table; destroyed buildings) adds to `s_routed` instead, so
-`s_routed` counts **models that fled off the battlefield**. A killed model flagged `0x40` also sends event 0x17.
+leave the table; single-piece buildings) adds to `s_routed` **as well as** `s_calualties` (no panic check), so
+`s_routed` counts **models that fled off the battlefield** (corrected; `notes/casualty_bookkeeping.md` §2). A killed model flagged `0x40` also sends event 0x17.
 
 ### Fear and terror ✅
 

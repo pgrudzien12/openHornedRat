@@ -538,7 +538,7 @@ Mercenary Crossbows (M4 WS3 BS4 S3 T3 W1 I3 A1 Ld7, "Crossbow 12/12") is `SAVE/P
 | 31 | `s_armr` | armour code: 0–5 rating (saves none, 6+, 5+, 4+, 3+, **none**), 6 regeneration (4+), 7 void, 8–13 mounted rating 1–6 (6+ … 2+); `BRTXT` 100–113 |
 | 32 | `s_weap` | close combat weapon class: 0 none, 3 hand weapon, 4 two-handed (+2 S), 10 spear/halberd (+1 S) |
 | 33 | `s_race` | `class × 8 + race`: race 0 Human, 1 Elven, 2 Dwarven, 3 Goblinoid, 4 Orc, 5 Skaven, 6 Peasant, 7 big; class 0 notype, 1 Infantry, 2 Cavalry, 3 Archers, 4 Artillary, 5 Wizard, 6 Monster, 7 RollingStock, 8 Special |
-| 34 | `s_pntval` | 🟡 points value (experience for the killer) |
+| 34 | `s_pntval` | ✅ points value (experience for the credited unit, `notes/casualty_bookkeeping.md` §2.2) |
 | 35 | `S_BalWeap` | missile weapon: 1 bow, 2 crossbow, 5 great cannon, 6 mortar, 7 Hellblaster, 8 rock lobber, 9 Wood Elf bow, 11 cannon, 12 doom diver, 13 warp lightning, 14 breath, 15 warpfire, 16 spellcaster marker (Wyvern shaman), 17 Gyrocopter bomb/steam gun, 18 short bow, 19 longbow (artillery: on the leader) |
 | 36–39 | `s_cmdr`, `s_armname`, `s_weponame`, `s_banner` | `s_weponame` = weapon name string `BRTXT 200 + n` (15 "Crossbow", 25 "Scimitar"…); the other three are always 0 |
 
