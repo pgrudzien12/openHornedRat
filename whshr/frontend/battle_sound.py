@@ -20,6 +20,7 @@ import wave
 import pygame
 
 from ..audio import parse_sfx
+from ..audio_settings import audio_settings
 from ..paths import Installation
 
 # notes/sfx.md "Packet table": slot -> (loadsfx name, directory under BINARY/SOUND).
@@ -186,7 +187,8 @@ class BattleSounds:
             mixer = pygame.mixer.get_init()
             if pitch != rate and mixer is not None and abs(mixer[1]) == 16:
                 sound = pygame.mixer.Sound(buffer=resample(array("h", sound.get_raw()), mixer[2], pitch / rate))
-            sound.set_volume(min(1.0, max(0.0, int(effect.get("volume") or 100) / 100)))
+            sound.set_volume(min(1.0, max(0.0, int(effect.get("volume") or 100) / 100))
+                             * audio_settings.volume("effects"))
             return sound
         except (OSError, EOFError, wave.Error, pygame.error):
             return None

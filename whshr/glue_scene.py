@@ -231,6 +231,10 @@ class GlueScene(Scene):
         if self.runtime is None:
             raise RuntimeError("GlueScene must be entered before handling input")
         if isinstance(event, GlueInput):
+            if ((event.kind == "hotspot-release" and (event.target or "").casefold() == "optionsdialog")
+                    or (event.kind == "panel-action" and event.target == "open_options")):
+                from .options_scene import OptionsScene
+                return Transition(OptionsScene(self), "options opened")
             if event.kind == "hotspot-release" and self._caravan_open():
                 return self._leave_caravan(event.target)
             if event.kind == "hotspot-release" and self.window is not None and event.target:

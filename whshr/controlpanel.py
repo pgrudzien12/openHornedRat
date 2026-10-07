@@ -35,7 +35,7 @@ _PANELS: dict[int, ControlPanel] = {
     6: ControlPanel("FRAMEPANEL3", (311, 309, 310)),
     7: ControlPanel("FRAMEPANEL3", (338, 309, 313), ("encounter_evade", None, None)),
     8: ControlPanel("FRAMEPANEL1", (329,), ("encounter_battle",)),
-    9: ControlPanel("FRAMEPANEL3", (333, 339, 310)),
+    9: ControlPanel("FRAMEPANEL3", (333, 339, 310), (None, "open_options", None)),
     10: ControlPanel("FRAMEPANEL3", (333, 309, 313)),
 }
 

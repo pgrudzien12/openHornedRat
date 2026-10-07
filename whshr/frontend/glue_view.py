@@ -14,6 +14,7 @@ from typing import Any
 import pygame
 
 from ..campaign_state import CampaignState, is_caravan_window, offered_refs
+from ..audio_settings import audio_settings
 from ..glue import MissionRecord, MissionRef
 from ..glue_content import GlueContent
 from ..glue_scene import GlueScene
@@ -182,7 +183,7 @@ class GlueView(NativeScreenView[GlueScene]):
                         continue
                     path = installation.binary_file("MUSIC", f"{effect.name}.MID")
                     pygame.mixer.music.load(str(path))
-                    pygame.mixer.music.set_volume(MUSIC_VOLUME)
+                    pygame.mixer.music.set_volume(audio_settings.volume("music"))
                     pygame.mixer.music.play(loops=-1)
                 except (FileNotFoundError, AttributeError, pygame.error):
                     pass
@@ -210,6 +211,7 @@ class GlueView(NativeScreenView[GlueScene]):
             return
         try:
             self._speech_sound = pygame.mixer.Sound(io.BytesIO(data))
+            self._speech_sound.set_volume(audio_settings.volume("dialogue"))
             self._speech_sound.play()
         except pygame.error:
             self._speech_sound = None

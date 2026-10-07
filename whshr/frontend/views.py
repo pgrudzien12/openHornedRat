@@ -16,6 +16,7 @@ from ..debrief_scene import DebriefScene
 from ..glue_scene import GlueScene
 from ..load_save_scene import LoadSaveScene
 from ..name_prompt_scene import NamePromptScene
+from ..options_scene import OptionsScene
 from ..result_scene import ResultScene
 from .battle_view import BattleView
 from .movie_view import MovieView
@@ -29,6 +30,7 @@ from .menu_view import MainMenuView
 from .name_prompt_view import NamePromptView
 from .mission_map_view import MissionMapView
 from .opening_view import OpeningNarrationView
+from .options_view import OptionsView
 from .result_view import ResultView
 from .scene_view import PlaceholderView, SceneView
 from .troop_selection_view import TroopSelectionView
@@ -52,6 +54,7 @@ VIEWS: dict[type[Scene], type[SceneView[Any]]] = {
     NamePromptScene: NamePromptView,
     ConfirmScene: ConfirmView,
     CreditsScene: CreditsView,
+    OptionsScene: OptionsView,
     DebriefScene: DebriefView,
     BattleScene: BattleView,
     ResultScene: ResultView,

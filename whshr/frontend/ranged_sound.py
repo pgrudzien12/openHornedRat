@@ -6,6 +6,7 @@ from typing import Any
 import pygame
 
 from ..audio import parse_sfx
+from ..audio_settings import audio_settings
 from ..paths import Installation
 
 
@@ -56,4 +57,5 @@ class MissileSounds:
             return
         sounds = next((effect for name, effect in self.effects.items() if term.casefold() in name), ())
         for sound in sounds:
+            sound.set_volume(audio_settings.volume("effects"))
             sound.play()

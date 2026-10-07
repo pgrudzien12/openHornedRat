@@ -14,6 +14,7 @@ import pygame  # noqa: E402
 import zengl  # noqa: E402
 
 from ..assets import AssetId  # noqa: E402
+from ..audio_settings import audio_settings  # noqa: E402
 from ..battle_scene import BattleScene  # noqa: E402
 from .. import campaign_log as campaign_log_module  # noqa: E402
 from ..campaign_scenes import OpeningNarrationScene  # noqa: E402
@@ -96,6 +97,7 @@ def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), 
         # and should not play audio through the machine's real device while running unattended.
         os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     context = scene_context(installation, save_dir=save_dir, no_battle=no_battle)
+    audio_settings.configure(context.save_dir)
     context.battle_log_dir = log_dir
     context.battle_seed = seed
     campaign_log: campaign_log_module.CampaignLogger | None = None

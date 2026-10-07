@@ -15,6 +15,7 @@ from typing import Any
 import pygame
 
 from ..campaign_scenes import MovieScene
+from ..audio_settings import audio_settings
 from ..scenes import SceneEvent
 
 from ..smacker import Smacker, frame_index_at
@@ -130,7 +131,9 @@ class MovieView(SceneView[MovieScene]):
     def _find_cues(media: Mapping[str, Any]) -> Iterator[tuple[float, pygame.mixer.Sound]]:
         for entry in media["objects"].values():
             if "wav" in entry and "blob" in entry:
-                yield entry["start"] / 1000, pygame.mixer.Sound(io.BytesIO(entry["blob"]))
+                sound = pygame.mixer.Sound(io.BytesIO(entry["blob"]))
+                sound.set_volume(audio_settings.volume("dialogue"))
+                yield entry["start"] / 1000, sound
 
     def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
         if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):

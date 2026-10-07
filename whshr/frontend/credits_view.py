@@ -11,10 +11,11 @@ from typing import Any
 import pygame
 
 from ..credits_scene import COLUMN_TOP, LINE_INDENT, TITLE_Y, TUNE, CreditsScene
+from ..audio_settings import audio_settings
 from ..scenes import SceneEvent
 from .bitmap_font import BitmapFont
 from .dialog_view import DialogView
-from .glue_view import MUSIC_VOLUME, _ensure_mixer
+from .glue_view import _ensure_mixer
 from .gpu import Gpu
 
 PALETTE_INDEX = 1
@@ -39,7 +40,7 @@ class CreditsView(DialogView[CreditsScene]):
             return
         try:
             pygame.mixer.music.load(str(installation.binary_file("MUSIC", f"{TUNE}.MID")))
-            pygame.mixer.music.set_volume(MUSIC_VOLUME)
+            pygame.mixer.music.set_volume(audio_settings.volume("music"))
             pygame.mixer.music.play(loops=-1)
         except (FileNotFoundError, AttributeError, pygame.error):
             pass

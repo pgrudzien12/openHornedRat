@@ -241,21 +241,16 @@ Mouse only (🟡 no keyboard handling). No timeout. Destroying the window discar
   paused and then immediately paused; OK skips the restart while paused.
 
 ### 4.8 Engine status and deviations
-❌ inert: `optionsdialog` is absent from `TARGET_ACTIONS` in `whshr/frontend/menu_view.py`; `whshr/glue_scene.py` lists it only among
-ignored caravan targets; panel 9 has no Options action; nothing reads/writes a stored options value; `OptionWindow` is never opened.
-Missing pieces: multi-state hotspot (`linkid`/`count`), `linked:` text (GMTXT `res + state`), init/Done hooks, engine-owned options store.
-Engine mapping (engine-side choice; original values only as compatibility import):
-| Setting | Engine equivalent |
-|---|---|
-| Shading 3 levels | shading model in the GPU renderer (flat / smooth) |
-| Texture mapping | textures on/off |
-| Perspective correction | always correct on a GPU: keep row, store, no effect (or drop) |
-| Pixel resolution | internal render scale (full / half) |
-| Animate scenery / textures | enable/disable scenery and texture animation |
-| Sound effects | one switch for SFX and speech (`nosound` and `nospeech`) |
-| Music off / FM / GM | off / OPL-style rendering / SoundFont rendering |
-Storage: an engine-owned file under the engine save directory (e.g. `options.json`), never the installation or registry; optionally
-seed defaults from the GOG value `3,1,1,1,1,1,1,2`.
+The engine opens a customized Options page from the main menu, caravan, and panel 9. It uses the original
+`MoreOptionScreen` backdrop and button art, with three controls: Music, Dialogue, and Sound Effects. Each cycles
+through Off, 25%, 50%, 75%, and 100% (default). OK atomically writes `options.json` in the engine's save directory;
+Cancel discards the edits. The original six rendering controls and FM/GM choice are not exposed because they do not
+map to working engine features. The original registry value is not read or written.
+
+Music controls glue, credits, and debrief tunes; Dialogue controls glue speech and movie WAV cues; Sound Effects
+controls battle and missile cues. The Options page leaves the caller's tune playing and applies its new volume on
+exit instead of starting the original `intro3` tune. The three controls occupy the first three left-column sockets;
+the other sockets remain empty for future settings, such as a campaign difficulty choice.
 
 ### 4.9 Test scenarios
 1. Given no stored options, when the dialog opens, then every toggle shows state 0 and row texts are GMTXT 36000, 36010, 36015, 36020,

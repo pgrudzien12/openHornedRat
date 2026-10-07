@@ -36,13 +36,12 @@ def _wrap(font: BitmapFont, text: str, max_width: int) -> list[str]:
 class MainMenuView(NativeScreenView[MainMenuScene]):
     """The original OPTIONSCREEN menu, with its paired round button sprites."""
 
-    # Only the campaign flow's New Campaign and Exit actions have scene
-    # implementations today.  The other original controls still react visually.
+    # The engine handles the original menu's campaign, Load, Credits, Options and Exit actions.
     SHORTCUTS: dict[int, str] = {pygame.K_n: "new_campaign", pygame.K_RETURN: "new_campaign",
                  pygame.K_KP_ENTER: "new_campaign", pygame.K_l: "load_game", pygame.K_q: "quit", pygame.K_ESCAPE: "quit"}
     TARGET_ACTIONS: dict[str, str] = {"newgame": "new_campaign", "loadsavewindow2": "load_game",
                                       "exitprocess": "quit",
-                                      "credits": "credits"}
+                                      "credits": "credits", "optionsdialog": "options"}
 
     def __init__(self, gpu: Gpu, scene: MainMenuScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)

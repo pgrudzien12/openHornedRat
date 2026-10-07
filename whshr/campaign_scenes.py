@@ -179,6 +179,9 @@ class MainMenuScene(Scene):
         if event == "credits":
             from .credits_scene import CreditsScene
             return Transition(CreditsScene(self), "credits opened")
+        if event == "options":
+            from .options_scene import OptionsScene
+            return Transition(OptionsScene(self), "options opened")
         if event == "quit":
             return Quit("player quit from the main menu")
         return None

@@ -60,11 +60,17 @@ class PostMissionCaravanTests(DirectMissionRouteTests):
                 self.assertEqual(campaign.completed, {601})
                 self.assertEqual(self._names(map_scene)[-1], "MISSIONBWINDOW")
 
-    def test_given_the_caravan_when_an_unimplemented_hotspot_is_released_then_it_stays_open(self):
+    def test_given_the_caravan_when_options_closes_then_it_stays_open(self):
+        from whshr.options_scene import OptionsScene
+
         machine, map_scene, campaign = self._play(("missionawindow.0",), False)
+        caravan = machine.active
 
         machine.handle(GlueInput("hotspot-release", "OptionsDialog"))
+        self.assertIsInstance(machine.active, OptionsScene)
+        machine.handle("options:cancel")
 
+        self.assertIs(machine.active, caravan)
         self.assertEqual(self._names(machine.active), ["CARAVANAFTERMISSION"])
         self.assertEqual(campaign.completed, set())
 

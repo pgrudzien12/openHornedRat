@@ -11,6 +11,7 @@ from typing import Any
 import pygame
 
 from ..debrief_scene import DebriefScene
+from ..audio_settings import audio_settings
 from ..debrief_screen import Text
 from ..glue_palette import AppPalette
 from ..scenes import SceneEvent
@@ -68,6 +69,7 @@ class DebriefView(NativeScreenView[DebriefScene]):
         try:
             path = installation.binary_file("MUSIC", f"{TUNES[screen.music()]}.MID")
             pygame.mixer.music.load(str(path))
+            pygame.mixer.music.set_volume(audio_settings.volume("music"))
             pygame.mixer.music.play(loops=-1)
             self.music_started = True
         except (FileNotFoundError, AttributeError, pygame.error):
