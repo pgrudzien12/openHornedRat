@@ -458,10 +458,16 @@ class ReformCasualtyTests(unittest.TestCase):
         battle = Battle(1000, 1000, [unit], seed=1995)
         unit.model_positions()
         battle.reform_to_ranks(unit, 2)
+        for _ in range(3):
+            battle.tick()
+        self.assertTrue(unit.reforming)
         combat.kill_models(unit, [0], battle, 2)
+        survivor_ids = {model.uid for model in unit.melee_models}
         for _ in range(600):
             battle.tick()
             if not unit.reforming:
                 break
         self.assertFalse(unit.reforming)
         self.assertEqual(len(unit.positions), unit.models)
+        self.assertEqual({model.uid for model in unit.melee_models}, survivor_ids)
+        self.assertEqual(sum(event.kind == "reform_complete" for event in battle.events), 1)
