@@ -416,3 +416,80 @@ The segment-boundary ticks are 19, 38, 57 and so on.
     not;
   - B counts race 6 (Peasant) models, not "class 6";
   - Z includes allied regiments only when **G** is defined. I affects only the debrief unit list.
+
+## 12. Data facts for C and K/X
+
+### 12.1 Building pseudo-units (C)
+
+**Which entries become building units.** At load, every `.BTS` `furniture:` entry whose **type is a building
+type** becomes an in-battle **building pseudo-unit**:
+- building side (`0x20`), class 9 Furniture;
+- it also keeps its scenery piece.
+
+Other furniture types (trees, signs, bridges, campfires, effects, rocks, road pieces) are scenery pieces only. The
+selection depends only on the type name, not on the section or a status.
+
+**Building types and model counts** (`size` is the footprint in 8-unit cells; `W` is the wounds needed to destroy
+the building):
+
+| type names | models | W |
+|---|---|---|
+| `Tudor2Stry`, `Yelo2Stry`, `StnYelo2Stry`, `TudorChimney`, `BalconyHouse`, `WaterMill`, `SmithyHut`, `BrewerySmall` | 2 | 4–5 |
+| `Brck2Stry`, `Crypt`, `NiteCrypt`, `WatchTower`, `Farm`, `WindMill`, `Tavern`, `StnFarmHouse`, `AngRoofHouse`, `BreweryMain` | 3 | 6 |
+| `WoodShack`, `BlackWoodShack`, `Barn1`, `BreweryShed` | 1 | 3 |
+| `Well2`, `HumanTent`, `NiteHumanTent`, `BlackOrcTent`, `OrcBoyzTent`, `B_OrcBoyzTent`, `GrsOrcBoyzTent`, `GrsBlackOrcTent`, `Menhir`, `SkavBase10FR`, `SkavBase10FL`, `SkavBase20FLR`, `SkavBase20FaR`, `SkavBase20x10`, `SkavBase20FaL` | 1 (fixed) | 1–5 |
+
+- The rule is `models = max(1, W / 2)`, integer division. The types in the last row always get 1 model.
+- `W` per type: `Tudor2Stry`, `Yelo2Stry`, `StnYelo2Stry` 5; `TudorChimney`, `BalconyHouse`, `WaterMill`,
+  `SmithyHut`, `BrewerySmall` 4; `Well2` 2; tents 1; `Menhir` 4; Skaven bases 5. The rest are as in the table.
+- **BF003:** its `furniture:` entries contain exactly 7 of these: `Tudor2Stry`, `Yelo2Stry`, `StnYelo2Stry`,
+  `Brck2Stry`, `TudorChimney`, `WaterMill` and `Farm`. Hence C's `v2 = 7`.
+
+**Losing buildings.** A building is **destroyed** when its first model has taken **W** wounds. Damage comes from
+the ordinary building hits:
+- missiles and artillery against buildings (`game_rules.md` §8.3, "S vs buildings");
+- spells that destroy buildings (Conflagration of Doom, Da Krunch);
+- 🟡 close-combat attacks ordered against a building.
+
+On destruction:
+1. All its models die together (no delay).
+2. Event 0x18 is broadcast.
+3. The piece changes to its `D_…` ruin variant.
+
+The fixed-1-model types are then removed from the roster. The others stay with **0 models**. Either way they no
+longer count for C.
+
+A battle in which nothing can damage a building keeps C at 100%.
+
+### 12.2 K/X item id, slots and marker
+
+**Item id.** The `.BTS` `b` is an item number `n`: the item whose text id is **GMTXT 31000 + n**. Item numbers:
+
+| n | item | n | item |
+|---|---|---|---|
+| 0 | `ItemBannerOfArcaneWarding` | 9 | `ItemParryingBlade` |
+| 1 | `ItemBannerOfMight` | 10 | `ItemSwordOfMight` |
+| 2 | `ItemDreadBanner` | 11 | `ItemDragonBlade` |
+| 3 | `ItemBannerOfWrath` | 12 | `ItemArmourOfMeteoricIron` |
+| 4 | `ItemBannerOfArcaneProtection` | 13 | `ItemArmourOfTheBeard` |
+| 5 | `ItemTalismanOfObsidian` | 14 | `ItemGrudgeBringer` |
+| 6 | `ItemShieldOfPtolos` | 15 | `ItemRockSplitter` |
+| 7 | `ItemPotionOfStrength` | 16 | `ItemSwordOfElior` |
+| 8 | `ItemSwordOfHeroes` | | |
+
+**`v4` index space.** `v4` is the entry's index in the game's **combined spell-and-item table**:
+- 0–28 are the spell entries and casting modes (`NullSpell` 0 … `SkavenMadness` 28);
+- items follow at **29 + n**.
+
+So BF003 `K,13,10` is GMTXT 31010 `ItemSwordOfMight`, `v4 = 39`. A **known item** is an `n` from 0 to 16. Any other
+`b` gives no marker and K/X can never be met.
+
+**Slots.** A regiment's item list has **5 slots**.
+- The item lines read for the regiment from the `.BTS`/`.MRC` (its magic items) fill the slots in order at load,
+  so those items **do** occupy slots for the free-slot test.
+- A pickup goes into the first empty slot.
+
+**Marker.** At load an effect object is placed at node `a`'s centre. It uses the effect sprite set 3 (`Sparkle`),
+with variant 1, or variant 2 in battles that load snow scenery (`D_SnwWatchTower`, `SnwRock1`–`SnwRock4`). It is
+removed when the item is picked up. 🟡 The exact frames and animation of the two variants were not traced: `SPARKLE`
+holds sparkle frames and snowman frames under two colour maps.
