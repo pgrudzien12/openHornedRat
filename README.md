@@ -4,7 +4,7 @@
 
 **What it is not:** it is not a game, and it is not a standalone or replacement copy of one. It contains no original game content, and it does nothing without your own legally owned copy of the original, from which it reads every asset at runtime. It is also not the original executable, and it does not run that executable.
 
-> **Early playtest build — source only.** It is useful for testing the opening campaign flow and some battles, and we especially need reports from people who can spend time with it. The first packaged playable release is targeted for **the end of October 2026**.
+> **Early playtest builds are available, but there is no stable release yet.** The installers have passed automated builds but have not been tested on players' machines. The first stable packaged release is targeted for **the end of October 2026**.
 
 ## Help us test
 
@@ -30,11 +30,56 @@ With your own copy of the game, you can watch or skip the opening movies, start 
 | 🟡 Battles | Deployment, movement, charges, ranged attacks, morale and routing, magic, enemy AI, and victory or defeat results are in place. Most battle rules have been recreated with substantial effort to match the original experience; mission scripts also drive battles, though rough edges remain. |
 | 🟡 Campaign progress | You can reach Nuln, about halfway through the campaign; the remainder has not been verified. |
 | ✅ Audio and presentation | Opening movies, speech, music, and effects are mostly done. The Options screen saves separate volume levels for music, dialogue, and effects; minor gaps may remain. |
-| 🔴 Packaged downloads | Run from source for now. |
+| 🟡 Packaged downloads | Windows, Debian, RPM, AppImage, and Apple Silicon macOS installers are built and available as prereleases. Installation and play have not yet been tested on players' machines; there is no stable release. |
 
 ## Chat
 
 Questions, playtest reports, or just want to talk about the game? Join us on [Discord](https://discord.gg/CPHBNFmwJ).
+
+## Install a playtest package
+
+Download the most recent package for your system from [GitHub Releases](https://github.com/pgrudzien12/openHornedRat/releases). Windows, Debian, RPM, and AppImage packages appear in **daily** prereleases; the Apple Silicon macOS package appears in **weekly** prereleases. A prerelease contains the formats rebuilt that day, so you may need to look at an earlier one for your system. These packages are unsigned and have not yet had a full installation and play test. You also need your own legally owned game files. When the launcher first opens, select the original game's `WARFB` directory if it is not found automatically.
+
+### Windows (64-bit)
+
+Download `ohr-engine-setup-*.exe` and run it. Follow the installer prompts; it installs for your user account. Later, open **Open Horned Rat** from the Start menu, or use the desktop shortcut if you selected that option during installation.
+
+### Debian or Ubuntu (64-bit)
+
+Download the `ohr-engine_*_amd64.deb` file. From the directory containing the download, run:
+
+```sh
+sudo apt install ./ohr-engine_*_amd64.deb
+```
+
+Later, open **Open Horned Rat** from the application menu or run `ohr-engine` in a terminal.
+
+### RPM-based Linux (64-bit)
+
+Download the `ohr-engine-*.x86_64.rpm` file. From the directory containing the download, run:
+
+```sh
+sudo dnf install ./ohr-engine-*.x86_64.rpm
+```
+
+Later, open **Open Horned Rat** from the application menu or run `ohr-engine` in a terminal. The RPM is built on Rocky Linux 9 and targets compatible systems.
+
+### AppImage (64-bit Linux)
+
+Download the `ohr-engine-*-x86_64.AppImage` file. It needs no installation. Make it executable and run it from the directory containing the download:
+
+```sh
+chmod +x ./ohr-engine-*-x86_64.AppImage
+./ohr-engine-*-x86_64.AppImage
+```
+
+Later, run the same AppImage file again. If your system cannot run AppImages through FUSE, use `APPIMAGE_EXTRACT_AND_RUN=1 ./ohr-engine-*-x86_64.AppImage`.
+
+### macOS (Apple Silicon)
+
+Download `ohr-engine-*-macos-arm64.pkg` from the weekly prerelease and open it with Installer. After installation, open **Open Horned Rat** from Applications. The package is unsigned and not notarized, so macOS may ask you to approve it before installation. An Intel Mac package is not available yet.
+
+The launcher starts the bundled engine when you select **Start game**. On Windows and Linux, you can also run the engine directly from a terminal with `ohr-engine --engine /path/to/WARFB`; on macOS, `/usr/local/bin/ohr-engine /path/to/WARFB` is the engine command. Original game files, launcher settings, and saves are outside the package; uninstalling does not remove them.
 
 ## Run it from source
 
@@ -42,7 +87,7 @@ Questions, playtest reports, or just want to talk about the game? Join us on [Di
 
 - Python 3 and a system capable of creating an OpenGL 3.3 window.
 - A legal local copy of *Warhammer: Shadow of the Horned Rat*. The GOG v1.0 release is the version we actively test. The 1995 CD edition may work; the Steam/SNEG re-release has not yet been verified.
-- A checkout of this repository. There is no release binary yet.
+- A checkout of this repository.
 
 The project never ships original game files. Point the engine at the `WARFB` directory in your own installation.
 
