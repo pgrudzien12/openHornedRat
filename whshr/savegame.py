@@ -89,6 +89,10 @@ def campaign_to_dict(campaign: "CampaignState") -> dict[str, Any]:
         "mission_cash": _CASH.encode(campaign.mission_cash),
         "mission_paid": campaign.mission_paid,
         "company": roster.company_text(campaign.company),
+        # The master roster as the last battle left it, and the wounded counters (whshr.casualties).
+        "master": roster.company_text(campaign.master),
+        "wounded_last": {str(whoami): count for whoami, count in campaign.wounded_last.items()},
+        "returning": {str(whoami): count for whoami, count in campaign.returning.items()},
     }
 
 
@@ -119,7 +123,11 @@ def restore_campaign(campaign: "CampaignState", data: Mapping[str, Any]) -> None
             "flawless_result": bool(data["flawless_result"]),
             "mission_cash": _CASH.decode(data.get("mission_cash")),
             "mission_paid": bool(data.get("mission_paid", False)),
+            "wounded_last": {int(whoami): int(count) for whoami, count in data.get("wounded_last", {}).items()},
+            "returning": {int(whoami): int(count) for whoami, count in data.get("returning", {}).items()},
         }
+        if data.get("master"):
+            values["master"] = roster.parse_company(str(data["master"]), rows)
     except (KeyError, TypeError, ValueError, AttributeError) as error:
         raise SaveError(f"damaged save: {error!r}") from error
     for name, value in values.items():  # nothing is touched unless the whole save parsed

@@ -10,7 +10,7 @@ effect is visible in the campaign log instead of silently vanishing.
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from . import payments
+from . import casualties, payments
 from .debrief_rewards import apply_rewards
 from .debrief_screen import DebriefReport, DebriefUnit
 from .payments import settle
@@ -51,8 +51,8 @@ def complete_debrief(campaign: "CampaignState | None", effect: "StartDebrief", l
     payment credited here is the sheet's Total Final Payment. A battle that wrote no objective records (a played
     battle: the engine does not evaluate objectives yet) skips the payment instead of guessing it. When ``log`` is
     given a ``payment`` row records the amount and the line items applied and skipped.  Modes 2 and 6 go on to
-    apply armour rewards, experience and promotions; mode 6 (a battle without debrief) pays nothing.  Casualties
-    and the army merge are not applied: the engine does not model wounded men returning (skipped, reported).
+    apply armour rewards, experience and promotions, then the battle result, returning wounded and disbanding
+    (whshr.casualties); mode 6 (a battle without debrief) pays nothing.
     """
     applied: list[str] = []
     skipped: list[str] = []
@@ -101,8 +101,9 @@ def _apply_company_rewards(campaign: "CampaignState", terms: "payments.CashTerms
         campaign.company = company
     applied.extend(done)
     skipped.extend(left)
-    if any(unit.casualties for unit in report.units):
-        skipped.append("casualties: wounded men returning are not modelled; the company keeps its strength")
+    healed, disbanded = casualties.heal_and_disband(campaign)
+    applied.extend(healed)
+    applied.extend(f"{name}: disbanded" for name in disbanded)
 
 
 def _log_payment(log: "CampaignLogger", kind: str, amount: int, campaign: "CampaignState",

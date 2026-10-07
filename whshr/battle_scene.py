@@ -3,7 +3,7 @@
 
 import os
 from os import PathLike
-from . import battle_log, behaviour, combat, payments, skirmish_log
+from . import battle_log, behaviour, casualties, combat, payments, skirmish_log
 from .assets import AssetId
 from .battlefield import Battlefield, WORLD_PER_MESH, sprite_files
 from .clock import FixedStepClock
@@ -313,6 +313,7 @@ class BattleScene(Scene):
         marching = campaign.ordered_march_units
         if len(player) != len(marching):
             campaign.battle_outcome = {}
+            casualties.after_battle(campaign)
             return
         outcomes: dict[int, UnitOutcome] = {}
         for whoami, (identifier, regiment) in zip(marching, player):
@@ -321,6 +322,7 @@ class BattleScene(Scene):
             outcomes[whoami] = UnitOutcome(regiment.models - routed, routed, dead + routed, regiment.kills,
                                            regiment.experience_gained)
         campaign.battle_outcome = outcomes
+        casualties.after_battle(campaign)  # wounded bookkeeping before the debrief screen
 
     def _casualty_summary(self) -> list[str]:
         return [f"{regiment.name}: {regiment.models}/{self.initial_models[identifier]} models"

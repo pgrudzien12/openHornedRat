@@ -4,6 +4,7 @@ for it (notes/native-windows.md section 9, issue #123)."""
 
 from typing import Any
 
+from .casualties import commit_wounded
 from .debrief import report_for
 from .debrief_screen import DebriefScreen
 from .glue import MissionRef
@@ -33,6 +34,9 @@ class DebriefScene(Scene):
             self.effect.mode, report_for(campaign), self.effect.debrief_index, terms, campaign.coffers,
             self._mission_name_id(), self._string, bonus_counter=campaign.bonus_counter)
         self.glue_scene.require_runtime().apply_evaluation_status(self.screen.evaluation)
+        if not self.screen.will_skip() and ("commit", 0) in (self.screen.evaluation.program or ()):
+            # The mission-text page (shown first) commits this battle's wounded (notes/casualty_bookkeeping.md 3.4).
+            commit_wounded(campaign)
 
     def _mission_name_id(self) -> int | None:
         """The ``BRTXT`` id of the mission title: the record's own ``set:res`` (notes/native-windows.md 9.3.4)."""

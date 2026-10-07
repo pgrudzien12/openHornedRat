@@ -187,6 +187,10 @@ class CampaignState:
     # What each marching regiment (by whoami) came out of the latest played battle with; empty when no battle was
     # played (no-battle mode), in which case the debrief shows every marching regiment unharmed.
     battle_outcome: "dict[int, UnitOutcome]" = field(default_factory=dict, repr=False, compare=False)
+    # Roster wounded counters by whoami (notes/casualty_bookkeeping.md 3.1, whshr.casualties): the wounded of the
+    # latest battle each regiment fought, and the wounded that rejoin at the current debrief's Done.
+    wounded_last: dict[int, int] = field(default_factory=dict[int, int])
+    returning: dict[int, int] = field(default_factory=dict[int, int])
 
     def __post_init__(self) -> None:
         if not self.flow_history or self.flow_history[-1] != self.flow:
