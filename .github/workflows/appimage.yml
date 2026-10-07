@@ -97,7 +97,7 @@ jobs:
       - name: Install build tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends python3 python3-venv python3-pip binutils libgl1 libx11-6 librsvg2-bin curl ca-certificates
+          apt-get install -y --no-install-recommends python3 python3-venv python3-pip binutils libgl1 libx11-6 librsvg2-bin curl ca-certificates file
 
       - name: Install Python build dependencies
         run: |
