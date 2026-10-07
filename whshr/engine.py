@@ -1548,6 +1548,7 @@ class Battle:
                 regiment.walking = False
                 continue
             regiment.model_positions()  # seed positions at the current anchor/facing before it moves
+            anchor_before = regiment.x, regiment.y
             state = self.event_bus.unit_states.get(regiment.identifier)
             if state is not None and state.waiting_for_start:
                 if regiment.reforming:
@@ -1640,6 +1641,11 @@ class Battle:
                 for model in regiment.melee_models:
                     model.freeze_ticks = 0
             if regiment.reforming:
+                # Re-form steps correct each model's offset from its slot. Carry the block's
+                # translation first; otherwise a cavalry anchor outruns the one-unit correction
+                # cap and WaitWhileUnitFlags 8 can never finish while it moves.
+                dx, dy = regiment.x - anchor_before[0], regiment.y - anchor_before[1]
+                regiment.positions = [(x + dx, y + dy) for x, y in regiment.positions]
                 models_catching_up = self._advance_reforming_models(regiment, scale)
             else:
                 models_catching_up = self._advance_models(regiment, scale)

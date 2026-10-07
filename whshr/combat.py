@@ -28,10 +28,9 @@ import random
 from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from . import animation, battle_grid, formation
+from . import animation, battle_grid, formation, interpreter
 from .battle_events import BattleEvent
 from .rules import EXPECTED_ARMOUR_SAVE, Side, may_engage, wfb_to_hit, wfb_to_wound
-from .interpreter import Event
 
 if TYPE_CHECKING:
     from .engine import Battle, ModelState, Regiment
@@ -181,7 +180,7 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
             del regiment.reform_slots[index]
     regiment.models -= len(victims)
     if leader_killed:
-        battle.event_bus.queue_event(regiment.identifier, Event(code=0x17), route="self")
+        battle.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x17), route="self")
     _unpair_dead(battle, regiment, dead_uids)
     sprite = (regiment.sprite or "").casefold()
     if death_kind not in (animation.DEATH_FIRE, animation.DEATH_WARPFIRE):
@@ -379,7 +378,7 @@ def _opponent_gone(battle: "Battle", regiment: "Regiment", touched: Iterable[str
 def _send_opponent_gone(battle: "Battle", regiment: "Regiment") -> None:
     """Queue event 0x19 to `regiment` (game_rules.md section 5, "Leaving": its opponent is gone and no
     other enemy remains on the grid), so its script clears the target and re-forms."""
-    battle.event_bus.queue_event(regiment.identifier, Event(code=OPPONENT_GONE_EVENT), route="self")
+    battle.event_bus.queue_event(regiment.identifier, interpreter.Event(code=OPPONENT_GONE_EVENT), route="self")
 
 
 def _fight_has_enemy(battle: "Battle", regiment: "Regiment") -> bool:
@@ -979,8 +978,13 @@ def resolve_rally(battle: "Battle") -> None:
             regiment=regiment.identifier, cant_rally=False, blocked_by_enemy=False,
             leadership=regiment.leadership, roll=roll, modifier=modifier, passed=passed))
         if passed:
-            regiment.routing = False
             regiment.rally_next_segment = None
+            if battle.interpreter is not None:
+                # The common event handler switches to script 163; its Rally opcode halts and
+                # re-forms the unit. Clearing routing here strands an idling script at the edge.
+                battle.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x10), route="self")
+            else:
+                regiment.routing = False
 
 
 def resolve_shooting(battle: "Battle") -> None:

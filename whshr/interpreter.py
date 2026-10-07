@@ -98,7 +98,8 @@ class UnitScriptState:
     # Script execution
     script_id: int = 100  # current script (0..37 for mission, 100..170 for library)
     pc: int = 0  # program counter (word index into the script)
-    restart_pc: int = 0  # saved by InitUnit/SetRestartPoint, restored by Restart
+    restart_pc: int = 0  # saved by SetRestartPoint, restored by Restart
+    restart_script_id: int | None = None  # the restart point belongs to this script, even after SwitchScript
     return_stack: list[tuple[int, ...]] = field(default_factory=list[tuple[int, ...]])  # (script_id, pc) pairs for gosub/return
 
     # Event handling
@@ -150,6 +151,7 @@ class UnitScriptState:
     pending_arrival: bool = False  # a MoveToNode order is in flight; see
     # ScriptInterpreter._update_arrival_flag, which sets ARRIVED_FLAG on unit_flags once the
     # regiment stops moving, so a WaitUntilUnitFlags(ARRIVED_FLAG) loop can unblock
+    pending_reform_ranks: int | None = None  # ReformBlock takes effect after this script update
     behaviour_id: int | None = None  # periodic behaviour code declared by SetBehaviour (0 or None = none)
     behaviour_period: int = 0  # SetBehaviour's period P; 0 disables the periodic decision
     behaviour_countdown: int = 0  # updates left before the next decision (notes/deployment.md 5.3)
@@ -177,6 +179,10 @@ class UnitScriptState:
 
     # Script metadata (loaded once at init)
     script_dll: behaviour.ScriptDll | None = None  # for script lookup
+
+    def __post_init__(self) -> None:
+        if self.restart_script_id is None:
+            self.restart_script_id = self.script_id
 
     @property
     def cond_flags(self) -> int:
@@ -598,6 +604,12 @@ class ScriptInterpreter:
             state.pending_switch = None
             state.pc = 0
 
+        if state.pending_reform_ranks is not None:
+            unit = self.battle.regiments.get(unit_id)
+            if unit is not None:
+                self.battle.reform_to_ranks(unit, state.pending_reform_ranks)
+            state.pending_reform_ranks = None
+
         # Clear current event at end of tick
         state.current_event = Event()
 
@@ -728,13 +740,15 @@ class ScriptInterpreter:
 
     def op_Restart(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """Restart: jump to the restart point (set by SetRestartPoint)."""
+        """Restart the script that owns the saved restart point, including after a library script switch."""
+        state.script_id = state.restart_script_id if state.restart_script_id is not None else state.script_id
         state.pc = state.restart_pc
         return state.pc
 
     def op_SetRestartPoint(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """SetRestartPoint: save current PC as the restart point for Restart."""
+        state.restart_script_id = state.script_id
         state.restart_pc = state.pc + 1
         return state.pc + 1
 
@@ -2786,7 +2800,7 @@ class ScriptInterpreter:
         root = math.sqrt(n)
         smallest = max(1, int(0.75 * root))
         ranks = max(smallest, min(int(n / (root * 1.15)), n // smallest))
-        self.battle.reform_to_ranks(unit, ranks)
+        state.pending_reform_ranks = ranks
         return state.pc + 1
 
     def op_DropTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,

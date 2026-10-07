@@ -429,6 +429,21 @@ class FlatReformMoverTests(unittest.TestCase):
         regiment = Regiment("m", "M", 0, 0, fields.pop("direction"), Side.PLAYER, **fields)
         return regiment, Battle(1000, 1000, [regiment])
 
+    def test_moving_cavalry_finishes_reform_while_its_anchor_advances(self):
+        regiment, battle = self._regiment(models=12, ranks=3, speed_per_tick=2.25)
+        regiment.x = regiment.y = 100.0
+        regiment.model_positions()
+        regiment.positions = [(x, y - 20) for x, y in regiment.positions]
+        regiment.reform_slots = list(formation.block_slots(regiment.models, regiment.ranks))
+        regiment.reforming = True
+        regiment.target_x, regiment.target_y = 100.0, 400.0
+
+        for _ in range(45):
+            battle.tick()
+
+        self.assertFalse(regiment.reforming)
+        self.assertGreater(regiment.y, 150.0)
+
     def test_given_a_model_far_from_its_slot_when_advanced_then_it_moves_at_full_flat_speed_immediately(self):
         regiment, battle = self._regiment()
         regiment.model_positions()

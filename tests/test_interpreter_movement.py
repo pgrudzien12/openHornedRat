@@ -6,7 +6,8 @@ Vectors are the reports' before/instruction/after tables. Facing 0 = +Y, 128 = +
 import unittest
 import unittest.mock
 
-from whshr import interpreter
+from tests.script_helpers import FakeDll, word
+from whshr import behaviour, interpreter
 from whshr.engine import MOVING_FREELY_K, Battle, Regiment
 from whshr.rules import Side
 
@@ -43,6 +44,43 @@ class MovementTestCase(unittest.TestCase):
 
 
 class MoveToTargetTests(MovementTestCase):
+    def test_reform_block_then_move_to_target_in_one_script_update(self):
+        # Library script 159 uses this sequence when a Wolfrider selects infantry.
+        self.build(unit_at=(838, 1190), facing=296, target_at=(827, 985),
+                   target_facing=472, s_rlmv=20, unit_models=12, unit_ranks=3,
+                   target_models=16, target_ranks=4)
+        self.state.script_dll = FakeDll([word("ReformBlock"), word("MoveToTarget"),
+                                         word("Yield"), behaviour.END])
+        self.interp.run("u", self.state, 0, self.battle.rng)
+
+        self.assertTrue(self.state.cond_flags)
+        self.assertIsNotNone(self.unit.target_x)
+        self.assertTrue(self.unit.reforming)
+
+    def test_wolfriders_charge_infantry_after_moving_reform(self):
+        # The BF003 library attack path: walk, wait for the re-form, test charge reach.
+        self.build(unit_at=(838, 1190), facing=296, target_at=(827, 985),
+                   target_facing=472, s_rlmv=20, unit_models=12, unit_ranks=3,
+                   target_models=16, target_ranks=4)
+        scripts = {
+            159: [word("ReformBlock"), word("MoveToTarget"), word("Yield"),
+                  word("WaitWhileUnitFlags"), 8, word("PushPC"), word("SetWait"), 10,
+                  word("IfTargetInChargeReach"), word("IfGotoScript"), 160,
+                  word("Wait"), word("Loop"), behaviour.END],
+            160: [word("ChargeTarget"), word("Yield"), behaviour.END],
+        }
+        self.state.script_id = 159
+        self.state.script_dll = FakeDll(scripts)
+        self.battle.interpreter = self.interp
+
+        for _ in range(80):
+            self.battle.tick()
+            if self.unit.attack_target == self.target.identifier:
+                break
+
+        self.assertEqual(self.unit.attack_target, self.target.identifier)
+        self.assertEqual(self.state.script_id, 160)
+
     def test_walks_to_the_targets_object_centre(self):
         self.build()
         self.assertTrue(self.op("MoveToTarget"))

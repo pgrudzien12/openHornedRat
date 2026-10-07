@@ -41,6 +41,24 @@ class ControlTestCase(unittest.TestCase):
         setattr(self.interp, "op_" + name, counting)
 
 
+class RestartTests(ControlTestCase):
+    def test_reform_library_restart_returns_to_saved_enemy_script(self):
+        self.state.pc = 0
+        self.call("SetRestartPoint")
+        self.assertEqual((self.state.restart_script_id, self.state.restart_pc), (1, 1))
+        self.state.script_id = 163
+        self.state.pc = 0
+        self.state.script_dll = FakeDll({
+            1: [word("Yield"), word("SetUnitFlags2"), 0x40, word("Yield"), END],
+            163: [word("Restart"), END],
+        })
+
+        self.interp.run("t", self.state, 1, self.battle.rng)
+
+        self.assertEqual(self.state.script_id, 1)
+        self.assertEqual(self.state.unit_flags2 & 0x40, 0x40)
+
+
 class ConditionWordTests(ControlTestCase):
     def test_set_clear_test_vectors(self):
         rows = [(0x0018, "SetCondFlags", 4, 0x001C), (0x001C, "SetCondFlags", 0x8001, 0x0001),

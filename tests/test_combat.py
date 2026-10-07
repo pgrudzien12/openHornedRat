@@ -7,7 +7,7 @@ import math
 import unittest
 from unittest.mock import patch
 
-from whshr import combat, formation
+from whshr import combat, formation, interpreter
 from whshr.engine import Battle, Regiment
 from whshr.rules import Side
 
@@ -650,6 +650,25 @@ class RallyTimingTests(unittest.TestCase):
 
 
 class CasualtiesAndCantRallyTests(unittest.TestCase):
+    def test_scripted_rally_at_map_edge_waits_for_reform_script(self):
+        rider = _regiment("Goblin_Wolfriders", 969, 1625, Side.ENEMY,
+                          leadership=9, routing=True, rally_next_segment=0)
+        enemy = _regiment("player", 100, 100, Side.PLAYER)
+        battle = Battle(1440, 1680, [rider, enemy], seed=0)
+        battle.interpreter = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+
+        combat.resolve_rally(battle)
+
+        state = battle.event_bus.unit_states[rider.identifier]
+        self.assertTrue(rider.routing)
+        self.assertIsNone(rider.rally_next_segment)
+        self.assertEqual([event.code for event in state.event_queue], [0x10])
+        combat.resolve_rally(battle)
+        self.assertEqual([event.code for event in state.event_queue], [0x10])
+        battle.interpreter.op_Rally(state, None, [], rider.identifier, 1, battle.rng)
+        self.assertFalse(rider.routing)
+        self.assertFalse(rider.moving)
+
     def test_given_no_enemy_nearby_when_the_leadership_test_passes_then_the_unit_rallies(self):
         routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_next_segment=0)
         enemy = _regiment("e", 1000, 1000, Side.ENEMY)

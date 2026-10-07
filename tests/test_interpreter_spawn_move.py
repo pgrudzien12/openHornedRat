@@ -3,8 +3,8 @@
 import random
 import unittest
 
-from tests.script_helpers import word
-from whshr import interpreter, nodes
+from tests.script_helpers import FakeDll, word
+from whshr import behaviour, interpreter, nodes
 from whshr.engine import Battle, Regiment
 from whshr.interpreter import Event
 from whshr.nodes import ScriptNode
@@ -43,6 +43,11 @@ class ReformBlockTests(MoveTestCase):
                 unit = Regiment("u", "U", 500, 500, 0, Side.ENEMY, models=models, ranks=1)
                 self.make(unit)
                 self.call("u", "ReformBlock")
+                state = self.bus.unit_states["u"]
+                self.assertEqual(unit.ranks, 1)  # queued until the script update ends
+                self.assertEqual(state.pending_reform_ranks, ranks)
+                state.script_dll = FakeDll([behaviour.END])
+                self.interp.run("u", state, 1, self.battle.rng)
                 self.assertEqual(unit.ranks, ranks)
 
     def test_refused_while_charging_and_condition_kept(self):
