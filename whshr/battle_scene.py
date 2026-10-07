@@ -121,8 +121,11 @@ class BattleScene(Scene):
         if kind == "start_battle":
             self.battle.start_battle()
         elif kind == "pause":
-            if self.battle.phase == "battle":
+            if self.battle.phase == "battle" and not self.battle.can_leave:
                 self.battle.paused = not self.battle.paused
+        elif kind == "leave_battle":
+            if self.battle.can_leave:  # the tent button (notes/battle_end_objectives.md 7)
+                self.battle.leave()
         elif kind == "independent":
             if self.selected_id is not None:
                 try:
@@ -287,17 +290,21 @@ class BattleScene(Scene):
         payments.store_flawless(campaign, (self.field.script.get("mission") or {}).get("objectives", ()))
 
     def _store_played_results(self) -> None:
-        """Hand the campaign what the debrief reports: objective records derived from the outcome
-        (payments.played_results) and each marching regiment's models, routed and casualties.  The engine does not
+        """Hand the campaign what the debrief reports: the battle's objective records (or, for a mission-less
+        battle, records derived from the outcome by payments.played_results) and each marching regiment's models, routed and casualties.  The engine does not
         track kills or experience yet, so those stay 0."""
         campaign = getattr(self.glue_scene, "campaign", None)
         if campaign is None:
             return
         terms = getattr(campaign, "mission_cash", None)
-        lost = sum(1 for r in self.battle.regiments.values() if r.side == Side.PLAYER and not r.models)
-        campaign.objective_results = payments.played_results(
-            (self.field.script.get("mission") or {}).get("objectives", ()), self.battle.result == "victory",
-            terms.letters if terms else (), payments.marching_models(campaign), lost)
+        if self.battle.objectives is not None:
+            # The records the final pass left (notes/battle_end_objectives.md 3.3), in list order.
+            campaign.objective_results = self.battle.objectives.results()
+        else:
+            lost = sum(1 for r in self.battle.regiments.values() if r.side == Side.PLAYER and not r.models)
+            campaign.objective_results = payments.played_results(
+                (self.field.script.get("mission") or {}).get("objectives", ()), self.battle.result == "victory",
+                terms.letters if terms else (), payments.marching_models(campaign), lost)
         campaign.flawless_result = False
         player = [(identifier, regiment) for identifier, regiment in self.battle.regiments.items()
                   if regiment.side == Side.PLAYER]

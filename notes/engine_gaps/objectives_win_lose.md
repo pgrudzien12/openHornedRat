@@ -5,6 +5,30 @@
 objective letters (capture a point, protect the forest, get past the dragon, survive N turns…), so every
 battle plays the same win condition regardless of its design.
 
+## Status (implemented)
+
+`whshr/objectives.py` implements `notes/battle_end_objectives.md`, the in-battle reference that supersedes the
+older readings below where they disagree:
+- the evaluation list: Z first, then the `.BTS` letters in file order;
+- counts taken at load;
+- segment-boundary checks before any unit moves;
+- **no automatic end**: the deciding letter prints "Mission complete.", plays the speech cue and swaps the pause
+  button for the tent;
+- the final pass and the `Result:` records when the player leaves through the tent (`Battle.leave`).
+
+The debrief receives the measured records instead of the outcome-derived ones (`payments.played_results` is kept
+only for mission-less battles).
+
+Engine approximations, named in the code:
+- nothing damages buildings or knocks trees down yet, so C and Q stay at 100%;
+- O reads "leader killed" as "regiment wiped out";
+- G's "handled by the cleanup pass" is read as "removed".
+
+Not done yet:
+- the book button's objective list (`Objectives.book_text_ids` is ready, the frontend does not show it);
+- frontend playback of the decision speech cue;
+- the K/X item marker sprite.
+
 ## Known facts
 
 From `notes/game_rules.md` §"Missions and objectives" (largely ✅, already public):

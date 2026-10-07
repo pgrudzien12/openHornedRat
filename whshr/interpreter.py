@@ -2668,21 +2668,25 @@ class ScriptInterpreter:
         units", else shown only when marked "also off screen" or the unit is on screen. Shown = the message
         (loaded from the installation's GMTXT by id), the leader portrait expression and the speech cue,
         non-positional. PROVISIONAL: "on screen" is read as "visible to the player and not hidden"."""
+        self.react(unit_id, operand or 0)
+        return state.pc + 2
+
+    def react(self, unit_id: str, code: int) -> None:
+        """React `code` for a unit outside its script too (the objectives' item pickup and retreat warning)."""
         unit = self.battle.regiments.get(unit_id)
-        entry = _REACT_TABLE.get((operand or 0, unit.race if unit is not None and unit.race is not None else 0))
+        entry = _REACT_TABLE.get((code, unit.race if unit is not None and unit.race is not None else 0))
         if unit is None or entry is None:
-            return state.pc + 2
+            return
         text_id, packet, effect, marker = entry
         if unit.side == Side.ENEMY and (marker == "P" or (marker != "E" and (unit.hidden or not unit.visible_to_player))):
-            return state.pc + 2
+            return
         resources: dict[int, str] = getattr(self.battle, "text_resources", {}) or {}
         message = resources.get(text_id, f"GMTXT {text_id}")
         self.battle.events.append(BattleEvent(
-            f"{unit.name}: {message}", "react", regiment=unit_id, code=operand, sender=unit.name, message=message,
-            text_id=text_id, expression=_REACT_EXPRESSIONS[(operand or 0) % len(_REACT_EXPRESSIONS)]))
+            f"{unit.name}: {message}", "react", regiment=unit_id, code=code, sender=unit.name, message=message,
+            text_id=text_id, expression=_REACT_EXPRESSIONS[code % len(_REACT_EXPRESSIONS)]))
         if packet:
             self._sound(unit_id, "play", packet, effect, positional=False)
-        return state.pc + 2
 
     def op_RemoveFromBattle(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:

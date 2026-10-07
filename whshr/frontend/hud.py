@@ -63,6 +63,8 @@ FIXED_BUTTONS: dict[str, tuple[Point, tuple[int, int], Size]] = {
 # The pause/resume button at (11, 118) changes frame pair by context; it is not in FIXED_BUTTONS.
 PAUSE_POS, PAUSE_SIZE = (11, 118), (52, 52)
 PAUSE_FRAMES: dict[str, tuple[int, int]] = {"battle": (46, 47), "deployment": (48, 49), "paused": (50, 51)}
+# Once the battle is decided the tent (panel record 4) replaces the pause button (notes/battle_end_objectives.md 6).
+TENT_FRAMES = (50, 51)
 
 # Command sub-window: 5 slots relative to COMMAND_SUBWINDOW's own origin, each 60x60.
 SLOT_POSITIONS: dict[str, Point] = {"TL": (7, 11), "TR": (83, 11), "BR": (83, 109), "BL": (7, 109), "C": (45, 60)}
@@ -389,8 +391,12 @@ class Hud:
     def _fixed_button_rects(self) -> Iterator[tuple[str, pygame.Rect]]:
         for name, (pos, _frames, size) in FIXED_BUTTONS.items():
             yield name, pygame.Rect(pos[0], pos[1], *size)
-        action = "start_battle" if self.battle is not None and self.battle.phase == "deployment" else "pause"
-        yield action, pygame.Rect(PAUSE_POS[0], PAUSE_POS[1], *PAUSE_SIZE)
+        yield self._pause_slot_action(), pygame.Rect(PAUSE_POS[0], PAUSE_POS[1], *PAUSE_SIZE)
+
+    def _pause_slot_action(self) -> str:
+        if self.battle is not None and self.battle.phase == "deployment":
+            return "start_battle"
+        return "leave_battle" if self.battle is not None and self.battle.can_leave else "pause"
 
     def _slot_rects(self) -> Iterator[tuple[str, pygame.Rect]]:
         sub_x, sub_y = COMMAND_SUBWINDOW[0], COMMAND_SUBWINDOW[1]
@@ -424,7 +430,7 @@ class Hud:
 
     def press(self, name: str) -> str | None:
         """Apply a clicked command's panel-navigation effect; returns the order to issue, if any."""
-        if name in {"start_battle", "pause", "next_regiment", "prev_regiment"}:
+        if name in {"start_battle", "pause", "leave_battle", "next_regiment", "prev_regiment"}:
             return name
         if self.battle is not None and self.battle.phase == "deployment" and name not in self.slots().values():
             return None
@@ -729,10 +735,13 @@ class Hud:
             pressed = self.pressed == name
             quad = self._icon(frames[1] if pressed else frames[0])
             self._draw_panel(quad, pos[0], pos[1], *size)
-        deployment = self.battle is not None and self.battle.phase == "deployment"
-        context = "deployment" if deployment else "paused" if self.battle is not None and self.battle.paused else "battle"
-        pause_frames = PAUSE_FRAMES[context]
-        pressed = self.pressed == ("start_battle" if deployment else "pause")
+        action = self._pause_slot_action()
+        if action == "leave_battle":
+            pause_frames = TENT_FRAMES
+        else:
+            paused = self.battle is not None and self.battle.paused
+            pause_frames = PAUSE_FRAMES["deployment" if action == "start_battle" else "paused" if paused else "battle"]
+        pressed = self.pressed == action
         quad = self._icon(pause_frames[1] if pressed else pause_frames[0])
         self._draw_panel(quad, PAUSE_POS[0], PAUSE_POS[1], *PAUSE_SIZE)
 

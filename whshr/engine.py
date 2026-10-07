@@ -7,7 +7,7 @@ import random
 from typing import Any, Callable, Literal
 
 from . import animation, battle_grid, behaviour, combat, deployment, formation, interpreter, navigation, ranged, visibility
-from . import magic, steering
+from . import magic, objectives as objective_table, steering
 from . import nodes as node_table
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
@@ -175,6 +175,7 @@ class Regiment:
     whoami: int = 0
     has_leader: bool = False  # the .BTS unit has a leader (character) block: PlayLeaderAnimation's model
     spells: tuple[int, ...] = ()  # spell codes from the unit's addspell: lines, in file order (whshr.magic)
+    items: tuple[str, ...] = ()  # magic items in its 5 slots, loaded ones first (notes/battle_end_objectives.md 12.2)
     # The missile code "Who shoots" reads (game_rules.md): Archers their own S_BalWeap, Artillery the leader's,
     # others the leader's if non-zero, else their own; None without one. Read by IsSpecialShooter.
     shooting_code: int | None = None
@@ -540,6 +541,9 @@ class Battle:
         self.mission_state = 0  # script choreography, independent of the player-visible phase
         # The objective letters the battle file defines (MISSIONINFO Objective: lines), read by IfObjective.
         self.objective_letters: frozenset[str] = frozenset()
+        # The mission's evaluation list (whshr.objectives); None for a mission-less battle, which keeps the flat
+        # "one side has no active regiment" end rule.
+        self.objectives: objective_table.Objectives | None = None
         self.deployment_regions = deployment.regions(boundaries)
         self.deployment_region: deployment.Region | None = None
         self.deployment_drag: deployment.Drag | None = None
@@ -547,6 +551,7 @@ class Battle:
         self.navigation_boundaries = navigation.boundaries_from_views(boundaries)
         self.objects = list(objects)
         # Radius is a replaceable engine choice for placed furniture without a parsed footprint.
+        self.scenery_names = [str(item.get("name", "")) for item in scenery]  # furniture types, in file order
         self.shooting_objects = list(objects) + [
             {"x": item.get("x"), "y": item.get("y"),
              "radius": 24 if any(word in str(item.get("name", "")).casefold()
@@ -694,6 +699,7 @@ class Battle:
                     whoami=int(position.get("whoami") or 0) & 0xFF,
                     has_leader=bool(unit.get("leader")),
                     spells=magic.spell_codes(unit.get("spells") or ()),
+                    items=tuple(str(item) for item in unit.get("items") or ())[:objective_table.ITEM_SLOTS],
                     shooting_code=_shooting_code(unit),
                     **_decode_combat_profile(unit),
                 ))
@@ -710,6 +716,11 @@ class Battle:
                    objects=source.get("objects") or (), scenery=source.get("scenery") or ())
         battle.objective_letters = frozenset(str(entry[0]).upper() for entry in mission.get("objectives") or ()
                                              if entry)
+        # Battle load, before deployment: every letter takes its counts (notes/battle_end_objectives.md 3.1). Every
+        # shipped battle declares objectives; a script with none (a test or mod field) keeps the flat end rule.
+        if mission.get("objectives"):
+            battle.objectives = objective_table.Objectives.from_entries(mission.get("objectives"))
+            battle.objectives.load(battle)
         return battle
 
     def start_battle(self) -> None:
@@ -1087,6 +1098,9 @@ class Battle:
         for regiment in self.regiments.values():
             if regiment.side == Side.ENEMY:
                 regiment.models = 0
+        if self.objectives is not None:
+            self.result = "victory"
+            return
         self._update_result()
 
     def order_reform(self, identifier: str, ranks: int) -> None:
@@ -1313,6 +1327,10 @@ class Battle:
             self.tick_count += 1
             return
         scale = seconds / TICK_SECONDS
+        if (self.objectives is not None and self.phase == "battle" and self.tick_count > 0
+                and self.tick_count % objective_table.SEGMENT_TICKS == 0):
+            # Segment boundary, before any unit is updated (notes/battle_end_objectives.md 3.2).
+            self.objectives.segment(self)
         if self.phase == "battle":
             self.refresh_visibility()
         # Run behaviour scripts via the bytecode interpreter (issue #3); a mission-less/synthetic
@@ -1345,7 +1363,8 @@ class Battle:
             combat.resolve_contact_attacks(self)  # game_rules.md 7.7, once per segment
             combat.resolve_rally(self)
         combat.resolve_shooting(self)
-        self._update_result()
+        if self.objectives is None:
+            self._update_result()
         self.tick_count += 1
 
     def _advance_regiments(self, scale: float, seconds: float) -> None:
@@ -2011,6 +2030,35 @@ class Battle:
                 "total": len(regiments),
             }
         return counts
+
+    @property
+    def decided(self) -> bool:
+        """An objective decided the battle; it keeps running until the player leaves (battle_end_objectives.md 6)."""
+        return self.objectives is not None and self.objectives.decided is not None
+
+    @property
+    def can_leave(self) -> bool:
+        """The tent button is shown: after the decision, or from the impossible mission's first warning (section 7)."""
+        return self.objectives is not None and self.objectives.tent and self.result is None
+
+    def leave(self) -> None:
+        """The tent button (section 7): the battle stops, the final pass runs and the result is fixed."""
+        if self.objectives is None or not self.can_leave:
+            raise ValueError("the battle cannot be left before it is decided")
+        self.objectives.finish(self)
+        self.result = "defeat" if self.objectives.defeat else "victory"
+        self.events.append(BattleEvent("The army leaves the battlefield.", "result", result=self.result,
+                                       counts=self.side_counts(), letter=self.objectives.decided))
+
+    def react(self, identifier: str, code: int) -> None:
+        """A React reaction outside the unit's script (an objective's pickup or warning)."""
+        if self.interpreter is not None:
+            self.interpreter.react(identifier, code)
+
+    def broadcast_script_event(self, code: int) -> None:
+        """Queue a script event to every unit (the siege Z rule's event 0x38)."""
+        for identifier in list(self.regiments):
+            self.event_bus.queue_event(identifier, interpreter.Event(code=code), checked=True)
 
     def _update_result(self) -> None:
         if not (self._has_enemy and self._has_player):
