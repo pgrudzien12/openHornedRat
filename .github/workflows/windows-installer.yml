@@ -27,7 +27,7 @@ jobs:
       cache_key: ${{ steps.target.outputs.cache_key }}
       source_cached: ${{ steps.source-cache.outputs.cache-hit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -82,7 +82,7 @@ jobs:
 
       - name: Check previous successful build
         id: source-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: build/package-cache/success
           key: ${{ steps.target.outputs.cache_key }}
@@ -94,11 +94,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.plan.outputs.checkout_ref }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -136,7 +136,7 @@ jobs:
           if (-not $iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
           & $iscc "/DMyAppVersion=$env:INSTALLER_VERSION" packaging\windows\installer.iss
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ohr-engine-windows-installer
           path: dist/installer/*.exe
@@ -157,7 +157,7 @@ jobs:
           mkdir -p build/package-cache
           printf 'built\n' > build/package-cache/success
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v5
         with:
           path: build/package-cache/success
           key: ${{ needs.plan.outputs.cache_key }}
@@ -169,13 +169,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: ohr-engine-windows-installer
           path: release
 
       - name: Attach installer to the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.plan.outputs.release_tag }}
           files: release/*.exe
@@ -187,13 +187,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: ohr-engine-windows-installer
           path: release
 
       - name: Publish daily prerelease
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.plan.outputs.daily_tag }}
           target_commitish: ${{ needs.plan.outputs.checkout_ref }}

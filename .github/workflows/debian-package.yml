@@ -23,7 +23,7 @@ jobs:
       cache_key: ${{ steps.target.outputs.cache_key }}
       source_cached: ${{ steps.source-cache.outputs.cache-hit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -78,7 +78,7 @@ jobs:
 
       - name: Check previous successful build
         id: source-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: build/package-cache/success
           key: ${{ steps.target.outputs.cache_key }}
@@ -91,19 +91,22 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.plan.outputs.checkout_ref }}
 
       - name: Install build tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends python3 python3-venv python3-pip binutils libgl1 libx11-6
+          apt-get install -y --no-install-recommends python3 python3-venv python3-pip ca-certificates binutils libgl1 libx11-6
 
       - name: Install Python build dependencies
         run: |
-          python3 -m venv /tmp/ohr-build-venv
-          /tmp/ohr-build-venv/bin/pip install --only-binary=:all: -r requirements-engine.txt pyinstaller
+          python3 -m venv /tmp/ohr-bootstrap
+          /tmp/ohr-bootstrap/bin/pip install --only-binary=:all: uv
+          /tmp/ohr-bootstrap/bin/uv python install 3.12
+          /tmp/ohr-bootstrap/bin/uv venv --python 3.12 /tmp/ohr-build-venv
+          /tmp/ohr-bootstrap/bin/uv pip install --python /tmp/ohr-build-venv/bin/python -r requirements-engine.txt pyinstaller
 
       - name: Freeze engine
         run: /tmp/ohr-build-venv/bin/pyinstaller packaging/linux/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
@@ -138,7 +141,7 @@ jobs:
           test -f /tmp/ohr-package-check/usr/share/doc/ohr-engine/THIRD_PARTY_NOTICES.md
           /tmp/ohr-package-check/opt/ohr-engine/ohr-engine --help >/dev/null
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ohr-engine-debian-amd64
           path: dist/debian/*.deb
@@ -159,7 +162,7 @@ jobs:
           mkdir -p build/package-cache
           printf 'built\n' > build/package-cache/success
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v5
         with:
           path: build/package-cache/success
           key: ${{ needs.plan.outputs.cache_key }}
@@ -171,13 +174,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: ohr-engine-debian-amd64
           path: release
 
       - name: Attach package to the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.plan.outputs.release_tag }}
           files: release/*.deb
@@ -189,13 +192,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: ohr-engine-debian-amd64
           path: release
 
       - name: Publish daily prerelease
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.plan.outputs.daily_tag }}
           target_commitish: ${{ needs.plan.outputs.checkout_ref }}

@@ -55,8 +55,7 @@ non-frozen, run-from-source behaviour is unchanged):
   installed package — which would have put user save data inside the install directory, at risk
   of being swept up by the uninstaller.
 
-Build locally (needs Python 3.10+ — the pinned `pygame-ce`/`zengl` versions in
-`requirements-engine.txt` don't publish wheels for 3.9 — and Inno Setup's `ISCC.exe` on PATH):
+Build locally (needs Python 3.12+ and Inno Setup's `ISCC.exe` on PATH):
 
 ```
 python -m venv .venv
@@ -138,12 +137,15 @@ entry opens a terminal and asks for the user's original `WARFB` directory; the c
 line entry accepts that path as its first argument or via `WARFB`. No original game files
 are included. Save files and logs stay in the user's home directory.
 
-To build locally on Debian 12 amd64 with Python 3.11, `python3-venv`, `binutils`,
-`libgl1`, `libx11-6`, and `dpkg` installed:
+To build locally on Debian 12 amd64 with `python3-venv`, `binutils`, `libgl1`,
+`libx11-6`, and `dpkg` installed, use a Python 3.12 environment:
 
 ```sh
-python3 -m venv /tmp/ohr-build-venv
-/tmp/ohr-build-venv/bin/pip install --only-binary=:all: -r requirements-engine.txt pyinstaller
+python3 -m venv /tmp/ohr-bootstrap
+/tmp/ohr-bootstrap/bin/pip install --only-binary=:all: uv
+/tmp/ohr-bootstrap/bin/uv python install 3.12
+/tmp/ohr-bootstrap/bin/uv venv --python 3.12 /tmp/ohr-build-venv
+/tmp/ohr-bootstrap/bin/uv pip install --python /tmp/ohr-build-venv/bin/python -r requirements-engine.txt pyinstaller
 /tmp/ohr-build-venv/bin/pyinstaller packaging/linux/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
 sh packaging/linux/build-deb.sh 0.0.0~dev1
 ```
@@ -192,8 +194,11 @@ For a local build on Rocky Linux 9:
 
 ```sh
 sudo dnf install python3.11 python3.11-pip rpm-build binutils libglvnd-glx libX11 cpio
-python3.11 -m venv /tmp/ohr-build-venv
-/tmp/ohr-build-venv/bin/pip install --only-binary=:all: -r requirements-engine.txt pyinstaller
+python3.11 -m venv /tmp/ohr-bootstrap
+/tmp/ohr-bootstrap/bin/pip install --only-binary=:all: uv
+/tmp/ohr-bootstrap/bin/uv python install 3.12
+/tmp/ohr-bootstrap/bin/uv venv --python 3.12 /tmp/ohr-build-venv
+/tmp/ohr-bootstrap/bin/uv pip install --python /tmp/ohr-build-venv/bin/python -r requirements-engine.txt pyinstaller
 /tmp/ohr-build-venv/bin/pyinstaller packaging/linux/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
 sh packaging/linux/build-rpm.sh 0.0.0~dev1
 ```
