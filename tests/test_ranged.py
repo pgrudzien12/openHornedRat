@@ -285,6 +285,8 @@ class RangedDamage(unittest.TestCase):
         self.assertTrue(hits["direct"].data["direct"])
         self.assertFalse(hits["margin"].data["direct"])
         self.assertLess(direct.models, 3)
+        self.assertEqual(len(battle.impact_effects), 1)
+        self.assertTrue(next(e for e in battle.events if e.kind == "projectile_impact").data["blast"])
 
     def test_building_uses_building_strength_and_first_model(self):
         firer = unit("gun", 0, 0, code=11, models=4, cls="art")
@@ -305,6 +307,8 @@ class RangedDamage(unittest.TestCase):
         p = ranged.Projectile("bow", 1, 0, 0, 0, 0, 100, 0, 0, 10, 1, x=0, y=100, z=0)
         ranged._impact(battle, p, flight=False)
         self.assertEqual(victim.models, 0)
+        self.assertEqual(battle.impact_effects, [])
+        self.assertFalse(next(e for e in battle.events if e.kind == "projectile_impact").data["blast"])
         self.assertEqual(len(victim.dying), 1)
         self.assertEqual(victim.dying[0].death_kind, animation.DEATH_MISSILE)
         battle.tick()

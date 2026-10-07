@@ -527,9 +527,10 @@ def _impact(battle: Battle, p: Projectile, *, flight: bool,
         elif not flight and p.radius and q < radius + p.radius:
             count = max(1, int((radius+p.radius-q)*unit.models/(radius+p.radius)))
             _damage_unit(battle, unit, p, False, count)
-    battle.impact_effects.append((p.x, p.y, p.code, battle.tick_count))
+    if p.radius > 0:
+        battle.impact_effects.append((p.x, p.y, p.code, battle.tick_count))
     battle.events.append(BattleEvent("Missile impact.", "projectile_impact", code=p.code,
-                                     x=p.x, y=p.y, flight=flight))
+                                     x=p.x, y=p.y, flight=flight, blast=p.radius > 0))
 
 
 def _step_projectiles(battle: Battle) -> None:
