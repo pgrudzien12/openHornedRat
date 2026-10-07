@@ -1262,14 +1262,18 @@ and Rally 37/38 (same art), Withdraw 39/40, Independent 52/53, Charge 54/55, Fig
 41 are not used by any command button.
 
 **Panel state** is chosen from the selected unit (the panel switches only when state or unit class changes):
-no selected unit, or unit charging → none / idle set (below); fighting in close combat → melee set (caster variant if the unit
-has spells or items, else non-caster); broken or pursuing → Rally set; otherwise idle.
+no selected unit → the unselected layout; unit charging → no unit-command buttons; in close combat or braced →
+melee set (the Items variant only if the unit has items and a living leader figure); broken or pursuing → Rally set;
+otherwise idle. The distinction between an Attack order, its approach, the charge, and close combat is detailed in
+[battle_attack_charge_buttons.md](battle_attack_charge_buttons.md).
 Sub-sets are entered by buttons: Move → move set; Ranks → ranks set; Facing → facing set; Attack → attack set (caster or
 non-caster variant). Fire and Magic keep the set and start a pending order with their own cursor. Any completed order or
 Back returns to idle. The panel background never changes; only the buttons do.
 
 Button sets by unit class and state. "Inf" = infantry and cavalry, "Arch" = archers, "Art" = artillery, "Wiz" = wizard,
-"Mon" = monster (classes 0 and 7–9 have no buttons). Slots are listed TL / TR / BR / BL / C, `–` = empty.
+"Mon" = monster (classes 0 and 7–9 have no buttons while selected). "Caster" in the attack/melee rows means the
+regiment has items and a living leader figure; a wizard's Magic button is shown separately. Slots are listed
+TL / TR / BR / BL / C, `–` = empty.
 
 | State | Class | TL | TR | BR | BL | C |
 |---|---|---|---|---|---|---|
