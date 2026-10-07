@@ -148,6 +148,11 @@ Artillery crews carry their machine's `S_BalWeap` on the leader (e.g. 5, 6, 8).
 The effective value is the leader model's Ld if the unit has a leader with non-zero Ld, otherwise the Ld of the
 first model.
 
+This applies to the Leadership test after a lost combat result, which may cause the unit to rout, and to its later
+rally test. For example, with troop Ld 6, a living leader at Ld 8, no modifier, and a roll of 7, the unit passes
+either test. After that leader is removed, the same roll fails if the first remaining model has Ld 6. The leader's
+other stats do not replace the troop profile for these tests.
+
 ### `psy_status` bits ✅
 
 `psy_status` is a 16-bit field; **bit = token − 19**. The writer masks `0x3FFF`.
