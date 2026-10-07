@@ -42,6 +42,36 @@ def _join_fight(battle, group_id, *regiments, turn=0):
             r.identifier for r in regiments if r.side != regiment.side)
 
 
+class FightHarderTests(unittest.TestCase):
+    def test_focused_player_unit_in_melee_gains_strength_and_leadership_until_segment_resolves(self):
+        player = _regiment("player", 0, 0, Side.PLAYER, strength=4, leadership=6, in_melee=True)
+        enemy = _regiment("enemy", 100, 100, Side.ENEMY, toughness=5)
+        battle = Battle(1000, 1000, [player, enemy], seed=1)
+        battle.tick_count = combat.SEGMENT_TICKS - 1
+
+        with patch.object(battle.rng, "randint", return_value=7):
+            _, ordinary = combat._roll_model_attacks(player, enemy, battle.rng)
+            self.assertFalse(combat.leadership_test(player.effective_leadership, battle.rng))
+            battle.order_fight_harder("player")
+            _, boosted = combat._roll_model_attacks(player, enemy, battle.rng)
+            self.assertTrue(combat.leadership_test(player.effective_leadership, battle.rng))
+        self.assertLess(boosted["wound_need"], ordinary["wound_need"])
+        battle.tick()  # tick 18 is not a segment boundary
+        self.assertTrue(player.fight_harder)
+        battle.tick()  # tick 19 resolves the segment and consumes the command
+        self.assertFalse(player.fight_harder)
+
+    def test_fight_harder_refuses_enemy_and_player_outside_melee(self):
+        player = _regiment("player", 0, 0, Side.PLAYER)
+        enemy = _regiment("enemy", 100, 100, Side.ENEMY, in_melee=True)
+        battle = Battle(1000, 1000, [player, enemy])
+
+        with self.assertRaises(ValueError):
+            battle.order_fight_harder("player")
+        with self.assertRaises(ValueError):
+            battle.order_fight_harder("enemy")
+
+
 class InitiativeTimingTests(unittest.TestCase):
     """game_rules.md 5.1: a unit attacks once per turn, in the segment equal to its Initiative."""
 

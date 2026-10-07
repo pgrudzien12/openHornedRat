@@ -620,6 +620,8 @@ class MagicBookScene(Scene):
 
         self.parent = parent
         self.campaign = campaign
+        if hasattr(campaign, "recover_item_pickups"):
+            campaign.recover_item_pickups()
         self.known = known_entries(campaign.company)
         campaign.book_flags[1] = set(self.known[0])
         campaign.book_flags[2] = set(self.known[1])

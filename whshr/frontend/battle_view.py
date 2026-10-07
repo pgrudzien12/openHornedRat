@@ -323,10 +323,13 @@ class BattleView(SceneView[BattleScene]):
             # through to hit_test()/occupies() below and is silently swallowed as HUD chrome.
             if (self.hud.minimap_position(event.pos) is not None
                     or self.hud.minimap_regiment_at(event.pos) is not None):
-                return self._minimap_click(event.pos, append=deploying and self._control_held(event))
+                control = self._control_held(event)
+                return self._minimap_click(event.pos, append=deploying and control, repeat_item=control)
             action = self.hud.hit_test(event.pos)
             if action is not None:
                 self.hud.set_pressed(action)
+                if action.startswith("item:"):
+                    return ()  # item rows commit on release, so their pressed state is visible
                 if action == "scroll_up":
                     self.log_scroll = min(self.log_scroll + 1, max(0, len(self.battle_log) - 1))
                     return ()
@@ -348,12 +351,23 @@ class BattleView(SceneView[BattleScene]):
                     if action not in {"ranks_up", "ranks_down", "turn_left", "turn_right", "about_face"}:
                         self.hud.order_completed()
                     return ((order,),)
+                if action in {"items", "back"}:
+                    self.order_mode = None
+                    self._set_cursor("default")
                 return ()
             if self.hud.occupies(event.pos):
                 return ()
-            return self._ground_click(event.pos, append=True) if deploying and self._control_held(event) else self._ground_click(event.pos)
+            control = self._control_held(event)
+            return self._ground_click(event.pos, append=deploying and control, repeat_item=control)
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            pressed = self.hud.pressed
             self.hud.set_pressed(None)
+            if pressed is not None and pressed.startswith("item:") and self.hud.hit_test(event.pos) == pressed:
+                self.hud.press(pressed)
+                item = pressed[5:]
+                self.order_mode = pressed if item != "ItemPotionOfStrength" else None
+                self._set_cursor("magic" if self.order_mode else "default")
+                return (("arm_item", item),)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
             self._right_minimap = deploying and self.hud.minimap_position(event.pos) is not None
             self._right_down = None if self.hud.occupies(event.pos) else event.pos
@@ -411,7 +425,8 @@ class BattleView(SceneView[BattleScene]):
             point = (ground[0] * WORLD_PER_MESH, ground[1] * WORLD_PER_MESH)
         return (("drag_to", *point, rotate),)
 
-    def _ground_click(self, pixel: Sequence[float], direct: bool = False, append: bool = False) -> Sequence[SceneEvent]:
+    def _ground_click(self, pixel: Sequence[float], direct: bool = False, append: bool = False,
+                      repeat_item: bool = False) -> Sequence[SceneEvent]:
         """Translate a screen click into a ("select", id), ("attack", id) or ("move_to", x, y)
         scene event, if it hits ground.
 
@@ -457,6 +472,9 @@ class BattleView(SceneView[BattleScene]):
             return (("select", regiment_id),) if regiment_id is not None else ()
         if append and self.order_mode == "move":
             return (("append_waypoint", x, y),)
+        if (self.order_mode.startswith("item:") and repeat_item
+                and self.scene.battle.event_bus.power.player >= 1):
+            return (("item_target", self.order_mode[5:], x, y),)
         mode, self.order_mode = self.order_mode, None
         self._set_cursor("default")
         self.hud.order_completed()
@@ -469,6 +487,8 @@ class BattleView(SceneView[BattleScene]):
             return (("move_to", x, y),)
         if mode == "fire":
             return (("fire", regiment_id, (x, y), bool(pygame.key.get_mods() & pygame.KMOD_CTRL)),)
+        if mode.startswith("item:"):
+            return (("item_target", mode[5:], x, y),)
         if mode == "face_point":
             return (("face_point", x, y),)
         return ()
@@ -500,7 +520,8 @@ class BattleView(SceneView[BattleScene]):
                 best_id, best_depth = regiment.identifier, depth
         return best_id
 
-    def _minimap_click(self, pixel: Sequence[float], append: bool = False) -> Sequence[SceneEvent]:
+    def _minimap_click(self, pixel: Sequence[float], append: bool = False,
+                       repeat_item: bool = False) -> Sequence[SceneEvent]:
         """A minimap click behaves like a 3D-view ground click (notes/game_rules.md "Battle HUD
         layout": "a left click on the minimap is handled exactly like a click in the 3D view"),
         sourced from the HUD's own marker hit-testing instead of 3D picking - see _ground_click's
@@ -519,6 +540,9 @@ class BattleView(SceneView[BattleScene]):
             return ()
         if append and self.order_mode == "move":
             return (("append_waypoint", *world),) if world is not None else ()
+        if (self.order_mode.startswith("item:") and repeat_item and world is not None
+                and self.scene.battle.event_bus.power.player >= 1):
+            return (("item_target", self.order_mode[5:], *world),)
         mode, self.order_mode = self.order_mode, None
         self._set_cursor("default")
         self.hud.order_completed()
@@ -532,6 +556,8 @@ class BattleView(SceneView[BattleScene]):
         if mode == "fire":
             return (("fire", target_id, tuple(world) if world is not None else None,
                      bool(pygame.key.get_mods() & pygame.KMOD_CTRL)),)
+        if mode.startswith("item:") and world is not None:
+            return (("item_target", mode[5:], *world),)
         return ()
 
     def _log_cannot(self, order: str) -> None:

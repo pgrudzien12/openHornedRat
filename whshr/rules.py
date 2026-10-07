@@ -92,7 +92,10 @@ def is_scripted_opponent(first: "Regiment", second: "Regiment") -> bool:
 
 def may_engage(first: "Regiment", second: "Regiment") -> bool:
     """Whether two regiments fight on physical contact: different camps (`can_fight`), or a scripted
-    same-side opponent pair (`is_scripted_opponent`). Takes regiments, not sides, for that reason."""
+    same-side opponent pair (`is_scripted_opponent`). Takes regiments, not sides, for that reason. A lifted regiment
+    (Flying Bower, Sapphire Arch) engages nobody (notes/spell_channelled_effects.md 2.3)."""
+    if first.lifted or second.lifted:
+        return False
     return can_fight(first.camp, second.camp) or is_scripted_opponent(first, second)
 
 

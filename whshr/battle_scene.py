@@ -3,7 +3,7 @@
 
 import os
 from os import PathLike
-from . import battle_log, behaviour, casualties, combat, payments, skirmish_log
+from . import battle_log, behaviour, casualties, combat, payments, roster, skirmish_log
 from .assets import AssetId
 from .battlefield import Battlefield, WORLD_PER_MESH, sprite_files
 from .clock import FixedStepClock
@@ -132,6 +132,30 @@ class BattleScene(Scene):
             if self.selected_id is not None:
                 try:
                     self.battle.toggle_independent(self.selected_id)
+                except ValueError:
+                    pass
+        elif kind == "fight_harder":
+            if self.selected_id is not None:
+                try:
+                    self.battle.order_fight_harder(self.selected_id)
+                except ValueError:
+                    pass
+        elif kind == "charge":
+            if self.selected_id is not None:
+                try:
+                    self.battle.order_charge_forward(self.selected_id)
+                except ValueError:
+                    pass
+        elif kind == "arm_item":
+            if self.selected_id is not None:
+                try:
+                    self.battle.arm_item(self.selected_id, args[0])
+                except ValueError:
+                    pass
+        elif kind == "item_target":
+            if self.selected_id is not None:
+                try:
+                    self.battle.order_item_target(self.selected_id, args[0], args[1], args[2])
                 except ValueError:
                     pass
         elif kind == "append_waypoint":
@@ -311,6 +335,9 @@ class BattleScene(Scene):
         player = [(identifier, regiment) for identifier, regiment in self.battle.regiments.items()
                   if regiment.side == Side.PLAYER]
         marching = campaign.ordered_march_units
+        battle_items = {regiment.whoami: regiment.items for _, regiment in player if regiment.whoami in marching}
+        campaign.company = tuple(roster.with_items(record, battle_items[record.whoami])
+                                 if record.whoami in battle_items else record for record in campaign.company)
         if len(player) != len(marching):
             campaign.battle_outcome = {}
             casualties.after_battle(campaign)

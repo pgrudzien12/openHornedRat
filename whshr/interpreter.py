@@ -20,7 +20,7 @@ import random
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from . import animation, behaviour, combat, magic, nodes, visibility
+from . import animation, behaviour, combat, magic, nodes, spell_effects, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import Side, side_of_code
@@ -1730,7 +1730,7 @@ class ScriptInterpreter:
         if unit is None or sender is None or self._attack_direction(sender, unit) not in (1, 5, 2, 3):
             return state.pc + 1
         from . import combat
-        if not combat.leadership_test(unit.leadership, rng):
+        if not combat.leadership_test(unit.effective_leadership, rng):
             state.cond_flags = False
             self.event_bus.queue_event(unit_id, Event(code=0x0C, source=unit_id), "self")
         return state.pc + 1
@@ -2606,7 +2606,7 @@ class ScriptInterpreter:
 
     def _doomwheel_bolts(self, unit: "Regiment") -> None:
         """Code 26: once reloaded, stamp and fire three bolts ahead, right and left (notes/script_behaviours.md
-        1.10). Not modelled: the bolts' flight and damage; they are recorded as a battle event."""
+        1.10), aimed and launched as notes/spell_blades_flock_items.md 5 describes."""
         elapsed, reload = self._elapsed_and_reload(unit)
         if elapsed <= reload:
             return
@@ -2615,12 +2615,13 @@ class ScriptInterpreter:
         headings = [facing, (facing + 128) % 512, (facing + 384) % 512]
         self.battle.events.append(BattleEvent(f"{unit.name} fires lightning bolts", "doomwheel_bolts",
                                               regiment=unit.identifier, headings=headings))
+        spell_effects.doomwheel_volley(self.battle, unit)
 
     def _pestilent_breath(self, unit: "Regiment") -> None:
         """Code 27: ready once elapsed > trunc(reload / (models div 4 + 1)); a full reload stamps, a partial one
         does not; the cloud goes to the unit position + (off, off) with off from two draws (the original's
-        same-offset quirk, notes/script_behaviours.md 1.10). Not modelled: the spell effect; the innate cast is
-        recorded as a spell event."""
+        same-offset quirk, notes/script_behaviours.md 1.10), launched as an innate Pestilent Breath from the unit
+        position (notes/spell_effects.md 3.7)."""
         elapsed, reload = self._elapsed_and_reload(unit)
         if not elapsed > reload // (unit.models // 4 + 1):
             return
@@ -2628,8 +2629,8 @@ class ScriptInterpreter:
             self._stamp(unit)
         heading = self.battle.rng.randrange(512)
         offset = (((self.battle.rng.randrange(360) + 180) >> 1) * heading) >> 8
-        self.battle.events.append(BattleEvent(f"{unit.name} breathes pestilence", "spell", regiment=unit.identifier,
-                                              spell=24, x=unit.x + offset, y=unit.y + offset))
+        spell_effects.launch(self.battle, spell_effects.PESTILENT_BREATH, unit, -1, unit.x + offset, unit.y + offset,
+                             innate=True)
 
     def _track_threat(self, unit_id: str, state: UnitScriptState) -> None:
         """Behaviour 15 (notes/script_queries.md 12.1): reveal hidden enemies in view; with no threat pick the
@@ -2822,8 +2823,8 @@ class ScriptInterpreter:
             return
         regiment.attack_target = None
         state.current_target = None
-        if regiment.anchored or regiment.routing or not regiment.active:
-            return
+        if regiment.anchored or regiment.routing or not regiment.active or regiment.held:
+            return  # a thorn-held unit cannot start a rout (notes/spell_area_effects.md 3.3)
         from . import combat
         heading = (regiment.direction + turn) % 512
         angle = heading * math.tau / 512
@@ -2909,9 +2910,9 @@ class ScriptInterpreter:
         no-op on later ticks rather than needing its own movement logic here.
         """
         regiment = self.battle.regiments.get(unit_id)
-        if regiment and not regiment.routing and "CantBreak" not in regiment.psychology:
+        if regiment and not regiment.routing and not regiment.held and "CantBreak" not in regiment.psychology:
             from . import combat
-            combat.start_rout(regiment, self.battle)
+            combat.start_rout(regiment, self.battle)  # refused while thorn-held (notes/spell_area_effects.md 3.3)
         return state.pc + 1
 
     def op_FearWhenCharged(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
@@ -2942,19 +2943,28 @@ class ScriptInterpreter:
     def _busy_casting(self, unit: "Regiment", state: UnitScriptState) -> bool:
         """IfCasting's "is casting" (notes/script_animation_sound.md 3.2)."""
         return unit.unit_class == WIZARD_CLASS and (
-            self._cast_pose_running(unit) or state.pending_spell is not None or state.channelling)
+            self._cast_pose_running(unit) or state.pending_spell is not None
+            or self._channelling(unit.identifier, state))
+
+    def _channelling(self, unit_id: str, state: UnitScriptState) -> bool:
+        """Owns an active Storm of Shemtek or Flying Bower (notes/spell_lasting_effects.md 6); the stored flag stays
+        settable for callers that model it directly."""
+        return state.channelling or spell_effects.channelling(self.battle, unit_id)
 
     def _may_engage(self, unit: "Regiment", enemy: "Regiment", state: UnitScriptState, rng: random.Random) -> bool:
         """MayEngage (game_rules.md "Fear and terror"): terror refuses non-Frenzy, non-PsyImmune units without a
         roll; fear (unless CantBreak/Frenzy/PsyImmune, or already passed) takes a Leadership test whose pass
-        sets fear-passed. Not modelled: Dread Banners."""
+        sets fear-passed. A Dread Banner both causes fear and protects its own unit from fear."""
         immune = bool(unit.psychology & {"Frenzy", "PsyImmune"})
+        dread = "ItemDreadBanner" in unit.items and unit.living_leader_index is not None
         if "CauseTerror" in enemy.psychology and not immune:
             return False
-        if ("CauseFear" in enemy.psychology and not immune and "CantBreak" not in unit.psychology
+        enemy_fear = ("CauseFear" in enemy.psychology or
+                      "ItemDreadBanner" in enemy.items and enemy.living_leader_index is not None)
+        if (enemy_fear and not immune and not dread and "CantBreak" not in unit.psychology
                 and not state.fear_passed):
             from . import combat
-            state.fear_passed = combat.leadership_test(unit.leadership, rng)
+            state.fear_passed = combat.leadership_test(unit.effective_leadership, rng)
             return state.fear_passed
         return True
 
@@ -2963,8 +2973,8 @@ class ScriptInterpreter:
         """ChargeForward: a charge with no target to the point 12 x s_rlmv straight ahead
         (notes/movement_formation.md 3.6): no fear test and no event 0x07; success clears fear-passed and
         reveals the unit (true); an anchored unit halts and re-forms (false) (notes/script_grid_events.md 3).
-        PROVISIONAL: the engine has no free-charge state, so the run is an ordinary move to that point. Not
-        modelled: the refusal inside a blocking boundary region."""
+        The engine tracks this as a free charge until it reaches the point or makes contact. Not modelled:
+        the refusal inside a blocking boundary region."""
         unit = self.battle.regiments.get(unit_id)
         if unit is None:
             state.cond_flags = False
@@ -2978,6 +2988,8 @@ class ScriptInterpreter:
         unit.target_x = unit.x + int(_trunc_sin(facing) * reach / 256)
         unit.target_y = unit.y + int(_trunc_cos(facing) * reach / 256)
         unit.waypoints = []
+        unit.attack_target = unit.charge_started_target = None
+        unit.free_charging = True
         unit.hidden = False
         state.fear_passed = False
         state.cond_flags = True
@@ -3121,9 +3133,10 @@ class ScriptInterpreter:
 
     def _query_contact(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
         """Case 8, the contact handler (notes/script_behaviours.md 2.3): the only place a fight starts. Always
-        false. Not modelled: the cannot-engage state (Flying Bower) and buildings, which are not units here."""
+        false. A lifted unit (Flying Bower, Sapphire Arch) neither contacts nor is contacted
+        (notes/spell_channelled_effects.md 2.3). Not modelled: buildings, which are not units here."""
         other = self.battle.regiments.get(state.contact_record or "")
-        if other is None or not other.active or other.routing:
+        if other is None or not other.active or other.routing or unit.lifted or other.lifted:
             return False
         state.contact_latch = True
         current = state.current_target[0] if state.current_target else None
@@ -3532,7 +3545,8 @@ class ScriptInterpreter:
             tick_count: int, rng: random.Random) -> int | None:
         """IfCastingAnimation F: condition := cast pose running or channelling, any class; a pending spell
         is not tested. True with F set shows message 2014 (section 3.1)."""
-        state.cond_flags = self._cast_pose_running(self.battle.regiments.get(unit_id)) or state.channelling
+        state.cond_flags = (self._cast_pose_running(self.battle.regiments.get(unit_id))
+                            or self._channelling(unit_id, state))
         if state.cond_flags and operand:
             self._battle_message(unit_id, 2014)
         return state.pc + 2
@@ -3540,12 +3554,12 @@ class ScriptInterpreter:
     def op_IfCasting(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
         """IfCasting R M: condition := the unit is of class Wizard and its cast pose is running, a spell is
-        pending or it is channelling. True with M set shows message 2014 (section 3.2). Not modelled: R's
-        re-enabling of the refused spell's magic-panel entry (no magic panel yet)."""
+        pending or it is channelling. True with M set shows message 2014 (section 3.2). R only clears the panel's
+        cosmetic "cast ordered" mark (notes/spell_lasting_effects.md 8)."""
         unit = self.battle.regiments.get(unit_id)
         state.cond_flags = (unit is not None and unit.unit_class == WIZARD_CLASS
                             and (self._cast_pose_running(unit) or state.pending_spell is not None
-                                 or state.channelling))
+                                 or self._channelling(unit_id, state)))
         message = script_words[state.pc + 2] if state.pc + 2 < len(script_words) else 0
         if state.cond_flags and message:
             self._battle_message(unit_id, 2014)
@@ -3666,13 +3680,15 @@ class ScriptInterpreter:
                 dx, dy, length = -math.sin(angle), -math.cos(angle), 1.0
             return True, (unit.x + leap * dx / length, unit.y + leap * dy / length)
         if rule == magic.DISPEL:
-            # Needs an active hostile effect whose caster sees the chooser; there are no spell effects yet.
-            return False, None
+            # notes/spell_lasting_effects.md 5.5: aim at the own centre.
+            if not spell_effects.dispel_choice(self.battle, unit, self._sees):
+                return False, None
+            return True, (unit.x, unit.y)
         return False, None  # NEVER
 
     def _maddened(self, target: "Regiment") -> bool:
-        """Not modelled: the Madness effect, so no unit is ever maddened."""
-        return False
+        """An active Madness effect targets the unit (notes/spell_lasting_effects.md 1.4)."""
+        return spell_effects.maddened(self.battle, target.identifier)
 
     def _leaving(self, other: "Regiment") -> bool:
         other_state = self.event_bus.unit_states.get(other.identifier)
@@ -3680,13 +3696,13 @@ class ScriptInterpreter:
 
     def _choose_spell(self, state: UnitScriptState, unit: "Regiment", target: "Regiment", pay: bool,
                       rng: random.Random) -> bool:
-        """Take the first list entry that is affordable, has no own effect active (no effects are modelled
-        yet), is in range and passes its rule; set pending (and the point/aim for point spells), pay when
-        asked. Failure clears the pending spell (section 2.2)."""
+        """Take the first list entry that is affordable, has no own effect active (visual tail included,
+        notes/spell_effects.md 1.3), is in range and passes its rule; set pending (and the point/aim for point
+        spells), pay when asked. Failure clears the pending spell (section 2.2)."""
         pool = self.event_bus.power.get(self._pool_side(unit))
         for code in unit.spells:
             spell = magic.SPELLS[code]
-            if spell.cost > pool:
+            if spell.cost > pool or spell_effects.spell_active(self.battle, unit.identifier, code):
                 continue
             accepted, point = self._spell_point(state, unit, spell, target, rng)
             if not accepted:
@@ -3779,42 +3795,42 @@ class ScriptInterpreter:
             state.target_point = (self.battle.script_nodes[node].x, self.battle.script_nodes[node].y)
         return state.pc + 2
 
-    def _launch(self, unit_id: str, unit: "Regiment", code: int, x: float, y: float, rng: random.Random) -> bool:
+    def _launch(self, unit_id: str, unit: "Regiment", code: int, x: float, y: float, origin_model: int,
+                rng: random.Random) -> bool:
         """The launch checks of section 0.4: a caster (class Wizard, or a leader with the casting weapon),
-        the aim point within the spell's range and the +-50 degree arc (skipped in melee), and a unit under
-        the point for unit-target spells. Success records a "spell" battle event; a player-army failure
-        shows message 2021. Not modelled: the spell effects themselves, the 64-effect limit and the magic
-        panel entry made usable again on failure."""
+        the aim point within the spell's range and the +-50 degree arc (skipped in melee); then the spell module
+        (whshr.spell_effects.launch: the 64-effect limit, the unit under the point, the effect itself). A
+        player-army failure shows message 2021. The panel's "cast ordered" mark is cosmetic and not modelled
+        (notes/spell_lasting_effects.md 8)."""
+        if code in (0x105, 0x10A):
+            return self.battle.launch_item(unit, code, x, y)
         can_cast = unit.unit_class == WIZARD_CLASS or unit.shooting_code == 16
         ok = (can_cast and magic.in_range(self._point_distance(unit, x, y), code, rng)
               and (unit.in_melee or self._arc_ok(unit, x, y, self.LAUNCH_ARC)))
-        if ok and code in magic.UNIT_TARGET_SPELLS:
-            ok = any(other.active and self._hostile(unit, other)
-                     and math.hypot(other.x - x, other.y - y) <= other.bounding_radius()
-                     for other in self.battle.regiments.values())
-        if ok:
-            self.battle.events.append(BattleEvent(f"{unit.name} casts spell {code}", "spell", regiment=unit_id,
-                                                  spell=code, x=x, y=y))
-        elif unit.side == Side.PLAYER:
-            self._battle_message(unit_id, 2021)
-        return ok
+        if not ok:
+            if unit.side == Side.PLAYER:
+                self._battle_message(unit_id, 2021)
+            return False
+        return spell_effects.launch(self.battle, code, unit, origin_model, x, y)
 
     def op_CastPending(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
-        """CastPending: launch the pending spell at the current target (PROVISIONAL: its unit position stands
-        in for its leader figure) unless aim-at-point is on, else at the target point; condition := launched.
-        Afterwards aim-at-point is off, the pending spell none, and a unit in the cast-only-target state drops
-        its target. No refund on failure (section 3.3)."""
+        """CastPending: launch the pending spell at the current target's aim figure (its leader, else roster entry
+        frontage - 1, notes/spell_effects.md 2.1) unless aim-at-point is on, else at the target point; the origin
+        model is the one that posted the triggering event, none otherwise; condition := launched. Afterwards
+        aim-at-point is off, the pending spell none, and a unit in the cast-only-target state drops its target.
+        No refund on failure (section 3.3)."""
         unit = self.battle.regiments.get(unit_id)
         if state.pending_spell is None or unit is None:
             state.cond_flags = False
             return state.pc + 1
         target = self.battle.regiments.get(state.current_target[0]) if state.current_target else None
         if target is not None and not state.aim_at_point:
-            aim: tuple[float, float] | None = (target.x, target.y)
+            aim: tuple[float, float] | None = spell_effects.reference_figure(target)
         else:
             aim = state.target_point
-        state.cond_flags = aim is not None and self._launch(unit_id, unit, state.pending_spell, *aim, rng)
+        state.cond_flags = aim is not None and self._launch(unit_id, unit, state.pending_spell, *aim,
+                                                              state.current_event.model, rng)
         state.aim_at_point = False
         if state.unit_flags & CAST_ONLY_TARGET_FLAG:
             state.current_target = None
@@ -3823,8 +3839,8 @@ class ScriptInterpreter:
 
     def op_DropPendingSpell(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
-        """DropPendingSpell: pending := none, no refund, no condition (section 3.4). Not modelled: the magic
-        panel entry made usable again."""
+        """DropPendingSpell: pending := none, no refund, no condition (section 3.4). The panel entry's "cast
+        ordered" mark it clears is cosmetic (notes/spell_lasting_effects.md 8)."""
         state.pending_spell = None
         return state.pc + 1
 

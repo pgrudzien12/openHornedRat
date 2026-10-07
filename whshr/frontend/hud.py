@@ -6,8 +6,8 @@ sub-window slots, per-state button sets, minimap, readout, feedback). Everything
 frame of the installation's ICONS sheet (225 frames); nothing here is procedurally drawn chrome
 invented by the engine.
 
-Order dispatch: `whshr.engine.Battle` implements move, attack, Fire, halt, ranks, facing and
-Independent controls. Other panel orders remain disabled until their engine paths exist.
+Order dispatch: `whshr.engine.Battle` implements move, attack, Fire, halt, ranks, facing,
+Independent, Fight harder and activated items. Other panel orders remain disabled until their engine paths exist.
 Buttons for orders without engine support still render at their documented position and icon (so
 the panel looks and navigates correctly) but are disabled; panel-state *navigation* (which
 sub-panel is shown) is implemented in full, since that is pure UI state independent of which
@@ -81,8 +81,8 @@ COMMAND_FRAMES: dict[str, tuple[int, int]] = {
 }
 # Commands whshr.engine.Battle can actually carry out today; everything else in COMMAND_FRAMES
 # renders (and, where it is a set-entry button, still navigates the panel) but is disabled.
-ORDER_SUPPORTED: set[str] = {"move", "attack", "fire", "halt", "ranks_up", "ranks_down",
-                   "turn_left", "turn_right", "about_face", "face_point", "independent"}
+ORDER_SUPPORTED: set[str] = {"move", "attack", "charge", "fire", "halt", "ranks_up", "ranks_down",
+                   "turn_left", "turn_right", "about_face", "face_point", "independent", "fight_harder", "items"}
 # Buttons that only change which sub-panel is shown (pure HUD state, always clickable when present).
 SET_ENTRY: dict[str, str] = {"move": "move", "attack": "attack", "ranks_subset": "ranks", "facing_subset": "facing",
             "back": "idle"}
@@ -201,6 +201,9 @@ class Hud:
         self.marker_mode = 0
         self.panel_set = "idle"  # HUD-local sub-panel navigation: idle/move/ranks/facing/attack
         self.pending_order: str | None = None  # "move" or "attack": next battlefield/minimap click issues it
+        self.item_list_open = False
+        self.item_list_owner: str | None = None
+        self._item_labels: list[Any] = []
         self._draw_size: Size | None = None
         # Name of the fixed button or command held down, for its pressed art; hit_test()'s return
         # value (fixed-button names and command names never collide).
@@ -319,6 +322,8 @@ class Hud:
         if regiment_id == self.selected:
             return
         self.selected = regiment_id
+        self.item_list_open = False
+        self.item_list_owner = None
         self.panel_set = "idle"
         self.pending_order = None
         if regiment_id is not None:
@@ -335,10 +340,7 @@ class Hud:
         return self.battle.regiments.get(identifier) if self.battle is not None and identifier is not None else None
 
     def _caster(self, regiment: "Regiment") -> bool:
-        # notes/game_rules.md's attack/melee "caster" variant depends on the unit carrying spells or
-        # items; whshr.engine.Regiment models neither (no magic/item system yet), so this is always
-        # the non-caster variant, a documented simplification rather than a guess at unmodelled data.
-        return False
+        return bool(regiment.items) and regiment.living_leader_index is not None
 
     def panel_state(self) -> tuple[str | None, str | None]:
         """(state, unit_class) selecting a row of PANEL_LAYOUT, per notes/game_rules.md."""
@@ -352,15 +354,15 @@ class Hud:
         unit_class = regiment.hud_class
         if unit_class is None:
             return None, None  # classes with no command buttons at all
-        if regiment.in_melee:
-            return ("melee_caster" if self._caster(regiment) else "melee_noncaster"), unit_class
-        if regiment.routing:
-            # notes/game_rules.md's "broken or pursuing" has no separate "pursuing" flag in this
-            # engine; routing is the closest and only available signal.
-            return "rally", unit_class
-        if regiment.attack_target is not None and not regiment.in_melee:
-            # No explicit "charging" flag either; approximated as "moving to a declared target".
+        if (not regiment.in_melee and (regiment.charge_started_target is not None
+                and regiment.charge_started_target == regiment.attack_target
+                or regiment.free_charging and regiment.moving)):
             return "charging", unit_class
+        if regiment.in_melee or regiment.braced:
+            return ("melee_caster" if self._caster(regiment) else "melee_noncaster"), unit_class
+        if regiment.routing or regiment.pursuing:
+            # Broken and pursuing units use the same Rally command set.
+            return "rally", unit_class
         if self.panel_set == "attack":
             return ("attack_caster" if self._caster(regiment) else "attack_noncaster"), unit_class
         return self.panel_set, unit_class
@@ -384,6 +386,8 @@ class Hud:
             return regiment.moving
         if name == "fire":
             return regiment.hud_class in {"arch", "art"} and bool(regiment.missile_range)
+        if name == "items":
+            return bool(regiment.items) and regiment.living_leader_index is not None
         return True
 
     # ------------------------------------------------------------------ hit testing
@@ -415,6 +419,15 @@ class Hud:
         if self._draw_size is None or not self._panel_screen_rect().collidepoint(pos):
             return None
         native = self._native_panel_point(pos)
+        if getattr(self, "item_list_open", False) and getattr(self, "item_list_owner", self.selected) == self.selected:
+            regiment = self._regiment(self.selected)
+            if regiment is not None:
+                for index, item in enumerate(regiment.items[:5]):
+                    if (item in {"ItemBannerOfWrath", "ItemGrudgeBringer", "ItemPotionOfStrength"}
+                            and item not in regiment.used_items
+                            and regiment.living_leader_index is not None
+                            and pygame.Rect(205, 72 + index * 19, 232, 18).collidepoint(native)):
+                        return f"item:{item}"
         for name, rect in self._fixed_button_rects():
             if rect.collidepoint(native):
                 return name
@@ -432,6 +445,14 @@ class Hud:
         """Apply a clicked command's panel-navigation effect; returns the order to issue, if any."""
         if name in {"start_battle", "pause", "leave_battle", "next_regiment", "prev_regiment"}:
             return name
+        if name == "items":
+            self.item_list_open = not self.item_list_open
+            self.item_list_owner = self.selected if self.item_list_open else None
+            return None
+        if name.startswith("item:"):
+            self.item_list_open = False
+            return name
+        self.item_list_open = False
         if self.battle is not None and self.battle.phase == "deployment" and name not in self.slots().values():
             return None
         if name in SET_ENTRY and not (self.battle is not None and self.battle.phase == "deployment"):
@@ -449,6 +470,7 @@ class Hud:
         """Called once a pending move/attack order has actually been issued (a ground/minimap click)."""
         self.pending_order = None
         self.panel_set = "idle"
+        self.item_list_open = False
 
     def set_log(self, entries: Sequence[tuple[str, str]]) -> None:
         """Render (sender, message) pairs into the battle log panel (4 visible lines)."""
@@ -729,6 +751,9 @@ class Hud:
         if self._unit_info_panel is not None:
             self._draw_panel(self._unit_info_panel, UNIT_INFO_RECT[0], UNIT_INFO_RECT[1],
                              UNIT_INFO_RECT[2], UNIT_INFO_RECT[3])
+        # The item list covers part of the unit-info rectangle; paint it last so the unit name
+        # cannot appear over the popup's rows.
+        self._draw_item_list(regiment)
 
     def _draw_fixed_buttons(self) -> None:
         for name, (pos, frames, size) in FIXED_BUTTONS.items():
@@ -758,6 +783,24 @@ class Hud:
             quad = self._icon(frame_index)
             self._draw_panel(quad, sub_x + x, sub_y + y, *SLOT_SIZE,
                              tint=(1, 1, 1, 1) if enabled else (0.4, 0.4, 0.4, 0.85))
+
+    def _draw_item_list(self, regiment: "Regiment | None") -> None:
+        if not self.item_list_open or regiment is None:
+            return
+        if getattr(self, "item_list_owner", self.selected) != self.selected:
+            return
+        self._draw_panel(self._icon(205), 200, 64)
+        for index, item in enumerate(regiment.items[:5]):
+            while len(self._item_labels) <= index:
+                self._item_labels.append(self.gpu.text((240, 18), self.gpu.battle_log_font,
+                                                       background=None, padding=0))
+            label = self._item_labels[index]
+            label.set_lines((item.removeprefix("Item").replace("Of", " of ").replace("The", " the "),))
+            enabled = (item in {"ItemBannerOfWrath", "ItemGrudgeBringer", "ItemPotionOfStrength"}
+                       and item not in regiment.used_items and regiment.living_leader_index is not None)
+            pressed = self.pressed == f"item:{item}" and enabled
+            self._draw_panel(label, 205 + int(pressed), 72 + index * 19 + int(pressed), 232, 18,
+                             tint=(1, 1, 1, 1) if enabled else (0.45, 0.45, 0.45, 0.85))
 
     def _draw_camera_target(self, camera: "BattleCamera") -> None:
         """A small "x" mark at the camera's look-at target (BattleCamera.target_x/y), the ICONS
@@ -811,3 +854,5 @@ class Hud:
             self._log_panel.release()
         if self._unit_info_panel is not None:
             self._unit_info_panel.release()
+        for label in self._item_labels:
+            label.release()

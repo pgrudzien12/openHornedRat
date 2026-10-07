@@ -10,7 +10,7 @@ has walked into it, and it strikes that one model, so there is no front-rank rul
 wraps around over several ticks.
 
 Simplifications common to this module (documented placeholders, not traced values):
-- No hatred re-rolls, magic items or monster return blows (game_rules.md 5.2, 5.4-5.6).
+- No hatred re-rolls or monster return blows (game_rules.md 5.2, 5.4-5.6).
 - Melee still treats a failed save as a lethal hit; ranged wounds are tracked per model in
   `whshr.ranged`.
 - Break tests are timed and scored per the traced rules (game_rules.md 6.2): tallies accumulate rank
@@ -66,6 +66,11 @@ def leadership_test(leadership: float, rng: random.Random, modifier: float = 0) 
 def _armour_threshold(armour: int, strength: int) -> int:
     save = EXPECTED_ARMOUR_SAVE[armour] if 0 <= armour < len(EXPECTED_ARMOUR_SAVE) else 7
     return save + max(0, strength - 3)
+
+
+def armour_threshold(armour: int, strength: int) -> int:
+    """The D6 score that saves against a hit of `strength` (game_rules.md 5.3); 7 or more cannot save."""
+    return _armour_threshold(armour, strength)
 
 
 def apply_casualties(regiment: "Regiment", count: int, rng: random.Random, battle: "Battle",
@@ -140,7 +145,9 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
     victims = sorted({index for index in indices if 0 <= index < len(positions)}, reverse=True)
     if not victims:
         return 0
-    if regiment.hud_class == "art" and regiment.has_leader and 0 in victims:
+    leader_killed = regiment.leader_uid is not None and any(
+        regiment.melee_models[index].uid == regiment.leader_uid for index in victims)
+    if regiment.hud_class == "art" and leader_killed:
         regiment.machine_alive = False
         regiment.clear_anchor()
         regiment.shooting_mode = regiment.shooting_target = None
@@ -173,6 +180,8 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
         if index < len(regiment.reform_slots):
             del regiment.reform_slots[index]
     regiment.models -= len(victims)
+    if leader_killed:
+        battle.event_bus.queue_event(regiment.identifier, Event(code=0x17), route="self")
     _unpair_dead(battle, regiment, dead_uids)
     sprite = (regiment.sprite or "").casefold()
     if death_kind not in (animation.DEATH_FIRE, animation.DEATH_WARPFIRE):
@@ -232,7 +241,9 @@ def _direction_bonus(attacker: "Regiment", defender: "Regiment") -> int:
 
 def _roll_model_attacks(attacker: "Regiment", defender: "Regiment", rng: random.Random, charge_bonus: int = 0,
                         gang_bonus: int = 0, attacks: int | None = None, ws: int | None = None,
-                        strength: int | None = None) -> tuple[bool, Roll]:
+                        strength: int | None = None, model: "ModelState | None" = None,
+                        mount_attack: bool = False,
+                        defender_model: "ModelState | None" = None) -> tuple[bool, Roll]:
     """One model's attacks against the one enemy model it is paired with (game_rules.md 5.2).
 
     Returns `(killed, detail)`: `killed` is True once any wound gets past the save, because this
@@ -243,14 +254,42 @@ def _roll_model_attacks(attacker: "Regiment", defender: "Regiment", rng: random.
     gets; `charge_bonus` is the +1 S spent one attacking model at a time from the unit's charge
     counter.
     """
-    attacks = max(1, attacker.attacks) if attacks is None else attacks
-    hit_need = wfb_to_hit((attacker.ws if ws is None else ws) + gang_bonus, defender.ws)
-    strength = (attacker.strength + attacker.strength_bonus + charge_bonus
-                if strength is None else strength)
-    wound_need = wfb_to_wound(strength, defender.toughness)
-    threshold = _armour_threshold(defender.armour, strength)
+    leader = model is not None and attacker.leader_model(model) and not mount_attack
+    defending_leader = defender_model is not None and defender.leader_model(defender_model)
+    defending_toughness = defender.model_toughness(defender_model) if defender_model is not None else defender.toughness
+    defending_armour = defender.model_armour(defender_model) if defender_model is not None else defender.armour
+    defending_ws = (defender.leader_ws if defending_leader and defender.leader_ws is not None else defender.ws)
+    base_attacks = attacker.leader_attacks if leader and attacker.leader_attacks is not None else attacker.attacks
+    attacks = max(1, base_attacks) if attacks is None else attacks
+    if leader and defending_leader and "ItemParryingBlade" in defender.items:
+        attacks = max(0, attacks - 1)
+    base_ws = attacker.leader_ws if leader and attacker.leader_ws is not None else attacker.ws
+    weapon_skill = base_ws if ws is None else ws
+    if leader:
+        weapon_skill += int("ItemGrudgeBringer" in attacker.items) + int("ItemBannerOfMight" in attacker.items)
+    hit_need = wfb_to_hit(min(10, weapon_skill + gang_bonus), defending_ws)
+    base_strength = attacker.leader_strength if leader and attacker.leader_strength is not None else attacker.strength
+    strength = (base_strength + attacker.strength_bonus + charge_bonus if strength is None else strength)
+    strength += int(attacker.fight_harder)
+    if leader:
+        strength += (int("ItemGrudgeBringer" in attacker.items)
+                     + int("ItemSwordOfMight" in attacker.items) + 3 * int(attacker.potion_strength))
+        if "ItemSwordOfHeroes" in attacker.items and defending_toughness >= 5:
+            strength += 3
+        if "ItemRockSplitter" in attacker.items and defender.unit_class in {4, 7, 9}:
+            strength += 5
+    strength = min(9, strength)
+    wound_need = wfb_to_wound(strength, defending_toughness)
+    threshold = 4 if defending_armour == 6 else _armour_threshold(defending_armour, strength)
+    wound_rolls = 1
+    if leader:
+        wound_rolls += int("ItemDragonBlade" in attacker.items)
+        if "ItemSwordOfElior" in attacker.items and defender.race == 2:
+            wound_rolls *= 2
+        if "ItemRockSplitter" in attacker.items and defender.unit_class in {4, 7, 9}:
+            wound_rolls += 5
     detail: Roll = {"attacks": attacks, "hit_need": hit_need, "wound_need": wound_need,
-              "save_need": threshold, "gang_bonus": gang_bonus, "rolls": []}
+              "save_need": threshold, "gang_bonus": gang_bonus, "wound_rolls": wound_rolls, "rolls": []}
     if wound_need > 6:
         return False, detail
     killed = False
@@ -259,16 +298,17 @@ def _roll_model_attacks(attacker: "Regiment", defender: "Regiment", rng: random.
         if hit_roll < hit_need:
             detail["rolls"].append({"hit": hit_roll, "wound": None, "save": None, "result": "missed"})
             continue
-        wound_roll = _d6(rng)
-        if wound_roll < wound_need:
-            detail["rolls"].append({"hit": hit_roll, "wound": wound_roll, "save": None, "result": "no_wound"})
-            continue
-        save_roll = _d6(rng)
-        if save_roll >= threshold:
-            detail["rolls"].append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "saved"})
-            continue
-        detail["rolls"].append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "killed"})
-        killed = True
+        for _ in range(wound_rolls):
+            wound_roll = _d6(rng)
+            if wound_roll < wound_need:
+                detail["rolls"].append({"hit": hit_roll, "wound": wound_roll, "save": None, "result": "no_wound"})
+                continue
+            save_roll = _d6(rng)
+            if save_roll >= threshold:
+                detail["rolls"].append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "saved"})
+                continue
+            detail["rolls"].append({"hit": hit_roll, "wound": wound_roll, "save": save_roll, "result": "killed"})
+            killed = True
     return killed, detail
 
 
@@ -520,7 +560,9 @@ def resolve_contacts(battle: "Battle") -> None:
                 # third regiment joining one already under way). The counter is spent one attacking
                 # model at a time, so only the first 1.5 x frontage models to strike get the bonus.
                 # Re-engaging an opponent this regiment was already recorded fighting stores 0 instead.
-                opponent = regiment.attack_target
+                opponent = (regiment.attack_target or
+                            (sorted(touching[identifier])[0] if regiment.free_charging and touching[identifier]
+                             else None))
                 if scripted:
                     if identifier in pending_counter:
                         regiment.charge_counter = pending_counter[identifier]
@@ -533,6 +575,7 @@ def resolve_contacts(battle: "Battle") -> None:
                 regiment.melee_group = group_id
                 regiment.target_x = regiment.target_y = None
             regiment.in_melee = True
+            regiment.free_charging = False
         fight = battle.fights[group_id]
         group = [by_id[identifier] for identifier in sorted(members)]
         if fight.get("grid") is None:
@@ -602,7 +645,8 @@ def _strike_with_models(attacker: "Regiment", group_id: str, fight: Fight, turn:
         if attacker.charge_counter > 0:
             attacker.charge_counter -= 1  # spent one attacking model at a time (5.5)
         killed, detail = _roll_model_attacks(attacker, defender, battle.rng,
-                                             charge_bonus=charge_bonus, gang_bonus=gang_bonus)
+                                             charge_bonus=charge_bonus, gang_bonus=gang_bonus, model=model,
+                                             defender_model=defender_model)
         detail.update({"model": model.uid, "target": defender.identifier,
                        "target_model": defender_model.uid, "charge_bonus": charge_bonus,
                        "source": "rider"})
@@ -615,7 +659,8 @@ def _strike_with_models(attacker: "Regiment", group_id: str, fight: Fight, turn:
             mount_strength = mount["charge_strength"] if mount_charge else mount["S"]
             mount_killed, mount_detail = _roll_model_attacks(
                 attacker, defender, battle.rng, gang_bonus=gang_bonus,
-                attacks=mount["A"], ws=mount["WS"], strength=mount_strength)
+                attacks=mount["A"], ws=mount["WS"], strength=mount_strength,
+                model=model, mount_attack=True, defender_model=defender_model)
             mount_detail.update({"model": model.uid, "target": defender.identifier,
                                  "target_model": defender_model.uid,
                                  "charge_bonus": mount_charge, "source": "mount"})
@@ -701,7 +746,7 @@ def _break_test(regiment: "Regiment", modifier: float, group_id: str, breakdown:
             modifier=modifier, breakdown=breakdown, cant_break=True, roll=None, passed=True))
         return
     roll = _2_to_12(battle.rng)
-    passed = modifier + roll <= regiment.leadership
+    passed = modifier + roll <= regiment.effective_leadership
     battle.events.append(BattleEvent(
         f"{regiment.name} takes a Leadership test (Ld {regiment.leadership}, roll {roll} + {modifier}): "
         f"{'passes' if passed else 'fails'}.", "leadership_test",
@@ -927,7 +972,7 @@ def resolve_rally(battle: "Battle") -> None:
                 nearest_enemy_distance=distance, roll=None, passed=False))
             continue
         roll = _2_to_12(battle.rng)
-        passed = modifier + roll <= regiment.leadership
+        passed = modifier + roll <= regiment.effective_leadership
         battle.events.append(BattleEvent(
             f"{regiment.name} takes a rally test (Ld {regiment.leadership}, roll {roll} + {modifier}): "
             f"{'rallies' if passed else 'still routing'}.", "rally_test",

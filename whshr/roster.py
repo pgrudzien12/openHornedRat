@@ -238,6 +238,16 @@ def with_experience(regiment: Regiment, experience: int) -> Regiment:
     return replace(regiment, experience=experience, raw=raw)
 
 
+def with_items(regiment: Regiment, items: Sequence[str]) -> Regiment:
+    """Copy the battle's item slots into the unit text used by the Magic Book and saved company."""
+    raw = regiment.raw
+    if raw is not None:
+        raw = raw.copy()
+        raw["cmds"] = [(key, value) for key, value in raw["cmds"] if key.casefold() != "addmagicitem"]
+        raw["cmds"].extend(("addmagicitem", item) for item in items)
+    return replace(regiment, raw=raw)
+
+
 def with_improved_stat(regiment: Regiment, stat: str) -> Regiment:
     """+1 to a profile stat (``s_wepn``, ``s_strn``, ``s_wnds`` ...) or to armour (``s_armr``), on the troops and
     on their leader (notes/campaign.md 1.3, 1.4)."""

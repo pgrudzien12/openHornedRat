@@ -7,8 +7,8 @@ import random
 import unittest
 
 from tests.script_helpers import word
-from whshr import interpreter, magic
 from whshr.engine import Battle, Regiment
+from whshr import interpreter, magic, spell_effects
 from whshr.nodes import ScriptNode
 from whshr.rules import Side
 
@@ -55,6 +55,27 @@ class SpellTableTests(unittest.TestCase):
 
     def test_marker_bit_spell_has_unlimited_range_but_the_base_cost(self):
         self.assertEqual((magic.cost(535), magic.spell_range(535, random.Random(1))), (1, None))
+
+
+class ItemEventTests(unittest.TestCase):
+    def test_item_event_launches_fireball_without_a_wizard_or_power_payment(self):
+        bearer = regiment("G", 0, 0, items=("ItemGrudgeBringer",), has_leader=True)
+        enemy = regiment("E", 0, 400, Side.ENEMY)
+        battle = Battle(1000, 1000, [bearer, enemy], seed=1)
+        state = battle.event_bus.unit_states["G"]
+        interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        power = battle.event_bus.power.player
+        state.current_event = interpreter.Event(code=0x2D, parameter=0x10A, x=0, y=400)
+
+        state.pc = 0
+        interp.op_TakeEventTarget(state, None, [word("TakeEventTarget")], "G", 0, battle.rng)
+        state.pc = 0
+        interp.op_CastPending(state, None, [word("CastPending")], "G", 0, battle.rng)
+
+        self.assertTrue(state.cond_flags)
+        self.assertEqual([effect.code for effect in spell_effects.table(battle).effects()],
+                         [spell_effects.FIREBALL])
+        self.assertEqual(battle.event_bus.power.player, power)
 
 
 class ChooseEnemyTests(MagicTestCase):

@@ -70,6 +70,75 @@ def _hud(selected="player", regiments=None, **overrides):
 
 
 class PanelStateTests(unittest.TestCase):
+    def test_item_popup_is_painted_after_the_unit_name(self):
+        hud = _hud()
+        order = []
+        hud.panel_bg = object()
+        hud._log_panel = None
+        hud._unit_info_panel = object()
+        hud._draw_panel = lambda quad, *args, **kwargs: order.append("unit_info") if quad is hud._unit_info_panel else None
+        hud._draw_readout = lambda regiment: None
+        hud._draw_fixed_buttons = lambda: None
+        hud._draw_slots = lambda regiment: None
+        hud._draw_minimap = lambda regiment, camera: None
+        hud._draw_item_list = lambda regiment: order.append("items")
+
+        hud.draw(640, 480)
+
+        self.assertEqual(order, ["unit_info", "items"])
+
+    def test_item_bearer_can_open_list_and_select_an_unused_item(self):
+        bearer = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf",
+                          items=("ItemGrudgeBringer", "ItemSwordOfMight"), has_leader=True)
+        hud = _hud(regiments=[bearer])
+        hud.press("attack")
+        self.assertEqual(hud.slots()["BR"], "items")
+        hud.press("items")
+        self.assertEqual(hud.hit_test(_panel_pos(hud, 210, 75)), "item:ItemGrudgeBringer")
+        self.assertIsNone(hud.hit_test(_panel_pos(hud, 210, 94)))  # passive item
+        bearer.used_items.add("ItemGrudgeBringer")
+        self.assertIsNone(hud.hit_test(_panel_pos(hud, 210, 75)))
+        bearer.used_items.clear()
+        self.assertEqual(hud.press("item:ItemGrudgeBringer"), "item:ItemGrudgeBringer")
+        self.assertFalse(hud.item_list_open)
+
+    def test_grudgebringer_row_reenables_after_the_next_wind(self):
+        from whshr import spell_effects
+
+        bearer = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf",
+                          items=("ItemGrudgeBringer",), has_leader=True)
+        hud = _hud(regiments=[bearer])
+        hud.press("attack")
+        hud.press("items")
+        point = _panel_pos(hud, 210, 75)
+        self.assertEqual(hud.hit_test(point), "item:ItemGrudgeBringer")
+        hud.battle.arm_item("player", "ItemGrudgeBringer")
+        self.assertIsNone(hud.hit_test(point))
+        hud.battle.tick_count = spell_effects.WIND_TICKS
+        hud.battle.tick()
+        self.assertEqual(hud.hit_test(point), "item:ItemGrudgeBringer")
+
+    def test_spent_grudgebringer_does_not_disable_the_items_menu(self):
+        bearer = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf",
+                          items=("ItemGrudgeBringer",), has_leader=True)
+        hud = _hud(regiments=[bearer])
+        hud.press("attack")
+        bearer.used_items.add("ItemGrudgeBringer")
+
+        self.assertTrue(hud._button_enabled("items", bearer))
+        hud.press("items")
+        self.assertTrue(hud.item_list_open)
+        self.assertIsNone(hud.hit_test(_panel_pos(hud, 210, 75)))
+
+    def test_item_menu_requires_a_living_leader(self):
+        bearer = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf",
+                          items=("ItemGrudgeBringer",), has_leader=False)
+        hud = _hud(regiments=[bearer])
+        hud.press("attack")
+
+        self.assertEqual(hud.slots(), {"TL": "charge", "C": "back"})
+        self.assertFalse(hud._button_enabled("items", bearer))
+
     def test_given_hidden_player_then_deployment_panel_and_friendly_markers_remain_available(self):
         hud = _hud()
         hud.battle.phase = "deployment"
@@ -147,6 +216,8 @@ class PanelStateTests(unittest.TestCase):
 
         self.assertEqual(hud.panel_state(), ("melee_noncaster", "inf"))
         self.assertEqual(hud.slots(), {"TR": "withdraw", "C": "fight_harder"})
+        self.assertTrue(hud._button_enabled("fight_harder", hud.battle.regiments["player"]))
+        self.assertEqual(hud.press("fight_harder"), "fight_harder")
 
     def test_given_a_routing_regiment_then_the_rally_set_is_used(self):
         regiments = [Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf", routing=True)]
@@ -155,12 +226,73 @@ class PanelStateTests(unittest.TestCase):
         self.assertEqual(hud.panel_state(), ("rally", "inf"))
         self.assertEqual(hud.slots(), {"BR": "rally"})
 
-    def test_given_a_regiment_with_an_attack_target_not_yet_in_melee_then_charging_has_no_buttons(self):
+    def test_attack_target_approaches_with_idle_buttons_then_charge_hides_them(self):
         regiments = [Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf", attack_target="enemy")]
         hud = _hud(regiments=regiments)
 
+        self.assertEqual(hud.panel_state(), ("idle", "inf"))
+        self.assertEqual(hud.slots(), {"TL": "move", "TR": "attack", "BR": "independent"})
+        regiments[0].charge_started_target = "enemy"
         self.assertEqual(hud.panel_state(), ("charging", "inf"))
         self.assertEqual(hud.slots(), {})
+        regiments[0].in_melee = True
+        self.assertEqual(hud.slots(), {"TR": "withdraw", "C": "fight_harder"})
+
+    def test_braced_unit_uses_melee_buttons_and_pursuer_uses_rally(self):
+        regiment = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf", braced=True)
+        hud = _hud(regiments=[regiment])
+        self.assertEqual(hud.slots(), {"TR": "withdraw", "C": "fight_harder"})
+        regiment.braced = False
+        regiment.pursuing = True
+        self.assertEqual(hud.slots(), {"BR": "rally"})
+
+    def test_free_charge_hides_buttons_until_it_ends(self):
+        regiment = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf")
+        hud = _hud(regiments=[regiment])
+        hud.battle.order_charge_forward("player")
+        self.assertTrue(regiment.free_charging)
+        self.assertEqual(hud.slots(), {})
+        hud.battle.order_halt("player")
+        self.assertEqual(hud.slots(), {"TL": "move", "TR": "attack", "BR": "independent"})
+
+    def test_attack_approach_charge_and_melee_panels_by_class(self):
+        cases = {
+            "inf": ({"TL": "move", "TR": "attack", "BR": "independent"},
+                    {"TR": "withdraw", "BR": "items", "C": "fight_harder"}),
+            "arch": ({"TL": "move", "TR": "attack", "BR": "independent"},
+                     {"TR": "withdraw", "BR": "items", "C": "fight_harder"}),
+            "art": ({"TR": "attack", "BR": "independent"},
+                    {"TR": "withdraw", "BR": "items", "C": "fight_harder"}),
+            "wiz": ({"TL": "move", "TR": "attack", "BR": "independent", "BL": "magic", "C": "back"},
+                    {"TR": "withdraw", "BR": "items", "BL": "magic", "C": "fight_harder"}),
+            "mon": ({"TL": "move", "TR": "attack", "BR": "independent"},
+                    {"TR": "withdraw", "BR": "items", "C": "fight_harder"}),
+        }
+        for hud_class, (approach, melee) in cases.items():
+            with self.subTest(hud_class=hud_class):
+                bearer = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class=hud_class,
+                                  items=("ItemGrudgeBringer",), has_leader=True, attack_target="enemy")
+                hud = _hud(regiments=[bearer])
+                self.assertEqual(hud.slots(), approach)
+                bearer.charge_started_target = "enemy"
+                self.assertEqual(hud.slots(), {})
+                bearer.in_melee = True
+                self.assertEqual(hud.slots(), melee)
+                bearer.has_leader = False
+                bearer.leader_uid = -1
+                self.assertNotIn("items", hud.slots().values())
+
+    def test_attack_order_keeps_idle_panel_until_charge_reach(self):
+        bearer = Regiment("player", "P", 100, 100, 0, Side.PLAYER, hud_class="inf")
+        enemy = Regiment("enemy", "E", 100, 200, 256, Side.ENEMY, hud_class="inf")
+        hud = _hud(regiments=[bearer, enemy])
+        hud.battle.order_attack("player", "enemy")
+        self.assertEqual(hud.panel_state(), ("idle", "inf"))
+
+        hud.battle.tick()
+
+        self.assertEqual(bearer.charge_started_target, "enemy")
+        self.assertEqual(hud.panel_state(), ("charging", "inf"))
 
     def test_given_a_class_with_no_buttons_then_no_slots_are_shown(self):
         regiments = [Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class=None)]
@@ -222,10 +354,10 @@ class PressAndOrderTests(unittest.TestCase):
 
         self.assertEqual(order, "halt")
 
-    def test_given_a_command_the_engine_does_not_support_then_pressing_it_issues_no_order(self):
+    def test_charge_is_an_order_while_unimplemented_commands_issue_none(self):
         hud = _hud()
 
-        self.assertIsNone(hud.press("charge"))
+        self.assertEqual(hud.press("charge"), "charge")
         self.assertIsNone(hud.press("withdraw"))
         self.assertIsNone(hud.press("rally"))
 
@@ -240,11 +372,11 @@ class PressAndOrderTests(unittest.TestCase):
 
 
 class ButtonEnabledTests(unittest.TestCase):
-    def test_given_an_unsupported_command_then_it_is_always_disabled(self):
+    def test_charge_is_enabled_for_a_player_regiment(self):
         hud = _hud()
         player = hud.battle.regiments["player"]
 
-        self.assertFalse(hud._button_enabled("charge", player))
+        self.assertTrue(hud._button_enabled("charge", player))
 
     def test_given_back_then_it_is_always_enabled(self):
         hud = _hud()
@@ -640,6 +772,52 @@ class BattleViewHudInputTests(unittest.TestCase):
         base.update(overrides)
         return SimpleNamespace(**base)
 
+    def test_item_selection_arms_magic_cursor_and_minimap_target(self):
+        world: list[tuple[float, float] | None] = [None]
+        hud = self._hud_mock(hit_test=lambda pos: "item:ItemGrudgeBringer",
+                             press=lambda name: name, minimap_position=lambda pos: world[0],
+                             minimap_target_at=lambda pos: None)
+        view = self._view(hud)
+        down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
+        hud.pressed = None
+        hud.set_pressed = lambda name: setattr(hud, "pressed", name)
+
+        self.assertEqual(view.events(down), ())
+        self.assertEqual(hud.pressed, "item:ItemGrudgeBringer")
+        self.assertEqual(view.events(SimpleNamespace(type=pygame.MOUSEBUTTONUP, button=1, pos=(100, 100))),
+                         (("arm_item", "ItemGrudgeBringer"),))
+        self.assertEqual(view.order_mode, "item:ItemGrudgeBringer")
+        world[0] = (0.0, 400.0)
+        self.assertEqual(view._minimap_click((100, 100)), (("item_target", "ItemGrudgeBringer", 0.0, 400.0),))
+        self.assertIsNone(view.order_mode)
+
+    def test_ctrl_item_targets_repeat_until_plain_click(self):
+        world = (0.0, 400.0)
+        hud = self._hud_mock(minimap_position=lambda pos: world)
+        view = self._view(hud)
+        view.scene.battle.event_bus = SimpleNamespace(power=SimpleNamespace(player=1))
+        view.order_mode = "item:ItemGrudgeBringer"
+        target = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100), mod=pygame.KMOD_CTRL)
+
+        for _ in range(2):
+            self.assertEqual(view.events(target),
+                             (("item_target", "ItemGrudgeBringer", *world),))
+            self.assertEqual(view.order_mode, "item:ItemGrudgeBringer")
+        target.mod = 0
+        self.assertEqual(view.events(target),
+                         (("item_target", "ItemGrudgeBringer", *world),))
+        self.assertIsNone(view.order_mode)
+
+    def test_ctrl_item_target_ends_when_player_has_no_magic_power(self):
+        hud = self._hud_mock(minimap_position=lambda pos: (0.0, 400.0))
+        view = self._view(hud)
+        view.scene.battle.event_bus = SimpleNamespace(power=SimpleNamespace(player=0))
+        view.order_mode = "item:ItemGrudgeBringer"
+
+        self.assertEqual(view._minimap_click((100, 100), repeat_item=True),
+                         (("item_target", "ItemGrudgeBringer", 0.0, 400.0),))
+        self.assertIsNone(view.order_mode)
+
     def test_given_a_non_actionable_hud_click_when_handled_then_it_never_reaches_ground_picking(self):
         view = self._view(self._hud_mock())
         event = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
@@ -941,6 +1119,20 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
         scene.handle(("move_to", 300.0, 300.0), context=None)
 
         self.assertIsNone(scene.battle.regiments["enemy"].target_x)
+
+    def test_fight_harder_scene_order_applies_only_to_focused_player_in_melee(self):
+        player = Regiment("player", "Player", 100, 100, 0, Side.PLAYER, in_melee=True)
+        enemy = Regiment("enemy", "Enemy", 200, 200, 0, Side.ENEMY, in_melee=True)
+        scene = BattleScene()
+        scene.battle = Battle(1000, 800, [player, enemy])
+        scene.selected_id = "player"
+
+        scene.handle(("fight_harder",), context=None)
+        self.assertTrue(player.fight_harder)
+        self.assertFalse(enemy.fight_harder)
+        scene.selected_id = "enemy"
+        scene.handle(("fight_harder",), context=None)
+        self.assertFalse(enemy.fight_harder)
 
 
 class SpritePickTests(unittest.TestCase):

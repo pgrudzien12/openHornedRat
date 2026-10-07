@@ -7,11 +7,11 @@ import random
 from typing import Any, Callable, Literal
 
 from . import animation, battle_grid, behaviour, combat, deployment, formation, interpreter, navigation, ranged, visibility
-from . import magic, objectives as objective_table, steering
+from . import magic, objectives as objective_table, spell_effects, steering
 from . import nodes as node_table
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
-from .rules import (EXPECTED_WEAPON_BONUS, MISSILE_RANGES, MOUNT_PROFILES, Side, can_fight, may_engage, side_of_code,
+from .rules import (EXPECTED_ARMOUR_SAVE, EXPECTED_WEAPON_BONUS, MISSILE_RANGES, MOUNT_PROFILES, Side, can_fight, may_engage, side_of_code,
                     stat_fields, stat_int)
 from .script import StrPath, View, load_battle, resource_name
 
@@ -181,8 +181,17 @@ class Regiment:
     # addressed by SendEventToUnitId (notes/threat_events_nodes.md, part B 0.1).
     whoami: int = 0
     has_leader: bool = False  # the .BTS unit has a leader (character) block: PlayLeaderAnimation's model
+    leader_uid: int | None = None  # stable figure identity; never replaced after its death
+    leader_ws: int | None = None
+    leader_strength: int | None = None
+    leader_attacks: int | None = None
+    leader_toughness: int | None = None
+    leader_wounds: int | None = None
+    leader_armour: int | None = None
     spells: tuple[int, ...] = ()  # spell codes from the unit's addspell: lines, in file order (whshr.magic)
     items: tuple[str, ...] = ()  # magic items in its 5 slots, loaded ones first (notes/battle_end_objectives.md 12.2)
+    used_items: set[str] = field(default_factory=set[str])  # battle-only activation state
+    potion_strength: bool = False
     # The missile code "Who shoots" reads (game_rules.md): Archers their own S_BalWeap, Artillery the leader's,
     # others the leader's if non-zero, else their own; None without one. Read by IsSpecialShooter.
     shooting_code: int | None = None
@@ -192,8 +201,9 @@ class Regiment:
     script_action_key: tuple[bool, ...] | None = None
 
     # Combat/order state (whshr.combat).
-    attack_target: str | None = None  # identifier of an enemy regiment this regiment is charging
+    attack_target: str | None = None  # identifier of an enemy regiment this regiment is approaching or charging
     charge_started_target: str | None = None  # target whose current charge already froze its models
+    free_charging: bool = False  # straight-ahead ChargeForward until its point is reached or contact ends it
     turn_order_key: TurnKey | None = None
     turn_goal: float | None = None
     turn_remaining: float = 0.0
@@ -207,12 +217,16 @@ class Regiment:
     braced: bool = False
     braced_target: str | None = None  # identifier of the regiment this one is braced against
     in_melee: bool = False
+    fight_harder: bool = False  # player melee command; expires after the next combat segment
     # Set (to `Side.DUEL`) only while this regiment is fighting a same-side regiment its script named as
     # its opponent; see `rules.may_engage`. Cleared whenever it leaves its fight.
     melee_camp: Side | None = None
     melee_group: str | None = None  # id of the shared multi-regiment fight (Battle.fights), if any
     melee_touching: frozenset[str] = field(default_factory=frozenset[str])  # enemy ids this footprint touches now
-    held: bool = False  # reserved for a Tangling-Thorn-style hold; already gates re-forms if ever set
+    held: bool = False  # held by a Tangling Thorn (whshr.spell_effects, notes/spell_area_effects.md 3.3)
+    # In a Flying Bower flight or inside a Sapphire Arch: not drawn, cannot engage or be engaged
+    # (notes/spell_channelled_effects.md 2.3, 3.2); set by whshr.spell_effects.
+    lifted: bool = False
     # game_rules.md "Formation changes": true while models are still walking to their newly assigned
     # slots after a re-form; `reform_slots` holds each model's assigned local (side, forward) offset,
     # index-parallel with `positions`/`melee_models`, turned into a world target every tick with
@@ -298,8 +312,49 @@ class Regiment:
 
     @property
     def visible_to_player(self) -> bool:
-        """Friendly display preserves opposing visibility (notes/deployment.md §1.3)."""
-        return self.side != Side.ENEMY or not self.hidden
+        """Friendly display preserves opposing visibility (notes/deployment.md §1.3); a lifted unit (Flying Bower,
+        Sapphire Arch) is not drawn (notes/spell_channelled_effects.md 2.3)."""
+        return not self.lifted and (self.side != Side.ENEMY or not self.hidden)
+
+    @property
+    def effective_leadership(self) -> int:
+        return self.leadership + int(self.fight_harder)
+
+    @property
+    def living_leader_index(self) -> int | None:
+        self.model_positions()
+        return self.index_of(self.leader_uid) if self.leader_uid is not None else None
+
+    @property
+    def displayed_leader_strength(self) -> int | None:
+        if self.living_leader_index is None:
+            return None
+        return min(9, (self.leader_strength if self.leader_strength is not None else self.strength)
+                   + int("ItemGrudgeBringer" in self.items) + int("ItemSwordOfMight" in self.items)
+                   + 3 * int(self.potion_strength))
+
+    def leader_model(self, model: ModelState) -> bool:
+        return self.leader_uid is not None and model.uid == self.leader_uid
+
+    def model_toughness(self, model: ModelState) -> int:
+        return (self.leader_toughness if self.leader_model(model) and self.leader_toughness is not None
+                else self.toughness)
+
+    def model_wounds(self, model: ModelState) -> int:
+        return (self.leader_wounds if self.leader_model(model) and self.leader_wounds is not None
+                else self.wounds)
+
+    def model_armour(self, model: ModelState) -> int:
+        code = self.leader_armour if self.leader_model(model) and self.leader_armour is not None else self.armour
+        if not self.leader_model(model):
+            return code
+        if "ItemArmourOfMeteoricIron" in self.items:
+            code = 13
+        for item in ("ItemShieldOfPtolos", "ItemArmourOfTheBeard"):
+            if item in self.items and code + 1 < len(EXPECTED_ARMOUR_SAVE):
+                if EXPECTED_ARMOUR_SAVE[code + 1] < EXPECTED_ARMOUR_SAVE[code]:
+                    code += 1
+        return code
 
     @property
     def anchored(self) -> bool:
@@ -399,6 +454,9 @@ class Regiment:
             self.melee_models = [ModelState(uid=self._next_uid + offset,
                                             stagger=self.stagger_counter.next_value())
                                  for offset in range(len(self.positions))]
+            if self.has_leader and self.leader_uid is None and self.melee_models:
+                centre = 0 if self.hud_class == "art" else (max(1, self.front_rank_models()) - 1) // 2
+                self.leader_uid = self.melee_models[centre].uid
             self._next_uid += len(self.positions)
             # A reseed (casualties changing the model count outside kill_models, reinforcement, ...)
             # invalidates any in-progress re-slotting: `reform_slots` would no longer be index-parallel
@@ -473,6 +531,8 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
     the tables it would supply are already verified constants in whshr.rules)."""
     fields, _conflicts = stat_fields(unit.get("stats") or {})
     profile: Mapping[str, Any] = unit.get("profile") or {}
+    leader: Mapping[str, Any] = unit.get("leader") or {}
+    leader_profile: Mapping[str, Any] = leader.get("profile") or {}
     armour = stat_int(fields, "s_armr") or 0
     mount_code = stat_int(fields, "s_mount")
     mount = MOUNT_PROFILES.get(mount_code) if mount_code is not None and 8 <= armour <= 13 else None
@@ -490,6 +550,12 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
         "ws": int(profile.get("WS", DEFAULT_PROFILE["WS"])),
         "bs": int(profile.get("BS", DEFAULT_PROFILE["BS"])),
         "strength": int(profile.get("S", DEFAULT_PROFILE["S"])),
+        "leader_ws": int(leader_profile["WS"]) if "WS" in leader_profile else None,
+        "leader_strength": int(leader_profile["S"]) if "S" in leader_profile else None,
+        "leader_attacks": int(leader_profile["A"]) if "A" in leader_profile else None,
+        "leader_toughness": int(leader_profile["T"]) if "T" in leader_profile else None,
+        "leader_wounds": int(leader_profile["W"]) if "W" in leader_profile else None,
+        "leader_armour": stat_int(stat_fields(leader.get("stats") or {})[0], "s_armr") if leader else None,
         "toughness": int(profile.get("T", DEFAULT_PROFILE["T"])),
         "wounds": int(profile.get("W", DEFAULT_PROFILE["W"])),
         "initiative": int(profile.get("I", DEFAULT_PROFILE["I"])),
@@ -576,6 +642,7 @@ class Battle:
         self.text_resources: dict[int, str] = {}
         self.projectiles: list[Any] = []
         self.innate_projectiles: list[Any] = []
+        self.spell_effects = spell_effects.EffectTable()  # active spell effects (whshr.spell_effects)
         self.impact_effects: list[Any] = []
         self.death_blasts: list[Any] = []
         self.ctrl_held = False
@@ -777,7 +844,7 @@ class Battle:
             return 0.0
         if regiment.routing:
             return regiment.speed_for_mode(FLEEING_K)
-        if regiment.attack_target is not None:
+        if regiment.attack_target is not None or regiment.free_charging and regiment.moving:
             return regiment.speed_for_mode(CHARGING_K)
         if regiment.moving or regiment.waypoints:
             return regiment.speed_per_tick
@@ -923,6 +990,65 @@ class Battle:
             raise ValueError("this class has no deployment Independent control")
         regiment.independent = not regiment.independent
 
+    def order_fight_harder(self, identifier: str) -> None:
+        """Apply the melee command to the focused player unit for one segment (game_rules.md, Player orders)."""
+        self._require_battle_order()
+        regiment = self.regiments[identifier]
+        if regiment.side != Side.PLAYER or not regiment.active or not regiment.in_melee:
+            raise ValueError("fight harder requires an active player regiment in melee")
+        regiment.fight_harder = True
+
+    def arm_item(self, identifier: str, item: str) -> bool:
+        """Spend an activated item on selection; return whether it needs a battlefield point."""
+        self._require_battle_order()
+        unit = self.regiments[identifier]
+        if (unit.side != Side.PLAYER or not unit.active or unit.living_leader_index is None
+                or item not in unit.items or item in unit.used_items):
+            raise ValueError("item is unavailable")
+        if item not in {"ItemBannerOfWrath", "ItemGrudgeBringer", "ItemPotionOfStrength"}:
+            raise ValueError("item has no activation")
+        unit.used_items.add(item)
+        if item == "ItemPotionOfStrength":
+            if not unit.held:
+                unit.potion_strength = True
+            return False
+        return True
+
+    def order_item_target(self, identifier: str, item: str, x: float, y: float) -> None:
+        """Give an already selected item its point; a held bearer loses the use without launching."""
+        self._require_battle_order()
+        unit = self.regiments[identifier]
+        if unit.side != Side.PLAYER or item not in unit.items or item not in unit.used_items:
+            raise ValueError("item was not selected")
+        if not unit.active or unit.held or unit.living_leader_index is None:
+            return
+        code = {"ItemBannerOfWrath": 0x105, "ItemGrudgeBringer": 0x10A}.get(item)
+        if code is None:
+            raise ValueError("item does not take a point")
+        if self.interpreter is not None:
+            self.event_bus.queue_event(identifier, interpreter.Event(code=0x2D, parameter=code, x=int(x), y=int(y)))
+        else:
+            self.launch_item(unit, code, x, y)
+
+    def launch_item(self, unit: Regiment, code: int, x: float, y: float) -> bool:
+        """Apply the item launch checks, then create Lightning or Fireball without spending power."""
+        if not unit.active or unit.held or unit.living_leader_index is None:
+            return False
+        target = self.event_bus.unit_states.get(unit.identifier)
+        if target is not None and target.current_target is not None:
+            aimed = self.regiments.get(target.current_target[0])
+            if aimed is not None and aimed.active:
+                x, y = spell_effects.reference_figure(aimed)
+        distance = int(math.hypot(x - unit.x, y - unit.y))
+        bearing = int(256 - 256 * math.atan2(x - unit.x, -(y - unit.y)) / math.pi) % 512
+        difference = abs(int(unit.direction) - bearing) % 512
+        if distance >= 576 or (not unit.in_melee and min(difference, 512 - difference) >= 71):
+            self.events.append(BattleEvent(f"{unit.name} cannot use the item at that point.", "message",
+                                           regiment=unit.identifier, text_id=2021))
+            return False
+        spell = spell_effects.LIGHTNING if code == 0x105 else spell_effects.FIREBALL
+        return spell_effects.launch(self, spell, unit, -1, x, y)
+
     def append_waypoint(self, identifier: str, x: float, y: float) -> None:
         """Ctrl Move targeting: retain up to nine manual destinations (§3)."""
         regiment = self.regiments[identifier]
@@ -947,6 +1073,8 @@ class Battle:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
         if regiment.pursuing:  # notes/pursuit_map_edge.md 5: move, attack, turn, rank and halt orders do nothing
             raise ValueError(f"{identifier} is pursuing and cannot be ordered")
+        if regiment.held:  # notes/spell_area_effects.md 3.3: a thorn-held unit cannot move, charge or turn
+            raise ValueError(f"{identifier} is held and cannot be ordered")
         regiment.route_pause_ticks = 0  # a new order ends a route pause
         if regiment.braced:
             raise ValueError(f"{identifier} is braced against a charge and cannot be ordered")
@@ -966,6 +1094,7 @@ class Battle:
         regiment.clear_shooting()
         regiment.attack_target = None
         regiment.charge_started_target = None
+        regiment.free_charging = False
         regiment.turn_order_key = None
         regiment.route_follows_unit = False
         self.set_point_route(regiment, (float(x), float(y)))
@@ -989,6 +1118,8 @@ class Battle:
             raise ValueError(f"{identifier} is routing and cannot be ordered")
         if regiment.pursuing:  # notes/pursuit_map_edge.md 5: move, attack, turn, rank and halt orders do nothing
             raise ValueError(f"{identifier} is pursuing and cannot be ordered")
+        if regiment.held:  # notes/spell_area_effects.md 3.3: a thorn-held unit cannot move, charge or turn
+            raise ValueError(f"{identifier} is held and cannot be ordered")
         if regiment.braced:
             raise ValueError(f"{identifier} is braced against a charge and cannot be ordered")
         if regiment.anchored:
@@ -1004,8 +1135,29 @@ class Battle:
         regiment.route_pause_ticks = 0
         regiment.clear_shooting()
         regiment.attack_target = target_id
+        regiment.charge_started_target = None
+        regiment.free_charging = False
         regiment.route_follows_unit = False
         regiment.turn_order_key = None
+
+    def order_charge_forward(self, identifier: str) -> None:
+        """Begin the selected regiment's straight-ahead Charge command."""
+        self._require_battle_order()
+        regiment = self.regiments[identifier]
+        if (regiment.side != Side.PLAYER or not regiment.active or regiment.routing or regiment.pursuing
+                or regiment.held or regiment.braced or regiment.anchored or regiment.in_melee):
+            raise ValueError("regiment cannot charge")
+        if self.interpreter is not None:
+            self.event_bus.queue_event(identifier, interpreter.Event(code=0x06), route="self")
+            return
+        reach = 12 * regiment.speed_per_tick * 16 / MOVING_FREELY_K
+        angle = regiment.direction * math.tau / formation.FULL_TURN
+        regiment.target_x = regiment.x + int(math.sin(angle) * reach)
+        regiment.target_y = regiment.y + int(math.cos(angle) * reach)
+        regiment.waypoints.clear()
+        regiment.attack_target = regiment.charge_started_target = None
+        regiment.free_charging = True
+        regiment.hidden = False
 
     def order_halt(self, identifier: str) -> None:
         """Cancel the selected regiment's current movement or charge order in place."""
@@ -1023,6 +1175,7 @@ class Battle:
         regiment.route_pause_ticks = 0
         regiment.attack_target = None
         regiment.charge_started_target = None
+        regiment.free_charging = False
         regiment.turn_order_key = None
         regiment.route_speed = 0.0
         regiment.waypoints.clear()
@@ -1046,6 +1199,8 @@ class Battle:
             raise ValueError("unit has no ordinary missile weapon")
         if unit.routing or unit.in_melee or unit.braced or unit.attack_target:
             raise ValueError("unit is busy")
+        if unit.held:  # notes/spell_area_effects.md 3.3: a thorn-held unit does not shoot
+            raise ValueError("unit is held")
         if bomb and unit.shooting_code == 17 and unit.hud_class == "arch":
             if not unit.airborne:
                 return 2020
@@ -1155,6 +1310,8 @@ class Battle:
             raise ValueError(f"{identifier} is pursuing and cannot be ordered")
         if regiment.in_melee:
             raise ValueError(f"{identifier} is in melee and cannot be ordered")
+        if regiment.held:  # notes/spell_area_effects.md 3.3: a thorn-held unit cannot move, charge or turn
+            raise ValueError(f"{identifier} is held and cannot be ordered")
         regiment.clear_shooting()
         return regiment
 
@@ -1228,11 +1385,10 @@ class Battle:
 
     def _begin_reform(self, regiment: Regiment, ranks: int) -> None:
         """Recompute the shape for `ranks` and re-slot every model into it (game_rules.md, "Formation
-        changes"). `leader_index` is left unset: this engine has no persistent leader-model identity
-        to hand the front-rank-centre slot to directly, so `formation.reform_assignment` falls back to
-        whichever model is currently nearest that slot, the documented fallback for that case.
+        changes"). A living leader keeps the front-rank-centre slot through the re-slotting.
         """
         positions = regiment.model_positions()
+        leader_index = regiment.living_leader_index if not regiment.routing else None
         ranks = max(1, min(regiment.models, ranks)) if regiment.models else 1
         regiment.ranks = ranks
         sizes = formation.rank_sizes(regiment.models, ranks)
@@ -1246,6 +1402,7 @@ class Battle:
             # filled directly (nearest fallback here); wagons use the ordinary nearest search.
             assignment = _slot_offsets(formation.reform_assignment(
                 regiment.x, regiment.y, regiment.direction, regiment.models, ranks, positions,
+                leader_index=leader_index,
                 farthest=regiment.hud_class == "art" and self.phase != "deployment"))
             raster_index = {offset: index for index, offset in
                             enumerate(formation.block_slots(regiment.models, ranks))}
@@ -1256,7 +1413,8 @@ class Battle:
             regiment.reforming = False
             return
         regiment.reform_slots = _slot_offsets(formation.reform_assignment(
-            regiment.x, regiment.y, regiment.direction, regiment.models, ranks, positions))
+            regiment.x, regiment.y, regiment.direction, regiment.models, ranks, positions,
+            leader_index=leader_index))
         regiment.reforming = bool(regiment.reform_slots)
 
     def snapshot(self) -> dict[str, dict[str, Any]]:
@@ -1331,6 +1489,7 @@ class Battle:
                 self._step_burning(regiment)
                 self._step_dying(regiment)
             ranged.finish_tick(self)
+            spell_effects.tick(self)
             self.tick_count += 1
             return
         scale = seconds / TICK_SECONDS
@@ -1339,6 +1498,7 @@ class Battle:
             # Segment boundary, before any unit is updated (notes/battle_end_objectives.md 3.2).
             self.objectives.segment(self)
         if self.phase == "battle":
+            spell_effects.blow_wind(self)
             self.refresh_visibility()
         # Run behaviour scripts via the bytecode interpreter (issue #3); a mission-less/synthetic
         # battle has no interpreter and so no automatic orders (only explicit Battle.order_* calls).
@@ -1371,7 +1531,11 @@ class Battle:
             combat.resolve_melee(self)
             combat.resolve_contact_attacks(self)  # game_rules.md 7.7, once per segment
             combat.resolve_rally(self)
+            if self.tick_count > 0:
+                for regiment in self.regiments.values():
+                    regiment.fight_harder = False
         combat.resolve_shooting(self)
+        spell_effects.tick(self)  # after units and ordinary missiles (notes/spell_effects.md 1.7)
         if self.objectives is None:
             self._update_result()
         self.tick_count += 1
@@ -1454,9 +1618,11 @@ class Battle:
                                                  order_key=("charge", target.identifier), scale=scale)
             elif regiment.target_x is not None and regiment.target_y is not None:
                 moved = self._advance_toward(regiment, (regiment.target_x, regiment.target_y),
-                                             regiment.speed_per_tick * move_scale,
+                                             (regiment.speed_for_mode(CHARGING_K) if regiment.free_charging
+                                              else regiment.speed_per_tick) * move_scale,
                                              arrive=not regiment.route_follows_unit or bool(regiment.waypoints),
-                                             order_key=("move", regiment.target_x, regiment.target_y), scale=scale)
+                                             order_key=(("charge", "forward") if regiment.free_charging else
+                                                        ("move", regiment.target_x, regiment.target_y)), scale=scale)
                 if not regiment.moving and regiment.waypoints:
                     regiment.waypoints.pop(0)
             elif regiment.turn_order_key is not None and regiment.turn_order_key[0] == "turn":
@@ -1587,6 +1753,7 @@ class Battle:
             regiment.target_x = regiment.target_y = None
             regiment.waypoints.clear()
             regiment.attack_target = regiment.charge_started_target = None
+            regiment.free_charging = False
             regiment.avoid_target = None
             regiment.route_side, regiment.route_planned_for = 0, None
             return False
@@ -1596,6 +1763,7 @@ class Battle:
             regiment.route_speed = 0.0
             if arrive:
                 regiment.target_x = regiment.target_y = None
+                regiment.free_charging = False
             return False
         goal = round(math.atan2(dx, dy) * 512 / math.tau) % 512
         new_order = order_key != regiment.turn_order_key
@@ -1622,6 +1790,7 @@ class Battle:
             regiment.route_speed = distance
             regiment.x, regiment.y = target
             regiment.target_x = regiment.target_y = None
+            regiment.free_charging = False
             return False
         angle = regiment.direction * math.tau / formation.FULL_TURN
         regiment.route_speed = min(step, distance)
@@ -1903,7 +2072,8 @@ class Battle:
                 # A casualty during the re-form left slots of the old, larger layout: re-slot the survivors into the
                 # current layout from where they stand instead of mapping slots that no longer exist.
                 regiment.reform_slots = _slot_offsets(formation.reform_assignment(
-                    regiment.x, regiment.y, regiment.direction, regiment.models, regiment.ranks, regiment.positions))
+                    regiment.x, regiment.y, regiment.direction, regiment.models, regiment.ranks, regiment.positions,
+                    leader_index=regiment.living_leader_index if not regiment.routing else None))
                 return True
             order = sorted(range(len(regiment.reform_slots)), key=lambda i: raster_index[regiment.reform_slots[i]])
             regiment.positions = [regiment.positions[i] for i in order]

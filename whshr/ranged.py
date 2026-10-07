@@ -181,7 +181,8 @@ def _search(battle: Battle, unit: Regiment) -> Regiment | None:
 
 
 def _ready(unit: Regiment) -> bool:
-    return (unit.reload_ticks <= 0 and (unit.hud_class != "art" or
+    """Reloaded, not held by a Tangling Thorn (notes/spell_area_effects.md 3.3), artillery manned."""
+    return (unit.reload_ticks <= 0 and not unit.held and (unit.hud_class != "art" or
             (unit.machine_alive and unit.models >= 2)))
 
 
@@ -387,7 +388,7 @@ def _destroy_machine(battle: Battle, unit: Regiment) -> None:
             if model.wounds_taken >= unit.wounds:
                 victims.append(index)
     combat.kill_models(unit, victims, battle, animation.DEATH_MISSILE, clear_credit=True)  # misfire: nobody
-    if unit.active and not combat.leadership_test(unit.leadership, battle.rng):
+    if unit.active and not combat.leadership_test(unit.effective_leadership, battle.rng):
         combat.start_rout(unit, battle)
 
 
@@ -488,15 +489,16 @@ def _damage_unit(battle: Battle, unit: Regiment, projectile: Projectile,
         if index in victims or index >= len(unit.melee_models):
             continue
         model = unit.melee_models[index]
-        if unit.armour == 6:
+        armour = unit.model_armour(model)
+        if armour == 6:
             continue
-        if battle.rng.randint(1, 6) < wfb_to_wound(strength, unit.toughness):
+        if battle.rng.randint(1, 6) < wfb_to_wound(strength, unit.model_toughness(model)):
             continue
-        if not building and battle.rng.randint(1, 6) >= combat._armour_threshold(unit.armour, strength):
+        if not building and battle.rng.randint(1, 6) >= combat._armour_threshold(armour, strength):
             continue
         wounds = battle.rng.randint(1, projectile.wounds) if direct else 1
         model.wounds_taken = getattr(model, "wounds_taken", 0) + wounds
-        if model.wounds_taken >= unit.wounds:
+        if model.wounds_taken >= unit.model_wounds(model):
             victims.add(index)
     killed = combat.kill_models(unit, victims, battle, animation.DEATH_MISSILE, killer=projectile.source)
     battle.events.append(BattleEvent(f"{unit.name} is hit by a missile.", "projectile_hit",
@@ -504,7 +506,7 @@ def _damage_unit(battle: Battle, unit: Regiment, projectile: Projectile,
                                      text_id=2004 if direct else 2005))
     if (not building and unit.models <= unit.original_models / 4 and projectile.code != 17
             and unit.active and not unit.routing and "CantBreak" not in unit.psychology):
-        if not combat.leadership_test(unit.leadership, battle.rng):
+        if not combat.leadership_test(unit.effective_leadership, battle.rng):
             combat.start_rout(unit, battle)
 
 

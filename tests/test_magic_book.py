@@ -2,12 +2,17 @@
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from whshr import script
+from whshr.battle_scene import BattleScene
 from whshr.campaign_scenes import MagicBookScene
+from whshr.campaign_state import CampaignState
+from whshr.engine import Battle, Regiment as BattleRegiment
 from whshr.glue_scene import GlueScene
 from whshr.magic_book import ENTRIES, ITEM_IDS, known_entries
-from whshr.roster import Regiment, RosterRow
+from whshr.roster import Regiment, RosterRow, with_items
+from whshr.rules import Side
 
 
 def unit(whoami, spells=(), items=(), hired=True):
@@ -21,6 +26,45 @@ def unit(whoami, spells=(), items=(), hired=True):
 
 
 class MagicBookTests(unittest.TestCase):
+    def test_magic_book_recovers_a_pickup_recorded_in_an_older_save(self):
+        campaign = CampaignState({"flow_scripts": {}, "mission_windows": {}}, mission_window="MAP")
+        campaign.company = (unit(2),)
+        campaign.master = campaign.company
+        campaign.objective_results = {"K": (True, (13, 10, 2, 39))}  # Sword of Might, whoami 2
+
+        scene = MagicBookScene(GlueScene("STARTCARAVAN", campaign), campaign)
+
+        self.assertEqual(scene.known[1], (14,))
+        self.assertEqual(known_entries(campaign.master)[1], (14,))
+        MagicBookScene(GlueScene("STARTCARAVAN", campaign), campaign)
+        self.assertEqual(script.unit_view(campaign.company[0].raw)["items"], ["ItemSwordOfMight"])
+
+    def test_battle_pickup_is_copied_to_the_company_before_debrief(self):
+        record = unit(2, items=("ItemGrudgeBringer",))
+        campaign = SimpleNamespace(company=(record,), ordered_march_units=(2,), mission_cash=None)
+        field_unit = BattleRegiment("unit2", "Unit2", 0, 0, 0, Side.PLAYER, whoami=2,
+                                    items=("ItemGrudgeBringer", "ItemSwordOfMight"))
+        scene = BattleScene()
+        scene.glue_scene = SimpleNamespace(campaign=campaign)
+        scene.battle = Battle(100, 100, [field_unit])
+        scene.battle.objectives = SimpleNamespace(results=lambda: ())
+        scene.initial_models = {"unit2": field_unit.models}
+
+        with patch("whshr.battle_scene.casualties.after_battle"):
+            scene._store_played_results()
+
+        self.assertEqual(known_entries(campaign.company)[1], (6, 14))
+
+    def test_new_battle_pickup_is_visible_to_the_magic_book_and_saved_company_text(self):
+        from whshr.roster import company_text
+
+        found = with_items(unit(2, items=("ItemGrudgeBringer",)),
+                           ("ItemGrudgeBringer", "ItemSwordOfMight"))
+        self.assertEqual(known_entries((found,))[1], (6, 14))
+        saved = script.parse_text(company_text((found,)), "saved company")
+        restored_items = script.unit_view(saved["children"][0]["children"][0])["items"]
+        self.assertEqual(restored_items, ["ItemGrudgeBringer", "ItemSwordOfMight"])
+
     def test_starting_items_open_the_items_tab_on_the_first_known_entry(self):
         company = (unit(2, items=("ItemGrudgeBringer",)),
                    unit(3, items=("ItemPotionOfStrength",)))

@@ -343,6 +343,38 @@ class CampaignState:
         """The ``(met, values)`` record of an objective letter, or ``None`` when the battle did not define it."""
         return self.objective_results.get(str(letter).upper()[:1])
 
+    def recover_item_pickups(self) -> None:
+        """Repair older saves whose K/X pickup result was stored but the unit's item list was not."""
+        if self.flawless_result:
+            return
+        from .objectives import ITEM_NUMBERS, ITEM_SLOTS
+
+        recovered: dict[int, list[str]] = {}
+        for letter in ("K", "X"):
+            result = self.objective_results.get(letter)
+            if result is None or not result[0] or len(result[1]) < 3:
+                continue
+            _, number, whoami, *_ = result[1]
+            if 0 <= number < len(ITEM_NUMBERS):
+                recovered.setdefault(whoami, []).append(ITEM_NUMBERS[number])
+        if not recovered:
+            return
+
+        def restore(record: Regiment) -> Regiment:
+            from .script import unit_view
+
+            missing = recovered.get(record.whoami, ())
+            if not missing or record.raw is None:
+                return record
+            items = list(unit_view(record.raw)["items"])
+            for item in missing:
+                if item not in items and len(items) < ITEM_SLOTS:
+                    items.append(item)
+            return roster.with_items(record, items)
+
+        self.company = tuple(restore(record) for record in self.company)
+        self.master = tuple(restore(record) for record in self.master)
+
     def bonus_init(self) -> None:
         self.bonus_counter = 0
 

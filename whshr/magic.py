@@ -59,7 +59,6 @@ SPELLS: dict[int, Spell] = {spell.code: spell for spell in (
 SPELL_CODES = {spell.name.casefold(): spell.code for spell in SPELLS.values()}
 WIND_BLAST = 1
 MADNESS_SPELL = 25
-UNIT_TARGET_SPELLS = frozenset({MADNESS_SPELL})  # PROVISIONAL: launch needs a unit under the aim point
 
 
 def spell_codes(names: Iterable[str]) -> tuple[int, ...]:
@@ -75,11 +74,11 @@ def cost(code: int) -> int | None:
 
 
 def spell_range(code: int, rng: random.Random) -> int | None:
-    """EffectRange of a spell: world units, or None for unlimited. A code carrying a marker bit is not recognised
-    and is unlimited (notes/script_magic.md 3.1). Wind Blast rolls a fresh 4-24" range on every call, drawing a
-    random number (PROVISIONAL: uniform whole inches)."""
+    """The range of a spell: world units, or None for unlimited. A code carrying a marker bit is not recognised
+    and is unlimited (notes/script_magic.md 3.1). Wind Blast draws a fresh range on every call:
+    96 x (1 + rand mod 6), i.e. 4, 8 .. 24 inches (notes/spell_area_effects.md 1.1)."""
     if code == WIND_BLAST:
-        return rng.randint(4, 24) * INCH
+        return 4 * INCH * (1 + rng.randrange(6))
     spell = SPELLS.get(code)
     return spell.range if spell is not None else None
 
@@ -92,7 +91,8 @@ def in_range(distance: float, code: int, rng: random.Random) -> bool:
 
 class PowerPools:
     """The player and enemy power pools, each clamped to 0..8 on every write; allies use the player's
-    (game_rules.md "Winds of magic and casting"). Not modelled: the wind that replaces each pool every 50 s."""
+    (game_rules.md "Winds of magic and casting"); the wind that replaces both every 50 s is
+    whshr.spell_effects.blow_wind."""
 
     def __init__(self, player: int, enemy: int) -> None:
         self.player = max(0, min(MAX_POWER, player))

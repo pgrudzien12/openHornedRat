@@ -88,6 +88,8 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
         self.palette = AppPalette.select(9, self.content.palette_tables())
         self.quads: list[tuple[ScreenQuad, Point]] = []
         self.labels: list[tuple[TextLabel, Point]] = []
+        self.overlay_quad_start = 0
+        self.overlay_label_start = 0
         self.buttons: list[tuple[pygame.Rect, str]] = []
         self.pressed_button: str | None = None
         # Information is the documented default page (builtin_widgets.md §2.2).
@@ -114,6 +116,8 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
         self._left_page(regiment)
         self._right_page(regiment)
         self._buttons(regiment)
+        self.overlay_quad_start = len(self.quads)
+        self.overlay_label_start = len(self.labels)
         self._reinforcement_window(regiment)
 
     def _left_page(self, regiment: Regiment) -> None:
@@ -462,15 +466,19 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
     def draw(self) -> None:
         super().draw()
         left, top, scale = self._layout()
-        for quad, (x, y) in self.quads:
-            quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
-        for label, (x, y) in self.labels:
-            label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
+        # The reinforcement window is a layer above both page art and page text.
+        for quads, labels in ((self.quads[:self.overlay_quad_start], self.labels[:self.overlay_label_start]),
+                              (self.quads[self.overlay_quad_start:], self.labels[self.overlay_label_start:])):
+            for quad, (x, y) in quads:
+                quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
+            for label, (x, y) in labels:
+                label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
 
     def _release_contents(self) -> None:
         for label, _ in self.labels:
             label.release()
         self.quads, self.labels, self.buttons = [], [], []
+        self.overlay_quad_start = self.overlay_label_start = 0
 
     def release(self) -> None:
         self._release_contents()

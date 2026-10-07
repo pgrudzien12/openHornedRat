@@ -1,4 +1,6 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 from whshr.campaign_scenes import ArmyRecordsScene, TroopSelectionScene
 from whshr.frontend.army_records_view import ArmyRecordsView
@@ -30,6 +32,24 @@ class GlueSceneTests(unittest.TestCase):
             "MAP_FLOW": "[RUN]\n[START]\nopenwindow:res=MAP\nwaitforrelease:\n[END]",
             "STARTCARAVAN": "[WINDOW]\n[END]",
         }))
+
+    def test_reinforcement_window_is_drawn_over_page_text(self):
+        calls = []
+        view = ArmyRecordsView.__new__(ArmyRecordsView)
+        view.gpu = SimpleNamespace(target=SimpleNamespace(clear=lambda _colour: None))
+        view._layout = lambda: (0, 0, 1)
+        def drawable(name):
+            item = Mock()
+            item.size = (10, 10)
+            item.draw.side_effect = lambda *_args: calls.append(name)
+            return item
+        view.quads = [(drawable("page art"), (0, 0)), (drawable("popup art"), (0, 0))]
+        view.labels = [(drawable("page text"), (0, 0)), (drawable("popup text"), (0, 0))]
+        view.overlay_quad_start = view.overlay_label_start = 1
+
+        view.draw()
+
+        self.assertEqual(calls, ["page art", "page text", "popup art", "popup text"])
 
     def test_scene_owns_runtime_effects_across_input_and_activity_boundaries(self):
         # Driven directly through GlueScene rather than SceneMachine: a StartMovie effect here
