@@ -471,7 +471,7 @@ Public implementation report (batch 4 of the interpreter requests, GitHub #3). C
 | `unit_flags 0x20000` | a collision re-check is requested (🟡 exact use) |
 | `unit_flags 0x100000` | braced against a charge |
 | `unit_flags 0x1000000` | the one-tick contact latch of the engagement handshake (`game_rules.md` "What triggers engagement") |
-| `unit_flags2 0x8` | **held** (Tangling Thorn: halted, cannot shoot, cast or change ranks) |
+| `unit_flags2 0x8` | **held** (Tangling Thorn: halted, cannot move, charge, turn, start a rout or pursuit, shoot, cast or change ranks; still fights; `notes/spell_area_effects.md` §3.3) |
 | `move_state 0x1` | a re-form is pending; it is carried out at the unit's next movement update |
 | `move_state 0x40` / `0x100` / `0x200` | charge movement / rout movement / pursuit movement |
 | `move_state 0x800` | rally attempts enabled (`game_rules.md` "Rally") |

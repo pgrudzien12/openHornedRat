@@ -495,4 +495,4 @@ target-point case.
 - `game_rules.md` "`StoreEventInfo`": the brace query refuses an **already braced** unit, not a broken one.
 - `game_rules.md` event table row 0x03: also queued by behaviour codes 14, 15, 16, 19, 20 and by
   `SendEventSelfIfTrue 3` in scripts 127/148/164 and missions — not only by 11/12.
-- `game_rules.md` R70: the cannot-engage state is set during the Flying Bower flight (🟡 other writers not searched).
+- `game_rules.md` R70: the cannot-engage state is set during the Flying Bower flight and while a unit is inside a Sapphire Arch; there are no other sources (`notes/spell_channelled_effects.md` §2.3, §3).

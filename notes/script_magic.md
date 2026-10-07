@@ -124,7 +124,7 @@ Walk the chooser's spell list **in order** and take the **first** entry that pas
 | Wind Blast, Sapphire Arch | **never chosen** | – |
 | Storm of Shemtek, Lightning, Piercing Bolts, Burning Head, Flamestorm, Fireball, Hunting Spear, Curse of Anraheir, Gaze of Mork, Warp Lightning, Pestilent Breath | target in the **AI arc** | target |
 | Madness | target in the AI arc **and** the target is not already maddened | target |
-| Azure Blades | `trunc(d) ≤ 23` | target (🟡 the blades then hit units overlapping the enemy, which can include the caster's own side) |
+| Azure Blades | `trunc(d) ≤ 23` | target (the blades then hit units overlapping the enemy, including the casting wizard itself, `notes/spell_blades_flock_items.md` §2) |
 | Fists of Gork | `trunc(d) < 16` | target 🟡 |
 | Conflagration of Doom | **no non-friend unit within 56** of the target (`trunc(d) < 56`) | target |
 | Flying Bower, Tangling Thorn, Flock of Doom, Da Krunch | no non-friend unit within 32 of the target | target |
@@ -293,7 +293,7 @@ Pools: P = player, E = enemy. Wizard W in the enemy army at (0,0) facing 0 (+y),
 A computer Skaven wizard in its attack behaviour runs library 137 every pass:
 
 ```
-137: TestUnitFlags2 8 (held by Tangling Thorn?) → skip everything
+137: TestUnitFlags2 8 (held by Tangling Thorn) → skip everything
      IfCastingAnimation 0 → busy → skip
      ChooseEnemyAndSpellPay
      If   GosubScript 134

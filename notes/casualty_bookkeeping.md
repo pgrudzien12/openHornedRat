@@ -62,7 +62,7 @@ There is no side test anywhere: friendly fire and allied NPCs are credited like 
 | Missile weapons (bows, crossbows, handguns) | the shooting unit | lethal-only | +1 | — | the projectile carries its shooter to impact |
 | Artillery and other area shots (cannon ball and bounce, stone thrower/mortar blast, Hellblaster, Gyrocopter bomb, ...) | the firing unit | lethal-only | +1 | — | only the firer's own unit is excluded from the blast; other friendly units in the area are hit **and credited to the firer** |
 | Spell damage, direct and area (fireball family, magical impacts) | the casting unit | lethal-only | +1 | — | effect owner = caster |
-| Conflagration of Doom finale, Da Krunch (slain outright) | the casting unit | set on every slain model | +1 | — | **no exclusion at all**: the caster's own unit can be slain and credited to itself |
+| Conflagration of Doom (fall and finale), Da Krunch (slain outright) | the casting unit | set on every slain model | +1 | — | **no exclusion at all**: the caster's own unit can be slain and credited to itself |
 | Sapphire Arch: a unit kept away too long is killed | **none** | cleared | +1 | — | |
 | Animation-driven impacts (e.g. the Giant's blast) | the unit whose model plays the animation | lethal-only | +1 | — | 🟡 list of animations using this impact not enumerated |
 | Fanatic hitting models (Infantry/Cavalry/Archers/Wizard/Monster, artillery crew and machine, rolling stock, Special) | the fanatic unit | any wound | +1 | — | |

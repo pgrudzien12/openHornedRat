@@ -268,9 +268,9 @@ in which no effect is active.
 | Madness | side restored, scripted maddened flag cleared, event 0x32 (§1.3) |
 | Ere We Go | T − 1, I := saved (§3) |
 | Curse of Anraheir | movement rate and I := the values saved at its launch |
-| Tangling Thorn | held units released |
+| Tangling Thorn | every unit whose centre is within 64 of the thorn's point is released, whatever held it (`notes/spell_area_effects.md` §3.4) |
 | Storm of Shemtek | caster's models unfrozen, told to stand; caster no longer channelling |
-| Flying Bower | if mid-flight: the unit is put back on the map at its take-off position 🟡 (full Bower later) |
+| Flying Bower | mid-flight: the unit is put down at its **current flight position**; during take-off: nothing (`notes/spell_channelled_effects.md` §2.4) |
 | Skitterleap | nothing — the teleport simply never happens |
 | Fists of Gork, Mork Save Uz, Azure Blades, projectiles | nothing beyond removal (Fists: no "return to stand") |
 | any | the owner's entry loses "active" if this was its last effect of that spell |
@@ -303,8 +303,9 @@ Storm of Shemtek or Flying Bower effect; `IfCastingAnimation` and (Wizard class 
 channelling, and the busy gates of `FearWhenCharged` and `EnemyRouted` (and library 103/155 `IfCasting 0 0`
 wrappers) then ignore charges, threats and routs. Additions:
 
-- During the Flying Bower flight the caster's unit is **off the map** (no footprint: not found by searches, contact,
-  collision or targeting) from the start of the flight until it is placed at the destination.
+- During the Flying Bower flight the caster's unit is **lifted**: it is not drawn and cannot engage or be engaged,
+  but its footprint moves with it and other searches, missiles and targeting still find it (`notes/spell_channelled_effects.md` §2.3). Units
+  inside a Sapphire Arch are in the same lifted state.
 - If the caster was **in melee** when the flight starts, it leaves its grid and **event 0x0F** (source = the
   caster's unit) is sent to every unit of the opposite side, which the morale layers treat like "an opponent routed"
   (`EnemyRouted`, `game_rules.md` "Opcode 0x53"). Brace is cleared.

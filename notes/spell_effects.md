@@ -88,7 +88,7 @@ except dispel's own) happens to **non-innate** effects only:
 | dispel (part B) | per its rules |
 | a Fireball-type impact near a Tangling Thorn (§3.4) | that thorn |
 | **the caster unit is removed from the battle** (destroyed, fled off the field, removed by a script) **and its class is Wizard** | **all** of its effects — bolts in flight vanish with no impact |
-| **a unit is removed from the battle** | every effect whose **target unit** is that unit (e.g. a Hunting Spear chasing it) |
+| **a unit is removed from the battle** | every effect whose **target unit** is that unit (e.g. a Hunting Spear chasing it; a Storm of Shemtek whose latest bolt targeted it, `notes/spell_channelled_effects.md` §1.5) |
 
 Not triggers: the caster routing/being broken, fighting in melee, losing models, being out of range afterwards; the
 target routing. A **monster-class spellcaster** (leader missile code 16, e.g. a Wyvern-riding shaman) is **not** class
@@ -231,10 +231,10 @@ lies in its footprint). Only terrain ends it early.
 ### 3.3 Warp Lightning (spell and Doomwheel)
 
 As Lightning but S5, **D6** wounds, launched from height 0. As a spell it never fails. Each **Doomwheel bolt** (three
-per volley, `game_rules.md` "Special weapons") is an innate launch preceded by its own failure roll: `rand mod 6 = 5`
+per volley, `game_rules.md` "Special weapons") is an innate launch with its own failure roll, made after the aim (draw order in `notes/spell_blades_flock_items.md` §5): `rand mod 6 = 5`
 → that bolt is not fired (1 in 6), `GMTXT 2021` if the Doomwheel is in the player army; nothing else happens (the
 machine is not harmed, the other bolts roll independently, the reload stamp already happened). A fired bolt aims at
-the centre of the unit found (or the random fallback point) and is scattered with the Doomwheel's BS (§2.2).
+the unit position of the unit found (or the fallback point, `notes/spell_blades_flock_items.md` §5) and is scattered with the Doomwheel's BS (§2.2).
 
 ### 3.4 Fireball, Grudgebringer
 

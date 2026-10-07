@@ -736,8 +736,8 @@ fleeing all use action 3.
 
    The test is the **unit** being in close combat, not whether the individual model has a partner: a unit that
    is only shooting, charging or routing gets the short delay, an engaged unit the long one. A whole unit falls
-   together only when it is slain outright (kind 2, one tick — Da Krunch, the Conflagration finale, artillery
-   misfire, fanatic death) or a building is destroyed (zero delay); a regiment wiped out by ordinary wounds
+   together only when it is slain outright (one tick — Da Krunch and the Conflagration finale, kind 2 and 1,
+   artillery misfire, fanatic death) or a building is destroyed (zero delay); a regiment wiped out by ordinary wounds
    still uses each model's own delay. On reaching action 6 the model is given a **random facing**, which is
    why corpses lie at all angles rather than facing the way the figure died.
 
@@ -781,8 +781,8 @@ script:
 | kind | meaning | produced by | collapse delay | shown |
 |---|---|---|---|---|
 | 0 | ordinary | close combat and every damage-type-0 spell | staggered (above) | the family's own corpse |
-| 1 | fire | fire spells, Dragon breath, Flamestorm, Conflagration damage, a collapsing building | 1 tick | burning figure, then charred corpse |
-| 2 | missile / slain outright | every missile weapon and shot, Da Krunch, the Conflagration finale, artillery misfire, fanatic death, the Giant's blast | 1 tick | the family's own corpse |
+| 1 | fire | fire spells, Dragon breath, Flamestorm, Conflagration damage including its finale, a collapsing building | 1 tick | burning figure, then charred corpse |
+| 2 | missile / slain outright | every missile weapon and shot, Da Krunch, artillery misfire, fanatic death, the Giant's blast | 1 tick | the family's own corpse |
 | 3 | warpfire | Warpfire Thrower flames and its death blast | 1 tick | green burning figure, then charred corpse |
 
 On kind 1 or 3 the death script switches the model onto the general battle-effects sprite set and plays a fire
@@ -1665,7 +1665,7 @@ its target is redirected instead (the game: event 0x1A to the old target, 0x07 t
 
 Engagement is refused when either unit is **broken** (`0x2000`, "Can't engage a broken unit"), when the
 target's collision record is **routing** (record bit `0x400`, set by `StartRout` and cleared by any
-re-form), when the target carries flag the relevant data (set while Flying Bower lifts the caster's unit, R70; 🟡 other writers not searched), when the two are on the
+re-form), when the target carries flag the relevant data (set while Flying Bower lifts the caster's unit or a unit is inside a Sapphire Arch, R70; no other sources), when the two are on the
 same side and the target is not the current opponent, or when the grid pool is exhausted (event 0x0C).
 
 **Creation and joining**: when unit A engages B, A joins B's
@@ -2348,7 +2348,8 @@ against buildings, saves, magical, flags, messages. For every map object at dist
     model, leader included; all wounds stay on that model (no overflow) (`notes/spell_effects.md` §4).
   - `d < footprint + radius` (blast margin, `GMTXT 2005` "The %s have been hit!"):
     `n = (footprint + radius − d) × size / (footprint + radius)`, at least 1, random models (with repetition)
-    at **S/2 for exactly 1 wound**.
+    at **S/2 for exactly 1 wound**, with an armour save at S/2 and the `MagicResistent` roll as above; units in the
+    air are not struck by height-0 blasts (`notes/spell_blades_flock_items.md` §1).
   - Afterwards flag `0x80` → panic test if `size ≤ orgsize / 4`; flag `0x40` → rout.
 - **Buildings and furniture**: the owning unit's first model takes `TO_WOUND[S2][T]` and the wound die
   (direct) or S2/2 and 1 wound (margin), no saves.
@@ -2371,7 +2372,7 @@ These reuse the **spell effect engine** (the spell launch, innate casting) and a
 
 | Code / routine | Targeting | Shots | Per shot |
 |---|---|---|---|
-| 13 Doomwheel warp lightning (behaviour 0x1A, `DoomwheelBolt`) | reload on the leader block | 3 bolts: ahead, right, left; distance `D6 × D6 × D6 × 12`; nearest unit **of either side** near that point | fails on a 6 (`GMTXT 2021`); S5, D6 wounds, no save |
+| 13 Doomwheel warp lightning (behaviour 0x1A, `DoomwheelBolt`) | reload on the leader block | 3 bolts: ahead, right, left; distance `D6 × D6 × D6 × 12`; nearest unit **of either side** (not itself, not hidden) whose position is within the bolt's own distance of that point, else a point 96 ahead ±40 (`notes/spell_blades_flock_items.md` §5) | fails on a 6 (`GMTXT 2021`), rolled after the aim; S5, D6 wounds, no save |
 | 14 Dragon breath | target in the front 180° | D6+3 flames around the target | S8, 1 wound, no save, **every unit hit routs** (flags `0x41`) |
 | 15 warpfire thrower | needs crew | D6 flames around the target | S4, 1 wound, no save; no misfire |
 | 16 (Wyvern shaman) | – | – | not a weapon: marks a monster-class unit as a **spellcaster** (`CanCastSpells`) |
@@ -2416,7 +2417,7 @@ WFB: D6 S5 hits per unit touched, 2D6" moves, dies on a double; here damage scal
   Conflagration of Doom, Flamestorm, Tangling Thorn, Curse of Anraheir, Da Krunch. A unit lists up to 5 spells
   (`spells`) and 5 items (`items`).
 - **Casting**: the spell button is enabled when the cost fits the pool; the **cost is paid on the click**.
-  Azure Blades, Dispel Magic and Fists of Gork need no target. The target click gives order 0x17 → event 0x2B to
+  Azure Blades, Dispel Magic and Fists of Gork need no target click (they aim at the wizard's own unit position). The target click gives order 0x17 → event 0x2B to
   the wizard (a busy wizard: `GMTXT 2014` "…is preparing to cast a spell", order dropped) → casting animation →
   event 0x2C → op 147 `CastPending` → the launch (`notes/spell_effects.md`). Storm of Shemtek and Flying Bower keep the wizard busy until
   they end. Ctrl+click on an active spell cancels the caster's effects of that code (no refund).
@@ -2443,25 +2444,25 @@ Gork, dispel, winds). Durations are tick counters: 180 ticks ≈ 18 s, just unde
 
 | Spell | Cost | Range | Effect | Duration |
 |---|---|---|---|---|
-| Wind Blast | 2 | random 4–24" | gust passing through units: S3, 1 wound, save, one model per unit per tick; replaces the previous blast | flight |
-| Azure Blades | 1 | own unit | every tick, units overlapping the target unit (not the target itself) take S4 hits, 1 wound, save | 180 ticks |
-| Storm of Shemtek | 3 | 24" | **2D6+1 bolts** (the phase counter is incremented after every phase, so the 1↔2 loop adds one) at the nearest enemy near the point: S6, D3 wounds, no save; wizard frozen | until spent |
-| Sapphire Arch | 2 | 24" | portal: units swallowed by a previous arch reappear here (killed if gone more than 900 ticks); then every other unit within 48 units vanishes until the next arch | 180 ticks |
+| Wind Blast | 2 | 4–24" in steps of 4" (random, re-drawn per range query) | gust for 55 ticks passing through units: S3, 1 wound, save, one model per unit per tick; leaves a trail of up to 30 solid discs; replaces the previous blast (`notes/spell_area_effects.md` §1) | **no natural end** (until recast, cancelled or dispelled) |
+| Azure Blades | 1 | unlimited | on the unit under the aim point (player: own unit; AI: the enemy in contact): every tick a blast around that unit, target excluded — units containing its position: every model S4, 1 wound, save; overlapping units: some models at S2; any side (`notes/spell_blades_flock_items.md` §2) | 180 ticks |
+| Storm of Shemtek | 3 | 24" | **2D6+1 bolts**, 7 ticks apart, each at the nearest hostile unit within 80 of the point other than the previous bolt's target (fallbacks in `notes/spell_channelled_effects.md` §1): scattered beams, S6, D3 wounds, no save; wizard frozen; cancelled when its current target is removed | until spent |
+| Sapphire Arch | 2 | 24" | portal: at T+20 units swallowed by a previous arch reappear here (killed if gone more than about 950 ticks); at T+161 every other unit with its centre within 48 is swallowed — it stays an active unit (scripts run, objectives count it) but is not drawn and cannot engage (`notes/spell_channelled_effects.md` §3) | 180 ticks |
 | Lightning | 1 | 24" | bolt: S6, D3 wounds, no save | flight |
 | Piercing Bolts of Burning | 2 | 18" | bolt: S4, 1 wound, no save, fire | flight |
 | The Burning Head | 2 | 18" | head passing through: S4, 1 wound, save, fire; on every tick it hits something, every unit containing the point (any side, the caster's own included) takes a **panic test** | 18 ticks |
-| Conflagration of Doom | 3 | unlimited | radius D6×8+8; panic tests every 9 ticks for D6×9 ticks, then units inside **lose all models** and overlapping units a share, **slain outright**; buildings destroyed | fuse + fall |
-| Flamestorm | 3 | 24" | column of flame, every 18 ticks every model inside radius 16: S4, 1 wound, no save, fire | 🟡 **no end** (until dispelled, cancelled or recast) |
+| Conflagration of Doom | 3 | unlimited | one D6 k: radius 8k+8, k panic tests 9 ticks apart, then a 10-tick fall slaying models of units under the point and a finale: units inside **lose all models**, overlapping units a share, **slain outright** (fire); buildings destroyed (`notes/spell_area_effects.md` §5) | fuse + fall |
+| Flamestorm | 3 | 24" | column of flame: from T+18 a radius-16 blast **every tick** (units containing the point: every model S4, 1 wound, no save, fire; margin: some models at S2); caster not spared (`notes/spell_area_effects.md` §2) | **no end** (until dispelled, cancelled or recast) |
 | Fireball | 1 | 24" | S4, 1 wound, no save, fire; burns a Tangling Thorn when one of its impacts hits something within 32 of the thorn's cast point; no terminal impact on a ground point | 18 ticks |
-| The Flying Bower | 1 | unlimited | the caster's unit leaves combat and flies to the point | flight |
-| Tangling Thorn | 3 | 24" | units within 32 are **halted and held** (also blocks shooting and casting); fire destroys it | growth + 90 ticks |
+| The Flying Bower | 1 | unlimited | the caster's unit leaves combat and flies to the point, nudged off obstacles and friends (not enemies): 19-tick take-off, lands exactly there at T+74 with facing and formation kept (`notes/spell_channelled_effects.md` §2) | 74 ticks |
+| Tangling Thorn | 3 | 24" | units whose centre is within 32 **at the cast** (any side) are **held**: no moving, charging, turning, rank changes, rout or pursuit start, shooting or casting; they still fight; fire destroys it; the end releases every unit within 64 (`notes/spell_area_effects.md` §3) | **no natural end** |
 | Hunting Spear | 2 | 24" | homing spear (re-aims every 3 ticks, each thing struck on the way costs 1 S); arrival hit, then strikes at S, S−1 … 1 on every unit under its point, D3 wounds each, no save | ≤ 180 ticks |
-| The Curse of Anraheir | 3 | 24" | **movement rate and Initiative halved**; mounted targets take a panic test each tick of segment 10 and the curse ends when one routs | 🟡 **no end otherwise** |
-| The Flock of Doom | 2 | 24" | three strikes, radius 32: S3, D6 wounds, save | 3 phases |
+| The Curse of Anraheir | 3 | 24" | **movement rate and Initiative halved** (floor); mounted targets take a panic test on every tick of segment 10 and the curse ends when a test fails; the end restores the values saved at the cast (`notes/spell_channelled_effects.md` §4) | **no end otherwise** |
+| The Flock of Doom | 2 | 24" | no scatter; strikes at the cast point on T+10, T+18, T+26, radius 32: units containing the point every model S3, D6 wounds, save; margin S1; any side, caster included (`notes/spell_blades_flock_items.md` §3) | 38 ticks |
 | Dispel Magic | 1 | self | dispel aura (8.10) | ≤ 180 ticks |
 | Gaze of Mork | 2 | 24" | beam passing through: S6, 1 wound, save | flight |
 | Ere We Go! | 2 | 36" | on the unit under the point (any side): T +1 and **I := 20** (the unit makes no close combat attacks, section 5.1); end: T −1, I := value saved at the cast | 180 ticks |
-| Da Krunch | 3 | 24" | giant foot: **every model** of every unit reaching within 32 units **slain**; buildings destroyed | ≈ 45 ticks |
+| Da Krunch | 3 | 24" | giant foot: **every model** of every unit reaching within 32 units **slain** during the 10-tick fall (caster's unit included); buildings destroyed; the foot then stands as a solid object until T+46 (`notes/spell_area_effects.md` §4) | 57 ticks |
 | Fists of Gork | 2 | self | every 4 ticks (45 strikes) the nearest unit of **either side** (not the caster's) whose centre is within 16 (inclusive) of the **fixed aim point**: wound roll at S6, 1 wound, no save; after a first 6 each further consecutive 6 adds a wound; no kill credit | 180 ticks |
 | Mork Save Uz! | 1 | 24" | dispel aura around a unit, 50% every tick | 180 ticks |
 | Warp Lightning | 2 | 24" | bolt: S5, D6 wounds, no save (Doomwheel version fails on 1 in 6) | flight |
@@ -2469,11 +2470,12 @@ Gork, dispel, winds). Durations are tick counters: 180 ticks ≈ 18 s, just unde
 | Pestilent Breath | 1 | 6" | cloud passing through: S3, 1 wound, no save | flight |
 | Madness | 2 | 24" | the unit under the point (must be hostile) **changes side**: player/allied → enemy, enemy → allied (events 0x31/0x32; its new side-mates drop it as a target); the saved side is restored at the end | 180 ticks |
 
-Area objects of Wind Blast, Flamestorm, Tangling Thorn and Da Krunch are temporary **solid scenery** (they push
-units back, stop charges, bend routes, block spotting and obstruct missiles). Only Wind Blast, Flamestorm,
+Area objects of Wind Blast (trail), Flamestorm, Tangling Thorn and Da Krunch are **solid scenery** while their effect
+lasts — for the first three that is until cancelled (`notes/spell_area_effects.md` §0): they push moving units back, stop charges, bend
+routes, block spotting and obstruct missiles. Only Wind Blast, Flamestorm,
 Tangling Thorn and Curse of Anraheir replace the caster's previous instance; other spells stack (two
-overlapping Ere We Go casts leave I = 20 for the rest of the battle, `notes/spell_lasting_effects.md` §3). No spell passes the panic or rout bits to
-`ApplyImpact`; panic comes from Burning Head, the Conflagration fuse and the Curse on mounts.
+overlapping Ere We Go casts leave I = 20 for the rest of the battle, `notes/spell_lasting_effects.md` §3). No spell's hit requests a panic test or a rout;
+panic comes from Burning Head, the Conflagration fuse and the Curse on mounts.
 
 ### Dispel and anti-magic ✅
 
@@ -2498,8 +2500,10 @@ spells nearby are dispelled too.
 ### Magic items in battle ✅
 
 - **Banner of Wrath** (effect `0x105`) casts a Lightning and **Grudgebringer** (`0x10A`) a Fireball: no power, no
-  wizard needed, once per wind (flag `0x20`, re-armed when the power pool is refreshed). The Dragon's breath uses
-  the Grudgebringer effect innately (section 8.6).
+  wizard needed, once per wind (the use is spent on the button click, even if the order is then cancelled or fails, and re-armed
+  at every wind for both sides). They fire at the bearer's current target if it has one, else at the click; range
+  24" and ±50° arc; not innate, so they can be dispelled (`notes/spell_blades_flock_items.md` §4). The Dragon's breath uses the Fireball effect
+  innately (section 8.6).
 - **Potion of Strength**: single use, +3 S for the rest of the battle (section 5.6).
 - Passive items (banners, armour, swords, talismans) have disabled buttons. **The AI never activates items.**
 - In the scripts, Banner of Wrath, the Talisman and Arcane Warding appear only in the `RLTEST*.MRC` test armies;
