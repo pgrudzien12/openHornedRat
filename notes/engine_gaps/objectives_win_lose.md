@@ -24,10 +24,8 @@ Engine approximations, named in the code:
 - O reads "leader killed" as "regiment wiped out";
 - G's "handled by the cleanup pass" is read as "removed".
 
-Not done yet:
-- the book button's objective list (`Objectives.book_text_ids` is ready, the frontend does not show it);
-- frontend playback of the decision speech cue;
-- the K/X item marker sprite.
+The frontend shows the book button's objective list, plays the decision speech (`whshr/frontend/battle_sound.py`)
+and draws the K/X Sparkle marker. The frame timing of the marker and positional sound are provisional.
 
 ## Known facts
 
