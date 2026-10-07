@@ -29,7 +29,7 @@ from ..glue_palette import AppPalette
 from .bitmap_font import BitmapFont
 from .cursors import CursorController
 from .glue_bitmap import load_optional_bitmap
-from .gpu import Gpu, ScreenQuad, TextLabel
+from .gpu import Gpu, QuadCache, ScreenQuad, TextLabel
 from .scene_view import NativeScreenView
 
 Point = tuple[int, int]
@@ -65,6 +65,7 @@ class GlueView(NativeScreenView[GlueScene]):
         super().__init__(gpu, scene, options)
         self.models: Models = ()
         self.quads: list[tuple[ScreenQuad, Point]] = []
+        self.bitmap_quads = QuadCache(gpu)
         self.portrait_quads: list[tuple[ScreenQuad, Point]] = []
         self.overlay_quads: list[tuple[ScreenQuad, Point]] = []
         self._overlay_frames: tuple[tuple[str, str], ...] = ()
@@ -89,6 +90,7 @@ class GlueView(NativeScreenView[GlueScene]):
         self.cursors.show(None)
         # Change fingerprints of the refresh groups (see `refresh`).
         self._bitmap_models: Models = ()
+        self._bitmap_visibility: tuple[tuple[bool, ...], ...] = ()
         self.frames: Frames = {}
         self.palette: AppPalette | None = None
         self._portrait_animations: tuple[Any, ...] = ()
@@ -222,26 +224,31 @@ class GlueView(NativeScreenView[GlueScene]):
             self._speech_sound = None
 
     def _refresh_bitmaps(self, models: Models, frames: Frames, palette: AppPalette) -> None:
-        if (models, frames, palette) == (self._bitmap_models, self.frames, self.palette):
+        visibility = tuple(tuple(_bitmap_visible(bitmap, self.scene.campaign) for bitmap in model.bitmaps)
+                           for model in models)
+        if (models, frames, palette, visibility) == (self._bitmap_models, self.frames, self.palette,
+                                                     self._bitmap_visibility):
             return
         content = self.scene.require_runtime().content
-        for quad, _ in self.quads:
-            quad.release()
-        for label, _ in self.text_labels:
-            label.release()
-        self._bitmap_models, self.frames, self.palette = models, frames, palette
-        self.quads, self.text_labels = [], []
-        for model in models:
+        rebuild_text = models != self._bitmap_models or palette != self.palette
+        self._bitmap_models, self.frames, self.palette, self._bitmap_visibility = models, frames, palette, visibility
+        self.quads = []
+        for model_index, model in enumerate(models):
             for index, bitmap in enumerate(model.bitmaps):
-                if not _bitmap_visible(bitmap, self.scene.campaign):
+                if not visibility[model_index][index]:
                     continue
                 name = frames.get((model.name, bitmap.object_name), frames.get((model.name, index), bitmap.name))
-                surface = load_optional_bitmap(content, name, app_palette=palette)
-                if surface is None:
+                quad = self.bitmap_quads.get((name, palette),
+                                             lambda name=name: load_optional_bitmap(content, name, app_palette=palette))
+                if quad is None:
                     continue
-                quad = ScreenQuad(self.gpu, surface.get_size())
-                quad.write(pygame.image.tobytes(surface, "RGBA"))
                 self.quads.append((quad, (model.x + bitmap.x, model.y + bitmap.y)))
+        if not rebuild_text:
+            return
+        for label, _ in self.text_labels:
+            label.release()
+        self.text_labels = []
+        for model in models:
             for text in model.texts:
                 value = resolve_text(content, text)
                 if value is None:
@@ -507,7 +514,10 @@ class GlueView(NativeScreenView[GlueScene]):
         return ()
 
     def animate(self, seconds: float) -> None:
-        changed = any(animator.tick(round(seconds * 1000)).redrawn for animator in self.bitmap_animators.values())
+        changed = False
+        for animator in self.bitmap_animators.values():
+            if animator.tick(round(seconds * 1000)).redrawn:
+                changed = True
         if changed or self._speech_overlay_frames() != self._overlay_frames:
             self.refresh()
 
@@ -539,8 +549,7 @@ class GlueView(NativeScreenView[GlueScene]):
 
     def release(self) -> None:
         self.cursors.release()
-        for quad, _ in self.quads:
-            quad.release()
+        self.bitmap_quads.release()
         for quad, _ in self.portrait_quads:
             quad.release()
         for quad, _ in self.overlay_quads:

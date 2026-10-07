@@ -11,7 +11,7 @@ from ..glue_palette import AppPalette
 from ..scenes import Scene
 from .bitmap_font import BitmapFont
 from .glue_bitmap import load_optional_bitmap
-from .gpu import Gpu, ScreenQuad, TextLabel
+from .gpu import Gpu, QuadCache, ScreenQuad, TextLabel
 from .scene_view import NativeScreenView
 
 Point = tuple[int, int]
@@ -27,7 +27,9 @@ class DialogView[S: Scene](NativeScreenView[S]):
         self.content = content
         self.font = BitmapFont(font)
         self.palette = AppPalette.select(palette_index, content.palette_tables())
+        self.bitmap_quads = QuadCache(gpu)
         self.quads: list[tuple[ScreenQuad, Point]] = []
+        self._uncached_quads: list[ScreenQuad] = []
         self.labels: list[tuple[TextLabel, Point]] = []
         self.buttons: list[tuple[pygame.Rect, str]] = []
 
@@ -40,13 +42,14 @@ class DialogView[S: Scene](NativeScreenView[S]):
         return next((action for rect, action in reversed(self.buttons) if rect.collidepoint(point)), None)
 
     def _bitmap(self, name: str, position: Point) -> None:
-        surface = load_optional_bitmap(self.content, name, app_palette=self.palette)
-        if surface is not None:
-            self._append(surface, position)
+        quad = self.bitmap_quads.get(name, lambda: load_optional_bitmap(self.content, name, app_palette=self.palette))
+        if quad is not None:
+            self.quads.append((quad, position))
 
     def _append(self, surface: pygame.Surface, position: Point) -> None:
         quad = ScreenQuad(self.gpu, surface.get_size())
         quad.write(pygame.image.tobytes(surface, "RGBA"))
+        self._uncached_quads.append(quad)
         self.quads.append((quad, position))
 
     def _center(self, value: str, y: int, colour: Rgb, *, x: int, width: int) -> None:
@@ -64,11 +67,12 @@ class DialogView[S: Scene](NativeScreenView[S]):
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
 
     def _release_contents(self) -> None:
-        for quad, _ in self.quads:
+        for quad in self._uncached_quads:
             quad.release()
         for label, _ in self.labels:
             label.release()
-        self.quads, self.labels, self.buttons = [], [], []
+        self.quads, self._uncached_quads, self.labels, self.buttons = [], [], [], []
 
     def release(self) -> None:
         self._release_contents()
+        self.bitmap_quads.release()

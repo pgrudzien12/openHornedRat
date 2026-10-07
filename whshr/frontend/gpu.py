@@ -2,7 +2,7 @@
 """GPU helpers: the frame render target, textured screen-space quads and text labels."""
 
 import struct
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Hashable, Iterable, Sequence
 from os import PathLike
 from typing import Any
 
@@ -126,6 +126,35 @@ class ScreenQuad:
     def release(self) -> None:
         self.gpu.ctx.release(self.pipeline)
         self.gpu.ctx.release(self.texture)
+
+
+class QuadCache:
+    """Keep decoded surfaces on the GPU for the lifetime of one view.
+
+    Keys identify image contents, not draw positions. One quad may be drawn at several positions;
+    the loader runs only for a key's first use. The owning view releases the cache on exit.
+    """
+
+    def __init__(self, gpu: "Gpu") -> None:
+        self.gpu = gpu
+        self._quads: dict[Hashable, ScreenQuad | None] = {}
+
+    def get(self, key: Hashable, load: Callable[[], pygame.Surface | None]) -> ScreenQuad | None:
+        if key not in self._quads:
+            surface = load()
+            if surface is None:
+                self._quads[key] = None
+            else:
+                quad = ScreenQuad(self.gpu, surface.get_size())
+                quad.write(pygame.image.tobytes(surface, "RGBA"))
+                self._quads[key] = quad
+        return self._quads[key]
+
+    def release(self) -> None:
+        for quad in self._quads.values():
+            if quad is not None:
+                quad.release()
+        self._quads.clear()
 
 
 class TextLabel(ScreenQuad):

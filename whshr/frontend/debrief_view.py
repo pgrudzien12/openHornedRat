@@ -19,7 +19,7 @@ from ..script import resource_name
 from .bitmap_font import BitmapFont
 from .cursors import CursorController
 from .glue_bitmap import load_optional_bitmap
-from .gpu import Gpu, ScreenQuad, TextLabel
+from .gpu import Gpu, QuadCache, ScreenQuad, TextLabel
 from .scene_view import NativeScreenView
 
 Point = tuple[int, int]
@@ -40,6 +40,7 @@ class DebriefView(NativeScreenView[DebriefScene]):
 
     def __init__(self, gpu: Gpu, scene: DebriefScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
+        self.bitmap_quads = QuadCache(gpu)
         self.quads: list[tuple[ScreenQuad, Point]] = []
         self.labels: list[tuple[TextLabel, Point]] = []
         self.buttons: list[tuple[pygame.Rect, str]] = []
@@ -130,20 +131,20 @@ class DebriefView(NativeScreenView[DebriefScene]):
         self.labels.append((label, (x, y)))
 
     def _bitmap(self, name: str, position: Point) -> None:
-        surface = load_optional_bitmap(self.content, name, app_palette=self.palette)
-        if surface is not None:
-            self._quad(surface, position)
+        quad = self.bitmap_quads.get(name, lambda: load_optional_bitmap(self.content, name, app_palette=self.palette))
+        if quad is not None:
+            self.quads.append((quad, position))
 
     def _bitmap_centered(self, name: str, center: Point) -> None:
-        surface = load_optional_bitmap(self.content, name, app_palette=self.palette)
-        if surface is not None:
-            width, height = surface.get_size()
-            self._quad(surface, (center[0] - width // 2, center[1] - height // 2))
+        quad = self.bitmap_quads.get(name, lambda: load_optional_bitmap(self.content, name, app_palette=self.palette))
+        if quad is not None:
+            width, height = quad.size
+            self.quads.append((quad, (center[0] - width // 2, center[1] - height // 2)))
 
-    def _quad(self, surface: pygame.Surface, position: Point) -> None:
-        quad = ScreenQuad(self.gpu, surface.get_size())
-        quad.write(pygame.image.tobytes(surface, "RGBA"))
-        self.quads.append((quad, position))
+    def _quad(self, surface: pygame.Surface, position: Point, key: str) -> None:
+        quad = self.bitmap_quads.get(("banner", key), lambda: surface)
+        if quad is not None:
+            self.quads.append((quad, position))
 
     def _banner(self, name: str | None, position: Point) -> None:
         """Frame 1 of a resident banner set, the 16x24 row marker (notes/troop_selection.md 3.3)."""
@@ -170,7 +171,7 @@ class DebriefView(NativeScreenView[DebriefScene]):
             self.banner_surfaces[base] = surface
         loaded = self.banner_surfaces[base]
         if loaded is not None:
-            self._quad(loaded, position)
+            self._quad(loaded, position, base)
 
     def _native_point(self, position: Sequence[float]) -> tuple[float, float]:
         left, top, scale = self._layout()
@@ -206,14 +207,13 @@ class DebriefView(NativeScreenView[DebriefScene]):
             label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
 
     def _release_contents(self) -> None:
-        for quad, _ in self.quads:
-            quad.release()
         for label, _ in self.labels:
             label.release()
         self.quads, self.labels, self.buttons = [], [], []
 
     def release(self) -> None:
         self._release_contents()
+        self.bitmap_quads.release()
         if self.music_started:
             try:
                 pygame.mixer.music.stop()

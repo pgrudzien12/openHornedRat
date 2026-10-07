@@ -1,5 +1,6 @@
 import importlib.util
 import unittest
+from unittest.mock import patch
 
 from whshr.glue_render import GlueRenderModel, RenderBitmap, RenderHotspot, RenderMissionList
 from whshr.glue import MissionRef
@@ -75,6 +76,57 @@ class GlueViewTests(unittest.TestCase):
         campaign = type("Campaign", (), {"missions": ()})()
 
         self.assertTrue(_bitmap_visible(bitmap, campaign))
+
+    def test_caravan_animation_keeps_the_unchanged_background_texture(self):
+        from whshr.frontend.glue_view import GlueView
+        from whshr.frontend.gpu import QuadCache
+        from whshr.glue_palette import AppPalette
+        import pygame
+
+        view = GlueView.__new__(GlueView)
+        view.scene = type("Scene", (), {"campaign": None, "require_runtime": lambda self: type("Runtime", (), {"content": None})()})()
+        view.gpu = object()
+        view._bitmap_models, view._bitmap_visibility = (), ()
+        view.frames, view.palette = {}, None
+        view.bitmap_quads, view.quads, view.text_labels = QuadCache(view.gpu), [], []
+        palette = AppPalette.select(0, {})
+        model = GlueRenderModel("STARTCARAVAN", 0, 0, 640, 480, 3,
+                                (RenderBitmap("ReadBackgroundPic"), RenderBitmap("CarLampCell")),
+                                (), (), (), ())
+
+        with patch("whshr.frontend.gpu.ScreenQuad", _FakeQuad), patch(
+                "whshr.frontend.glue_view.load_optional_bitmap", return_value=pygame.Surface((2, 2))):
+            view._refresh_bitmaps((model,), {(model.name, 1): "CarLampCell5"}, palette)
+            background, lamp = (quad for quad, _ in view.quads)
+            view._refresh_bitmaps((model,), {(model.name, 1): "CarLampCell4"}, palette)
+            view._refresh_bitmaps((model,), {(model.name, 1): "CarLampCell5"}, palette)
+
+        self.assertIs(view.quads[0][0], background)
+        self.assertFalse(background.released)
+        self.assertIs(view.quads[1][0], lamp)
+        self.assertFalse(lamp.released)
+        view.bitmap_quads.release()
+        self.assertTrue(background.released)
+        self.assertTrue(lamp.released)
+
+    def test_simultaneous_caravan_animations_advance_together(self):
+        from whshr.frontend.glue_view import GlueView
+        from whshr.glue_animation import GlueBitmapAnimator
+
+        view = GlueView.__new__(GlueView)
+        view.bitmap_animators = {
+            ("STARTCARAVAN", 0): GlueBitmapAnimator({"bitmap": "CarLampCell", "animstartframe": 5, "animstopframe": -1}),
+            ("STARTCARAVAN", 1): GlueBitmapAnimator({"bitmap": "CarCandleCell", "animstartframe": 5, "animstopframe": -1}),
+        }
+        view._overlay_frames = ()
+        view.scene = type("Scene", (), {"require_runtime": lambda self: type(
+            "Runtime", (), {"state": type("State", (), {"speech_overlays": {}})()})()})()
+        view.refresh = lambda: None
+
+        view.animate(50 / 1000)
+
+        self.assertEqual([animator.display_name for animator in view.bitmap_animators.values()],
+                         ["CarLampCell5", "CarCandleCell5"])
 
     def test_caravan_coffers_hint_receives_the_campaign_value(self):
         from whshr.frontend.glue_view import _caravan_hint
@@ -155,6 +207,18 @@ class _FakeGpu:
     def text(self, size, font, **options):
         self.last_size = size
         return _FakeLabel(size, **options)
+
+
+class _FakeQuad:
+    def __init__(self, gpu, size):
+        self.size = size
+        self.released = False
+
+    def write(self, data):
+        pass
+
+    def release(self):
+        self.released = True
 
 
 if __name__ == "__main__":
