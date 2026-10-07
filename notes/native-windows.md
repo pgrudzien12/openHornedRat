@@ -1288,7 +1288,7 @@ Status: ✅ pages P2/P3/P4, the evaluator table (41 rows, 8 kinds) with its text
 (Done: payment, armour rewards, doubled experience, promotions), `whshr/payments.py` (cash programs and their step list for P4). A battle now ends in the debrief screen (mode 2 with `playgamewithdebrief`, mode 6 otherwise; the plain "Victory!/Defeat" `ResultScene` still shows first);
 `debrief:`/`debriefwithsummary:` open modes 4/7. `testmission:` runs the same evaluator (and the last mission's status bits). No-battle mode keeps skipping the screen.
 Deviations and gaps (all reported in the campaign log `debrief` row as *skipped*): the engine measures no objective itself, so a played battle's records are derived from its outcome (`payments.played_results`: a win is the flawless result, a loss meets `Z`);
-it tracks no kills or experience, so P3 shows 0 kills/experience and no promotions happen yet; casualties are not carried into the company (the wounded-return counters do not exist), so the army merge, healing and disbanding are skipped;
+kills and experience are credited per model in battle (`notes/casualty_bookkeeping.md` §2) and the wounded, healing and disbanding bookkeeping runs before the screen and at Done (§3, `whshr/casualties.py`); routed models rejoin at Done rather than at the next troop selection, the campaign-over test is not run, and allied NPC regiments are not merged back;
 wizard spell promotions are skipped; the `K`/`X` item-pickup line needs an item-name table the engine does not have; Ctrl+click opens no view-only roster book; the end-screen bitmaps and the campaign-over/quit routes of §9.9.5 are not implemented; the mode-6 P4 page is unreachable as specified.
 
 ### 9.11 Test scenarios (BDD; run on several missions)

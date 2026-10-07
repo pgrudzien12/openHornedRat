@@ -90,9 +90,10 @@ renumber later work.
   and resume the requesting Glue runtime.
   *Implemented:* `DebriefScene` opens for `debrief:`/`debriefwithsummary:` and after every played battle (modes 4/7 and 2/6),
   shows the verdict, troop and balance pages of `notes/native-windows.md` §9, and on Done applies the payment (mode 2/4/7),
-  armour rewards, doubled experience and promotions before resuming the parked runtime. Open (status in §9.10): kills/experience
-  tracking, casualty carry-over and the army merge, wizard spells, the view-only roster book, the end screens and the
-  campaign-over route.
+  armour rewards, doubled experience and promotions, then merges the battle result into the army (returning wounded,
+  disbanding; `notes/casualty_bookkeeping.md`, `whshr/casualties.py`) before resuming the parked runtime. Kills and
+  experience are credited in battle. Open (status in §9.10): wizard spells, the view-only roster book, the end screens and
+  the campaign-over route.
 
 - [x] **GEI9 — Generic post-mission caravan modes.** (issue #120) Route `EnterCaravan` to the requested
   generic caravan window while retaining the parked runtime. Implement the campaign-required
