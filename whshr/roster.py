@@ -248,6 +248,16 @@ def with_items(regiment: Regiment, items: Sequence[str]) -> Regiment:
     return replace(regiment, raw=raw)
 
 
+def with_spell(regiment: Regiment, spell: str) -> Regiment:
+    """Add a unit-level spell to the text used by battle deployment and saved company."""
+    raw = regiment.raw
+    if raw is None:
+        return regiment
+    raw = raw.copy()
+    raw["cmds"] = [*raw["cmds"], ("addspell", spell)]
+    return replace(regiment, raw=raw)
+
+
 def with_improved_stat(regiment: Regiment, stat: str) -> Regiment:
     """+1 to a profile stat (``s_wepn``, ``s_strn``, ``s_wnds`` ...) or to armour (``s_armr``), on the troops and
     on their leader (notes/campaign.md 1.3, 1.4)."""

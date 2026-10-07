@@ -89,8 +89,10 @@ def campaign_to_dict(campaign: "CampaignState") -> dict[str, Any]:
         "mission_cash": _CASH.encode(campaign.mission_cash),
         "mission_paid": campaign.mission_paid,
         "company": roster.company_text(campaign.company),
+        "company_prices": {str(regiment.whoami): regiment.row.base_price for regiment in campaign.company},
         # The master roster as the last battle left it, and the wounded counters (whshr.casualties).
         "master": roster.company_text(campaign.master),
+        "master_prices": {str(regiment.whoami): regiment.row.base_price for regiment in campaign.master},
         "wounded_last": {str(whoami): count for whoami, count in campaign.wounded_last.items()},
         "returning": {str(whoami): count for whoami, count in campaign.returning.items()},
     }
@@ -100,8 +102,13 @@ def restore_campaign(campaign: "CampaignState", data: Mapping[str, Any]) -> None
     """Overwrite ``campaign`` (a fresh one for the same installation) with saved ``data``."""
     rows = {regiment.whoami: regiment.row for regiment in (*campaign.master, *campaign.company)}
     try:
+        def priced(regiments: tuple[roster.Regiment, ...], key: str) -> tuple[roster.Regiment, ...]:
+            prices = {int(whoami): int(price) for whoami, price in data.get(key, {}).items()}
+            return tuple(roster.with_base_price(regiment, prices[regiment.whoami])
+                         if regiment.whoami in prices else regiment for regiment in regiments)
+
         values: dict[str, Any] = {
-            "company": roster.parse_company(str(data["company"]), rows),
+            "company": priced(roster.parse_company(str(data["company"]), rows), "company_prices"),
             "flow": str(data["flow"]),
             "flow_history": [str(name) for name in data["flow_history"]],
             "flow_step": int(data["flow_step"]),
@@ -127,7 +134,7 @@ def restore_campaign(campaign: "CampaignState", data: Mapping[str, Any]) -> None
             "returning": {int(whoami): int(count) for whoami, count in data.get("returning", {}).items()},
         }
         if data.get("master"):
-            values["master"] = roster.parse_company(str(data["master"]), rows)
+            values["master"] = priced(roster.parse_company(str(data["master"]), rows), "master_prices")
     except (KeyError, TypeError, ValueError, AttributeError) as error:
         raise SaveError(f"damaged save: {error!r}") from error
     for name, value in values.items():  # nothing is touched unless the whole save parsed

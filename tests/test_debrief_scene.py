@@ -3,12 +3,13 @@ the screen opens for a script's debrief request, Done pays and resumes, a screen
 and Done applies armour rewards, experience and promotions."""
 import unittest
 from dataclasses import replace
+from unittest.mock import patch
 
 from tests.test_debrief_flow import RESOURCES as FLOW_RESOURCES, _campaign
 from tests.test_debrief_screen import BF003_TERMS, BF003_WON, unit
 from tests.test_post_mission_caravan import PostMissionCaravanTests
 from tests.test_troop_selection import regiment
-from whshr import debrief_rewards
+from whshr import debrief_rewards, script
 from whshr.debrief import complete_debrief
 from whshr.debrief_scene import DebriefScene
 from whshr.glue_content import GlueContent
@@ -138,11 +139,23 @@ class PlayedResultTests(unittest.TestCase):
 
 
 class RewardTests(unittest.TestCase):
-    def make(self, whoami=5, experience=0, wizard=False):
+    def make(self, whoami=5, experience=0, wizard=False, spells=(), race=None, missile=None):
         base = regiment(whoami, base_price=20)
         row = replace(base.row, wizard=wizard)
+        raw = None
+        if wizard or race is not None or missile is not None:
+            commands = "".join(f"addspell:{spell}\n" for spell in spells)
+            stats = "setstats:s_move=4,3,0,3,3,1,3,1,7\n"
+            if race is not None:
+                stats += f"setstats:s_race={race}\n"
+            if missile is not None:
+                stats += f"setstats:S_BalWeap={missile}\n"
+            tree = script.parse_text(f"[MERCARMY]\n[UNITS]\naddunit:Wizard\n{commands}"
+                                     f"{stats}endunit:\n[END]\n[END]", "wizard")
+            raw = tree["children"][0]["children"][0]
         return replace(base, row=row, experience=experience, profile=(4, 3, 0, 3, 3, 1, 3, 1, 7),
-                       leader_profile=(4, 4, 0, 3, 3, 1, 3, 1, 7), leader_name="Leader", armour=2, leader_armour=2)
+                       leader_profile=(4, 4, 0, 3, 3, 1, 3, 1, 7), leader_name="Leader", armour=2,
+                       leader_armour=2, raw=raw)
 
     def test_given_experience_crossing_2000_then_ws_is_raised_and_price_and_worth_rise(self):
         company, applied, skipped = debrief_rewards.apply_rewards(
@@ -154,6 +167,25 @@ class RewardTests(unittest.TestCase):
         self.assertEqual(updated.experience, 2100)
         self.assertIn("Regiment5: +1 s_wepn", applied)
         self.assertEqual(skipped, [])
+
+    def test_archers_and_artillery_gain_bs_instead_of_ws_at_2000(self):
+        for shooter in (self.make(race=3 * 8), self.make(race=4 * 8),
+                        self.make(race=1 * 8, missile=2)):
+            with self.subTest(race=script.unit_view(shooter.raw)["stats"]):
+                promoted, applied, _ = debrief_rewards.promote(shooter, 1900, 2100)
+
+                self.assertEqual(promoted.profile[1:3], (3, 1))
+                self.assertEqual(script.unit_view(promoted.raw)["profile"]["BS"], 1)
+                self.assertEqual(promoted.leader_profile[1:3], (4, 1))
+                self.assertIn("Regiment5: +1 s_bals", applied)
+
+    def test_shooting_regiment_still_gains_strength_at_4000(self):
+        shooter = self.make(race=3 * 8)
+
+        promoted, applied, _ = debrief_rewards.promote(shooter, 1900, 4100)
+
+        self.assertEqual(promoted.profile[1:4], (3, 1, 4))
+        self.assertEqual(applied, ["Regiment5: +1 s_bals", "Regiment5: +1 s_strn"])
 
     def test_given_doubled_experience_then_the_gain_counts_twice_and_may_cross_two_thresholds(self):
         company, _, _ = debrief_rewards.apply_rewards(
@@ -168,12 +200,38 @@ class RewardTests(unittest.TestCase):
 
         self.assertEqual(company[0].profile, self.make().profile)
 
-    def test_given_a_wizard_crossing_1000_then_the_spell_promotion_is_reported_not_applied(self):
-        company, _, skipped = debrief_rewards.apply_rewards(
-            [self.make(wizard=True)], [unit(whoami=5, experience=1200, experience_start=900)], 1, False)
+    def test_wizard_crossing_1000_learns_an_unknown_spell_and_gains_price_and_worth(self):
+        wizard = self.make(wizard=True, spells=("GeneralDispel", "BrightFireball"))
+        with patch("whshr.debrief_rewards.random.choice", return_value=6):
+            company, applied, skipped = debrief_rewards.apply_rewards(
+                [wizard], [unit(whoami=5, experience=1200, experience_start=900)], 1, False)
 
-        self.assertEqual(company[0].profile, self.make().profile)
-        self.assertTrue(any("spell" in text for text in skipped))
+        promoted = company[0]
+        self.assertEqual(script.unit_view(promoted.raw)["spells"],
+                         ["GeneralDispel", "BrightFireball", "BrightPiercingBoltsOfBurning"])
+        self.assertEqual((promoted.experience, promoted.points, promoted.row.base_price), (1200, 7, 35))
+        self.assertEqual(promoted.profile, wizard.profile)
+        self.assertIn("Regiment5: learned BrightPiercingBoltsOfBurning", applied)
+        self.assertEqual(skipped, [])
+
+    def test_wizard_crossing_multiple_thresholds_learns_until_five_spell_limit(self):
+        wizard = self.make(wizard=True, spells=("GeneralDispel", "AmberFlyingBower", "AmberTanglingThorn"))
+        with patch("whshr.debrief_rewards.random.choice", side_effect=lambda candidates: candidates[0]):
+            promoted, _, _ = debrief_rewards.promote(wizard, 900, 3900)
+
+        self.assertEqual(script.unit_view(promoted.raw)["spells"],
+                         ["GeneralDispel", "AmberFlyingBower", "AmberTanglingThorn",
+                          "AmberHuntingSpear", "AmberCurseOfAnraheir"])
+        self.assertEqual((promoted.points, promoted.row.base_price), (14, 50))
+
+    def test_wizard_without_a_known_college_does_not_gain_an_unrelated_spell(self):
+        wizard = self.make(wizard=True, spells=("GeneralDispel",))
+
+        promoted, applied, skipped = debrief_rewards.promote(wizard, 900, 1100)
+
+        self.assertEqual(promoted, wizard)
+        self.assertEqual(applied, [])
+        self.assertIn("no known spell college", skipped[0])
 
     def test_given_an_armour_program_then_a_listed_regiment_with_models_gains_one_armour_on_troops_and_leader(self):
         company, applied, _ = debrief_rewards.apply_rewards(

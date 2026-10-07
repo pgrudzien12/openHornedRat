@@ -239,6 +239,8 @@ and the leader's copy.
 
 - The game contains an alternative for missile troops (+1 BS instead of WS, +1 I instead of S), but it is never
   selected, so every troop type gets WS and S. ✅
+  The engine deliberately uses +1 BS instead of +1 WS at 2000 XP for ranged regiments; their 4000 XP promotion
+  remains +1 S.
 - The spell promotion picks one of three college spell lists according to the college of the spells the wizard
   already knows, then draws random spells from it until it finds one the wizard does not know yet
   (`Unit gaining new spell (%d)`).

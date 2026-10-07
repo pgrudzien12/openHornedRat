@@ -3,8 +3,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from whshr import roster
+from whshr import debrief_rewards, roster, script
 from whshr.campaign_state import CampaignState
 from whshr.glue import MissionRef
 from whshr.roster import RosterRow
@@ -96,6 +97,27 @@ class SaveStoreTests(unittest.TestCase):
 
         self.assertEqual([(r.whoami, r.models, r.hired, r.experience) for r in fresh.company],
                          [(2, 7, True, 77), (14, 3, False, 0)])
+
+    def test_wizard_promotion_spells_price_and_worth_survive_save_and_reload(self):
+        wizard_rows = {**ROWS, 2: roster.RosterRow(2, False, False, True, False, 0)}
+        wizard_text = MRC.replace("banner:COMM,0", "addspell:GeneralDispel\naddspell:BrightFireball")
+        wizard = roster.parse_company(wizard_text, wizard_rows)[0]
+        with patch("whshr.debrief_rewards.random.choice", return_value=6):
+            promoted, _, _ = debrief_rewards.promote(wizard, 900, 1100)
+        played = campaign()
+        played.company = (promoted,)
+        played.master = (wizard,)
+        self.store.write(0, "wizard", played)
+        fresh = campaign()
+
+        self.store.load_into(0, fresh)
+
+        restored = fresh.company[0]
+        self.assertEqual(script.unit_view(restored.raw)["spells"],
+                         ["GeneralDispel", "BrightFireball", "BrightPiercingBoltsOfBurning"])
+        self.assertEqual((restored.row.base_price, restored.points), (15, wizard.points + 7))
+        fresh.march_units = {2}
+        self.assertIn("BrightPiercingBoltsOfBurning", fresh.marching_army()["armies"][0]["units"][0]["spells"])
 
     def test_given_a_mission_in_progress_then_its_payment_terms_and_paid_flag_round_trip(self):
         from whshr.payments import CashTerms
