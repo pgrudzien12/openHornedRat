@@ -19,19 +19,19 @@ Once the repository is public, please [open an issue](../../issues) for a reprod
 
 ## What you can play today
 
-With your own copy of the game, a new campaign plays the prologue and intro, shows the main menu, and takes you through the campaign screens (the caravan, army records, troop selection, reinforcements, and mission selection) into a battle. In battle you deploy your regiments, then select them, move, charge, shoot, and finish with a victory or defeat result. This is a development prototype: the rules are simplified and a full campaign has not been played through to the end. The first battle is the most tested; expect rough edges in later ones.
+With your own copy of the game, you can watch or skip the opening movies, start a campaign, use the caravan and mission screens, and enter battles. You can deploy regiments and give movement, attack, and firing orders. Battles produce results and return to the campaign flow. A campaign can currently reach the Nuln mission, about halfway through the game. This is still a development prototype: the first battle (BF001) is the most tested, later missions may have missing script behaviour, and a full campaign has not been played through to the end.
 
-| Area | Status | What to expect |
-|---|---|---|
-| Original game data | Works | Reads assets from your own installation; no game data is included here. |
-| Opening and menu | Works | Prologue, intro movie, main menu, and mission briefings. |
-| Campaign screens | In progress | Caravan, army records, troop selection, reinforcements, and mission select work; many screens and choices still need validation. |
-| Saving and loading | In progress | Load/Save dialog and an automatic slot, written to the engine's own save directory (never your game installation). Saves are not compatible with the original game's, and may change between versions. |
-| Battles | In progress | Deployment, movement, charges, ranged attacks, morale and routing, magic, and enemy AI. The first battle is the most tested; later ones are largely untested. |
-| Battle rules and mission scripts | In progress | Rules follow the original's behaviour where it has been reverse-engineered, but some are still simplified, and mission scripting is not yet fully reproduced. |
-| Complete campaign | Not verified | Nobody has yet played a full campaign start to finish. |
-| Audio and presentation | In progress | Speech, effects, and cutscenes are used; expect gaps and rough edges. |
-| Packaged downloads | Not available | Run from source for now. |
+| Area | What to expect |
+|---|---|
+| ✅ Original game data | Reads assets from your own installation; no game data is included here. |
+| ✅ Opening and menu | Prologue, intro movie, main menu, and mission briefings. |
+| ✅ Campaign screens | Caravan, army records, troop selection, reinforcements, and mission selection are in place; minor bugs may remain. |
+| ✅ Saving and loading | Manual save slots and a loadable automatic slot work during a playthrough. Saves use the engine's own directory (never your game installation), are incompatible with the original game's saves, and may not work across engine versions. |
+| 🟡 Battles | Deployment, movement, charges, ranged attacks, morale and routing, magic, enemy AI, and victory or defeat results are implemented in prototype form. BF001 is the most tested battle. |
+| 🟡 Battle rules and mission scripts | Some rules are simplified and the mission script interpreter does not yet reproduce every behaviour; later battles may not play out correctly. |
+| 🟡 Campaign progress | You can reach the Nuln mission, about halfway through the campaign; the remainder has not been verified. |
+| ✅ Audio and presentation | Opening movies, speech, music, and effects are mostly done. The Options screen saves separate volume levels for music, dialogue, and effects; minor gaps may remain. |
+| 🔴 Packaged downloads | Run from source for now. |
 
 ## Chat
 
@@ -87,13 +87,16 @@ still launches the engine through the `.venv` next to this checkout.
 
 The window opens with the prologue and intro. Any key or click skips the intro; choose **New Campaign** with `N` or Enter. Use Ctrl+Q or close the window to quit.
 
+The **Options** button opens audio levels for Music, Dialogue, and Sound Effects. Each cycles through Off, 25%,
+50%, 75%, and 100%; OK saves the levels in the engine's save directory, and Cancel discards the edits.
+
 ### Battle controls
 
 | Action | Control |
 |---|---|
 | Select a regiment | Left-click it |
-| Move selected regiment / charge an enemy | Left-click the ground / an enemy regiment |
-| Move without a selection | Right-click the ground |
+| Move, attack, or fire | Select a player regiment, click the matching command button, then click a destination or target |
+| Direct move or attack | With a player regiment selected, right-click the ground or an enemy regiment |
 | Deselect | Escape |
 | Pan camera | Arrow keys, WASD, or right-drag |
 | Rotate camera | Q/E or middle-drag |
