@@ -10,16 +10,18 @@ is per-user; Debian and RPM packages use system package managers; macOS uses a n
 Installer package. Linux packages provide a menu entry, while AppImage is a portable executable.
 The original game's files/assets are never bundled — see `CLAUDE.md`.
 
-## Entry point: frozen launcher integration is pending
+## Entry point
 
-The standalone GUI launcher (epic #88: install discovery, settings, battle picker) is not
-yet integrated with frozen builds. The installers freeze `python -m whshr engine` as-is
-(`windows/entrypoint.py`): it forwards any arguments and otherwise falls back to the `WARFB`
-environment variable, exactly like running `whshr engine` from source. This means the first
-launch after install needs `WARFB` set, or the exe run with the installation path as an
-argument (e.g. from a shortcut's "Target" field) — there is no install-path picker yet.
-The source launcher now exists, but its subprocess logic still assumes a source checkout
-and local virtual environment. Integrating it into frozen packages needs a separate change.
+Every package freezes `packaging/entrypoint.py`. Opening its application shortcut, app
+bundle, or executable without arguments starts the GUI launcher. The launcher discovers
+or asks for a legally owned `WARFB` installation and starts the bundled engine in a child
+process. Command-line use remains available: `ohr-engine --engine /path/to/WARFB` (or
+`ohr-engine /path/to/WARFB` on Windows/Linux) starts the engine directly. `--launcher`
+explicitly opens the GUI. The macOS command in `/usr/local/bin` is an engine-only wrapper;
+open **Open Horned Rat.app** from Applications to use its launcher.
+
+Launcher settings and game saves are stored in per-user directories outside the installed
+package. Uninstalling a package does not delete them or the original game files.
 
 ## Windows (#97)
 
@@ -31,7 +33,7 @@ install support and a scriptable CLI compiler (`ISCC.exe`) that works well in CI
 bookkeeping (see `THIRD_PARTY_NOTICES.md`) and faster startup (no self-extraction step).
 
 Files:
-- `windows/entrypoint.py` — the frozen entry point (see above).
+- `entrypoint.py` — the shared frozen entry point (see above).
 - `windows/ohr-engine.spec` — PyInstaller spec. Bundles `scripts/` as data: `whshr/legacy.py`
   dynamically loads a handful of stdlib-only helper modules from there (e.g. `pe_resources`,
   `pe_missions`, `fon_parse`, used by the campaign-glue and cursor/portrait rendering code
@@ -40,7 +42,7 @@ Files:
   which PyInstaller can't discover from a compiled binary and zengl ships no PyInstaller hook
   of its own (found by actually running the frozen build — see "Verified this session" below).
 - `windows/installer.iss` — Inno Setup script: per-user install under
-  `%LOCALAPPDATA%\Programs\openHornedRat Engine`, Start Menu shortcut (optional desktop
+  `%LOCALAPPDATA%\Programs\Open Horned Rat`, Start Menu shortcut (optional desktop
   shortcut), "launch now" checkbox on the finish page, registered uninstaller.
 
 Two engine-side fixes were needed to freeze correctly, both frozen-build-only branches (the
@@ -67,7 +69,7 @@ ISCC packaging\windows\installer.iss
 The resulting installer lands in `dist\installer\ohr-engine-setup-<version>.exe`. Override
 the version with `ISCC /DMyAppVersion=1.2.3 packaging\windows\installer.iss`.
 
-**Verified this session:** running the frozen exe with `WARFB` pointed at an empty directory
+**Previously verified for the engine-only bundle:** running the frozen exe with `WARFB` pointed at an empty directory
 (`--hidden --frames 1`, the same check the CI smoke-test step runs) reaches past argument
 parsing into `whshr.frontend.app.run` — i.e. pygame-ce and zengl, the runtime frontend's own
 third-party dependencies that are otherwise only imported lazily past the argument-parsing
@@ -107,8 +109,8 @@ alongside the app (see `installer.iss`'s `[Files]` section).
 builds the Windows installer on a `windows-latest` runner when needed (PyInstaller and Inno
 Setup both run natively there — no Wine/cross-compilation). A pending `v*` tag takes priority
 and its installer is attached to the matching GitHub Release. Use **Run workflow** to force
-a build on a selected branch or tag at any time. Not yet run on GitHub's infrastructure as
-of this writing — verify the first run before relying on it.
+a build on a selected branch or tag at any time. The build checks that the frozen launcher
+and engine dependencies import successfully.
 
 The scheduled run checks the tracked files used by each package against a marker saved
 after a successful build and release upload. If those files are unchanged, the build job
@@ -135,10 +137,10 @@ builds an amd64 `.deb` inside a Debian 12 (bookworm) container when needed. A pe
 tag takes priority and its package is attached to the matching GitHub Release; daily builds
 appear in a dated prerelease and workflow artifacts. **Run workflow** forces a build on a
 selected branch or tag at any time.
-PyInstaller bundles the engine and its Python dependencies under `/opt/ohr-engine`.
-The package provides `ohr-engine` on `PATH` and an application-menu entry. The menu
-entry opens a terminal and asks for the user's original `WARFB` directory; the command
-line entry accepts that path as its first argument or via `WARFB`. No original game files
+PyInstaller bundles the launcher, engine, and Python dependencies under `/opt/ohr-engine`.
+The package provides `ohr-engine` on `PATH` and an application-menu entry. Opening either
+without arguments shows the launcher. The command-line entry accepts a game path as its
+first argument. No original game files
 are included. Save files and logs stay in the user's home directory.
 
 To build locally on Debian 12 amd64 with `python3-venv`, `binutils`, `libgl1`,
@@ -156,17 +158,17 @@ sh packaging/linux/build-deb.sh 0.0.0~dev1
 
 The package is written to `dist/debian/`. Install with
 `sudo apt install ./dist/debian/ohr-engine_*.deb`, then run
-`ohr-engine /path/to/WARFB` or use the menu entry.
+`ohr-engine` or use the menu entry; pass a path to start the engine directly.
 The bookworm build targets Debian 12 and newer systems with compatible libraries; it has
 not been tested against an actual game installation in CI.
 
 ## AppImage
 
 `.github/workflows/appimage.yml` builds an x86_64 AppImage in a Debian 12 container. Its
-AppDir contains the frozen engine, a relative `AppRun`, a desktop file, a PNG icon, and
+AppDir contains the frozen launcher and engine, a relative `AppRun`, a desktop file, a PNG icon, and
 license notices. The workflow uses versioned upstream appimagetool and type 2 runtime
-releases. Run the resulting file with `./ohr-engine-<version>-x86_64.AppImage
-/path/to/WARFB`, or set `WARFB`. The AppImage still needs a compatible host graphics
+releases. Run the resulting file with no arguments to open the launcher, or pass
+`/path/to/WARFB` to start the engine directly. The AppImage still needs a compatible host graphics
 stack and a glibc at least as new as Debian 12's. See the
 [AppDir specification](https://docs.appimage.org/reference/appdir.html) for its layout.
 If FUSE is unavailable, set `APPIMAGE_EXTRACT_AND_RUN=1` when launching it; see the
@@ -189,7 +191,7 @@ The output is in `dist/appimage/`.
 
 `.github/workflows/rpm-package.yml` freezes the engine in a Rocky Linux 9 container and
 builds an x86_64 RPM with `rpmbuild`. It installs under `/opt/ohr-engine`, with the same
-command and terminal menu entry as the Debian package. The RPM includes the frozen Python
+command and GUI menu entry as the Debian package. The RPM includes the frozen Python
 runtime and notices, and targets systems with glibc 2.34 or newer and compatible OpenGL/X11
 libraries. Prerelease hyphens in tags become RPM tilde operators, so `v1.2.3-rc1` becomes
 `1.2.3~rc1`.
@@ -217,9 +219,9 @@ the Debian and Windows workflows. Pending release tags are processed one per day
 `.pkg` on a standard macOS 15 runner only when package sources changed or a version tag
 needs its package. **Run workflow** forces a build on a selected branch or tag. Successful
 default-branch builds appear under **Releases** as a dated weekly prerelease. The installer
-places the frozen engine under `/usr/local/lib/ohr-engine`, a command link at
+places **Open Horned Rat.app** in `/Applications`, an engine command at
 `/usr/local/bin/ohr-engine`, and license notices under `/usr/local/share/doc/ohr-engine`.
-Run `ohr-engine /path/to/WARFB` or set `WARFB` to your legally owned game installation.
+Open the app to use the launcher, or run `ohr-engine /path/to/WARFB` for command-line engine use.
 
 The package is unsigned and has not been notarized. macOS Gatekeeper may require manual
 approval before installation. Signing for smooth distribution requires an Apple Developer
@@ -231,7 +233,7 @@ To build locally on Apple Silicon with Python 3.12 and Xcode command-line tools:
 ```sh
 python3.12 -m venv /tmp/ohr-build-venv
 /tmp/ohr-build-venv/bin/pip install --only-binary=:all: -r requirements-engine.txt pyinstaller
-/tmp/ohr-build-venv/bin/pyinstaller packaging/linux/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
+/tmp/ohr-build-venv/bin/pyinstaller packaging/macos/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
 sh packaging/macos/build-pkg.sh 0.0.0-dev1
 ```
 

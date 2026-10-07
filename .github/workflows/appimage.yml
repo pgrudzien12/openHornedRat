@@ -67,7 +67,7 @@ jobs:
             echo "version=0.0.0~dev+${GITHUB_SHA:0:8}" >> "$GITHUB_OUTPUT"
             echo "release_tag=" >> "$GITHUB_OUTPUT"
           fi
-          source_hash=$(git ls-tree -r "$checkout_ref" -- packaging/linux/ohr-engine.spec packaging/linux/build-appimage.sh packaging/linux/appimage packaging/THIRD_PARTY_NOTICES.md packaging/licenses requirements-engine.txt whshr scripts LICENSE LEGAL.md packaging/windows/entrypoint.py .github/workflows/appimage.yml | sha256sum | cut -d' ' -f1)
+          source_hash=$(git ls-tree -r "$checkout_ref" -- packaging/linux/ohr-engine.spec packaging/linux/build-appimage.sh packaging/linux/appimage packaging/entrypoint.py packaging/THIRD_PARTY_NOTICES.md packaging/licenses requirements-engine.txt whshr scripts LICENSE LEGAL.md .github/workflows/appimage.yml | sha256sum | cut -d' ' -f1)
           echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
           echo "cache_key=ohr-appimage-v1-$source_hash" >> "$GITHUB_OUTPUT"
           if [[ -z "$release_tag" ]] && { [[ "$GITHUB_EVENT_NAME" == schedule ]] || [[ "$GITHUB_REF" == "refs/heads/$DEFAULT_BRANCH" ]]; }; then
@@ -114,7 +114,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./dist/ohr-engine/ohr-engine --help >/dev/null
+          ./dist/ohr-engine/ohr-engine --check-bundle
+          ./dist/ohr-engine/ohr-engine --engine --help >/dev/null
           mkdir -p /tmp/fake-warfb
           output=$(WARFB=/tmp/fake-warfb ./dist/ohr-engine/ohr-engine --hidden --frames 1 2>&1) && exit 1 || status=$?
           printf '%s\n' "$output"
@@ -141,7 +142,7 @@ jobs:
           set -euo pipefail
           image=(dist/appimage/*.AppImage)
           test "${#image[@]}" -eq 1
-          APPIMAGE_EXTRACT_AND_RUN=1 "${image[0]}" --help >/dev/null
+          APPIMAGE_EXTRACT_AND_RUN=1 "${image[0]}" --check-bundle
 
       - uses: actions/upload-artifact@v6
         with:

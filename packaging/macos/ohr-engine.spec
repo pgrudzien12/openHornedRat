@@ -1,14 +1,8 @@
-"""PyInstaller onedir build shared by the Linux packages."""
+"""Windowed macOS app with the launcher and engine in one onedir bundle."""
 
 from pathlib import Path
-import sys
 
 REPO_ROOT = Path(SPECPATH).resolve().parents[1]
-# uv's standalone Python 3.12 links _tkinter against Tcl/Tk 9 libraries in
-# sys.base_prefix/lib. PyInstaller does not currently resolve that directory.
-python_lib = Path(sys.base_prefix) / "lib"
-tk_binaries = [(str(python_lib / name), ".") for name in ("libtcl9.0.so", "libtcl9tk9.0.so")
-               if (python_lib / name).is_file()]
 datas = [
     (str(path), str(Path("scripts") / path.relative_to(REPO_ROOT / "scripts").parent))
     for path in (REPO_ROOT / "scripts").rglob("*.py")
@@ -18,7 +12,7 @@ datas = [
 a = Analysis(
     [str(REPO_ROOT / "packaging" / "entrypoint.py")],
     pathex=[str(REPO_ROOT)],
-    binaries=tk_binaries,
+    binaries=[],
     datas=datas,
     hiddenimports=["_zengl"],
     hookspath=[],
@@ -34,7 +28,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="ohr-engine",
-    console=True,
+    console=False,
     strip=False,
     upx=False,
 )
@@ -45,4 +39,10 @@ coll = COLLECT(
     name="ohr-engine",
     strip=False,
     upx=False,
+)
+app = BUNDLE(
+    coll,
+    name="Open Horned Rat.app",
+    bundle_identifier="org.openhornedrat.launcher",
+    info_plist={"CFBundleDisplayName": "Open Horned Rat", "NSPrincipalClass": "NSApplication"},
 )

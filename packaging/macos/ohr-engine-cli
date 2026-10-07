@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "/Applications/Open Horned Rat.app/Contents/MacOS/ohr-engine" --engine "$@"

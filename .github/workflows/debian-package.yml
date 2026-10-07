@@ -67,7 +67,7 @@ jobs:
             echo "version=0.0.0~dev+${GITHUB_SHA:0:8}" >> "$GITHUB_OUTPUT"
             echo "release_tag=" >> "$GITHUB_OUTPUT"
           fi
-          source_hash=$(git ls-tree -r "$checkout_ref" -- packaging/linux/ohr-engine.spec packaging/linux/build-deb.sh packaging/linux/ohr-engine-launch packaging/linux/ohr-engine.desktop packaging/windows/entrypoint.py packaging/THIRD_PARTY_NOTICES.md packaging/licenses requirements-engine.txt whshr scripts LICENSE LEGAL.md .github/workflows/debian-package.yml | sha256sum | cut -d' ' -f1)
+          source_hash=$(git ls-tree -r "$checkout_ref" -- packaging/linux/ohr-engine.spec packaging/linux/build-deb.sh packaging/linux/ohr-engine-launch packaging/linux/ohr-engine.desktop packaging/entrypoint.py packaging/THIRD_PARTY_NOTICES.md packaging/licenses requirements-engine.txt whshr scripts LICENSE LEGAL.md .github/workflows/debian-package.yml | sha256sum | cut -d' ' -f1)
           cache_key="ohr-debian-v1-$source_hash"
           echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
           echo "cache_key=$cache_key" >> "$GITHUB_OUTPUT"
@@ -115,7 +115,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./dist/ohr-engine/ohr-engine --help >/dev/null
+          ./dist/ohr-engine/ohr-engine --check-bundle
+          ./dist/ohr-engine/ohr-engine --engine --help >/dev/null
           mkdir -p /tmp/fake-warfb
           output=$(WARFB=/tmp/fake-warfb ./dist/ohr-engine/ohr-engine --hidden --frames 1 2>&1) && exit 1 || status=$?
           printf '%s\n' "$output"

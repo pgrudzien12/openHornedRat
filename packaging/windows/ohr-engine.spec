@@ -25,7 +25,7 @@ datas = [
 ]
 
 a = Analysis(
-    [str(Path(SPECPATH) / "entrypoint.py")],
+    [str(REPO_ROOT / "packaging" / "entrypoint.py")],
     pathex=[str(REPO_ROOT)],
     binaries=[],
     datas=datas,
@@ -53,7 +53,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

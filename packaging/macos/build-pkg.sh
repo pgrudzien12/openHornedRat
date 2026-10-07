@@ -13,8 +13,8 @@ esac
 
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repository_root"
-if [ ! -x dist/ohr-engine/ohr-engine ]; then
-    echo "build dist/ohr-engine first with packaging/linux/ohr-engine.spec" >&2
+if [ ! -x 'dist/Open Horned Rat.app/Contents/MacOS/ohr-engine' ]; then
+    echo "build dist/Open Horned Rat.app first with packaging/macos/ohr-engine.spec" >&2
     exit 2
 fi
 
@@ -33,10 +33,10 @@ esac
 
 stage=build/macos/package-root
 rm -rf "$stage"
-install -d "$stage/usr/local/lib/ohr-engine" "$stage/usr/local/bin" \
+install -d "$stage/Applications" "$stage/usr/local/bin" \
     "$stage/usr/local/share/doc/ohr-engine" dist/macos
-ditto dist/ohr-engine "$stage/usr/local/lib/ohr-engine"
-ln -s ../lib/ohr-engine/ohr-engine "$stage/usr/local/bin/ohr-engine"
+ditto 'dist/Open Horned Rat.app' "$stage/Applications/Open Horned Rat.app"
+install -m 755 packaging/macos/ohr-engine-cli "$stage/usr/local/bin/ohr-engine"
 install -m 644 LICENSE "$stage/usr/local/share/doc/ohr-engine/LICENSE"
 install -m 644 LEGAL.md "$stage/usr/local/share/doc/ohr-engine/LEGAL.md"
 install -m 644 packaging/THIRD_PARTY_NOTICES.md "$stage/usr/local/share/doc/ohr-engine/THIRD_PARTY_NOTICES.md"

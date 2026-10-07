@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from whshr.launcher import engine_launch
 
@@ -30,6 +31,12 @@ class EngineLaunchTests(unittest.TestCase):
 
         self.assertEqual(found, venv_python)
 
+    def test_frozen_launcher_uses_its_own_executable_even_if_a_venv_exists(self):
+        with patch.object(sys, "frozen", True, create=True), patch.object(sys, "executable", "/Applications/OHR.app/Contents/MacOS/ohr-engine"):
+            found = engine_launch.find_engine_python(self.repository_root)
+
+        self.assertEqual(found, Path("/Applications/OHR.app/Contents/MacOS/ohr-engine"))
+
     def test_given_a_missing_module_when_checking_dependencies_then_it_is_reported_unavailable(self):
         available = engine_launch.engine_dependencies_available(
             Path(sys.executable), modules=("definitely_not_a_real_module_xyz",),
@@ -41,6 +48,10 @@ class EngineLaunchTests(unittest.TestCase):
         available = engine_launch.engine_dependencies_available(Path(sys.executable), modules=("os",))
 
         self.assertTrue(available)
+
+    def test_frozen_launcher_uses_bundled_dependencies(self):
+        with patch.object(sys, "frozen", True, create=True):
+            self.assertTrue(engine_launch.engine_dependencies_available("/Applications/OHR.app/Contents/MacOS/ohr-engine"))
 
 
 class BuildCommandTests(unittest.TestCase):
@@ -57,6 +68,13 @@ class BuildCommandTests(unittest.TestCase):
         self.assertEqual(command, ["py", "-m", "whshr", "engine", "/game", "--battle", "BF001",
                                    "--skip-intro", "--no-battle"])
 
+    def test_frozen_launcher_starts_the_bundled_engine_mode(self):
+        with patch.object(sys, "frozen", True, create=True):
+            command = engine_launch.build_command("/game", "BF001", python_path="/Applications/OHR.app/Contents/MacOS/ohr-engine")
+
+        self.assertEqual(command, ["/Applications/OHR.app/Contents/MacOS/ohr-engine", "--engine", "/game",
+                                   "--battle", "BF001"])
+
     def test_given_trace_when_building_the_environment_then_the_trace_variable_is_set(self):
         traced = engine_launch.build_environment(engine_launch.LaunchOptions(trace=True), base={})
         plain = engine_launch.build_environment(engine_launch.LaunchOptions(), base={})
@@ -69,3 +87,9 @@ class BuildCommandTests(unittest.TestCase):
 
         self.assertEqual(environment["PYTHONPATH"].split(os.pathsep),
                          [str(engine_launch.REPOSITORY_ROOT), "/other"])
+
+    def test_frozen_launcher_does_not_add_a_source_checkout_to_pythonpath(self):
+        with patch.object(sys, "frozen", True, create=True):
+            environment = engine_launch.build_environment(base={})
+
+        self.assertNotIn("PYTHONPATH", environment)

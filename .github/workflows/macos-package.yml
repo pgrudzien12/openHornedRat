@@ -69,7 +69,7 @@ jobs:
             echo "version=0.0.0-dev+${GITHUB_SHA:0:8}" >> "$GITHUB_OUTPUT"
             echo "release_tag=" >> "$GITHUB_OUTPUT"
           fi
-          source_hash=$(git ls-tree -r "$checkout_ref" -- packaging/linux/ohr-engine.spec packaging/macos packaging/windows/entrypoint.py packaging/THIRD_PARTY_NOTICES.md packaging/licenses requirements-engine.txt whshr scripts LICENSE LEGAL.md .github/workflows/macos-package.yml | sha256sum | cut -d' ' -f1)
+          source_hash=$(git ls-tree -r "$checkout_ref" -- packaging/macos packaging/entrypoint.py packaging/THIRD_PARTY_NOTICES.md packaging/licenses requirements-engine.txt whshr scripts LICENSE LEGAL.md .github/workflows/macos-package.yml | sha256sum | cut -d' ' -f1)
           cache_key="ohr-macos-arm64-v1-$source_hash"
           echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
           echo "cache_key=$cache_key" >> "$GITHUB_OUTPUT"
@@ -106,19 +106,15 @@ jobs:
           pip install --only-binary=:all: -r requirements-engine.txt pyinstaller
 
       - name: Freeze engine
-        run: pyinstaller packaging/linux/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
+        run: pyinstaller packaging/macos/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
 
       - name: Smoke-test frozen engine
         shell: bash
         run: |
           set -euo pipefail
-          ./dist/ohr-engine/ohr-engine --help >/dev/null
-          mkdir -p /tmp/fake-warfb
-          output=$(WARFB=/tmp/fake-warfb ./dist/ohr-engine/ohr-engine --hidden --frames 1 2>&1) && exit 1 || status=$?
-          printf '%s\n' "$output"
-          test "$status" -ne 0
-          grep -q 'incomplete WARFB installation' <<< "$output"
-          ! grep -Eq 'ModuleNotFoundError|ImportError' <<< "$output"
+          app='dist/Open Horned Rat.app/Contents/MacOS/ohr-engine'
+          "$app" --check-bundle
+          "$app" --engine --help >/dev/null
 
       - name: Build macOS installer package
         shell: bash
@@ -133,7 +129,7 @@ jobs:
           package=(dist/macos/*.pkg)
           pkgutil --payload-files "${package[0]}" > /tmp/ohr-macos-payload.txt
           grep -Eq '(^|/)usr/local/bin/ohr-engine$' /tmp/ohr-macos-payload.txt
-          grep -Eq '(^|/)usr/local/lib/ohr-engine/ohr-engine$' /tmp/ohr-macos-payload.txt
+          grep -Eq '(^|/)Applications/Open Horned Rat.app/Contents/MacOS/ohr-engine$' /tmp/ohr-macos-payload.txt
           grep -Eq '(^|/)usr/local/share/doc/ohr-engine/THIRD_PARTY_NOTICES.md$' /tmp/ohr-macos-payload.txt
 
       - uses: actions/upload-artifact@v6

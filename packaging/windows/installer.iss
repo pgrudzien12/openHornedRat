@@ -1,8 +1,7 @@
 ; Inno Setup script for the Windows installer (epic #96, issue #97).
 ;
-; Chosen approach (see packaging/README.md): PyInstaller freezes packaging/windows/entrypoint.py
-; (a stopgap wrapper around `whshr engine` until the standalone launcher, epic #88, exists) into
-; dist/ohr-engine/; this script wraps that onedir output. Per-user install, no admin required
+; PyInstaller freezes packaging/entrypoint.py into dist/ohr-engine/; this script
+; wraps that onedir output. Per-user install, no admin required
 ; (PrivilegesRequired=lowest, install dir under the user's local app data, Start Menu shortcut
 ; under the user's own Start Menu, not the shared one).
 ;
@@ -13,7 +12,7 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0-dev"
 #endif
-#define MyAppName "openHornedRat Engine"
+#define MyAppName "Open Horned Rat"
 #define MyAppPublisher "openHornedRat project"
 #define MyAppURL "https://github.com/pgrudzien12/openHornedRat"
 #define MyAppExeName "ohr-engine.exe"

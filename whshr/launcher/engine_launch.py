@@ -24,6 +24,8 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 def find_engine_python(repository_root: PathArg = REPOSITORY_ROOT) -> Path:
     """The interpreter that should run ``whshr engine``: the local ``.venv`` if one exists."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable)
     repository_root = Path(repository_root)
     relative = "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
     venv_python = repository_root / ".venv" / relative
@@ -33,6 +35,8 @@ def find_engine_python(repository_root: PathArg = REPOSITORY_ROOT) -> Path:
 def engine_dependencies_available(python_path: PathArg, modules: Sequence[str] = ("pygame", "zengl"),
                                   timeout: float = 10) -> bool:
     """Whether ``python_path`` can import the engine's frontend dependencies."""
+    if getattr(sys, "frozen", False):
+        return True  # the packaged executable is smoke-tested with both dependencies
     try:
         result = subprocess.run(
             [str(python_path), "-c", f"import {', '.join(modules)}"],
@@ -56,7 +60,9 @@ def build_command(installation: PathArg, battle_id: str | None = None, options: 
                   python_path: PathArg | None = None) -> list[str]:
     """The ``whshr engine`` command line: a normal start, or a direct battle when ``battle_id`` is given."""
     options = options or LaunchOptions()
-    command = [str(python_path or find_engine_python()), "-m", "whshr", "engine", str(installation)]
+    executable = str(python_path or find_engine_python())
+    command = ([executable, "--engine", str(installation)] if getattr(sys, "frozen", False) else
+               [executable, "-m", "whshr", "engine", str(installation)])
     if battle_id:
         command += ["--battle", battle_id]
     if options.skip_intro:
@@ -69,10 +75,10 @@ def build_command(installation: PathArg, battle_id: str | None = None, options: 
 def build_environment(options: LaunchOptions | None = None, base: Mapping[str, str] | None = None) -> dict[str, str]:
     """The child's environment: the checkout on ``PYTHONPATH``, plus ``WHSHR_TRACE_SCRIPTS=1`` when tracing."""
     environment = dict(os.environ if base is None else base)
-    # Put the checkout on the child's import path explicitly: a debugger-wrapped child does not
-    # get the working directory on sys.path, and `-m whshr` then fails with "No module named whshr".
-    existing = environment.get("PYTHONPATH")
-    environment["PYTHONPATH"] = os.pathsep.join([str(REPOSITORY_ROOT)] + ([existing] if existing else []))
+    if not getattr(sys, "frozen", False):
+        # A source checkout needs its modules on the child's import path.
+        existing = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = os.pathsep.join([str(REPOSITORY_ROOT)] + ([existing] if existing else []))
     if options and options.trace:
         environment["WHSHR_TRACE_SCRIPTS"] = "1"
     return environment
@@ -83,7 +89,7 @@ def launch_engine(installation: PathArg, battle_id: str | None = None, options: 
     """Starts the engine as an independent process (a normal game, or one battle)."""
     return subprocess.Popen(
         build_command(installation, battle_id, options, python_path),
-        cwd=str(REPOSITORY_ROOT),
+        cwd=None if getattr(sys, "frozen", False) else str(REPOSITORY_ROOT),
         env=build_environment(options),
     )
 

@@ -3,7 +3,7 @@
 Name:           ohr-engine
 Version:        %{pkg_version}
 Release:        1%{?dist}
-Summary:        Open Horned Rat engine for Shadow of the Horned Rat
+Summary:        Open Horned Rat launcher and engine for Shadow of the Horned Rat
 License:        GPL-3.0-or-later
 URL:            https://github.com/pgrudzien12/openHornedRat
 AutoReqProv:    no

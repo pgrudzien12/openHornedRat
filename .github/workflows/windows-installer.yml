@@ -71,7 +71,7 @@ jobs:
             echo "version=0.0.0-dev+${GITHUB_SHA:0:8}" >> "$GITHUB_OUTPUT"
             echo "release_tag=" >> "$GITHUB_OUTPUT"
           fi
-          source_hash=$(git ls-tree -r "$checkout_ref" -- packaging/windows packaging/THIRD_PARTY_NOTICES.md packaging/licenses requirements-engine.txt whshr scripts LICENSE .github/workflows/windows-installer.yml | sha256sum | cut -d' ' -f1)
+          source_hash=$(git ls-tree -r "$checkout_ref" -- packaging/windows packaging/entrypoint.py packaging/THIRD_PARTY_NOTICES.md packaging/licenses requirements-engine.txt whshr scripts LICENSE .github/workflows/windows-installer.yml | sha256sum | cut -d' ' -f1)
           cache_key="ohr-windows-v1-$source_hash"
           echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
           echo "cache_key=$cache_key" >> "$GITHUB_OUTPUT"
@@ -112,20 +112,11 @@ jobs:
 
       - name: Smoke-test the frozen executable
         shell: bash
-        # `whshr engine` lazily imports pygame/zengl only once past argument parsing (they
-        # are the runtime frontend's own third-party dependencies), so a bare no-args run
-        # only proves argparse works, not that the frozen native DLLs load. Point WARFB at
-        # an empty directory: this is not a real installation (the game is never bundled or
-        # available on a CI runner - see CLAUDE.md), but whshr.frontend.app.run validates the
-        # installation (whshr/assets.py) before ever opening a window/GL context, so this
-        # reaches the pygame/zengl imports and fails deterministically on the installation
-        # check, without needing GPU-accelerated OpenGL to be available on the runner.
+        # A windowed PyInstaller exe does not expose stdout/stderr to this shell. The
+        # self-check imports Tk and the engine's native dependencies and returns failure
+        # if any import fails, without opening a window or requiring game files.
         run: |
-          mkdir -p /tmp/fake_warfb
-          out="$(WARFB=/tmp/fake_warfb ./dist/ohr-engine/ohr-engine.exe --hidden --frames 1 2>&1 || true)"
-          echo "$out"
-          echo "$out" | grep -q "incomplete WARFB installation"
-          ! echo "$out" | grep -qE "ModuleNotFoundError|ImportError"
+          ./dist/ohr-engine/ohr-engine.exe --check-bundle
 
       - name: Compile installer with Inno Setup
         shell: pwsh
