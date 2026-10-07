@@ -33,6 +33,7 @@ from ..battle3d import Projection
 from ..battlefield import SpriteSheet
 from ..scenes import SceneEvent
 from .cursors import GameCursors
+from .battle_text import display_text, reaction_text
 from .battle_sound import BattleSounds
 from .ranged_sound import MissileSounds
 from .gpu import Gpu
@@ -572,12 +573,12 @@ class BattleView(SceneView[BattleScene]):
                             message = message % display_name
                         except (TypeError, ValueError):
                             pass
-                self.battle_log.append(("", message))
+                self.battle_log.append(("", display_text(message)))
                 self.log_scroll = 0
             if hasattr(event, "kind") and event.kind == "react":
                 sender = event.data.get("sender", "")
                 message = event.data.get("message", str(event))
-                self.battle_log.append((f"{sender}:", message))
+                self.battle_log.append((f"{sender}:", reaction_text(message)))
                 self.log_scroll = 0  # auto-scroll to newest on a new message
         self.event_log.extend(str(event) for event in self.scene.battle.events)
         battle_sounds: BattleSounds | None = getattr(self, "battle_sounds", None)  # tests build views without __init__
