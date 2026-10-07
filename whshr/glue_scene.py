@@ -378,7 +378,7 @@ class GlueScene(Scene):
             self._queue((Diagnostic("caravan", "the army book needs a company"),))
             return None
         model = RosterBook(campaign.company, coffers=campaign.coffers, reinforcements=campaign.reinforcements,
-                           pays=hire_only)
+                           pays=hire_only, wounded=campaign.wounded_last)
         return Transition(ArmyRecordsScene(self, campaign.company[0].whoami, model), "army records opened")
 
     def _open_magic_book(self) -> Transition | None:

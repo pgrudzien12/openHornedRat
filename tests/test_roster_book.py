@@ -30,6 +30,12 @@ def book(company, coffers=1000, reinforcements=None, pays=True):
 
 
 class HireOnlyBookTests(unittest.TestCase):
+    def test_caravan_book_reserves_room_for_wounded(self):
+        model = RosterBook([regiment(2, models=10, orgsize=12)], coffers=1000,
+                           reinforcements={2: 5}, pays=False, wounded={2: 1})
+
+        self.assertEqual(model.ledger.offered[2], 1)
+
     def test_given_a_regiment_for_hire_when_hired_then_its_price_leaves_the_coffers_and_it_joins_the_march(self):
         model = book([regiment(2, for_hire=False), regiment(5, hired=False, models=10, base_price=12)])
 
@@ -167,6 +173,18 @@ class ReinforcementTests(unittest.TestCase):
         ledger = ReinforcementLedger(company, {5: 7, 6: 7})
 
         self.assertEqual((ledger.offered[5], ledger.offered[6]), (2, 0))
+
+    def test_wounded_reserve_slots_in_the_reinforcement_offer(self):
+        company = {2: regiment(2, models=10, orgsize=12),
+                   3: regiment(3, models=13, orgsize=16)}
+        ledger = ReinforcementLedger(company, {2: 12, 3: 16}, wounded={2: 1, 3: 1})
+
+        self.assertEqual((ledger.offered[2], ledger.offered[3]), (1, 2))
+        self.assertTrue(ledger.increase(2))
+        self.assertFalse(ledger.increase(2))
+        self.assertTrue(ledger.increase(3))
+        self.assertTrue(ledger.increase(3))
+        self.assertFalse(ledger.increase(3))
 
     def test_given_a_regiment_read_from_a_script_when_its_size_changes_then_the_written_node_follows(self):
         text = "[MERCARMY]\n[UNITS]\naddunit:Some<Unit\nset:whoami=5\nset:hired=1\nsetstats:s_side=2,12,9,1\nendunit:\n[END]\n[END]\n"

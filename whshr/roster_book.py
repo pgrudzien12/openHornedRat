@@ -41,7 +41,8 @@ class RosterBook:
     """The caravan's Army Records; notes/builtin_widgets.md §2.1, §2.3."""
 
     def __init__(self, company: Iterable[Regiment], *, coffers: int, reinforcements: Mapping[int, int],
-                 pays: bool, limit: int = DEFAULT_LIMIT) -> None:
+                 pays: bool, limit: int = DEFAULT_LIMIT,
+                 wounded: Mapping[int, int] | None = None) -> None:
         self.company: dict[int, Regiment] = {regiment.whoami: regiment for regiment in company}
         self.pays = pays
         self.coffers = coffers
@@ -55,7 +56,7 @@ class RosterBook:
         self.selection: list[int] = ([] if pays else
                                      [whoami for whoami, regiment in self.company.items()
                                       if whoami == ALWAYS_FORCED_WHOAMI and not regiment.destroyed])
-        self.ledger = ReinforcementLedger(self.company, reinforcements)
+        self.ledger = ReinforcementLedger(self.company, reinforcements, wounded)
 
     @property
     def dirty(self) -> bool:

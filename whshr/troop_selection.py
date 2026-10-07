@@ -47,7 +47,8 @@ class TroopSelection:
 
     def __init__(self, company: Iterable[Regiment], forced: Iterable[int] = (), excluded: Iterable[int] = (),
                  limit: int = DEFAULT_LIMIT, coffers: int = 0, prepaid: int = 0,
-                 reinforcements: Mapping[int, int] | None = None) -> None:
+                 reinforcements: Mapping[int, int] | None = None,
+                 wounded: Mapping[int, int] | None = None) -> None:
         self.company: dict[int, Regiment] = {regiment.whoami: regiment for regiment in company}
         # a forced regiment that is not in the company file (it has not joined yet) cannot be selected or paid for
         self.forced = (frozenset(forced) | {ALWAYS_FORCED_WHOAMI}) & self.company.keys()
@@ -55,7 +56,7 @@ class TroopSelection:
         self.limit = max(LIMIT_RANGE[0], min(LIMIT_RANGE[1], limit))
         self.coffers = coffers
         self.prepaid = prepaid
-        self.ledger = ReinforcementLedger(self.company, reinforcements or {})
+        self.ledger = ReinforcementLedger(self.company, reinforcements or {}, wounded)
         self.pays = False  # the selection book never touches the coffers (notes/troop_selection.md §4.3)
         # notes/troop_selection.md §4.1: forced regiments become hired; selected unless destroyed.
         self.hired = {whoami: regiment.hired or whoami in self.forced

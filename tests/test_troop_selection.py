@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 import pygame
@@ -14,6 +15,12 @@ def regiment(whoami, hired=True, models=10, for_hire=True, artillery=False, base
 
 
 class TroopSelectionTests(unittest.TestCase):
+    def test_selection_book_reserves_room_for_wounded(self):
+        cavalry = replace(regiment(2, models=10), orgsize=12)
+        selection = TroopSelection([cavalry], reinforcements={2: 5}, wounded={2: 1})
+
+        self.assertEqual(selection.ledger.offered[2], 1)
+
     def test_given_the_always_forced_commander_when_opened_then_it_is_hired_and_selected(self):
         selection = TroopSelection([regiment(2)], coffers=1000)
 
