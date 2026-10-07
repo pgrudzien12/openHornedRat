@@ -7,8 +7,8 @@ Public implementation report, batch 7 of the interpreter requests (GitHub #3). B
 
 **Read in `game_rules.md` rather than re-deriving:**
 - "Winds of magic and casting": the two power pools (0–8, player and enemy; the allied side uses the player's),
-  the 50 s wind, spell costs, the player's click path (cost paid on the click), the `LaunchEffect` checks
-  (≤ 64 active effects, who can cast, range from the unit centre, ±50° arc, unit-target spells need a unit under
+  the 50 s wind, spell costs, the player's click path (cost paid on the click), the launch checks
+  (who can cast, range from the unit centre, ±50° arc, unit-target spells need a unit under
   the point), no casting roll, `GMTXT 2021` on failure;
 - "Spells" (per-spell ranges and effects), "Dispel and anti-magic", "AI casting";
 - "Who shoots, orders and volleys" (special shooters, used by `IsSpecialShooter` below).
@@ -61,7 +61,7 @@ point (`game_rules.md` "Checks"). Minimal interface:
 
 ```
 launch(spell, caster, origin_model, x, y) -> bool
-  fails (and does nothing) if: 64 effects active; caster cannot cast; aim point out of the spell's range from the
+  fails (and does nothing) if: caster cannot cast; aim point out of the spell's range from the
   caster's centre or outside ±50° of its facing (arc skipped while the caster is in melee); a unit-target spell finds
   no unit under the point (Madness: no hostile, not-already-mad unit)
   on failure: the spell's panel entry is made usable again; GMTXT 2021 only if the caster is in the player army

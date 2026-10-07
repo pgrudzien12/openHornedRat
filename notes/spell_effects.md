@@ -22,16 +22,24 @@ consumes a random number in the order given, which matters for deterministic rep
 
 ---
 
-## 1. The active-effect list (framework) ✅
+## 1. Active effects (framework) ✅
 
 ### 1.1 What an active effect holds
 
-Every launch that succeeds creates one **active effect** in a fixed table of **64 slots**. Fields an engine needs
-(names are ours):
+Every launch that succeeds creates one **active effect**, which lives until its spell has run its course (including the
+visual tail, §1.5) or is cancelled (§1.4). Keeping the effect as a live object, rather than resolving a spell in one
+step, matters because almost every rule acts on it while it lasts:
+
+- the spell's own behaviour runs from it, tick by tick (flight, timers, phases, auras, end step and stat restores);
+- dispel finds and removes effects, measured from the effect's position (`spell_lasting_effects.md` §5);
+- the caster's "spell active" state (§1.3) comes from it, and the AI refuses to re-cast a spell while it is active;
+- the AI's Dispel choice looks for a hostile active effect (`spell_lasting_effects.md` §5.5);
+- cancellation acts on it: replacement by a new cast, Ctrl+click, the caster's or target's removal (§1.4).
+
+Fields an engine needs (names are ours; how effects are stored is the engine's choice):
 
 | field | meaning |
 |---|---|
-| in use | slot taken; a launch takes the **lowest free slot** |
 | spell code | effect code 1–27, or an item code (Banner of Wrath = Lightning, Grudgebringer = Fireball) |
 | owner | the **caster unit** (always the launching unit, also for innate effects) |
 | innate | launched by a special weapon or a behaviour (Doomwheel bolts, Dragon breath, warpfire, steam gun, behaviour-27 breath) rather than cast; innate effects skip the caster, range and arc checks, are never cancelled or dispelled (§1.4) and never touch the spell list (§1.3) |
@@ -44,18 +52,17 @@ Every launch that succeeds creates one **active effect** in a fixed table of **6
 
 The **origin model** is *not* stored: it is only used to place the projectile's start (§2.1).
 
-### 1.2 What counts against the 64
+### 1.2 What is an effect, and the original's capacity limit
 
-**Every** active effect, cast or innate: each Lightning/Fireball/…, each Doomwheel bolt (3 per volley), **each** Dragon
-breath flame (4–9 per breath) and warpfire flame (1–6), each steam-gun shot, each behaviour-27 breath, item effects,
-and every lasting spell until it ends. Not counted: ordinary missiles (their own 32-slot pool, `game_rules.md` §8.1),
-area objects (they are map objects), Storm of Shemtek's successive bolts and Hunting Spear's legs (they reuse their
-own effect's projectile).
+**Each** launch is one effect, cast or innate: each Lightning/Fireball/…, each Doomwheel bolt (3 per volley), **each**
+Dragon breath flame (4–9 per breath) and warpfire flame (1–6), each steam-gun shot, each behaviour-27 breath, item
+effects, and every lasting spell until it ends. Not effects of their own: ordinary missiles, area objects (they are map
+objects owned by an effect), Storm of Shemtek's successive bolts and Hunting Spear's legs (they belong to their
+spell's one effect).
 
-When 64 effects are active every launch fails, **innate ones included**: a failed launch prints `GMTXT 2021`
-("…attempted to cast … but failed") when the caster is in the player army (not for allies, not for the enemy), even
-for a Doomwheel or a breath weapon. A failed *cast* also re-enables the spell's panel entry; a failed innate launch
-just does nothing.
+The original allows at most 64 effects at the same time; a launch beyond that fails like any failed launch
+(`GMTXT 2021` for player-army casters, innate launches included). The cap is practically unreachable in normal play
+and is not a game rule: an engine may use any capacity or none.
 
 ### 1.3 "This caster has an active effect of this spell" (the spell-list state of `script_magic.md` §0.1)
 
@@ -70,9 +77,7 @@ just does nothing.
 ### 1.4 How an effect ends or is removed
 
 Natural end: each spell runs through its phases (§3); when the last phase is done the effect's end routine runs
-(stat restores etc. for part-B spells; nothing for bolts), its sounds stop, the slot is freed, the active-effect count
-drops by one and §1.3 is updated. **Exception:** a Dispel Magic effect frees its slot without lowering the count, so
-every Dispel Magic cast lowers the usable limit by one for the rest of the battle (`spell_lasting_effects.md` §5.4).
+(stat restores etc. for part-B spells; nothing for bolts), its sounds stop, the effect is gone and §1.3 is updated.
 
 Cancellation (immediate, same end routine, projectile/particles/area objects removed at once, no impact, no message
 except dispel's own) happens to **non-innate** effects only:
@@ -92,10 +97,10 @@ credited to a unit no longer on the field).
 
 ### 1.5 Visual tail
 
-After the decisive moment, bolts keep their slot while their impact flash / trail particles finish (Lightning, Gaze,
+After the decisive moment, bolts stay active while their impact flash / trail particles finish (Lightning, Gaze,
 Warp Lightning, Banner of Wrath: one flash; Fireball, Grudgebringer, warpfire, Burning Head: until every trail
-particle has finished). During the tail the effect still counts against the 64, still holds the §1.3 state, and is
-still a dispel candidate (part B). It deals no more damage. 🟡 the tail length is the particle animation's
+particle has finished). During the tail the effect still holds the §1.3 state and is still a dispel candidate
+(part B). It deals no more damage. 🟡 the tail length is the particle animation's
 (a few ticks); an engine may use a fixed short tail (e.g. 8 ticks) and keep it data-driven.
 
 ### 1.6 Launch side effects ✅
@@ -109,9 +114,9 @@ still a dispel candidate (part B). It deals no more damage. 🟡 the tail length
 
 One battle update: (segment bookkeeping) → **every unit in table order** (behaviour script — where `CastPending`
 launches —, movement, models) → **ordinary missiles** → **active effects** → model deaths/corpses → housekeeping.
-Inside the effect step: (1) the item dispel auras, (2) Dispel Magic / Mork Save Uz auras for all slots, (3) each
-in-use slot is advanced **in slot order** (0…63, not launch order; a freed low slot is reused by the next launch).
-A projectile therefore moves and tests after every unit has moved this tick.
+Inside the effect step: (1) the item dispel auras, (2) the Dispel Magic / Mork Save Uz auras, (3) every effect
+advances once. The order of effects among themselves is not specified (the original's is not launch order); an
+engine may choose any fixed order. A projectile therefore moves and tests after every unit has moved this tick.
 
 ---
 
@@ -426,8 +431,6 @@ footprint also contains the point (`d ≤ footprint`) tests too, also if Y is th
 y 180–220: the beam's height above the ground there would be 8 − 20 < 0, so at y = 191 (the first position on the
 ridge) it is removed: no impact, no terminal, flash tail at the destination (visual only).
 
-**V12 — 64 effects.** 64 active (e.g. 60 + a 4-flame Dragon breath): a player Lightning cast fails (`GMTXT 2021`,
-power lost, entry re-enabled); a player-army Doomwheel's bolt also fails with `GMTXT 2021`.
 
 ---
 
@@ -435,7 +438,7 @@ power lost, entry re-enabled); a player-army Doomwheel's bolt also fails with `G
 
 | engine today | original |
 |---|---|
-| launch appends a "spell" event only | creates an active effect in a 64-slot table; every effect, innate included, counts |
+| launch appends a "spell" event only | creates an active effect that lives until the spell ends (§1.1); innate launches too |
 | no per-caster "effect active" state | §1.3 (caster, code), cleared only when the last one (with its visual tail) ends |
 | nothing happens when the caster dies | a destroyed/fled/removed **Wizard** unit cancels all its effects (bolts vanish); target removal cancels effects on that target |
 | launch does not reveal | a launch un-hides the caster |
@@ -475,7 +478,7 @@ power lost, entry re-enabled); a player-army Doomwheel's bolt also fails with `G
 9. `game_rules.md` "Spells" (stacking note): **Curse of Anraheir** also replaces the same caster's previous Curse
    (not only Wind Blast, Flamestorm and Tangling Thorn) — part B to confirm the consequences.
 10. `ranged_combat_handoff.md` §3 "Doomwheel lightning and Pestilent Breath … belong to separate behaviour work": now
-   specified here (§3.3, §3.7); the innate launch also needs a free slot of the 64.
+   specified here (§3.3, §3.7); each is an active effect like a cast spell.
 
 ## 8. Open items
 

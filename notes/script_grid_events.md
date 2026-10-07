@@ -105,7 +105,7 @@ Notes:
 
 **Correction to `script_magic.md` §4:** a player cast order (event 0x2B) **never names a unit** — the event source is
 always none, so its unit branch ("becomes the target only if the caster is not charging, …") is never reached by a
-cast order. The spell goes to the clicked point, and `LaunchEffect` then needs a unit under the point for unit-target
+cast order. The spell goes to the clicked point, and the launch then needs a unit under the point for unit-target
 spells (`game_rules.md` "Checks"). The unit branch is reached by events 0x28/0x29/0x2F (wizard), 0x1E/0x1F/0x25
 (shooters) and 0x04 (attack).
 

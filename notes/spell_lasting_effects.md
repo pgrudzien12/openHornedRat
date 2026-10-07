@@ -3,7 +3,7 @@
 Issue #168, part B. Status markers: ✅ established, 🟡 hypothesis, ⬜ unresolved. Companion: `notes/spell_effects.md`
 (part A: the active-effect list, the magical hit, the bolt/beam spells).
 
-Part A (`notes/spell_effects.md`) holds the effect framework (what an active effect holds, the 64 limit, removal
+Part A (`notes/spell_effects.md`) holds the effect framework (what an active effect holds and why it is kept, removal
 on caster death) and the magical hit. Read first, do not re-derive:
 `game_rules.md` §8 "Winds of magic and casting", "Spells", "Dispel and anti-magic", "Magic items in battle", "Death
 kinds"; `script_magic.md` §0 (shared state), §0.4 (launch interface), §2.2/§2.3 (AI choice);
@@ -246,7 +246,7 @@ There is **no side test**.
 
 Order inside the effect update of a tick: (a) item auras, unit list order, one pass per qualifying item; (b) Dispel
 Magic and Mork Save Uz passes, effect list order; (c) every effect's own update. Nothing of (a)/(b) runs in a tick
-in which the active-effect count is 0.
+in which no effect is active.
 
 | source | P | c | schedule | lifetime |
 |---|---|---|---|---|
@@ -278,15 +278,12 @@ in which the active-effect count is 0.
 Mork Save Uz quirk: when its pass dispels something, its **own** entry's "active" state is cleared although the
 aura keeps running — the AI may then cast a second Mork Save Uz, and Ctrl+click no longer cancels it.
 
-### 5.4 Dispel Magic: once per battle, and an effect-count leak (model-changing)
+### 5.4 Dispel Magic: once per battle (model-changing)
 
 - Clicking Dispel Magic (player) and launching it (any caster) put the Dispel entry in the **selected** state, and
   nothing ever clears it for Dispel Magic. So **each wizard can cast Dispel Magic once per battle**: afterwards the
   player's button stays unusable and the AI's Dispel rule rejects the entry. (This also holds after a *failed*
   player order: the click alone selects it.)
-- A Dispel Magic effect that ends (timer or successful pass) is retired **without lowering the active-effect count**
-  of part A. Each Dispel Magic cast therefore permanently uses up one unit of the 64-effect limit for the rest of
-  the battle (bounded in practice by the once-per-wizard rule). Confirmed with part A §1.4: the slot is freed, the count is not lowered.
 - No message, sound or event marks the Dispel's own end.
 
 ### 5.5 The AI's Dispel rule restated

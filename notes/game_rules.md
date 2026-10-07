@@ -2259,8 +2259,8 @@ battle clock (19 per segment, 100 ms each).
 
 ### Who shoots, orders and volleys ✅
 
-- Only classes 3 (Archers) and 4 (Artillery) use `FireMissile`, with at most 32 projectiles in flight
-  (the game; 64 for spell effects). The missile code is `S_BalWeap` of the unit (Archers), of the
+- Only classes 3 (Archers) and 4 (Artillery) use `FireMissile`, with a limited number of projectiles in flight
+  (the original's capacity; not a game rule, `ranged_combat_handoff.md`). The missile code is `S_BalWeap` of the unit (Archers), of the
   leader's block (Artillery) or the leader's if non-zero (others).
 - Shooting is run by the **library behaviour scripts** (107–124, handlers 154/156, identical in all mission
   DLLs). A player fire order (`OrderFire`) **halts a moving unit** and queues an event:
@@ -2366,7 +2366,7 @@ never misfires.
 
 ### Special weapons ✅
 
-These reuse the **spell effect engine** (`LaunchEffect`, innate casting) and are magical
+These reuse the **spell effect engine** (the spell launch, innate casting) and are magical
 (`MagicResistent` ignores half the hits).
 
 | Code / routine | Targeting | Shots | Per shot |
@@ -2418,18 +2418,18 @@ WFB: D6 S5 hits per unit touched, 2D6" moves, dies on a double; here damage scal
 - **Casting**: the spell button is enabled when the cost fits the pool; the **cost is paid on the click**.
   Azure Blades, Dispel Magic and Fists of Gork need no target. The target click gives order 0x17 → event 0x2B to
   the wizard (a busy wizard: `GMTXT 2014` "…is preparing to cast a spell", order dropped) → casting animation →
-  event 0x2C → op 147 `CastPending` → `LaunchEffect`. Storm of Shemtek and Flying Bower keep the wizard busy until
+  event 0x2C → op 147 `CastPending` → the launch (`notes/spell_effects.md`). Storm of Shemtek and Flying Bower keep the wizard busy until
   they end. Ctrl+click on an active spell cancels the caster's effects of that code (no refund).
   **In close combat** a wizard casts at once without the animation if the target is in range and inside the arc; an
   engaged wizard cannot turn, so a target outside the arc cancels the spell (op 0xAA). Outside combat the wizard
   first turns ("Turning Wizard to cast spell.", script 141: instant quarter/half turn beyond 45°, then a wheel);
   the arc is not re-tested after the turn.
-- **Checks** (`LaunchEffect`): fewer than 64 active effects; the caster can cast (class Wizard,
+- **Checks** (the launch): the caster can cast (class Wizard,
   or a leader with `S_BalWeap` 16, e.g. the Orc shaman on a Wyvern); target point within `EffectRange` of the
   unit centre and within **±50° of facing**; unit-target spells need a unit under the point. **No line of
   sight, no casting roll, no miscast, no reload** (but bolt spells **scatter** with the caster's BS and are stopped by
   terrain above their path and by solid objects, `notes/spell_effects.md` §2); on failure `GMTXT 2021` "…attempted to cast … but failed" (shown only
-  for player-army casters) and the power is lost (`script_magic.md`). The 2D6 inside `LaunchEffect` is the bolt count of Storm of Shemtek.
+  for player-army casters) and the power is lost (`script_magic.md`). The 2D6 rolled at the launch is the bolt count of Storm of Shemtek.
 - 🟡 Holding **Shift** at launch switches several spells to alternative projectiles (Flying Bower then does S3
   hits); it reads the physical keyboard, so it affects AI casts too (probably a developer toggle).
 

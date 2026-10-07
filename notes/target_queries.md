@@ -264,12 +264,12 @@ kind. 🟡 That fallback is not used by the shipped scripts' normal flow.
 
 **Arc (0x94 only):** the bearing from the caster's position to the point must be **strictly within ±70/512 of
 the caster's facing** (half-width 71: circular difference < 71, about ±49.9°). This is the same ±50° as the
-`LaunchEffect` casting check. Two exceptions:
+launch's casting check. Two exceptions:
 
 - a point exactly at the caster's position always passes;
 - **while the caster is in melee** (`unit_flags & 0x200`) the arc test is **skipped** and 0x94 behaves like 0x95.
   (`game_rules.md` "Casting" says an engaged wizard's spell is cancelled when the target is outside the arc. That
-  must come from the scripts or from `LaunchEffect`'s own arc check, not from this opcode.)
+  must come from the scripts or from the launch's own arc check, not from this opcode.)
 
 **Side effects:** none, apart from the optional message. No turn, no state change.
 
