@@ -250,6 +250,31 @@ and the leader's copy.
 - Comparison with WFB 4th edition: the tabletop game has no experience; the thresholds are a computer-game
   addition. The "Dogs of War" flavour survives in paying for troops by the model.
 
+#### Optional marksman progression (proposed engine mod rule)
+
+Tracked in [issue #180](https://github.com/pgrudzien12/openHornedRat/issues/180).
+
+The following is a **proposed optional rule**, not behaviour of the original game. The
+original promotion track above should remain the default. The engine currently gives
+the first promotion to Ballistic Skill for a broad ranged category, while leaving
+the second and third promotions at Strength and Wounds. A selectable mod rule would
+replace that interim behaviour with separate tracks:
+
+| Regiment's ordinary missile weapon | 2000 XP | 4000 XP | 6000 XP |
+|---|---|---|---|
+| Bow, crossbow, Wood Elf bow, short bow, longbow | +1 BS | +1 I | +1 BS |
+| Great cannon, cannon, mortar, Hellblaster, rock lobber, Doom Diver | +1 BS | +1 I | +1 W |
+| Other special ranged attacks | +1 WS | +1 S | +1 W |
+
+Identify the first two groups by their ordinary missile weapon, rather than the
+regiment class alone: a Gyrocopter bomb and innate fire or breath attacks should not
+inherit the bow track accidentally. In the battle rules, BS narrows ordinary shot
+scatter and I shortens reload; artillery also loses its ability to fire when the
+machine is destroyed (`game_rules.md` §8; `ranged_combat_handoff.md` §4). The thresholds,
+leader and troop updates, price changes, and points-value changes stay as specified
+above. A campaign should retain its chosen rule across engine saves, and changing it
+should not recalculate promotions already earned.
+
 ### 1.4 "+1 Armour rating" (`BKTXT` 5022) ✅
 
 The balance-sheet program's opcodes `0x0D`–`0x13` name one regiment each by
