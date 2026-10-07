@@ -44,18 +44,18 @@ A letter that is not defined in the battle has no record: `testobjective`, the e
 
 ### 2.2 The 26 letters ✅ (GAMEF evaluators)
 
-Evaluator modes: 1 = battle start, 2 = every tick (flag `0x2` letters), 3 = final pass (flag `0x8` letters). Flags (`notes/game_rules.md`
+Evaluator modes: 1 = battle load, 2 = every segment boundary (flag `0x2` letters), 3 = final pass when the player leaves the battle with the tent button (flag `0x8` letters). In-battle rules: [battle_end_objectives.md](battle_end_objectives.md). Flags (`notes/game_rules.md`
 "Missions and objectives"): `0x1` ends the battle when met, `0x4` no line in the end-of-battle list, `0x20` custom end-of-battle line, `0x10` still evaluated after
 the battle is decided. "Side" = unit side bits: `0x00` player, `0x40` allied NPC, `0x80` enemy, `0x20` neutral/structures.
 
 | L | Flags | What is measured / when `met` | v1 | v2 | v3 | v4 | Consumers |
 |---|---|---|---|---|---|---|---|
 | A | 0x03 | enemy (side `0x80`): **all** enemy regiments counted at start are dead, or gone from the field | enemy models at start | enemy regiments at start | 0 | 0 | default evaluator, end screen key `A`, cash `A` letters |
-| B | 0x28 | ≥ `a`% of the units of class 6 (villagers, slaves) survive (alive or routed off alive) | `a` = required % | class-6 models at start | % now | count now | text ops, cash 0x3C/0x3F/0x54, evaluator E2/E5, `bonusadd` |
+| B | 0x28 | ≥ `a`% of the models of race 6 (Peasant: villagers, slaves) survive (still in battle, or left the field alive) | `a` = required % | class-6 models at start | % now | count now | text ops, cash 0x3C/0x3F/0x54, evaluator E2/E5, `bonusadd` |
 | C | 0x28 | ≥ `a`% of the side-`0x20` units (buildings) survive | `a` | structures at start | % now | count now | text ops, cash 0x3D |
 | D | 0x08 | wagons lost (class `0x38`, side `0x40`) ≤ `a` (0 in shipped data) | `a` | wagons at start | lost | wagons now | cash 0x3E (−A × v3), text op D, `testobjective:D` |
 | E | 0x08 | ≥ `a`% (100) of the enemy models **killed** (routed enemies do not count) | `a` | enemy models at start | % killed | killed | `testobjective:E` (BPMission5) |
-| F | 0x07 | like A but routed/fled units do not count as gone | enemy count | — | 0 | 0 | ends BF009 |
+| F | 0x07 | like A, but only removed regiments (dead, fled off, removed by a script) count as gone; broken regiments still on the table do not | enemy models at start | enemy regiments at start | 0 | 0 | ends BF009 |
 | G | 0x08 | siege "Inside the gates" **loss** flag (§3.3) | `a` | regiments merged | — | — | campaign-over test, evaluator E4 |
 | H | 0x07 | battle state 7 reached (siege gate breached; `H(0,0)` only in BF015/BF017) | — | — | — | — | ends the siege battles |
 | I | 0x0C | configuration letter (`I(1,4)`): `a ≠ 0` merges NPC artillery into the player army at start; never met | `a` | — | — | — | selects NPC merging in the debrief unit list |
@@ -75,7 +75,7 @@ the battle is decided. "Side" = unit side bits: `0x00` player, `0x40` allied NPC
 | W | 0x0C | artillery (`0x8e & 0xF8 == a`, 32 = rock lobbers, side `0x80`) destroyed; always met | `a` | count at start | — | **destroyed** | cash 0x51/0x52, text op W |
 | X | 0x16 | item pickup like K (BF012/018/019/034) | node | item id | picker | item index | none |
 | Y | 0x0C | "campaign lost" mirror: G's flag if G is defined, else the latch set by G/U (§3.3) | — | — | — | — | campaign-over test |
-| Z | 0x0F | **all player models gone**: every player regiment counted at start is dead or has left the field routed (with NPC allies included when G or I is defined) | models at start | regiments at start | regiments lost | 0 | everything; a met flag is **defeat** |
+| Z | 0x0F | **all player regiments gone**: every player regiment counted at start is removed or broken and unable to rally (allied regiments included only when G is defined); always active, `.BTS` line ignored | models at start | regiments at start | regiments lost | 0 | everything; a met flag is **defeat** |
 
 `v1`/`v2` of `A`/`Z` are re-measured at battle start; the `.BTS` numbers are only a snapshot. Unit class = low 3 bits (`& 7`) or
 high 5 bits (`& 0xF8`) of a unit byte; class 6 = villagers/slaves, `0x38` = rolling stock (wagons, gate).

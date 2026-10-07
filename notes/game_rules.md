@@ -1080,9 +1080,9 @@ Per-battle detail and the BF001 walkthrough are retained in private research not
   only these five letters can *ever* end a battle (that's fixed by the game's code, the same for every
   mission), but whether one is *active* in a specific battle depends entirely on whether that mission's
   `.BTS` declares it, and different missions make different choices:
-  - **Z** (the loss condition — player side wiped out) is declared in **50 of the 54 campaign battles**,
-    close to universal. An implementer can treat "player army eliminated → defeat" as the default loss rule
-    and only needs to special-case the 4 battles that omit Z.
+  - **Z** (the loss condition — player side wiped out) is **always active**: the game links Z first in every
+    battle and ignores any `Z` line in the `.BTS` ([battle_end_objectives.md](battle_end_objectives.md) §3.1).
+    The siege battles BF015/BF017 use a variant of it (§4.4 there).
   - The **win condition is usually A** ("eliminate the enemy" — declared in **47 of 54** battles), but three
     battles replace it with a different letter instead of also declaring A: **BF009** declares F in A's
     place (F runs the identical "wipe out the enemy" check, just tracked in its own slot), and **BF014**
@@ -1092,17 +1092,19 @@ Per-battle detail and the BF001 walkthrough are retained in private research not
   - **BF015 and BF017** (the two siege missions) are the one case where **two** battle-ending letters are
     declared together: both **A and H** are active at once, so either "eliminate the enemy" *or* "the siege
     gate reaches its breached state" ends the battle, whichever happens first.
-  - So the general shape is "one loss condition (usually Z) racing one or two win conditions (usually just
-    A, sometimes F or N instead of A, occasionally A and H together)" — but an implementer must read each
-    mission's own declared letters rather than assuming a single game-wide pair. Within one tick, only the
-    *first* flag-`0x1` objective the game happens to check that returns "met" decides the battle (relevant
-    only for the A+H case above; no evidence in the shipped data of the two actually racing in the same
-    tick).
-- **Evaluation** ✅: battle set-up calls every defined evaluator with mode 1; the game runs each tick (from
-  `BattleTick`) and tests the not-yet-met objectives with flag `0x2` in mode 2; the first met objective with flag
-  `0x1` decides the battle (`runtime state = 1`), opens the win or loss dialog and plays the end
-  stinger. the game evaluates flag-`0x8` objectives in mode 3 from a less frequent poll; at the end
-  the game lists captions, or calls the evaluator in mode 4 for a custom debrief line.
+  - So the general shape is "the loss condition Z racing one or two win conditions (usually just A,
+    sometimes F or N instead of A, occasionally A and H together)" — but an implementer must read each
+    mission's own declared letters rather than assuming a single game-wide pair. Within one check, the
+    *first* flag-`0x1` objective in list order that returns "met" decides the battle; Z is always first, so a
+    simultaneous A and Z is a loss.
+- **Evaluation** ✅ (full rules: [battle_end_objectives.md](battle_end_objectives.md)): battle load calls every
+  listed evaluator with mode 1; on every **segment-boundary tick** (every 19 ticks, before units update) the game
+  tests the not-yet-met objectives with flag `0x2` in mode 2; the first met objective with flag `0x1` **decides**
+  the battle. Deciding does not end it: the game prints "Mission complete." (GMTXT 1005), plays the `HumBtl` speech
+  `Hum_Complete` or `Hum_Failed`, and replaces the pause button with the tent button; the simulation keeps
+  running and only flag-`0x10` letters are still tested. The player ends the battle with the tent; then
+  flag-`0x8` objectives are evaluated once in mode 3 and the results are written. The book button lists the
+  captions (mode 4 for a custom line) while the battle is undecided.
 - **All 26 letter evaluators read** ✅ (static analysis). Every evaluator shares the same four-mode contract
   (1 = initialize/snapshot a baseline, 2 = per-tick met-check, 3 = slow-pass met-check, 4 = custom debrief text),
   and only letters **A, F, H, N, Z** carry the "ends the battle" flag — independently confirming the flag reading
@@ -1111,12 +1113,12 @@ Per-battle detail and the BF001 walkthrough are retained in private research not
 
   | Letter | What it checks | Ends battle? | Notes |
   |---|---|---|---|
-  | A | Count of enemy-side units still active in the battle, against a snapshot taken at battle start; met once none remain (enemy wiped out or routed off). | ✅ | The generic "Eliminate the enemy" condition; per-tick. |
+  | A | Enemy regiments counted at load; met once every one is removed (dead, fled off, removed by a script) or broken and unable to rally ([battle_end_objectives.md](battle_end_objectives.md) §4.1). | ✅ | The generic "Eliminate the enemy" condition; per segment. |
   | B | Percentage of a specific NPC population (the same population category used by the villager objective) still present, against a start-of-battle snapshot; met when the survivor percentage is at or above the mission's threshold. | – | "Protect the villagers." Evaluated on the slow pass; has a custom debrief line. |
   | C | Percentage of a specific structure-type entity population still present, against a start-of-battle snapshot; met at or above the mission's threshold. | – | "Protect the buildings." Same shape as B; custom debrief line. |
   | D | Count of a wagon/rolling-stock-type, allied-side population lost since battle start; met when losses stay at or under the mission's allowed threshold. Evaluating D also gives any pending "downed but recoverable" allied units in that population a chance to be restored to the active roster. | – | "Protect the wagons." Slow pass only. |
   | E | Percentage of enemy-side **models** (not units) killed since battle start (a headcount, not a unit count); met at or above the mission's threshold. | – | "Leave no survivors." Distinguishes model casualties from unit count (contrast with A). |
-  | F | Same underlying "count remaining enemy units against a start snapshot" logic as A, but in its own independent slot and without A's extra "already left the field" adjustment; used standalone in the one mission that defines F without also defining A. | ✅ | A mission-specific instance of the same elimination check, not a distinct condition. |
+  | F | Like A, in its own slot, but only **removed** regiments count as gone: a broken enemy still on the table keeps F open. Used standalone in BF009. | ✅ | A mission-specific variant of the elimination check. |
   | G | Recomputes the player roster (merging any allied reinforcements gained during the siege) as part of its init step; its met-check looks for the absence of two specific unit-class categories. The actual "player units get inside the walls" mechanic (unit reaches an interior map trigger, is teleported off-field and reassigned to the allied side) is separate scripted behaviour, not this evaluator — see "Objective G" below. | – | Siege-only (BF015, BF017). |
   | H | Reads a single state value from a "control piece" battlefield object (the siege gate/ram) and is met exactly when that value equals a specific state code. | ✅ | Siege-only; a direct state check, not a count. |
   | I | Initializes by locating a target node and, once located, by spawning something at that node's position (consistent with "Ambush," an ambush trigger placed at a location) and enabling related UI/state flags; its later-mode branches run a follow-up action but do not themselves return "met." | – | Evaluated on the slow pass; no caption in the end-of-battle list. |
@@ -1131,12 +1133,12 @@ Per-battle detail and the BF001 walkthrough are retained in private research not
   | R | Always returns "not met." | – | Unused/placeholder (see correction below). |
   | S | Always returns "met" as soon as it is first evaluated (on the slow pass), regardless of any battlefield condition. | – | "Capture Hiln" in BF001. The evaluator itself performs no check; whatever "capturing" means in play is tracked elsewhere (e.g. the target's own scripted flee behaviour), not fed back into this function. |
   | T | Identical unconditional-"met" behaviour to S. | – | "Rescue Ilmarin." Same caveat as S: the evaluator is a stub: the actual rescue condition, if any, is not implemented here. |
-  | U | On a repeating timer, picks one player unit and sends it a specific in-battle message (consistent with a "hopeless" warning), and stops the battle music as a scripted atmosphere beat; on the slow pass it sets the shared flag that selects which of two win/lose dialog variants is shown at battle end. Never itself returns "met." | – | "The Mission is Impossible" — an atmosphere/flavour objective, not a win/lose gate by itself. |
+  | U | From turn `a` on, at the start of every turn one more player regiment shows `React 15` ("We must retreat!") and the tent button replaces the pause button, so the player can leave; at the end it sets Z met. Never itself returns "met." | – | "The Mission is Impossible" ([battle_end_objectives.md](battle_end_objectives.md) §5.3). |
   | V | Recomputes a "population killed since battle start" tally for a specific race/class (same shape as B), but always returns "met" once evaluated; the computed tally exists for its debrief number, not to gate the outcome. | – | The "Count Dead Race" debrief statistic. |
   | W | Recomputes an "enemy artillery destroyed since battle start" tally (matched by a broad class category consistent with war machines), but, like V, always returns "met"; the tally is for the debrief line. | – | "Destroy the enemy artillery" — a debrief statistic, not a gate. |
   | X | Same pickup-at-a-node logic as K, in its own independent slot. | – | Paired with K; see K. |
   | Y | Not an independent check: mirrors either of two shared flags set elsewhere (one of which is the same win/lose-dialog-variant flag U also writes). | – | Bookkeeping/debrief flag, not its own count. |
-  | Z | The silent loss condition; tracks the player-side population (adjusted for any allied units gained mid-battle) against its battle-start snapshot and is met when it reaches zero, or, read together with the "which objective decided the battle" bookkeeping, also drives the campaign-mode variant of the win/lose dialog and post-battle housekeeping. | ✅ | "Stay alive!" |
+  | Z | The silent loss condition, always active and checked first: player regiments counted at load, met when every one is removed or broken and unable to rally (siege battles: player and allied regiments, and the battle state changes). | ✅ | "Stay alive!" ([battle_end_objectives.md](battle_end_objectives.md) §4.4) |
 
   **Corrects an earlier, mistaken reading of this table**: a first static-analysis pass momentarily matched two of these evaluator bodies to letters **R** and **S** by inference from debrief text alone, before the actual letter→evaluator table (a fixed data table, one 40-byte record per letter, read directly rather than guessed) was located. The two evaluator bodies in question are in fact letters **B** and **C**; R and S are, respectively, an unconditional-"not met" stub and an unconditional-"met" stub, per the table above. Any earlier note or engine code that used "R = percentage-threshold villager check" or "S = percentage-threshold building check" should be corrected to B and C.
 
@@ -2644,7 +2646,7 @@ research unless marked Wine.
 | R61 | **Visibility details** | Unit flag bit 3 (`0x8`) also doubles the view cone together with melee (`0x208`); the shooting/effect region behaviour is not fully confirmed; mode 1 of the "attack the n-th nearest" opcodes uses a signed-axis metric (🟡). | Verify the behaviour in a controlled play session. | low |
 | R62 | **AI deployment** | See [deployment.md §1](deployment.md#1-mission-entry-and-default-positions). | — | done |
 | R63 | **Objective evaluators** | ✅ resolved: all 26 letter evaluators read (Missions and objectives). S "Capture Hiln" and several others (T, V, W) turn out to be unconditional stubs rather than real checks; Y mirrors a shared flag rather than computing anything itself. | — | done |
-| R64 | **Win/loss dialog codes** | The game opens dialog 9 or 0xF depending on battle state; which is which is not yet confirmed. | Verify both outcomes in a play session. | low |
+| R64 | **Win/loss dialog codes** | ✅ resolved: 9 and 0xF are `HumBtl` speech effects (`Hum_Complete`, `Hum_Failed`), not dialogs; no dialog opens ([battle_end_objectives.md](battle_end_objectives.md) §6). | — | done |
 | R65 | **Deployment** | Default slots and zone rules established in [deployment.md](deployment.md); remaining interaction checks are listed there. | [Remaining checks](deployment.md#7-remaining-checks-for-full-original-parity). | low |
 | R66 | **Footprint box and anchor** | ✅ resolved: for blocks the map object centre is `(ranks − 1) × 6` behind the unit position, the middle of the block; other kinds keep it at the unit position (section 4, Formations). | — | done |
 | R67 | **Formation spacing on screen** | ✅ resolved: both viewers use the traced 12-unit block (`whshr/formation.py`); the BF001 screenshot matches its rank sizes and offsets (section 4, Formations). | — | done |
