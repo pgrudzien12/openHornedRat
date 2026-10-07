@@ -130,7 +130,7 @@ Walk the chooser's spell list **in order** and take the **first** entry that pas
 | Flying Bower, Tangling Thorn, Flock of Doom, Da Krunch | no non-friend unit within 32 of the target | target |
 | Ere We Go, Mork Save Uz | some **non-hostile** unit (not the chooser, not the target; not hidden, not leaving) within 24 (`≤ 24`) of the target's position; the nearest one | **point** = that friend's position, aim at point |
 | Skitterleap | `trunc(d) <` the chooser's **threat range** | **point** = chooser position + `floor(0.9 × threat range)` (integer `threat_range × 9 / 10`) in the direction **from the target to the chooser** (jump away), aim at point |
-| Dispel Magic | (target ignored) no Dispel of this unit is running, **and** the **first** active effect in the effect list that was cast by a unit hostile to the chooser and is not itself a Dispel has a caster that is **not hidden** and **can see the chooser** (standard view cone, `game_rules.md` "Routes, collisions and visibility") | **point** = chooser's own position, aim at point |
+| Dispel Magic | (target ignored) the Dispel entry is not "selected" (this wizard has not cast Dispel Magic this battle, `notes/spell_lasting_effects.md` §5.4), no Dispel of this unit is running, **and** the **first** active effect in the effect list that was cast by a unit hostile to the chooser and is not itself a Dispel has a caster that is **not hidden** and **can see the chooser** (standard view cone, `game_rules.md` "Routes, collisions and visibility") | **point** = chooser's own position, aim at point |
 
 **AI arc**: the bearing from the chooser to the target position differs from the chooser's facing by **less than
 55/512 of a turn** (≈ ±38.7°), a narrower arc than the launch test's 71/512 (±50°), so a wizard always turns first
@@ -157,7 +157,7 @@ Enemy-army wizards (battle and army files):
 
 | list (in file order) | units | castable by the AI |
 |---|---|---|
-| Dispel, Warp Lightning, Madness, Pestilent Breath, Skitterleap (or Madness before Warp Lightning in 2) | 11 + 2 army-file | Dispel (if hostile magic is up), **Warp Lightning**, **Madness**, Pestilent Breath (6"), **Skitterleap** (escape) |
+| Dispel, Warp Lightning, Madness, Pestilent Breath, Skitterleap (or Madness before Warp Lightning in 2) | 11 + 2 army-file | Dispel (if hostile magic is up), **Warp Lightning**, **Madness**, Pestilent Breath (6"), **Skitterleap** (escape; succeeds only while the wizard is in melee, `notes/spell_lasting_effects.md` §2) |
 | Orc/Goblin shamans: Dispel + four of Da Krunch, Gaze of Mork, Fists of Gork, Ere We Go, Mork Save Uz | 8 | Dispel, **Gaze of Mork**, Fists of Gork, Ere We Go / Mork Save Uz (on a friend fighting the target); Da Krunch never |
 | Skitterleap only | 1 (BF035, scripted teleport §6) | Skitterleap |
 
@@ -181,7 +181,7 @@ If the side pool ≥ the cost of spell `code` (looked up in the spell table, ign
 it does **not** need to be in the unit's spell list): pending spell := `code`, condition true. Otherwise condition
 false and the pending spell is unchanged. **Nothing is paid.** Shipped once: BF035 `535` = Skitterleap with a marker
 bit (512 + 23). The marker has no visible effect except that `EffectRange` does not recognise the code, so the cast
-has **unlimited range** (the ±50° arc still applies). 🟡 no other use of the marker was found.
+has **unlimited range** (the ±50° arc still applies), and the launched effect is **undispellable** (`notes/spell_effects.md` §1.1, `notes/spell_lasting_effects.md` §5.1).
 
 ### 3.2 `SetCastPointNode node` (0xA1, 2 words)
 
@@ -193,12 +193,12 @@ pending spell or aim-at-point (not needed: without a target `CastPending` uses t
 ```
 if pending spell is none: condition false; nothing else (target, aim state untouched).
 else:
-  if a current target exists and aim-at-point is off: aim = the target's leader figure (🟡 or, without a leader,
-       a reference figure of the unit) position
+  if a current target exists and aim-at-point is off: aim = the target's leader figure (without a leader: roster
+       entry frontage − 1, or entry 0 if that is not below the unit's size; `notes/spell_effects.md` §2.1) position
   elif target point is set: aim = target point
   else: fail
-  launched = launch(spell, caster, origin model = the model whose event triggered the cast, else the caster's
-                    leader, aim)          # §0.4
+  launched = launch(spell, caster, origin model = the model whose event triggered the cast, else none
+                    (start = unit position; Lightning/Banner of Wrath do the reverse, `notes/spell_effects.md` §2.1), aim)   # §0.4
   condition := launched
   aim-at-point := off
   if the unit is in the "cast-only target" state (the state library 155 sets with `SetUnitFlags 0x4000000` before
@@ -212,8 +212,8 @@ the opcode can pass and the launch still fail (🟡 rare).
 
 ### 3.4 `DropPendingSpell` (0xAA, 1 word)
 
-Makes the pending spell's panel entry usable again (for a player unit, the button is no longer shown as "cast
-ordered"), then pending spell := none. **No refund.** Target, target point and aim-at-point are untouched;
+Clears the pending spell's cosmetic "cast ordered" mark (button availability never depended on it, `notes/spell_lasting_effects.md` §8),
+then pending spell := none. **No refund.** Target, target point and aim-at-point are untouched;
 condition not written. Shipped only in library 132: a cast order for a wizard **in melee** whose target is in range
 but outside the arc, and a cast order whose target is out of range (`game_rules.md` "Casting").
 

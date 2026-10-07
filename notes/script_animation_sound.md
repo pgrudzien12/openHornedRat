@@ -277,7 +277,8 @@ When the result is true:
 - `message` ≠ 0 → battle message `GMTXT 2014` (no unit name argument 🟡);
 - `reenable` ≠ 0 → the **magic panel entry of the spell carried by the current event** is made available again,
   unless it is the same spell as the one already pending. This is the refusal path of a player cast order to a
-  busy wizard: the button the player just clicked is not left locked. 🟡 whether the power paid on the click is
+  busy wizard; only the cosmetic "cast ordered" mark is cleared, button availability never depended on it
+  (`notes/spell_lasting_effects.md` §8). 🟡 whether the power paid on the click is
   refunded is not settled here; nothing in this instruction changes the power pool.
 
 When false: no side effect. Shipped operand pairs: **`0 0`** (176 uses; library 103 cases 3/4/6 and 155 case 10:

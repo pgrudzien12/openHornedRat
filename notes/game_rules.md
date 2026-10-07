@@ -2344,7 +2344,8 @@ against buildings, saves, magical, flags, messages. For every map object at dist
 - **Units** (height test passed, flying units only between their base and top):
   - `d < footprint radius` (`GMTXT 2004` "Direct hit on the %s!"): radius 0 → **one random model**;
     radius ≠ 0 → **every model**. Each: `TO_WOUND[S][T]`, armour save if allowed (the leader with its armour
-    items), `MagicResistent` 50% if magical, then `rand % wound_die + 1` wounds.
+    items), `MagicResistent` 50% if magical, then `rand % wound_die + 1` wounds. T is the **unit's** T for every
+    model, leader included; all wounds stay on that model (no overflow) (`notes/spell_effects.md` §4).
   - `d < footprint + radius` (blast margin, `GMTXT 2005` "The %s have been hit!"):
     `n = (footprint + radius − d) × size / (footprint + radius)`, at least 1, random models (with repetition)
     at **S/2 for exactly 1 wound**.
@@ -2403,8 +2404,10 @@ WFB: D6 S5 hits per unit touched, 2D6" moves, dies on a double; here damage scal
 
 - **Power**: one pool per side, 0–8 (one for the player, one for the enemy; allies use the player's).
   No per-wizard power, no wizard levels. the game replaces each pool every **50 s of unpaused real time**
-  by `Wind(current)`: an empty pool becomes 1–7, otherwise `current − 4 … current + 3`, at least
-  1. (Count and Fixed = 8 modes are debug options behind Ctrl/Shift clicks on the magic panel.) Each pool **starts at `rand % 8 + 1` (1–8)**, set by the battle
+  by `Wind(current)`: an empty pool becomes 1–7 (0 or 1 → 1), a pool of 1–3 becomes `current … current + 3`, a pool
+  of 4–8 becomes `current − 4 … current + 3`, then clamped to 1–8. The clock counts unpaused milliseconds and is checked
+  at most once a second at the start of a tick, so winds fall at the first check after each multiple of 50 s; both
+  pools roll at once (player first) and every re-usable magic item is re-armed (`notes/spell_lasting_effects.md` §7). (Count and Fixed = 8 modes are debug options behind Ctrl/Shift clicks on the magic panel.) Each pool **starts at `rand % 8 + 1` (1–8)**, set by the battle
   window's create handler.
 - **Spell/item table** the relevant data, 24-byte records `{GMTXT id, effect code, name, kind (1 spell, 2 item),
   cost, flags}`; costs: 1 Dispel Magic, Azure Blades, Lightning, Fireball, Flying Bower, Mork Save Uz,
@@ -2424,15 +2427,18 @@ WFB: D6 S5 hits per unit touched, 2D6" moves, dies on a double; here damage scal
 - **Checks** (`LaunchEffect`): fewer than 64 active effects; the caster can cast (class Wizard,
   or a leader with `S_BalWeap` 16, e.g. the Orc shaman on a Wyvern); target point within `EffectRange` of the
   unit centre and within **±50° of facing**; unit-target spells need a unit under the point. **No line of
-  sight, no casting roll, no miscast, no reload**; on failure `GMTXT 2021` "…attempted to cast … but failed" (shown only
+  sight, no casting roll, no miscast, no reload** (but bolt spells **scatter** with the caster's BS and are stopped by
+  terrain above their path and by solid objects, `notes/spell_effects.md` §2); on failure `GMTXT 2021` "…attempted to cast … but failed" (shown only
   for player-army casters) and the power is lost (`script_magic.md`). The 2D6 inside `LaunchEffect` is the bolt count of Storm of Shemtek.
 - 🟡 Holding **Shift** at launch switches several spells to alternative projectiles (Flying Bower then does S3
   hits); it reads the physical keyboard, so it affects AI casts too (probably a developer toggle).
 
 ### Spells ✅
 
-"Hit" = `ApplyImpact` through the magical callback (so `MagicResistent` ignores half); radius 0 = one random model
-of each unit hit. Durations are tick counters: 180 ticks ≈ 18 s, just under one 190-tick turn; nothing ends
+"Hit" = the magical impact (so `MagicResistent` ignores half); radius 0 = one random model of each unit hit.
+**Exact mechanics** (effect list, flight times, scatter, per-spell details, corrections to the rows below):
+`notes/spell_effects.md` (bolts, beams, Hunting Spear, the hit) and `notes/spell_lasting_effects.md` (Madness, Skitterleap, Ere We Go, Mork Save Uz, Fists of
+Gork, dispel, winds). Durations are tick counters: 180 ticks ≈ 18 s, just under one 190-tick turn; nothing ends
 "at the end of the turn".
 
 | Spell | Cost | Range | Effect | Duration |
@@ -2443,37 +2449,39 @@ of each unit hit. Durations are tick counters: 180 ticks ≈ 18 s, just under on
 | Sapphire Arch | 2 | 24" | portal: units swallowed by a previous arch reappear here (killed if gone more than 900 ticks); then every other unit within 48 units vanishes until the next arch | 180 ticks |
 | Lightning | 1 | 24" | bolt: S6, D3 wounds, no save | flight |
 | Piercing Bolts of Burning | 2 | 18" | bolt: S4, 1 wound, no save, fire | flight |
-| The Burning Head | 2 | 18" | head passing through: S4, 1 wound, save, fire; units it is inside take a **panic test** | flight |
+| The Burning Head | 2 | 18" | head passing through: S4, 1 wound, save, fire; on every tick it hits something, every unit containing the point (any side, the caster's own included) takes a **panic test** | 18 ticks |
 | Conflagration of Doom | 3 | unlimited | radius D6×8+8; panic tests every 9 ticks for D6×9 ticks, then units inside **lose all models** and overlapping units a share, **slain outright**; buildings destroyed | fuse + fall |
 | Flamestorm | 3 | 24" | column of flame, every 18 ticks every model inside radius 16: S4, 1 wound, no save, fire | 🟡 **no end** (until dispelled, cancelled or recast) |
-| Fireball | 1 | 24" | S4, 1 wound, no save, fire; burns Tangling Thorns | flight |
+| Fireball | 1 | 24" | S4, 1 wound, no save, fire; burns a Tangling Thorn when one of its impacts hits something within 32 of the thorn's cast point; no terminal impact on a ground point | 18 ticks |
 | The Flying Bower | 1 | unlimited | the caster's unit leaves combat and flies to the point | flight |
 | Tangling Thorn | 3 | 24" | units within 32 are **halted and held** (also blocks shooting and casting); fire destroys it | growth + 90 ticks |
-| Hunting Spear | 2 | 24" | homing spear; at the target strikes 6 times at S6…S1, D3 wounds each, no save | ≤ 180 ticks |
+| Hunting Spear | 2 | 24" | homing spear (re-aims every 3 ticks, each thing struck on the way costs 1 S); arrival hit, then strikes at S, S−1 … 1 on every unit under its point, D3 wounds each, no save | ≤ 180 ticks |
 | The Curse of Anraheir | 3 | 24" | **movement rate and Initiative halved**; mounted targets take a panic test each tick of segment 10 and the curse ends when one routs | 🟡 **no end otherwise** |
 | The Flock of Doom | 2 | 24" | three strikes, radius 32: S3, D6 wounds, save | 3 phases |
 | Dispel Magic | 1 | self | dispel aura (8.10) | ≤ 180 ticks |
 | Gaze of Mork | 2 | 24" | beam passing through: S6, 1 wound, save | flight |
-| Ere We Go! | 2 | 36" | T +1 and **I := 20** (the unit makes no close combat attacks, section 5.1) | 180 ticks |
+| Ere We Go! | 2 | 36" | on the unit under the point (any side): T +1 and **I := 20** (the unit makes no close combat attacks, section 5.1); end: T −1, I := value saved at the cast | 180 ticks |
 | Da Krunch | 3 | 24" | giant foot: **every model** of every unit reaching within 32 units **slain**; buildings destroyed | ≈ 45 ticks |
-| Fists of Gork | 2 | self | every 4 ticks the nearest unit of **either side** within 16: wound roll at S6, 1 wound, no save, a 6 chains | 180 ticks |
+| Fists of Gork | 2 | self | every 4 ticks (45 strikes) the nearest unit of **either side** (not the caster's) whose centre is within 16 (inclusive) of the **fixed aim point**: wound roll at S6, 1 wound, no save; after a first 6 each further consecutive 6 adds a wound; no kill credit | 180 ticks |
 | Mork Save Uz! | 1 | 24" | dispel aura around a unit, 50% every tick | 180 ticks |
 | Warp Lightning | 2 | 24" | bolt: S5, D6 wounds, no save (Doomwheel version fails on 1 in 6) | flight |
-| Skitterleap | 1 | unlimited | the caster's unit teleports to the point | animation |
+| Skitterleap | 1 | unlimited | the caster's unit is placed at the point 4 ticks after the launch (facing and formation kept, no destination checks); the arc applies, so the AI's escape leap only succeeds in melee | 4 ticks |
 | Pestilent Breath | 1 | 6" | cloud passing through: S3, 1 wound, no save | flight |
-| Madness | 2 | 24" | the target unit **changes side** (events 0x31/0x32), friends drop it as a target | 180 ticks |
+| Madness | 2 | 24" | the unit under the point (must be hostile) **changes side**: player/allied → enemy, enemy → allied (events 0x31/0x32; its new side-mates drop it as a target); the saved side is restored at the end | 180 ticks |
 
 Area objects of Wind Blast, Flamestorm, Tangling Thorn and Da Krunch are temporary **solid scenery** (they push
-units back, stop charges, bend routes, block spotting and obstruct missiles). Only Wind Blast, Flamestorm and
-Tangling Thorn replace the caster's previous instance; other spells stack (two
-overlapping Ere We Go casts would restore a wrong I, 🟡). No spell passes the panic or rout bits to
+units back, stop charges, bend routes, block spotting and obstruct missiles). Only Wind Blast, Flamestorm,
+Tangling Thorn and Curse of Anraheir replace the caster's previous instance; other spells stack (two
+overlapping Ere We Go casts leave I = 20 for the rest of the battle, `notes/spell_lasting_effects.md` §3). No spell passes the panic or rout bits to
 `ApplyImpact`; panic comes from Burning Head, the Conflagration fuse and the Curse on mounts.
 
 ### Dispel and anti-magic ✅
 
 `DispelAura`: each tick of its schedule, every other dispellable effect within **80 units** of
 the protected unit is removed on a percentage roll (`GMTXT 2006` "…has been dispelled by…"). Innate effects,
-other dispels and effects cast by or on the protected unit are skipped; **there is no side test**, so friendly
+Dispel Magic effects (Mork Save Uz effects **can** be dispelled), undispellable effects and effects cast by or on the
+protected unit are skipped; the chance is rolled for every eligible effect before the distance test, and a Dispel
+Magic ends after its first successful pass and can be cast **once per battle per wizard** (`notes/spell_lasting_effects.md` §5); **there is no side test**, so friendly
 spells nearby are dispelled too.
 
 | Source | Chance | Schedule |
