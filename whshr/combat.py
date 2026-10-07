@@ -741,15 +741,15 @@ def _break_test(regiment: "Regiment", modifier: float, group_id: str, breakdown:
     if "CantBreak" in regiment.psychology:
         battle.events.append(BattleEvent(
             f"{regiment.name} cannot break (CantBreak).", "leadership_test",
-            regiment=regiment.identifier, fight=group_id, leadership=regiment.leadership,
+            regiment=regiment.identifier, fight=group_id, leadership=regiment.base_leadership,
             modifier=modifier, breakdown=breakdown, cant_break=True, roll=None, passed=True))
         return
     roll = _2_to_12(battle.rng)
     passed = modifier + roll <= regiment.effective_leadership
     battle.events.append(BattleEvent(
-        f"{regiment.name} takes a Leadership test (Ld {regiment.leadership}, roll {roll} + {modifier}): "
+        f"{regiment.name} takes a Leadership test (Ld {regiment.base_leadership}, roll {roll} + {modifier}): "
         f"{'passes' if passed else 'fails'}.", "leadership_test",
-        regiment=regiment.identifier, fight=group_id, leadership=regiment.leadership,
+        regiment=regiment.identifier, fight=group_id, leadership=regiment.base_leadership,
         roll=roll, modifier=modifier, breakdown=breakdown, cant_break=False, passed=passed))
     if not passed:
         start_rout(regiment, battle)
@@ -973,10 +973,10 @@ def resolve_rally(battle: "Battle") -> None:
         roll = _2_to_12(battle.rng)
         passed = modifier + roll <= regiment.effective_leadership
         battle.events.append(BattleEvent(
-            f"{regiment.name} takes a rally test (Ld {regiment.leadership}, roll {roll} + {modifier}): "
+            f"{regiment.name} takes a rally test (Ld {regiment.base_leadership}, roll {roll} + {modifier}): "
             f"{'rallies' if passed else 'still routing'}.", "rally_test",
             regiment=regiment.identifier, cant_rally=False, blocked_by_enemy=False,
-            leadership=regiment.leadership, roll=roll, modifier=modifier, passed=passed))
+            leadership=regiment.base_leadership, roll=roll, modifier=modifier, passed=passed))
         if passed:
             regiment.rally_next_segment = None
             if battle.interpreter is not None:

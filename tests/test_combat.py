@@ -72,6 +72,43 @@ class FightHarderTests(unittest.TestCase):
             battle.order_fight_harder("enemy")
 
 
+class LeaderMoraleTests(unittest.TestCase):
+    """game_rules.md Effective Leadership: break and rally use a living leader's Ld."""
+
+    def test_roll_seven_breaks_only_after_ld_eight_leader_dies(self):
+        for leader_alive in (True, False):
+            with self.subTest(leader_alive=leader_alive):
+                unit = _regiment("unit", 100, 100, Side.PLAYER, models=10,
+                                 leadership=6, has_leader=True, leader_leadership=8,
+                                 leader_ws=10, leader_strength=9)
+                battle = Battle(2000, 2000, [unit])
+                if not leader_alive:
+                    combat.kill_models(unit, [unit.living_leader_index], battle)
+                battle.events.clear()
+                with patch.object(combat, "_2_to_12", return_value=7):
+                    combat._break_test(unit, 0, "fight", combat._empty_breakdown(), battle)
+                result = next(event for event in battle.events if event.kind == "leadership_test")
+                self.assertEqual((result.data["leadership"], result.data["passed"]),
+                                 (8, True) if leader_alive else (6, False))
+
+    def test_roll_seven_rallies_only_while_ld_eight_leader_lives(self):
+        for leader_alive in (True, False):
+            with self.subTest(leader_alive=leader_alive):
+                unit = _regiment("unit", 100, 100, Side.PLAYER, models=10,
+                                 leadership=6, has_leader=True, leader_leadership=8,
+                                 leader_ws=10, leader_strength=9,
+                                 routing=True, rally_next_segment=0)
+                battle = Battle(2000, 2000, [unit])
+                if not leader_alive:
+                    combat.kill_models(unit, [unit.living_leader_index], battle)
+                battle.events.clear()
+                with patch.object(combat, "_2_to_12", return_value=7):
+                    combat.resolve_rally(battle)
+                result = next(event for event in battle.events if event.kind == "rally_test")
+                self.assertEqual((result.data["leadership"], result.data["passed"]),
+                                 (8, True) if leader_alive else (6, False))
+
+
 class InitiativeTimingTests(unittest.TestCase):
     """game_rules.md 5.1: a unit attacks once per turn, in the segment equal to its Initiative."""
 

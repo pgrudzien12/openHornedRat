@@ -75,6 +75,30 @@ class BattleTests(unittest.TestCase):
         self.assertAlmostEqual(self.player.charge_reach, 12 * (11 + 1))
 
 
+class LeaderLeadershipTests(unittest.TestCase):
+    def test_living_leader_uses_own_ld_then_survivors_use_regiment_ld(self):
+        from whshr.engine import _decode_combat_profile
+
+        decoded = _decode_combat_profile({"profile": {"BS": 3, "Ld": 5},
+                                          "leader": {"profile": {"BS": 7, "Ld": 9}}})
+        self.assertEqual(decoded["bs"], 3)
+        self.assertEqual(decoded["leader_leadership"], 9)
+        unit = Regiment("archers", "Archers", 100, 100, 0, Side.PLAYER,
+                        models=4, ranks=1, has_leader=True, **decoded)
+        battle = Battle(1000, 1000, [unit])
+        self.assertEqual(unit.effective_leadership, 9)
+        unit.fight_harder = True
+        self.assertEqual(unit.effective_leadership, 10)
+        combat.kill_models(unit, [unit.living_leader_index], battle)
+        self.assertEqual(unit.effective_leadership, 6)
+
+    def test_zero_ld_leader_uses_regiment_ld(self):
+        unit = Regiment("archers", "Archers", 100, 100, 0, Side.PLAYER,
+                        models=4, ranks=1, has_leader=True, leadership=6, leader_leadership=0)
+        Battle(1000, 1000, [unit])
+        self.assertEqual(unit.effective_leadership, 6)
+
+
 class MountedMovementTests(unittest.TestCase):
     """game_rules.md "Mounts": a mounted rider uses the mount's M and the rider's I."""
 

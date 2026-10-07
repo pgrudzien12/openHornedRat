@@ -188,6 +188,7 @@ class Regiment:
     leader_toughness: int | None = None
     leader_wounds: int | None = None
     leader_armour: int | None = None
+    leader_leadership: int | None = None
     spells: tuple[int, ...] = ()  # spell codes from the unit's addspell: lines, in file order (whshr.magic)
     items: tuple[str, ...] = ()  # magic items in its 5 slots, loaded ones first (notes/battle_end_objectives.md 12.2)
     used_items: set[str] = field(default_factory=set[str])  # battle-only activation state
@@ -318,7 +319,14 @@ class Regiment:
 
     @property
     def effective_leadership(self) -> int:
-        return self.leadership + int(self.fight_harder)
+        return self.base_leadership + int(self.fight_harder)
+
+    @property
+    def base_leadership(self) -> int:
+        """Use a living leader's nonzero Ld, else the regiment's Ld (game_rules.md 3)."""
+        if self.leader_leadership and self.living_leader_index is not None:
+            return self.leader_leadership
+        return self.leadership
 
     @property
     def living_leader_index(self) -> int | None:
@@ -556,6 +564,7 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
         "leader_toughness": int(leader_profile["T"]) if "T" in leader_profile else None,
         "leader_wounds": int(leader_profile["W"]) if "W" in leader_profile else None,
         "leader_armour": stat_int(stat_fields(leader.get("stats") or {})[0], "s_armr") if leader else None,
+        "leader_leadership": int(leader_profile["Ld"]) if "Ld" in leader_profile else None,
         "toughness": int(profile.get("T", DEFAULT_PROFILE["T"])),
         "wounds": int(profile.get("W", DEFAULT_PROFILE["W"])),
         "initiative": int(profile.get("I", DEFAULT_PROFILE["I"])),

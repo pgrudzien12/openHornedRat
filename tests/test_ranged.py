@@ -36,6 +36,45 @@ class RangedOrders(unittest.TestCase):
         self.enemy = unit("enemy", 100, 400, Side.ENEMY, code=0)
         self.battle = Battle(2000, 2000, [self.shooter, self.enemy], seed=11)
 
+    def test_leader_launch_uses_regiment_bs_and_artillery_uses_leader_weapon(self):
+        from whshr.engine import _decode_combat_profile, _shooting_code
+
+        class ScatterDice:
+            def __init__(self):
+                self.bounds = []
+
+            def randint(self, low, high):
+                self.bounds.append((low, high))
+                return low if (low, high) == (1, 6) else high
+
+            def choice(self, values):
+                return values[1]
+
+        for unit_class, expected_code in ((3, 1), (4, 6)):
+            raw = {"stats": {"s_race": [unit_class << 3], "S_BalWeap": [1]},
+                   "profile": {"BS": 3},
+                   "leader": {"stats": {"S_BalWeap": [6]}, "profile": {"BS": 7}}}
+            decoded = _decode_combat_profile(raw)
+            code = _shooting_code(raw)
+            self.assertEqual((decoded["bs"], code), (3, expected_code))
+            shooter = Regiment("shooter", "Shooter", 100, 100, 0, Side.PLAYER,
+                               models=4, ranks=1, has_leader=True,
+                               shooting_code=code, **decoded)
+            shooter.hud_class = "art" if unit_class == 4 else "arch"
+            battle = Battle(2000, 2000, [shooter])
+            origin = shooter.model_positions()[shooter.living_leader_index]
+            battle.rng = ScatterDice()
+            self.assertEqual(ranged.launch_shot(battle, shooter, origin, (100, 400)), "launched")
+            self.assertEqual((battle.projectiles[0].x0, battle.projectiles[0].y0), origin)
+            self.assertEqual(battle.projectiles[0].code, expected_code)
+            self.assertEqual(battle.rng.bounds[-2:], [(0, 7), (0, 7)])
+            shooter.bs = 4
+            shooter.reload_ticks = 0
+            battle.projectiles.clear()
+            battle.rng = ScatterDice()
+            self.assertEqual(ranged.launch_shot(battle, shooter, origin, (100, 400)), "launched")
+            self.assertEqual(battle.rng.bounds[-2:], [(0, 6), (0, 6)])
+
     def test_explicit_ten_model_volley_releases_three_from_posting_models(self):
         self.assertEqual(self.battle.order_fire("bow", "enemy"), 2008)
         self.battle.tick()
