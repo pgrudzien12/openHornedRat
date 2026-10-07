@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+
+appdir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+engine="$appdir/usr/bin/ohr-engine/ohr-engine"
+
+if [ -n "${WARFB:-}" ] || [ "$#" -gt 0 ]; then
+    exec "$engine" "$@"
+fi
+
+if [ ! -t 0 ]; then
+    echo "Run this AppImage from a terminal with your WARFB path, or set WARFB." >&2
+    exit 2
+fi
+
+printf 'Enter the path to your original game WARFB directory: '
+IFS= read -r warfb || exit 1
+if [ -z "$warfb" ]; then
+    echo "No directory entered." >&2
+    exit 1
+fi
+exec "$engine" "$warfb"

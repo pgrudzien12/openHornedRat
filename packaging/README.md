@@ -4,24 +4,22 @@ Tracked by GitHub epic #96 (Windows: #97, Ubuntu/Linux: #98, CI + license audit:
 
 ## Goal and scope
 
-Produce installers that bundle this project's own launcher/engine code and a Python
-interpreter, so a user doesn't need Python or any dependencies pre-installed. Per-user
-install (no admin/root), a shortcut/menu entry, and the option to launch immediately after
-install. The original game's files/assets are never bundled — see `CLAUDE.md`.
+Produce packages that bundle this project's own engine code and a Python interpreter,
+so a user doesn't need Python or Python dependencies pre-installed. The Windows installer
+is per-user; Debian and RPM packages use system package managers. These packages provide a
+menu entry, while AppImage is a portable executable.
+The original game's files/assets are never bundled — see `CLAUDE.md`.
 
-Windows is implemented first (`windows/`); Ubuntu/Linux (#98) is a later follow-up and does
-not exist yet.
+## Entry point: frozen launcher integration is pending
 
-## Entry point: a stopgap until the launcher (epic #88) exists
-
-The standalone GUI launcher (epic #88: install discovery, settings, battle picker) hasn't
-been built yet. Until it lands, the installer freezes `python -m whshr engine` as-is
+The standalone GUI launcher (epic #88: install discovery, settings, battle picker) is not
+yet integrated with frozen builds. The installers freeze `python -m whshr engine` as-is
 (`windows/entrypoint.py`): it forwards any arguments and otherwise falls back to the `WARFB`
 environment variable, exactly like running `whshr engine` from source. This means the first
 launch after install needs `WARFB` set, or the exe run with the installation path as an
 argument (e.g. from a shortcut's "Target" field) — there is no install-path picker yet.
-**When epic #88 lands, point `windows/ohr-engine.spec`'s `Analysis` entry at the real
-launcher entry point instead of `entrypoint.py`**; nothing else in the packaging changes.
+The source launcher now exists, but its subprocess logic still assumes a source checkout
+and local virtual environment. Integrating it into frozen packages needs a separate change.
 
 ## Windows (#97)
 
@@ -106,12 +104,100 @@ alongside the app (see `installer.iss`'s `[Files]` section).
 
 ## CI (#99)
 
-`.github/workflows/windows-installer.yml` builds the Windows installer on a `windows-latest`
-runner (PyInstaller and Inno Setup both run natively there — no Wine/cross-compilation,
-PyInstaller does not support it) on pushes to `main` and pull requests touching the relevant
-paths (unpublished smoke build, uploaded as a workflow artifact), and on `v*` tags, where the
-installer is additionally attached to the matching GitHub Release. Not yet run on GitHub's
-infrastructure as of this writing — verify the first run before relying on it.
+`.github/workflows/windows-installer.yml` checks once a day for package source changes and
+builds the Windows installer on a `windows-latest` runner when needed (PyInstaller and Inno
+Setup both run natively there — no Wine/cross-compilation). A pending `v*` tag takes priority
+and its installer is attached to the matching GitHub Release. Use **Run workflow** to force
+a build on a selected branch or tag at any time. Not yet run on GitHub's infrastructure as
+of this writing — verify the first run before relying on it.
 
-The Ubuntu/Linux job (#98) is a follow-up; add it as a second job in the same workflow (or a
-separate one) once that installer exists, rather than duplicating the trigger config.
+The scheduled run checks the tracked files used by each package against a marker saved
+after a successful build and release upload. If those files are unchanged, the build job
+is skipped. A manual run always builds. A tag with a missing release asset is built even if
+its source was built before. Only one pending tag is processed per daily run.
+
+Successful builds of the default branch are also published under **Releases** as a dated
+prerelease, `daily-YYYYMMDD` (UTC). All formats built that day attach to that one prerelease.
+If no package source changed, no new daily prerelease or package is created. A manual run
+on the default branch also publishes there; a manual run on another branch remains a
+workflow artifact.
+Version-tag builds continue to attach to their matching `v*` release. Daily assets include
+the source commit in their filenames, since formats may be built from different commits
+on a busy day.
+
+## Debian package (#98)
+
+`.github/workflows/debian-package.yml` checks once a day for package source changes and
+builds an amd64 `.deb` inside a Debian 12 (bookworm) container when needed. A pending `v*`
+tag takes priority and its package is attached to the matching GitHub Release; daily builds
+appear in a dated prerelease and workflow artifacts. **Run workflow** forces a build on a
+selected branch or tag at any time.
+PyInstaller bundles the engine and its Python dependencies under `/opt/ohr-engine`.
+The package provides `ohr-engine` on `PATH` and an application-menu entry. The menu
+entry opens a terminal and asks for the user's original `WARFB` directory; the command
+line entry accepts that path as its first argument or via `WARFB`. No original game files
+are included. Save files and logs stay in the user's home directory.
+
+To build locally on Debian 12 amd64 with Python 3.11, `python3-venv`, `binutils`,
+`libgl1`, `libx11-6`, and `dpkg` installed:
+
+```sh
+python3 -m venv /tmp/ohr-build-venv
+/tmp/ohr-build-venv/bin/pip install --only-binary=:all: -r requirements-engine.txt pyinstaller
+/tmp/ohr-build-venv/bin/pyinstaller packaging/linux/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
+sh packaging/linux/build-deb.sh 0.0.0~dev1
+```
+
+The package is written to `dist/debian/`. Install with
+`sudo apt install ./dist/debian/ohr-engine_*.deb`, then run
+`ohr-engine /path/to/WARFB` or use the menu entry.
+The bookworm build targets Debian 12 and newer systems with compatible libraries; it has
+not been tested against an actual game installation in CI.
+
+## AppImage
+
+`.github/workflows/appimage.yml` builds an x86_64 AppImage in a Debian 12 container. Its
+AppDir contains the frozen engine, a relative `AppRun`, a desktop file, a PNG icon, and
+license notices. The workflow uses versioned upstream appimagetool and type 2 runtime
+releases. Run the resulting file with `./ohr-engine-<version>-x86_64.AppImage
+/path/to/WARFB`, or set `WARFB`. The AppImage still needs a compatible host graphics
+stack and a glibc at least as new as Debian 12's. See the
+[AppDir specification](https://docs.appimage.org/reference/appdir.html) for its layout.
+If FUSE is unavailable, set `APPIMAGE_EXTRACT_AND_RUN=1` when launching it; see the
+[AppImage FUSE guide](https://docs.appimage.org/user-guide/troubleshooting/fuse.html).
+
+For a local build on Debian 12, first create `dist/ohr-engine` with the PyInstaller command
+above. Install `librsvg2-bin` for the icon, and provide the pinned upstream
+`appimagetool-x86_64.AppImage` and `runtime-x86_64` files. Make appimagetool executable:
+
+```sh
+chmod +x /path/to/appimagetool-x86_64.AppImage
+APPIMAGETOOL=/path/to/appimagetool-x86_64.AppImage \
+APPIMAGE_RUNTIME_FILE=/path/to/runtime-x86_64 \
+sh packaging/linux/build-appimage.sh 0.0.0~dev1
+```
+
+The output is in `dist/appimage/`.
+
+## RPM
+
+`.github/workflows/rpm-package.yml` freezes the engine in a Rocky Linux 9 container and
+builds an x86_64 RPM with `rpmbuild`. It installs under `/opt/ohr-engine`, with the same
+command and terminal menu entry as the Debian package. The RPM includes the frozen Python
+runtime and notices, and targets systems with glibc 2.34 or newer and compatible OpenGL/X11
+libraries. Prerelease hyphens in tags become RPM tilde operators, so `v1.2.3-rc1` becomes
+`1.2.3~rc1`.
+
+For a local build on Rocky Linux 9:
+
+```sh
+sudo dnf install python3.11 python3.11-pip rpm-build binutils libglvnd-glx libX11 cpio
+python3.11 -m venv /tmp/ohr-build-venv
+/tmp/ohr-build-venv/bin/pip install --only-binary=:all: -r requirements-engine.txt pyinstaller
+/tmp/ohr-build-venv/bin/pyinstaller packaging/linux/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
+sh packaging/linux/build-rpm.sh 0.0.0~dev1
+```
+
+The output is in `dist/rpm/`; install it with `sudo dnf install ./dist/rpm/*.rpm`.
+Both new workflows use the same daily source check and manual **Run workflow** option as
+the Debian and Windows workflows. Pending release tags are processed one per day per format.

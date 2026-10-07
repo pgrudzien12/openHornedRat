@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Open Horned Rat Engine
+Comment=Play Shadow of the Horned Rat with your own game files
+Exec=AppRun
+Icon=ohr-engine
+Terminal=true
+Categories=Game;StrategyGame;

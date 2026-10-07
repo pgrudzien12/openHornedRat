@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+if [ -n "${WARFB:-}" ] || [ "$#" -gt 0 ]; then
+    exec /usr/bin/ohr-engine "$@"
+fi
+
+printf 'Enter the path to your original game WARFB directory: '
+IFS= read -r warfb || exit 1
+if [ -z "$warfb" ]; then
+    echo "No directory entered." >&2
+    exit 1
+fi
+exec /usr/bin/ohr-engine "$warfb"

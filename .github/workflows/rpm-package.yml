@@ -1,16 +1,12 @@
-name: Windows installer
+name: RPM package
 
-# Builds the Windows installer (issue #97) on a native windows-latest runner (PyInstaller
-# does not support cross-compilation; ISCC and a Python new enough for pygame-ce/zengl's
-# published wheels both ship on this runner image already). The daily run builds one
-# unprocessed v* tag, or the default branch when no tag needs a release asset.
 on:
   schedule:
-    - cron: "23 3 * * *"
+    - cron: "23 4 * * *"
   workflow_dispatch:
 
 concurrency:
-  group: windows-installer-daily
+  group: rpm-package-daily
   cancel-in-progress: false
 
 jobs:
@@ -47,7 +43,7 @@ jobs:
           else
             while IFS= read -r tag; do
               [[ "$tag" =~ ^v[0-9]+[A-Za-z0-9.+~-]*$ ]] || continue
-              git cat-file -e "$tag:packaging/windows/ohr-engine.spec" 2>/dev/null || continue
+              git cat-file -e "$tag:packaging/linux/build-rpm.sh" 2>/dev/null || continue
               if ! assets=$(gh release view "$tag" --json assets --jq '.assets[].name' 2>/tmp/ohr-release-error); then
                 if grep -qi 'not found' /tmp/ohr-release-error; then
                   assets=""
@@ -56,7 +52,7 @@ jobs:
                   exit 1
                 fi
               fi
-              if ! grep -Eq '^ohr-engine-setup-.*\.exe$' <<< "$assets"; then
+              if ! grep -Eq '^ohr-engine-.*\.x86_64\.rpm$' <<< "$assets"; then
                 release_tag="$tag"
                 break
               fi
@@ -68,13 +64,12 @@ jobs:
             echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
           else
             checkout_ref="$(git rev-parse HEAD)"
-            echo "version=0.0.0-dev+${GITHUB_SHA:0:8}" >> "$GITHUB_OUTPUT"
+            echo "version=0.0.0~dev+${GITHUB_SHA:0:8}" >> "$GITHUB_OUTPUT"
             echo "release_tag=" >> "$GITHUB_OUTPUT"
           fi
-          source_hash=$(git ls-tree -r "$checkout_ref" -- packaging/windows packaging/THIRD_PARTY_NOTICES.md packaging/licenses requirements-engine.txt whshr scripts LICENSE .github/workflows/windows-installer.yml | sha256sum | cut -d' ' -f1)
-          cache_key="ohr-windows-v1-$source_hash"
+          source_hash=$(git ls-tree -r "$checkout_ref" -- packaging/linux/ohr-engine.spec packaging/linux/build-rpm.sh packaging/linux/ohr-engine.rpm.spec packaging/linux/ohr-engine-launch packaging/linux/ohr-engine.desktop packaging/THIRD_PARTY_NOTICES.md packaging/licenses requirements-engine.txt whshr scripts LICENSE LEGAL.md packaging/windows/entrypoint.py .github/workflows/rpm-package.yml | sha256sum | cut -d' ' -f1)
           echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
-          echo "cache_key=$cache_key" >> "$GITHUB_OUTPUT"
+          echo "cache_key=ohr-rpm-v1-$source_hash" >> "$GITHUB_OUTPUT"
           if [[ -z "$release_tag" ]] && { [[ "$GITHUB_EVENT_NAME" == schedule ]] || [[ "$GITHUB_REF" == "refs/heads/$DEFAULT_BRANCH" ]]; }; then
             echo "daily_tag=daily-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
             echo "daily_date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
@@ -84,13 +79,14 @@ jobs:
         id: source-cache
         uses: actions/cache/restore@v4
         with:
-          path: build/package-cache/success
+          path: build/package-cache/rpm-success
           key: ${{ steps.target.outputs.cache_key }}
 
   build:
     needs: plan
     if: github.event_name == 'workflow_dispatch' || needs.plan.outputs.release_tag != '' || needs.plan.outputs.source_cached != 'true'
-    runs-on: windows-latest
+    runs-on: ubuntu-24.04
+    container: rockylinux:9
     permissions:
       contents: read
     steps:
@@ -98,48 +94,52 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.checkout_ref }}
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: Install build tools
+        run: dnf install -y python3.11 python3.11-pip rpm-build binutils libglvnd-glx libX11 cpio
 
-      - name: Install engine dependencies and PyInstaller
+      - name: Install Python build dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install --only-binary=:all: -r requirements-engine.txt pyinstaller
+          python3.11 -m venv /tmp/ohr-build-venv
+          /tmp/ohr-build-venv/bin/pip install --only-binary=:all: -r requirements-engine.txt pyinstaller
 
-      - name: Freeze with PyInstaller
-        run: pyinstaller packaging/windows/ohr-engine.spec --distpath dist --workpath build --noconfirm
+      - name: Freeze engine
+        run: /tmp/ohr-build-venv/bin/pyinstaller packaging/linux/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
 
-      - name: Smoke-test the frozen executable
+      - name: Smoke-test frozen engine
         shell: bash
-        # `whshr engine` lazily imports pygame/zengl only once past argument parsing (they
-        # are the runtime frontend's own third-party dependencies), so a bare no-args run
-        # only proves argparse works, not that the frozen native DLLs load. Point WARFB at
-        # an empty directory: this is not a real installation (the game is never bundled or
-        # available on a CI runner - see CLAUDE.md), but whshr.frontend.app.run validates the
-        # installation (whshr/assets.py) before ever opening a window/GL context, so this
-        # reaches the pygame/zengl imports and fails deterministically on the installation
-        # check, without needing GPU-accelerated OpenGL to be available on the runner.
         run: |
-          mkdir -p /tmp/fake_warfb
-          out="$(WARFB=/tmp/fake_warfb ./dist/ohr-engine/ohr-engine.exe --hidden --frames 1 2>&1 || true)"
-          echo "$out"
-          echo "$out" | grep -q "incomplete WARFB installation"
-          ! echo "$out" | grep -qE "ModuleNotFoundError|ImportError"
+          set -euo pipefail
+          ./dist/ohr-engine/ohr-engine --help >/dev/null
+          mkdir -p /tmp/fake-warfb
+          output=$(WARFB=/tmp/fake-warfb ./dist/ohr-engine/ohr-engine --hidden --frames 1 2>&1) && exit 1 || status=$?
+          printf '%s\n' "$output"
+          test "$status" -ne 0
+          grep -q 'incomplete WARFB installation' <<< "$output"
+          ! grep -Eq 'ModuleNotFoundError|ImportError' <<< "$output"
 
-      - name: Compile installer with Inno Setup
-        shell: pwsh
+      - name: Build RPM
         env:
-          INSTALLER_VERSION: ${{ needs.plan.outputs.version }}
+          PACKAGE_VERSION: ${{ needs.plan.outputs.version }}
+        run: sh packaging/linux/build-rpm.sh "$PACKAGE_VERSION"
+
+      - name: Check RPM contents
+        shell: bash
         run: |
-          $iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
-          if (-not $iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
-          & $iscc "/DMyAppVersion=$env:INSTALLER_VERSION" packaging\windows\installer.iss
+          set -euo pipefail
+          package=(dist/rpm/*.rpm)
+          test "${#package[@]}" -eq 1
+          rpm -qp --queryformat '%{NAME} %{VERSION} %{RELEASE} %{ARCH}\n' "${package[0]}"
+          package_path="$PWD/${package[0]}"
+          mkdir -p /tmp/ohr-rpm-check
+          (cd /tmp/ohr-rpm-check && rpm2cpio "$package_path" | cpio -idm --quiet)
+          test -f /tmp/ohr-rpm-check/usr/share/applications/ohr-engine.desktop
+          test -L /tmp/ohr-rpm-check/usr/bin/ohr-engine
+          /tmp/ohr-rpm-check/opt/ohr-engine/ohr-engine --help >/dev/null
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ohr-engine-windows-installer
-          path: dist/installer/*.exe
+          name: ohr-engine-rpm-x86_64
+          path: dist/rpm/*.rpm
 
   remember:
     if: >-
@@ -155,11 +155,11 @@ jobs:
       - name: Record successful package source
         run: |
           mkdir -p build/package-cache
-          printf 'built\n' > build/package-cache/success
+          printf 'built\n' > build/package-cache/rpm-success
 
       - uses: actions/cache/save@v4
         with:
-          path: build/package-cache/success
+          path: build/package-cache/rpm-success
           key: ${{ needs.plan.outputs.cache_key }}
 
   release:
@@ -171,14 +171,14 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: ohr-engine-windows-installer
+          name: ohr-engine-rpm-x86_64
           path: release
 
-      - name: Attach installer to the release
+      - name: Attach RPM to the release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.plan.outputs.release_tag }}
-          files: release/*.exe
+          files: release/*.rpm
 
   daily_release:
     if: needs.plan.outputs.daily_tag != ''
@@ -189,7 +189,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: ohr-engine-windows-installer
+          name: ohr-engine-rpm-x86_64
           path: release
 
       - name: Publish daily prerelease
@@ -201,4 +201,4 @@ jobs:
           prerelease: true
           make_latest: false
           body: Automated playtest packages. Asset names identify the source commit. Bring your own legally owned WARFB game files; they are not included.
-          files: release/*.exe
+          files: release/*.rpm
