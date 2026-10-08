@@ -3045,13 +3045,13 @@ class ScriptInterpreter:
         """ChargeForward: a charge with no target to the point 12 x s_rlmv straight ahead
         (notes/movement_formation.md 3.6): no fear test and no event 0x07; success clears fear-passed and
         reveals the unit (true); an anchored unit halts and re-forms (false) (notes/script_grid_events.md 3).
-        The engine tracks this as a free charge until it reaches the point or makes contact. Not modelled:
-        the refusal inside a blocking boundary region."""
+        The engine tracks this as a free charge until it reaches the point or makes contact. A unit standing in a
+        blocking boundary region halts and re-forms (false) instead."""
         unit = self.battle.regiments.get(unit_id)
         if unit is None:
             state.cond_flags = False
             return state.pc + 1
-        if unit.anchored or unit.held:
+        if unit.anchored or unit.held or self.battle.on_blocked_ground(unit):
             self.battle.reform_to_ranks(unit, unit.ranks)
             state.cond_flags = False
             return state.pc + 1

@@ -2796,6 +2796,14 @@ class Battle:
             f"{regiment.name}'s charge ends at {description}.", "charge_end",
             regiment=regiment.identifier))
 
+    def on_blocked_ground(self, regiment: Regiment) -> bool:
+        """Whether the regiment's position (its front-rank reference point) lies in a blocking region: outside a
+        solid area, inside an inverse-solid one or outside the battle edge (notes/movement_formation.md 3.6,
+        notes/target_queries.md 5.2 check 11)."""
+        point = self.route_reference_point(regiment)
+        return any(boundary.forbidden(point) for boundary in self.navigation_boundaries
+                   if boundary.solid or boundary.inverse or boundary.battle_edge)
+
     def _correct_boundaries(self, regiment: Regiment) -> None:
         if regiment.routing:
             return  # notes/flight_solid_obstacles.md 4: routing units get no boundary correction of any kind

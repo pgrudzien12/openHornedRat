@@ -6,7 +6,7 @@ Vectors follow the report's tables: unit A at (0, 0), enemy block B at (0, 200) 
 import unittest
 from unittest import mock
 
-from whshr import behaviour, interpreter
+from whshr import behaviour, interpreter, navigation
 from whshr.engine import Battle, Regiment
 from whshr.interpreter import Event
 from whshr.rules import Side
@@ -99,6 +99,38 @@ class ChargeForwardTests(GridTestCase):
         self.a.hud_class = "art"
         self.interp.op_ChargeForward(self.state, None, [], "A", 0, None)
         self.assertFalse(self.state.cond_flags)
+
+    def square(self, flag, x1=-50, y1=-50, x2=50, y2=50):
+        return {"status": ["bnd_ACTIVE", flag],
+                "lines": [[x1, y1, x2, y1], [x2, y1, x2, y2], [x2, y2, x1, y2], [x1, y2, x1, y1]]}
+
+    def charge_forward(self, boundaries):
+        self.battle.navigation_boundaries = navigation.boundaries_from_views(boundaries)
+        self.interp.op_ChargeForward(self.state, None, [], "A", 0, None)
+
+    def test_unit_inside_an_inverse_solid_area_halts_and_reforms_without_charging(self):
+        self.charge_forward([self.square("bnd_INVSOLID")])
+        self.assertFalse(self.state.cond_flags)
+        self.assertIsNone(self.a.target_x)
+        self.assertFalse(self.a.free_charging)
+
+    def test_unit_outside_a_solid_area_is_refused(self):
+        self.charge_forward([self.square("bnd_SOLID", 500, 500, 600, 600)])
+        self.assertFalse(self.state.cond_flags)
+        self.assertFalse(self.a.free_charging)
+
+    def test_unit_outside_the_battle_edge_is_refused(self):
+        self.charge_forward([self.square("bnd_BATTLEEDGE", 500, 500, 600, 600)])
+        self.assertFalse(self.state.cond_flags)
+
+    def test_unit_on_open_ground_inside_solid_and_edge_areas_charges(self):
+        self.charge_forward([self.square("bnd_SOLID"), self.square("bnd_BATTLEEDGE")])
+        self.assertTrue(self.state.cond_flags)
+        self.assertTrue(self.a.free_charging)
+
+    def test_sight_edge_and_line_boundaries_do_not_block(self):
+        self.charge_forward([self.square("bnd_SIGHTEDGE", 500, 500, 600, 600)])
+        self.assertTrue(self.state.cond_flags)
 
 
 class CheckCollisionsTests(GridTestCase):
