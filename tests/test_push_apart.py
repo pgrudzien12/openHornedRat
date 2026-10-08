@@ -131,6 +131,28 @@ class PushApartTests(unittest.TestCase):
         battle.tick()
         self.assertFalse(mover.collision_recheck or friend.collision_recheck)
 
+    def test_re_check_states_set_by_a_push_survive_the_scripted_contact_sweep(self):
+        # The sweep clears the state of every unit it visited; the pass's own switch-ons are applied again after it.
+        with mock.patch.object(Regiment, "bounding_radius", return_value=30):
+            mover, friend = unit("A", 500, 500), unit("B", 550, 500)
+            battle = Battle(2000, 2000, [mover, friend], seed=1995)
+            mover.collision_recheck = True
+            battle._resolve_collisions()
+            mover.collision_recheck = friend.collision_recheck = False  # what the contact sweep does
+            battle._restore_carried_rechecks()
+            self.assertTrue(mover.collision_recheck)  # A's last push (o = -1) still pending
+
+    def test_enemy_machine_with_overlapping_circles_gets_its_re_check_state_on(self):
+        with mock.patch.object(Regiment, "bounding_radius", return_value=22.5):
+            mover, cart = unit("A", 500, 500), wagon("W", 543, 500, Side.ENEMY)
+            battle = Battle(2000, 2000, [mover, cart], seed=1995)
+            battle._push_apart_pass(mover, [mover, cart])
+            self.assertEqual((mover.x, cart.x), (500, 543))  # not pushed apart
+            self.assertTrue(cart.collision_recheck)
+            cart.collision_recheck = False  # the contact sweep visited it
+            battle._restore_carried_rechecks()
+            self.assertTrue(cart.collision_recheck)
+
 
 if __name__ == "__main__":
     unittest.main()
