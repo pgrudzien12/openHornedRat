@@ -125,6 +125,10 @@ renumber later work.
 
 - [ ] **GEI13 — Remaining interpreter behavior.** (issue #127) Complete `replacescript`, mission release,
   remaining built-in object behavior, and the documented deferred `goto` behavior.
+  **Done:** the deferred `goto` (`whshr/glue_runtime.py`): `goto` only records its target and the run goes on; the
+  jump happens when the script ends and wins over `gomissionselect`; a successful window, object or `gosub` load
+  clears both requests (notes/glue_interpreter.md quirk 3). Conditional gotos stay unsupported (Diagnostic).
+  **Still open:** a runtime-level walk of every chapter flow (needs a real installation), built-in object behaviour.
 
 - [ ] **GEI14 — Persistent save/load.** (issue #128) Define save/load semantics, then replace the in-memory
   autosave snapshot with durable persistence.

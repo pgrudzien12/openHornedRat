@@ -265,6 +265,7 @@ class GlueRuntimeState:
     dialogue_ms: float = 0
     dialogue_clip_ms: float = 0.0  # length of the current line's recording; 0 = none, the line is paced by its text
     gomissionselect_pending: bool = False  # raised by ``gomissionselect``; notes/glue_interpreter.md §9.3
+    pending_goto: str = ""  # target recorded by ``goto``; run when the script ends (notes/glue_interpreter.md 2.2, 4.2)
     dialogue_colour: str = "black"  # live settextcolor value, applies to the *next* queued line
     speech_lines: tuple[int, ...] = ()  # string ids still to speak after the current hotspot speech line
     speech_active: bool = False  # a hotspot click speech is typing or holding its current line
@@ -777,7 +778,9 @@ class GlueRuntime:
                     effects.append(Diagnostic(self._location(instruction), "conditional goto is unsupported"))
                     self.state.wait_reason = "conditional-goto"
                 else:
-                    self.state.current = ScriptFrame(argument.upper())
+                    # Only a request (notes/glue_interpreter.md 2.3): the run goes on and the jump happens when the
+                    # script ends, unless a resource load clears it first (quirk 3).
+                    self.state.pending_goto = self._resource_argument(argument).upper()
         elif command in ("openwindow", "opensubwindow"):
             self._open_window(argument, command == "opensubwindow", effects)
         elif command == "closewindow":
@@ -867,8 +870,21 @@ class GlueRuntime:
         else:
             effects.append(Diagnostic(self._location(instruction), f"unsupported command {command!r}"))
 
+    def _clear_pending_requests(self) -> None:
+        """Every resource load (window, object or script) clears the pending goto and the gomissionselect flag
+        (notes/glue_interpreter.md 10, quirk 3)."""
+        self.state.pending_goto = ""
+        self.state.gomissionselect_pending = False
+
     def _finish_frame(self, effects: list[GlueEffect]) -> None:
         self.state.current = None
+        if self.state.pending_goto:
+            # The target replaces the ended script as a tail call (no frame is pushed); loading it clears the
+            # gomissionselect flag, so the goto wins (notes/glue_interpreter.md 2.1).
+            target, self.state.pending_goto = self.state.pending_goto, ""
+            self.state.gomissionselect_pending = False
+            self.state.current = ScriptFrame(target)
+            return
         if self.state.gomissionselect_pending:
             # The flag only fires the mission release step once the run truly ends (no window, wait or
             # pending request left to resume it); a resource load clears it first (quirk 3), but shipped
@@ -888,6 +904,12 @@ class GlueRuntime:
             effects.append(Diagnostic("gosub", "script-frame stack overflow"))
             return
         target = self._resource_argument(argument)
+        try:
+            self.content.program(target.upper())
+        except (KeyError, TypeError):
+            pass  # a target that cannot be opened changes nothing (the frame then reports the missing resource)
+        else:
+            self._clear_pending_requests()
         if self.state.current is not None:
             self.state.call_stack.append(deepcopy(self.state.current))
         self.state.current = ScriptFrame(target.upper())
@@ -900,6 +922,7 @@ class GlueRuntime:
             definition = self.content.window(name)
         except (KeyError, TypeError):
             return
+        self._clear_pending_requests()  # a failed load changes nothing (notes/glue_interpreter.md 2.1)
         position = next((record.values for record in definition.records if record.block_type == "POSITION"), {})
         parent = next((window.name for window in self.state.windows if window.parent is None), None) if child else None
         palette = (next((window.palette_id for window in self.state.windows if window.name == parent), 0)
@@ -955,6 +978,7 @@ class GlueRuntime:
             definition = self.content.window(name)
         except (KeyError, TypeError):
             return
+        self._clear_pending_requests()
         target.objects.append(name)
         self._select_first_mission()
         effects.append(UpdateWindow(target.name))
