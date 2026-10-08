@@ -1929,7 +1929,9 @@ units (one model), `NEAR_DISTANCE = 18`, `ARRIVAL_DISTANCE = 3`, `OWNER_SWITCH_R
 7. **Retargeting** happens once, at arrival, as described in 5.7 (`s_pntval` comparison, war machines).
 8. **Death and leaving.** A dead model frees its cell and unpairs its opponent; the survivor stays
    on the grid and is re-paired on a later tick. A unit leaves the grid only on the state conditions
-   listed in 5.7, never because of distance.
+   listed in 5.7, never because of distance. How the re-pairing closes gaps (re-collection of unpaired models,
+   "beside a comrade" cells, reserve release after a loss) and why a model that is at rest when it is paired
+   does not fight until its opponent arrives: `notes/grid_gap_closing.md`.
 9. **Not modelled by `whshr/`** (documented placeholders): war machine, monster and wagon block
    layouts (every unit is seeded as troops), opponent stealing by `s_pntval`, the original's exact
    per-tick model walking speed.
