@@ -2,6 +2,7 @@
 
 import random
 import unittest
+from unittest import mock
 
 from tests.script_helpers import FakeDll, word
 from whshr import behaviour, interpreter, nodes
@@ -154,6 +155,90 @@ class SquigHopTests(MoveTestCase):
         self.call("s", "FanaticRelease")
         self.assertEqual((self.state.hop_counter, bool(self.state.cond_flags)), (0, False))
         self.assertEqual([event.code for event in self.state.event_queue], [1, 1])
+
+
+class SquigLandingTests(MoveTestCase):
+    """notes/script_spawn_move.md 5: the landing collision, with the report's five rows."""
+
+    def setUp(self):
+        self.hopper = Regiment("s", "S", 500, 1000, 0, Side.ENEMY, models=5, ranks=1, strength=4)
+        self.victim = Regiment("v", "V", 502, 1000, 0, Side.PLAYER, models=2, ranks=1, toughness=3, armour=0)
+        self.make(self.hopper, self.victim)
+        self.state = self.bus.unit_states["s"]
+        self.state.current_target = ("v", 0)
+
+    def release(self, counter, *dice):
+        self.state.hop_counter = counter
+        with mock.patch.object(self.battle.rng, "randint", side_effect=list(dice)):
+            self.call("s", "FanaticRelease")
+        return self.state.hop_counter, bool(self.state.cond_flags)
+
+    def test_a_landing_that_wounds_keeps_the_counter_and_is_true(self):
+        self.assertEqual(self.release(4, 6, 1, 6, 1), (4, True))  # two models: wound 6, save 1 (no armour)
+        self.assertEqual(self.victim.models, 0)
+        self.assertEqual(self.hopper.models, 5)  # the hopper never dies
+
+    def test_nothing_within_reach_counts_a_miss(self):
+        self.victim.x = 900
+        self.assertEqual(self.release(4), (3, True))
+        self.assertEqual(self.release(1), (0, False))
+
+    def test_a_failed_wound_roll_or_a_save_is_a_miss(self):
+        self.assertEqual(self.release(1, 1, 1), (0, False))  # wound rolls 1 and 1: need 3
+        self.victim.armour = 4  # save 3 + (4 - 3) = 4
+        self.assertEqual(self.release(1, 6, 6, 6, 6), (0, False))  # wounds 6, saves 6 >= 4: saved
+        self.assertEqual(self.victim.models, 2)
+
+    def test_a_miss_with_no_target_calls_the_unit_to_itself(self):
+        self.victim.x = 900
+        self.state.current_target = None
+        self.assertEqual(self.release(2), (1, True))
+        self.assertEqual([event.code for event in self.state.event_queue], [1])
+
+    def test_touching_rolling_stock_or_scenery_counts_without_damage(self):
+        wagon = Regiment("w", "W", 505, 1000, 0, Side.PLAYER, models=2, ranks=1, unit_class=7)
+        self.make(self.hopper, wagon)
+        self.state = self.bus.unit_states["s"]
+        self.assertEqual(self.release(4), (4, True))
+        self.assertEqual(wagon.models, 2)
+        self.make(self.hopper)
+        self.state = self.bus.unit_states["s"]
+        self.battle.objects.append({"x": 505, "y": 1000, "radius": 30, "status": ["os_active"]})
+        self.assertEqual(self.release(4), (4, True))
+
+    def test_artillery_is_touched_even_when_the_crew_rolls_fail_and_its_machine_is_not_rolled_for(self):
+        gun = Regiment("g", "G", 505, 1000, 0, Side.PLAYER, models=3, ranks=1, unit_class=4, hud_class="art",
+                       toughness=3, has_leader=True)
+        self.make(self.hopper, gun)
+        self.state = self.bus.unit_states["s"]
+        gun.model_positions()
+        machine = gun.leader_model_index
+        assert machine is not None
+        self.assertEqual(self.release(4, 1, 1), (4, True))  # the crew models in reach roll 1: no wound, still a touch
+        self.assertEqual((gun.models, gun.melee_models[machine].wounds_taken), (3, 0))
+
+    def test_a_special_unit_is_touched_not_wounded(self):
+        special = Regiment("x", "X", 505, 1000, 0, Side.PLAYER, models=3, ranks=1, unit_class=8, toughness=3)
+        self.make(self.hopper, special)
+        self.state = self.bus.unit_states["s"]
+        self.assertEqual(self.release(4), (4, True))
+        self.assertEqual(special.models, 3)
+
+    def test_the_reach_follows_the_target_class(self):
+        for unit_class, wounded in ((1, False), (2, True), (6, True)):
+            with self.subTest(unit_class=unit_class):
+                far = Regiment("f", "F", 500, 1012, 0, Side.PLAYER, models=2, ranks=1, unit_class=unit_class,
+                               toughness=3)
+                self.make(self.hopper, far)
+                self.state = self.bus.unit_states["s"]
+                # its two models stand 13.4 from the hopper: outside 12, inside 18 and 24
+                self.release(4, *((6, 1, 6, 1) if wounded else ()))
+                self.assertEqual(far.models, 0 if wounded else 2)
+
+    def test_a_multi_wound_model_survives_a_single_wound(self):
+        self.victim.wounds = 2
+        self.assertEqual(self.release(4, 6, 1, 6, 1), (4, True))
+        self.assertEqual(self.victim.models, 2)  # wounded, not dead
 
 
 class ScatterFormulaTests(unittest.TestCase):
