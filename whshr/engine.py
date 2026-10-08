@@ -1919,8 +1919,9 @@ class Battle:
         route follows a unit on its last leg) the unit keeps moving, wheeling if the turn is 11/512 or more and
         `d > 32` (a smaller one is absorbed); within 32 units it goes on to its next waypoint, or with none left
         halts and re-forms. A point move therefore stops within 32 units of its point. Between plans it translates
-        along its facing (half speed in a wheel, none in a halted turn). While re-forming no plan is made and the
-        turn is suspended (notes/reform_while_moving.md 5).
+        along its facing (half speed in a wheel, none in a halted turn). While re-forming plans still run but the
+        turn is suspended (notes/reform_while_moving.md 5, notes/close_point_move.md 2). Deviation: within 32 units
+        the move halts even when the turn exceeds 64/512 (see the halt branch).
         """
         steering_target = self._steering_target(regiment, target, order_key)
         if steering_target is None:
@@ -1941,15 +1942,19 @@ class Battle:
             regiment.turn_order_key = order_key
             regiment.move_plan_countdown = -1.0
         suspended = regiment.reforming and not regiment.pursuing
+        # A halted turn steps first: it does not translate or run down the countdown, and the tick it ends in
+        # re-plans (notes/close_point_move.md 2). While re-forming it does nothing at all.
+        halted_tick = regiment.move_turn_owed and regiment.turn_mode == "halted"
+        if halted_tick and not suspended:
+            self._step_turn(regiment, scale)
         turn_finished = regiment.move_turn_owed and regiment.turn_mode is None
-        halted_turn = regiment.move_turn_owed and regiment.turn_mode == "halted"  # re-plans only when done
-        if not suspended and ((regiment.move_plan_countdown < 0 and not halted_turn) or turn_finished):
+        if (regiment.move_plan_countdown < 0 and not halted_tick) or turn_finished:
             regiment.move_plan_countdown = min(2 * distance, 150.0)
             regiment.move_turn_owed = False
             delta = self._turn_delta(regiment.direction, goal)
             current = (regiment.target_x, regiment.target_y)
             follows_last_leg = regiment.route_follows_unit and (not regiment.waypoints or regiment.waypoints == [current])
-            if abs(delta) > 64:
+            if abs(delta) > 64 and (distance > 32 or follows_last_leg):
                 self._owe_turn(regiment, delta / 2, "halted", 8)
             elif distance > 32 or follows_last_leg:
                 if abs(delta) >= 11 and distance > 32:
@@ -1958,7 +1963,10 @@ class Battle:
                     regiment.direction = goal  # absorbed
                     regiment.turn_mode = None
             else:
-                # Within 32 units: on to the next waypoint, or halt and re-form. A Ctrl-queued route keeps its current
+                # Within 32 units: on to the next waypoint, or halt and re-form. PROVISIONAL deviation
+                # (notes/close_point_move.md 3, 6): the original tests the turn first, so a point this close but more
+                # than 64/512 off the facing starts a halted turn; when it lies inside the pivot circle the unit then
+                # spins forever. This engine halts here whatever the turn, which changes only those endless cases. A Ctrl-queued route keeps its current
                 # destination at the head of the list; a planned route keeps only the legs still to come.
                 if regiment.waypoints and regiment.waypoints[0] == current:
                     regiment.waypoints.pop(0)
@@ -1974,17 +1982,19 @@ class Battle:
                 if regiment.models > 0 and not regiment.in_melee:
                     self.reform_to_ranks(regiment, regiment.ranks)
                 return False
-        if suspended:
-            mode = regiment.turn_mode
-            if mode == "halted":
-                step = 0
+        if halted_tick:
+            step = 0  # the halted turn already stepped this tick
+        elif suspended:
+            if regiment.turn_mode == "halted":
+                step = 0  # does nothing while re-forming; a wheel translates without turning
         elif (mode := self._step_turn(regiment, scale)) is None or regiment.turns_on_the_spot:
             pass
         elif mode == "wheel":
             step /= 2
         else:
             step = 0
-        regiment.move_plan_countdown -= regiment.speed_per_tick * 16 / MOVING_FREELY_K * scale
+        if not (regiment.move_turn_owed and regiment.turn_mode == "halted"):
+            regiment.move_plan_countdown -= regiment.speed_per_tick * 16 / MOVING_FREELY_K * scale
         if step <= 0:
             regiment.route_speed = 0.0
             return True

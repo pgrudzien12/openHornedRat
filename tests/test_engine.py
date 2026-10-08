@@ -1209,6 +1209,52 @@ class OrdinaryMovePlanTests(unittest.TestCase):
         assert regiment.turn_goal is not None
         self.assertAlmostEqual(regiment.turn_goal, 64, delta=9)
 
+    def _planner(self, waypoint):
+        regiment = Regiment("w", "W", 0, 0, 0, Side.PLAYER, models=11, ranks=3, speed_per_tick=18 * 1.8 / 16)
+        battle = Battle(1000, 1000, [regiment], seed=1)
+        battle.phase = "battle"
+        regiment.target_x, regiment.target_y = waypoint
+        regiment.turn_order_key = ("move", 0, 0)  # under way already: no start snap
+        return regiment, battle
+
+    def test_given_a_waypoint_within_32_units_and_a_small_turn_when_planned_then_the_move_halts(self):
+        # notes/close_point_move.md 5: P (0,0), facing 0, waypoint (5, 30): turn <= 64, d <= 32 -> halt and re-form.
+        regiment, battle = self._planner((5.0, 30.0))
+
+        battle._advance_move(regiment, (5.0, 30.0), regiment.speed_per_tick, ("move", 5.0, 30.0), 1.0)
+
+        self.assertFalse(regiment.moving)
+        self.assertTrue(regiment.reforming)
+
+    def test_given_a_far_waypoint_with_a_moderate_turn_when_planned_then_it_wheels_and_sets_the_countdown(self):
+        # notes/close_point_move.md 5: waypoint (20, 40): d 44, turn 38 -> keep moving, wheel owing 38, countdown 88.
+        regiment, battle = self._planner((20.0, 40.0))
+
+        battle._advance_move(regiment, (20.0, 40.0), regiment.speed_per_tick, ("move", 20.0, 40.0), 1.0)
+
+        self.assertTrue(regiment.moving)
+        self.assertEqual(regiment.turn_mode, "wheel")
+        self.assertAlmostEqual(regiment.move_plan_countdown, 2 * math.hypot(20, 40) - 18, places=4)
+
+    def test_given_a_re_forming_unit_owing_a_halted_turn_when_updated_then_nothing_happens(self):
+        regiment, battle = self._planner((300.0, 0.0))
+        regiment.reforming = True
+        regiment.move_plan_countdown = 50.0
+        Battle._owe_turn(regiment, 40, "halted", 8)
+        before = (regiment.x, regiment.y, regiment.direction)
+
+        battle._advance_move(regiment, (300.0, 0.0), regiment.speed_per_tick, ("move", 0, 0), 1.0)
+
+        self.assertEqual((regiment.x, regiment.y, regiment.direction), before)
+        self.assertEqual(regiment.move_plan_countdown, 50.0)
+
+    def test_given_a_point_inside_the_pivot_circle_when_ordered_then_the_unit_halts_instead_of_spinning(self):
+        # PROVISIONAL deviation (notes/close_point_move.md 3, 6): the original's rules spin forever here.
+        for bearing, distance in ((60, 10), (60, 18), (90, 20), (150, 32), (150, 40)):
+            with self.subTest(bearing=bearing, distance=distance):
+                regiment, point = self._move(bearing, distance)
+                self.assertFalse(regiment.moving)
+
     def test_given_a_three_point_route_when_followed_then_the_middle_point_is_visited(self):
         regiment = Regiment("w", "W", 100, 100, 0, Side.PLAYER, models=1, ranks=1, speed_per_tick=3.0)
         battle = Battle(1000, 1000, [regiment], seed=1)
