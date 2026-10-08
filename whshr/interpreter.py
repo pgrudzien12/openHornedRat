@@ -109,6 +109,7 @@ class UnitScriptState:
     event_queue: deque[Event] = field(default_factory=lambda: deque[Event](maxlen=128))  # pending events
     interrupt_script: int | None = None  # set by SetInterruptScript; called by CallInterruptScript
     pending_switch: int | None = None  # set by SwitchScript; applied after event handling
+    pending_switch_high: bool = False  # the pending switch came from IfSwitchScriptHigh (restarts even the running script)
 
     # Unit state (flags set by SetUnitFlags, SetCondFlags, etc.)
     unit_flags: int = 0  # primary unit flag bits (game_rules.md)
@@ -649,9 +650,10 @@ class ScriptInterpreter:
                 self._should_yield = False
                 break
 
-        # After main loop: apply pending script switch
+        # After main loop: apply pending script switch (a normal one to the running script is ignored)
+        high = state.pending_switch_high
         switch = self._take_pending_switch(state)
-        if switch is not None:
+        if switch is not None and not (switch == state.script_id and not high):
             state.script_id = switch
             state.pc = 0
             state.interrupt_return = None  # the switch abandons the handler, as in op_ReturnInterrupt
@@ -814,14 +816,17 @@ class ScriptInterpreter:
         return 0
 
     @staticmethod
-    def _request_switch(state: UnitScriptState, script: int, override: bool) -> None:
+    def _request_switch(state: UnitScriptState, script: int, override: bool, high: bool = False) -> None:
         """Record a deferred switch (notes/unit_script_control.md 1 and 6: the SwitchScript family sets the pending
         bit 8 of the condition word and is refused while bit 0x20 is set). `override` replaces a switch already
-        pending; otherwise the first request of the tick stands."""
+        pending; otherwise the first request of the tick stands. `high` marks an `IfSwitchScriptHigh` request, the
+        only kind that restarts the script the unit is already running (notes/convoy_jam_and_melee_obstacles.md
+        A.1)."""
         if state.cond_bits & SWITCH_REFUSED:
             return
         if override or state.pending_switch is None:
             state.pending_switch = script
+            state.pending_switch_high = high
         state.cond_bits |= SWITCH_PENDING
 
     @staticmethod
@@ -830,6 +835,7 @@ class ScriptInterpreter:
         (`ClearCondFlags 8`) has cancelled it."""
         switch = state.pending_switch if state.cond_bits & SWITCH_PENDING else None
         state.pending_switch = None
+        state.pending_switch_high = False
         state.cond_bits &= ~SWITCH_PENDING
         return switch
 
@@ -852,9 +858,10 @@ class ScriptInterpreter:
     def op_IfSwitchScriptHigh(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """IfSwitchScriptHigh N: request switching to script N at end of tick, overriding any
-        other pending switch this tick (the "high priority" variant per game_rules.md)."""
+        other pending switch this tick (the "high priority" variant per game_rules.md). Unlike the normal
+        switches it restarts the requested script even when the unit is already running it."""
         if operand is not None:
-            self._request_switch(state, operand, override=True)
+            self._request_switch(state, operand, override=True, high=True)
         return state.pc + 1
 
     def op_IfNotSwitchScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -2915,8 +2922,21 @@ class ScriptInterpreter:
         requested one (game_rules.md: opcode 0x14 "end of an event handler: return to the
         interrupted script or apply a pending switch"). Falls through if neither applies (e.g. this
         opcode reached without ever going through CallInterruptScript).
+
+        A normal-priority switch to the interrupted script itself is ignored: the unit resumes that script where it
+        was interrupted, so a wagon re-sent 0x27 while already in its halt script reaches the halt instead of
+        restarting at the script's first `Yield` (notes/convoy_jam_and_melee_obstacles.md A.1, A.3). Only a
+        different script or an `IfSwitchScriptHigh` request starts at pc 0. From a nested handler the comparison is
+        with the outermost interrupted script, and the outer handlers are abandoned as for any switch.
         """
+        high = state.pending_switch_high
         switch = self._take_pending_switch(state)
+        resumed = state.outer_returns[0] if state.outer_returns else state.interrupt_return
+        if switch is not None and not high and resumed is not None and resumed[0] == switch:
+            state.script_id, pc = resumed
+            state.interrupt_return = None
+            state.outer_returns.clear()
+            return pc
         if switch is not None:
             state.script_id = switch
             state.interrupt_return = None

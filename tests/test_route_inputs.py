@@ -104,6 +104,27 @@ class RouteUnitRelationTests(unittest.TestCase):
         self._move(self.ally)
         self.assertEqual(self.rel(self.ally), "pause")
 
+    # notes/convoy_jam_and_melee_obstacles.md B.1-B.2: a friendly unit in melee or braced has effective speed 0.
+    def test_a_friend_fighting_in_melee_is_an_obstacle_not_a_pause_even_with_its_attack_target(self):
+        self.ally.direction = 128
+        self._move(self.mover)
+        self.ally.attack_target, self.ally.in_melee = "enemy", True
+        self.assertEqual(self.battle.route_effective_speed(self.ally), 0.0)
+        self.assertEqual(self.rel(self.ally), "block")
+
+    def test_a_braced_friend_is_an_obstacle_not_a_pause(self):
+        self.ally.direction = 128
+        self._move(self.mover)
+        self.ally.braced = True
+        self.assertEqual(self.rel(self.ally), "block")
+
+    def test_a_friend_still_charging_across_the_path_pauses_the_mover(self):
+        self.ally.direction = 128
+        self._move(self.mover)
+        self.ally.attack_target = "enemy"  # charging, not yet in contact: charge speed
+        self.assertGreater(self.battle.route_effective_speed(self.ally), self.battle.route_effective_speed(self.mover))
+        self.assertEqual(self.rel(self.ally), "pause")
+
     def test_the_plan_at_a_new_order_treats_the_mover_as_stationary(self):
         self.ally.direction = 256
         self._move(self.mover)
