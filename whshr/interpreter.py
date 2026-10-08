@@ -1707,7 +1707,7 @@ class ScriptInterpreter:
     def op_Rally(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
         """Rally: stop being broken, charging, pursuing or braced; halt and re-form to the script's rank
-        count. While the unit is held the opcode yields without advancing and tries again next tick.
+        count around the unit's current position and facing, in walk-back mode. While the unit is held the opcode yields without advancing and tries again next tick.
         Does not leave the grid, change the target or facing, or write the condition."""
         unit = self.battle.regiments.get(unit_id)
         if unit is None:
@@ -1730,7 +1730,8 @@ class ScriptInterpreter:
             self._should_yield = True
             return state.pc
         if unit.models > 0 and not unit.in_melee:
-            self.battle.reform_to_ranks(unit, unit.script_ranks)
+            # Walk-back mode: the catch-up walk, no speed halving, no heading snap (notes/reform_while_moving.md 6).
+            self.battle.reform_to_ranks(unit, unit.script_ranks, walk_back=True)
         return state.pc + 1
 
     def op_FlankRearTest(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,

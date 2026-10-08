@@ -573,6 +573,8 @@ def resolve_contacts(battle: "Battle") -> None:
                     regiment.last_fought_opponent = opponent
                 regiment.melee_group = group_id
                 regiment.target_x = regiment.target_y = None
+            if not regiment.in_melee:
+                battle.end_reform_for_engagement(regiment)  # notes/reform_while_moving.md 8
             regiment.in_melee = True
             regiment.free_charging = False
         fight = battle.fights[group_id]

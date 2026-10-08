@@ -167,7 +167,8 @@ class FigureCapture:
                   if regiment.target_x is not None else "-")
         states = [name for name, on in (
             ("active", regiment.active), ("walking", regiment.walking), ("moving", regiment.moving),
-            ("reforming", regiment.reforming), ("in_melee", regiment.in_melee), ("routing", regiment.routing),
+            ("reforming", regiment.reforming), ("walk_back", regiment.reforming and regiment.reform_walk_back),
+            ("in_melee", regiment.in_melee), ("routing", regiment.routing),
             ("fled", regiment.fled), ("pursuing", regiment.pursuing), ("free_charging", regiment.free_charging),
             ("independent", regiment.independent), ("hidden", regiment.hidden)) if on]
         self._write(f"== tick {battle.update_count} (combat tick {battle.tick_count}, phase {battle.phase}"
