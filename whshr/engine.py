@@ -1443,6 +1443,21 @@ class Battle:
             event = interpreter.Event(code=0x21, x=int(x), y=int(y))
         self.event_bus.queue_event(unit.identifier, event)
 
+    def win_by_objectives(self, entries: Any = None) -> bool:
+        """Testing aid (--debug F10): destroy the enemy, run the mission's objectives, mark them completed and leave
+        through the tent, so the debrief gets the objectives' own records (`Objectives.complete`). False, doing
+        nothing, for a battle without objectives or one that is already over."""
+        if self.objectives is None or self.result is not None:
+            return False
+        self.start_battle()
+        for regiment in self.regiments.values():
+            if regiment.side == Side.ENEMY:
+                regiment.models = 0
+        self.objectives.complete(self, entries)
+        self.objectives.tent = True  # the tent is offered even if no letter decided the battle
+        self.leave()
+        return True
+
     def resolve_no_battle(self) -> None:
         """No-battle mode (a campaign-progression shortcut, not a game rule): skip this fight and
         settle it as an immediate, lossless win -- every enemy regiment destroyed, no player
