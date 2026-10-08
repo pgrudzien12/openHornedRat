@@ -2711,10 +2711,12 @@ class ScriptInterpreter:
         """Code 14 (notes/script_behaviours.md 1.6), 0x03 to self if either test is true. Test 1: every live unit,
         of any side, that is charging or pursuing, has not yet made its contact attacks this segment and is nearer
         than the threat range makes them on this unit now and spends them; true if any wound was caused (no early
-        stop). Test 2, only when test 1 is false: an enemy that is not hidden or marked is nearer than the range."""
+        stop; no broken test on the attacker). The unit itself is skipped: the report allows it only "in principle", and
+        a unit hitting its own models has no sensible meaning. Test 2, only when test 1 is false: an enemy that is not
+        hidden or marked is nearer than the range."""
         wounded = False
         for other in list(self.battle.regiments.values()):
-            if (other is unit or not other.active or other.routing or combat.contact_attacks_spent(self.battle, other)
+            if (other is unit or not other.active or combat.contact_attacks_spent(self.battle, other)
                     or not (other.attack_target is not None or other.pursuing)
                     or self._octagonal(unit, other) >= state.threat_range):
                 continue

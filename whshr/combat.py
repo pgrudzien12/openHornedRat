@@ -958,8 +958,9 @@ def _strike_router(battle: "Battle", attacker: "Regiment", target: "Regiment") -
     if not rolls:
         return False
     killed = kill_models(target, victims, battle=battle, killer=attacker.identifier)
+    fleeing = "fleeing " if target.routing else ""
     battle.events.append(BattleEvent(
-        f"{attacker.name} cuts down {killed} fleeing {target.name}."
+        f"{attacker.name} cuts down {killed} {fleeing}{target.name}."
         if killed else f"{attacker.name} reaches {target.name} but draws no blood.",
         "contact_attack",
         attacker=attacker.identifier, target=target.identifier, kills=killed,
@@ -1058,9 +1059,10 @@ def squig_landing(battle: "Battle", hopper: "Regiment") -> bool:
         if victims:
             kill_models(other, victims, battle=battle, killer=hopper.identifier)
             hit = True
-    for obj in battle.shooting_objects:  # placed scenery and buildings, ruins included
+    for obj in battle.shooting_objects:  # solid placed scenery and buildings, ruins included
+        status = {str(flag).casefold() for flag in obj.get("status") or ()}
         radius = float(obj.get("radius") or 0)
-        if radius > 0 and math.hypot(float(obj.get("x") or 0) - px, float(obj.get("y") or 0) - py) < radius:
+        if "os_solid" in status and radius > 0 and math.hypot(float(obj.get("x") or 0) - px, float(obj.get("y") or 0) - py) < radius:
             hit = True
     return hit
 

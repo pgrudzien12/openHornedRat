@@ -87,6 +87,12 @@ class SquigLandingTests(unittest.TestCase):
         interp.op_FanaticRelease(state, None, [word("FanaticRelease")], "H", 0, battle.rng)
         self.assertEqual((state.hop_counter, [event.code for event in state.event_queue]), (1, [0x01]))
 
+    def test_given_a_non_solid_map_object_under_the_leader_then_it_is_not_a_hit(self):
+        battle, interp = battle_of(self.hopper, regiment("V", 1000, 1500, Side.PLAYER))
+        battle.shooting_objects.append({"x": 1000, "y": 1000, "radius": 30, "status": ["os_active"]})
+        state = self.release(battle, interp)
+        self.assertEqual((bool(state.cond_flags), state.hop_counter), (True, 3))  # a miss: the counter dropped
+
     def test_given_cavalry_in_reach_then_the_wider_reach_of_18_applies(self):
         cavalry = regiment("V", 1000, 1030, Side.PLAYER, strength=3, toughness=3, unit_class=2)
         battle, interp = battle_of(self.hopper, cavalry)
@@ -157,6 +163,19 @@ class ThreatInReachTests(unittest.TestCase):
         with mock.patch.object(combat, "_d6", return_value=1):
             codes = self.run_code_14()
         self.assertEqual(codes, [0x03])
+
+    def test_given_a_charger_that_is_also_broken_then_it_still_makes_its_contact_attacks(self):
+        self.charger.routing = True
+        with mock.patch.object(combat, "_d6", return_value=6):
+            codes = self.run_code_14()
+        self.assertEqual(codes, [0x03])
+
+    def test_given_a_standing_victim_then_the_battle_log_does_not_call_it_fleeing(self):
+        with mock.patch.object(combat, "_d6", return_value=6):
+            self.run_code_14()
+        texts = [str(event) for event in self.battle.events if event.kind == "contact_attack"]
+        self.assertTrue(texts)
+        self.assertTrue(all("fleeing" not in text for text in texts))
 
     def test_given_spent_contact_attacks_then_the_segment_pass_skips_that_attacker(self):
         routing = regiment("R", 1000, 1010, Side.PLAYER)
