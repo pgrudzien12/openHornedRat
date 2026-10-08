@@ -215,7 +215,8 @@ script 111: FireAtTarget                        script 112: FireAt90PercentRange
   Event 35 = one `FireAt90PercentRange`.
 - After every artillery shot (source is a model, class Artillery, machine still there) the handler **waits 10 ticks
   inside the event handler** — the unit's main script is suspended meanwhile — then barks `React 12` and re-forms to
-  its script ranks. 🟡 whether further events are dispatched during that wait.
+  its script ranks. Events queued during that wait **are** dispatched: a nested handler runs and the wait resumes, unless
+  the nested handler switches script, which abandons the "Reload!" (`unit_script_control.md` §1, "Event handlers can nest").
 - A unit whose interrupt script reaches neither 154 nor 156 (library 101/103 → 153/155 → 152: Infantry, Cavalry,
   Monster, Wizard handlers) **drops** events 33–35: a volley animation ordered for such a unit produces no shots. The
   Monster-class special shooters do not need them (115/117 fire them directly), but BF014's Dragon needs case 33 for

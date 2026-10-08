@@ -94,7 +94,9 @@ the order (`script_shooting.md` §1).
 | same | player fire at a unit | `React 13`, then waits, fires when reloaded, then "Reload!" 10 ticks after that shot |
 | two player cannons fire on the same tick | 10 ticks later | both texts; one portrait pop-up (the first); the second speech skipped if the same cue is still playing |
 
-## 6. Uncertainties
+## 6. Events during the 10-tick wait (resolved)
 
-- 🟡 Whether further events are dispatched to the artillery unit during the 10-tick wait inside its handler
-  (`script_shooting.md` §5 notes the same open point).
+Events that arrive during the wait **are** handled: the unit's event handler runs nested, then the wait resumes.
+The timer keeps counting, so "Reload!" comes on time. If the nested event switches the unit's script (a rout, a
+brace against a charge, a re-form), the shot handler is abandoned: **no "Reload!"** and no re-form for that shot.
+Details and vectors: `unit_script_control.md` §1, "Event handlers can nest".

@@ -25,6 +25,29 @@ tick always sees the condition **false**, except right after an applied order. T
 ...) does persist. Shipped scripts always test the condition in the same tick that set it (for example
 `PushPC; Yield; ...; TestUnitFlags2 4; LoopIfTrue`).
 
+**Event handlers can nest** (October 2026, resolving the open point of `script_shooting.md` §5). At the start of every
+tick, if the unit has queued events not yet taken by `GetEvent`, the interpreter enters the unit's event handler at
+its start. It does this **even when the unit is already inside its event handler**, for example waiting in
+`SetWait`/`Wait` or yielding there. The interrupted point is resumed when the nested handler returns, like any
+other interruption. Order at the start of a tick: periodic behaviour, then event entry, then the wait timer counts
+down by one, then the player order check (§1 above).
+
+Consequences:
+- **One current-event slot.** The nested handler's `GetEvent` replaces the current event. When the outer handler
+  resumes, any later `CaseEvent`, event-argument opcode or `ConsumeEvent` sees the nested event, not its own.
+  Shipped handlers read their event before they wait, so this does not change shipped behaviour.
+- **One wait timer.** A nested handler that sets its own wait replaces the outer one. The outer wait then ends
+  when the nested one does. The timer keeps counting down on ticks spent in the nested handler.
+- **Switches win.** If the nested handler requests a script switch (rout, brace, re-form script 163, …), its return
+  applies the switch and the outer handler is abandoned: whatever the outer handler was still going to do never
+  happens.
+
+| Before | Tick | After |
+|---|---|---|
+| player cannon in its shot handler, waiting (5 ticks left) before "Reload!"; event 0x1C (enemy sighted) queued | next tick | nested handler: `React 11`; returns into the wait; "Reload!" about 4 ticks later as normal |
+| same, event 0x0C (rout) queued | next tick | nested handler: rout reaction and switch to the rout script; the shot handler is abandoned: **no "Reload!"**, no re-form |
+| same, no event | each tick | wait counts down; after 10 ticks "Reload!" and re-form |
+
 ## 2. `SetCondFlags` 0x2E / `ClearCondFlags` 0x2F / `TestCondFlags` 0x30
 
 (a) Two words each; operand = 16-bit mask.
