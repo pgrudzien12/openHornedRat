@@ -31,6 +31,9 @@ install -m 644 LICENSE "$stage/usr/share/doc/ohr-engine/LICENSE"
 install -m 644 LEGAL.md "$stage/usr/share/doc/ohr-engine/LEGAL.md"
 install -m 644 packaging/THIRD_PARTY_NOTICES.md "$stage/usr/share/doc/ohr-engine/THIRD_PARTY_NOTICES.md"
 install -m 644 packaging/licenses/LGPL-2.1.txt "$stage/usr/share/doc/ohr-engine/LGPL-2.1.txt"
+install -m 644 packaging/licenses/Apache-2.0.txt "$stage/usr/share/doc/ohr-engine/Apache-2.0.txt"
+install -d "$stage/usr/share/doc/ohr-engine/third-party-licenses"
+install -m 644 packaging/licenses/third-party/* "$stage/usr/share/doc/ohr-engine/third-party-licenses/"
 
 cat > "$stage/DEBIAN/control" <<EOF
 Package: ohr-engine
