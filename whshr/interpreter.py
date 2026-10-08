@@ -1859,6 +1859,15 @@ class ScriptInterpreter:
         notes/script_spawn_move.md 6). The destination is fixed until re-issued or re-aimed by
         IfTargetInChargeReach/ApproachTargetInReach. PROVISIONAL: the original follows the unit and never
         ends this move by distance; this engine's ordinary arrival rule still applies (the re-form that follows posts 0x34)."""
+        building = self._target_building(state)
+        if building is not None:
+            unit = self.battle.regiments.get(unit_id)
+            state.cond_flags = False
+            if unit is None or unit.reforming or unit.anchored or unit.held or unit.routing or building.destroyed:
+                return state.pc + 1
+            self._start_point_move(unit, (building.x, building.y), follows_unit=True)
+            state.cond_flags = True
+            return state.pc + 1
         pair = self._query_pair(state, unit_id)
         unit = pair[0] if pair else None
         state.cond_flags = False
@@ -2023,7 +2032,11 @@ class ScriptInterpreter:
         the line to it is not obstructed by a blocking object or unit (a friendly unit in the way included), the
         target is not charging, the unit is not charging, in melee, latched or about to re-form, it has exactly one
         waypoint, the aim point is within 12 x s_rlmv of the target's bounding circle and the unit does not stand in
-        a blocking boundary region."""
+        a blocking boundary region. For a building target the aim point is its centre and the reach is measured from
+        its radius (notes/building_units.md 6); the building case does not yet apply the other tests."""
+        building = self._target_building(state)
+        if building is not None:
+            return self._building_charge_reach(state, unit_id, building)
         pair = self._query_pair(state, unit_id)
         state.cond_flags = False
         if pair is None:
@@ -2048,6 +2061,28 @@ class ScriptInterpreter:
             return state.pc + 1
         reach = int(math.hypot(aim[0] - unit.x, aim[1] - unit.y)) - int(target.bounding_radius())
         state.cond_flags = reach < 12 * self._s_rlmv(unit) and not self.battle.on_blocked_ground(unit)
+        return state.pc + 1
+
+    def _target_building(self, state: UnitScriptState) -> "buildings.Building | None":
+        """The building the unit's current target names, or None."""
+        if state.current_target is None:
+            return None
+        return self.battle.building_index.get(state.current_target[0])
+
+    def _building_charge_reach(self, state: UnitScriptState, unit_id: str, building: "buildings.Building") -> int:
+        unit = self.battle.regiments.get(unit_id)
+        state.cond_flags = False
+        if unit is None or unit.reforming or building.destroyed:
+            return state.pc + 1
+        aim = (building.x, building.y)
+        charging = unit.attack_target is not None or unit.assaulting_building is not None
+        if not charging and not unit.in_melee:
+            unit.target_x, unit.target_y = float(aim[0]), float(aim[1])
+        heading = self._bearing_from_to((unit.x, unit.y), aim)
+        if self._fold(heading - unit.direction) >= 32 or charging or unit.in_melee:
+            return state.pc + 1
+        reach = int(math.hypot(aim[0] - unit.x, aim[1] - unit.y)) - int(building.radius)
+        state.cond_flags = reach < 12 * self._s_rlmv(unit)
         return state.pc + 1
 
     def op_ApproachTargetInReach(self, state: UnitScriptState, operand: int | None, script_words: Words,
@@ -2242,7 +2277,7 @@ class ScriptInterpreter:
                 state.cond_flags = False
                 return state.pc + 1
             unit.braced, unit.braced_target = False, None
-            state.current_target = None
+            state.current_target = (building.identifier, 0)
             state.approach_point = state.target_point = (building.x, building.y)
             state.cond_flags = True
             return state.pc + 1
@@ -2379,6 +2414,10 @@ class ScriptInterpreter:
             return state.pc + 1
         if regiment and state.current_target:
             target_id = state.current_target[0]
+            building = self.battle.building_index.get(target_id)
+            if building is not None and not building.destroyed:
+                regiment.attack_target = target_id
+                regiment.charge_started_target = None
             if target_id in self.battle.regiments:
                 regiment.attack_target = target_id
                 state.fear_passed = False  # a new charge clears it (notes/script_grid_events.md 0)

@@ -150,6 +150,7 @@ class ActivatedItemTests(unittest.TestCase):
         enemy = unit("E", 0, 10, Side.ENEMY, toughness=5)
         battle = Battle(100, 100, [bearer, enemy])
         bearer.model_positions()
+        assert bearer.living_leader_index is not None
         leader = bearer.melee_models[bearer.living_leader_index]
         ordinary = next(model for model in bearer.melee_models if model.uid != bearer.leader_uid)
         with mock.patch.object(battle.rng, "randint", return_value=6):
@@ -170,6 +171,7 @@ class ActivatedItemTests(unittest.TestCase):
         enemy = unit("E", 0, 10, Side.ENEMY, ws=5, toughness=5)
         battle = Battle(100, 100, [bearer, enemy])
         bearer.model_positions()
+        assert bearer.living_leader_index is not None
         leader = bearer.melee_models[bearer.living_leader_index]
         ordinary = next(model for model in bearer.melee_models if model.uid != bearer.leader_uid)
         with mock.patch.object(battle.rng, "randint", return_value=6):
@@ -207,11 +209,13 @@ class ActivatedItemTests(unittest.TestCase):
         bearer.model_positions()
         leader_uid = bearer.leader_uid
         leader_index = bearer.living_leader_index
+        assert leader_index is not None
         bearer.positions[leader_index] = (200.0, 200.0)
 
         battle._begin_reform(bearer, 2)
 
         self.assertEqual(bearer.leader_uid, leader_uid)
+        assert bearer.living_leader_index is not None
         self.assertEqual(bearer.reform_slots[bearer.living_leader_index],
                          formation.reform_slot_order(6, 2)[0])
 

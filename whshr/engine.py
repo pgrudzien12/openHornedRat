@@ -210,6 +210,7 @@ class Regiment:
     # Combat/order state (whshr.combat).
     attack_target: str | None = None  # identifier of an enemy regiment this regiment is approaching or charging
     charge_started_target: str | None = None  # target whose current charge already froze its models
+    assaulting_building: str | None = None  # identifier of the building this regiment is fighting (whshr.buildings)
     free_charging: bool = False  # straight-ahead ChargeForward until its point is reached or contact ends it
     turn_order_key: TurnKey | None = None
     turn_goal: float | None = None
@@ -1352,14 +1353,16 @@ class Battle:
         return feedback
 
     def destroy_building(self, building: buildings.Building) -> None:
-        """A building at its wounds-to-destroy ends: it stops being solid and stops counting as a target, every
-        live scripted unit gets event 0x18 (notes/battle_end_objectives.md 12.1) and a battle event is recorded.
-        Not modelled: the ruin variant of the piece."""
+        """A building at its wounds-to-destroy ends: it stops counting as a target, every live scripted unit gets
+        event 0x18 (notes/building_units.md 7) and a battle event is recorded. The footprint stays solid -- the
+        ruin still pushes regiments apart and intercepts shots. Not modelled: the ruin's own size and height."""
         building.destroyed = True
         building.models = 0
-        for obj in self.shooting_objects:
-            if obj.get("building") == building.identifier:
-                obj["status"] = []
+        credited = self.regiments.get(building.credit or "")
+        if credited is not None:  # +1 kill per piece, no experience: building points are 0 (casualty_bookkeeping.md)
+            credited.kills += building.pieces
+        building.credit = None
+        self.release_building_assaults(building.identifier)
         for unit_id in list(self.event_bus.unit_states):
             self.event_bus.queue_event(unit_id, interpreter.Event(code=0x18, source=building.identifier,
                                                                   x=int(building.x), y=int(building.y)))
@@ -1692,6 +1695,7 @@ class Battle:
             self._update_pursuits()
             combat.resolve_melee(self)
             combat.resolve_contact_attacks(self)  # game_rules.md 7.7, once per segment
+            combat.resolve_building_assaults(self)
             combat.resolve_rally(self)
             if self.tick_count > 0:
                 for regiment in self.regiments.values():
@@ -1754,6 +1758,11 @@ class Battle:
                 moved = self._advance_toward(regiment, (regiment.flee_x, regiment.flee_y),
                                              regiment.speed_for_mode(FLEEING_K) * move_scale, arrive=False,
                                              order_key=("flee",), scale=scale)
+            elif regiment.assaulting_building is not None:
+                regiment.turn_order_key = regiment.turn_mode = None  # held at the building until it falls
+            elif regiment.attack_target in self.building_index:
+                moved = self._advance_on_building(regiment, self.building_index[regiment.attack_target],
+                                                  move_scale, scale)
             elif regiment.route_pause_ticks > 0 and (regiment.attack_target or regiment.moving):
                 regiment.route_pause_ticks -= 1  # route pause: keep the order, do not advance
                 regiment.route_speed = 0.0
@@ -2198,8 +2207,8 @@ class Battle:
 
     def _route_footprints(self, regiment: Regiment, order_key: TurnKey
                           ) -> tuple[list[steering.Footprint], dict[str, Regiment]]:
-        """Live footprints in collision-object order (solid scenery, then the other regiments by their collision
-        centre), and the regiments behind the unit footprints. A charge's own target and routing regiments are
+        """Live footprints in collision-object order (solid scenery, buildings, then the other regiments by their
+        collision centre), and the regiments behind the unit footprints. A charge's own target and routing regiments are
         not obstacles (notes/obstacle_steering.md section 3); flight steers round units too
         (notes/flight_solid_obstacles.md 3)."""
         footprints: list[steering.Footprint] = []
@@ -2208,6 +2217,10 @@ class Battle:
             if {"os_active", "os_solid"}.issubset(flags):
                 footprints.append(steering.Footprint(f"object:{index}", float(obj.get("x") or 0),
                                                      float(obj.get("y") or 0), float(int(obj.get("radius") or 0))))
+        for building in self.buildings:  # notes/obstacle_steering.md 3: a building blocks unless it is the target
+            if order_key[0] == "charge" and order_key[1] == building.identifier:
+                continue
+            footprints.append(steering.Footprint(building.identifier, building.x, building.y, float(building.radius)))
         units: dict[str, Regiment] = {}
         for other in self.regiments.values():
             if (other is regiment or not other.active or other.routing
@@ -2680,10 +2693,12 @@ class Battle:
             for regiment in regiments:
                 self._correct_boundaries(regiment)
                 self._correct_solid_objects(regiment)
+                self._correct_buildings(regiment)
         else:
             # notes/deployment.md 2: collision correction follows the zone clipping, with no final zone clamp.
             self._correct_boundaries(self.regiments[deployment_id])
             self._correct_solid_objects(self.regiments[deployment_id])
+            self._correct_buildings(self.regiments[deployment_id])
         for i, first in enumerate(regiments):
             for second in regiments[i + 1:]:
                 if first.in_melee or second.in_melee:
@@ -2836,6 +2851,92 @@ class Battle:
             self._translate_regiment(regiment, dx, dy)
             if not regiment.pursuing:  # notes/pursuit_map_edge.md 3: the correction only pushes a pursuer
                 self._end_charge_on_obstruction(regiment, "a movement boundary")
+
+    def _advance_on_building(self, regiment: Regiment, building: buildings.Building, move_scale: float,
+                             scale: float) -> bool:
+        """A charge at a building walks at its centre (not the far side used for regiments); the charge counts
+        as started once the distance less the building's radius is within charge reach
+        (notes/building_units.md 6). A destroyed building cannot be charged."""
+        if building.destroyed or not regiment.active:
+            regiment.attack_target = regiment.charge_started_target = None
+            return False
+        centre = (building.x, building.y)
+        distance = math.hypot(building.x - regiment.x, building.y - regiment.y)
+        if regiment.charge_started_target != building.identifier and distance - building.radius <= regiment.charge_reach:
+            for model in regiment.melee_models:
+                model.freeze_ticks = (model.stagger & 7) + 1
+                model.current_speed = 0.0
+            regiment.charge_started_target = building.identifier
+        return self._advance_toward(regiment, centre, regiment.speed_for_mode(CHARGING_K) * move_scale, arrive=False,
+                                    order_key=("charge", building.identifier), scale=scale)
+
+    def building_at(self, x: float, y: float) -> str | None:
+        """Identifier of the standing building whose footprint contains the point (a click target), or None."""
+        return next((b.identifier for b in self.buildings if not b.destroyed and b.contains(x, y)), None)
+
+    def order_attack_building(self, identifier: str, building_id: str) -> None:
+        """Order a player regiment to charge a standing building (notes/building_units.md 6): with behaviour
+        scripts the order is event 0x04 with the building as source, otherwise the regiment charges at once.
+        Destroyed buildings cannot be targeted."""
+        self._require_battle_order()
+        regiment = self.regiments[identifier]
+        building = self.building_index.get(building_id)
+        if regiment.side != Side.PLAYER:
+            raise ValueError(f"{identifier} is not player-controlled")
+        if building is None or building.destroyed:
+            raise ValueError("attack target must be a standing building")
+        if (regiment.routing or regiment.pursuing or regiment.held or regiment.braced or regiment.anchored
+                or regiment.assaulting_building is not None):
+            raise ValueError(f"{identifier} cannot be ordered to attack")
+        if self._hold_while_reforming(regiment, ("order_attack", building_id)):
+            return
+        regiment.target_x = regiment.target_y = None
+        regiment.clear_shooting()
+        regiment.free_charging = False
+        regiment.turn_order_key = None
+        if self.interpreter is not None:
+            self.event_bus.queue_event(identifier, interpreter.Event(code=0x04, source=building_id))
+            return
+        regiment.attack_target = building_id
+        regiment.charge_started_target = None
+
+    def release_building_assaults(self, building_id: str) -> None:
+        """Every regiment fighting or charging the building lets go of it (the building fell)."""
+        for regiment in self.regiments.values():
+            if regiment.assaulting_building == building_id:
+                regiment.assaulting_building = None
+            if regiment.attack_target == building_id:
+                regiment.attack_target = regiment.charge_started_target = None
+
+    def _correct_buildings(self, regiment: Regiment) -> None:
+        """Building footprints against a regiment (notes/building_units.md 5): a charge that reaches its own target
+        building starts the assault (no charge counter); a charge that touches another building ends there, with
+        event 0x09 to its target; every other overlap pushes the regiment clear. A destroyed building keeps its
+        footprint. PROVISIONAL: the original's contact latch (an ordinary move undone while the overlap lasts) is
+        not modelled, and the regiment is pushed by the circle of its bounding radius against the rectangle."""
+        if regiment.routing:
+            return
+        centre = self.formation_centre(regiment)
+        radius = regiment.bounding_radius()
+        for building in self.buildings:
+            if regiment.assaulting_building == building.identifier:
+                continue
+            push = building.penetration(centre[0], centre[1], radius)
+            if push is None:
+                continue
+            charging = regiment.charge_started_target is not None and regiment.charge_started_target == regiment.attack_target
+            if charging and regiment.attack_target == building.identifier and not building.destroyed:
+                regiment.assaulting_building = building.identifier
+                regiment.attack_target = regiment.charge_started_target = None
+                regiment.target_x = regiment.target_y = None
+                regiment.waypoints.clear()
+                self.events.append(BattleEvent(f"{regiment.name} storms the {building.name}!", "building_assault",
+                                               regiment=regiment.identifier, building=building.identifier))
+                continue
+            if charging and regiment.attack_target != building.identifier:
+                self._end_charge_on_obstruction(regiment, f"the {building.name}")
+            self._translate_regiment(regiment, push[0], push[1])
+            centre = centre[0] + push[0], centre[1] + push[1]
 
     def _correct_solid_objects(self, regiment: Regiment) -> None:
         centre = self.formation_centre(regiment)

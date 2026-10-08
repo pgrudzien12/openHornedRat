@@ -275,12 +275,40 @@ class AttackNearestFamilyTests(SearchTestCase):
         self.call("AttackUnitAtNode", 0)
         self.assertEqual((self.picked(), self.state.cond_flags), ([], 0))
 
-    def test_take_event_target_from_a_building_aims_at_its_centre_without_a_unit_target(self):
+    def test_take_event_target_from_a_building_targets_it_and_aims_at_its_centre(self):
         self.make_with_building(self.searcher(), "Farm", 1030, 1000)
         self.state.current_event = Event(code=0x04, source="building:0")
         self.call("TakeEventTarget")
         self.assertEqual((self.state.current_target, self.state.approach_point, self.state.cond_flags),
-                         (None, (1030.0, 1000.0), 1))
+                         (("building:0", 0), (1030.0, 1000.0), 1))
+
+    def targeting_building(self, x, y):
+        self.make_with_building(unit("S", 0, 0, Side.PLAYER), "Farm", x, y)
+        self.battle.regiments["S"].x = self.battle.regiments["S"].y = 0
+        self.state.current_target = ("building:0", 0)
+
+    def test_move_to_target_walks_at_the_building_centre(self):
+        self.targeting_building(0, 300)
+        self.call("MoveToTarget")
+        self.assertEqual((self.state.cond_flags, (self.s.target_x, self.s.target_y)), (1, (0.0, 300.0)))
+
+    def test_charge_reach_to_a_building_is_measured_from_its_radius(self):
+        # Farm radius 89; infantry reach is 12 x s_rlmv, so a centre 150 away is in reach, 600 away is not.
+        for y, expected in ((150, 1), (600, 0)):
+            with self.subTest(y=y):
+                self.targeting_building(0, y)
+                self.call("IfTargetInChargeReach")
+                self.assertEqual(self.state.cond_flags, expected)
+                self.assertEqual((self.s.target_x, self.s.target_y), (0.0, float(y)))
+
+    def test_charge_target_orders_the_charge_on_a_standing_building_only(self):
+        self.targeting_building(0, 300)
+        self.call("ChargeTarget")
+        self.assertEqual(self.s.attack_target, "building:0")
+        self.s.attack_target = None
+        self.battle.buildings[0].destroyed = True
+        self.call("ChargeTarget")
+        self.assertIsNone(self.s.attack_target)
 
 
 class ReactToThreatTests(SearchTestCase):
