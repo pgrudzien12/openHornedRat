@@ -433,11 +433,12 @@ Notes:
 - The unit loader shared by both programs (the `set:` key switch) stores `whoami` and `hired` from the unit text ✅.
 - In `PLAY.MRC` the 38 regiments carry whoami 0–37 in order; `ARMY.MRC`, `MARCH.MRC` and `debrief.dbf` keep the
   same numbers, and the glue scripts address regiments by it (`addtroop:27=2 ; Merc Crossbowmen`).
-- In battle, `GAMEF.DLL` loads `ARMY.MRC` and, for every NPC unit of the battle script (side bits
-  `0x40`) with `whoami < 50`, looks for the same whoami in the player's army: if the regiment is in the army it
-  copies the army's profile, psychology, experience (`s_Exp`) and the spell and item lists into the NPC
-  ("NPC %s is in Army Merging with %s"); if it is in the marching orders the NPC is deleted; if not found it is
-  kept. Allied story regiments therefore keep their campaign state when they fight as NPCs.
+- In battle, only when objective `G` is defined with a non-zero first value, the game loads `ARMY.MRC` and, for every
+  NPC unit of the battle script (side bits `0x40`) with `whoami < 50`: if the regiment marches with the player the NPC
+  is deleted; else if it is in the company the NPC is rebuilt from it (name, stat line including the **current
+  model count**, leader profile, psychology, experience `s_Exp`, spells and items); else the NPC is **deleted**
+  (corrected October 2026: not kept). Objective `I` does a different artillery swap. Full rules, the affected
+  battles and test vectors: `notes/allied_npc_merge.md`.
 
 ### 3.2 Joining and leaving ✅
 
