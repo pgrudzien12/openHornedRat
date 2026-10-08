@@ -269,13 +269,15 @@ class UnitTestOpcodeTests(QueryTestCase):
         self.s.model_positions()
         self.s.leader_wounds = 3
         self.assertFalse(self.call("IfMachineDestroyed"))
-        leader = self.s.melee_models[self.s.leader_model_index]
+        index = self.s.leader_model_index
+        assert index is not None
+        leader = self.s.melee_models[index]
         leader.wounds_taken = 2
         self.assertFalse(self.call("IfMachineDestroyed"))  # wounded, still standing
         leader.wounds_taken = 3
         self.assertTrue(self.call("IfMachineDestroyed"))  # all its wounds taken
         leader.wounds_taken = 0
-        combat.kill_models(self.s, [self.s.leader_model_index], self.battle)
+        combat.kill_models(self.s, [index], self.battle)
         self.assertTrue(self.s.models > 0)
         self.assertTrue(self.call("IfMachineDestroyed"))  # the leader died, the unit did not
 

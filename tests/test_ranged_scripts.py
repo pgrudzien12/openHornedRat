@@ -184,6 +184,7 @@ class NodeManningReadinessTests(SeamTestCase):
         self.make(gun)
         gun.model_positions()
         machine = gun.leader_model_index
+        assert machine is not None
         self.assertEqual(machine, 0)
         gun.volley_countdown = 1  # artillery: one post per fire event, so the countdown only has to be positive
         poses = []
