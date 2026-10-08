@@ -429,6 +429,9 @@ class ScriptInterpreter:
                     self._record_contact(other, mover)
         for unit_id, state in self.event_bus.unit_states.items():
             if state.contact_latch and unit_id not in touching:
+                held = self.battle.regiments.get(unit_id)
+                if held is not None and held.assaulting_building is None and self.battle.overlaps_building(held):
+                    continue  # still overlapping a building: the latch lasts (notes/script_behaviours.md 2.5, 2.9)
                 state.contact_latch = False
 
     def raise_wagon_collisions(self, regiments: list["Regiment"]) -> None:
@@ -3291,7 +3294,11 @@ class ScriptInterpreter:
     def _query_contact(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
         """Case 8, the contact handler (notes/script_behaviours.md 2.3): the only place a fight starts. Always
         false. A lifted unit (Flying Bower, Sapphire Arch) neither contacts nor is contacted
-        (notes/spell_channelled_effects.md 2.3). Not modelled: buildings, which are not units here."""
+        (notes/spell_channelled_effects.md 2.3). A building contact (a charging unit overlapping a footprint) is
+        handled by `_building_contact`."""
+        building = self.battle.building_index.get(state.contact_record or "")
+        if building is not None:
+            return self._building_contact(state, unit, building)
         other = self.battle.regiments.get(state.contact_record or "")
         if other is None or not other.active or other.routing or unit.lifted or other.lifted:
             return False
@@ -3324,6 +3331,24 @@ class ScriptInterpreter:
             self._release_latch(state, unit)
         elif not self._engage_new(other, unit):
             self.event_bus.queue_event(unit.identifier, Event(code=0x0C, source=unit.identifier), checked=True)
+        return False
+
+    def _building_contact(self, state: UnitScriptState, unit: "Regiment", building: "buildings.Building") -> bool:
+        """The contact handler's building branch (notes/script_behaviours.md 2.3, 2.9; notes/building_units.md 4-5):
+        contact with the unit's own standing target building starts the assault with no charge counter and 0x0A to
+        the unit; a charging unit touching any other building has its charge ended (halt, 0x09 to its target). The
+        latch stays on in both cases. Always false."""
+        if unit.lifted or unit.routing:
+            return False
+        state.contact_latch = True
+        current = state.current_target[0] if state.current_target else None
+        if building.identifier == current and not building.destroyed:
+            self.battle.begin_building_assault(unit, building)
+            self.event_bus.queue_event(unit.identifier, Event(code=0x0A, source=building.identifier), checked=True)
+        elif unit.attack_target is not None or unit.free_charging:
+            self.battle.end_charge_at_building(unit, building)
+        else:
+            self._release_latch(state, unit)
         return False
 
     @staticmethod
