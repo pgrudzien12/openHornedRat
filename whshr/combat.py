@@ -942,18 +942,21 @@ def resolve_contact_attacks(battle: "Battle") -> None:
     would get a to-hit roll -- every target model here is taken to be running.
     """
     for attacker in sorted(battle.regiments.values(), key=lambda r: r.identifier):
-        if not attacker.active or attacker.routing or attacker.in_melee:
+        if (not attacker.active or attacker.routing or attacker.in_melee
+                or attacker.contact_attack_segment == battle.tick_count // SEGMENT_TICKS):
             continue
         target = battle.regiments.get(attacker.attack_target) if attacker.attack_target else None
         if target is None or not target.active or not target.routing:
             continue  # contact attacks only matter against a unit that cannot fight back
+        attacker.contact_attack_segment = battle.tick_count // SEGMENT_TICKS
         _strike_router(battle, attacker, target)
 
 
-def _strike_router(battle: "Battle", attacker: "Regiment", target: "Regiment") -> None:
+def _strike_router(battle: "Battle", attacker: "Regiment", target: "Regiment") -> bool:
+    """The attacker's contact attacks on the target; returns whether any model was wounded."""
     victims, rolls = _contact_attack_rolls(attacker, target, battle.rng)
     if not rolls:
-        return
+        return False
     killed = kill_models(target, victims, battle=battle, killer=attacker.identifier)
     battle.events.append(BattleEvent(
         f"{attacker.name} cuts down {killed} fleeing {target.name}."
@@ -961,6 +964,20 @@ def _strike_router(battle: "Battle", attacker: "Regiment", target: "Regiment") -
         "contact_attack",
         attacker=attacker.identifier, target=target.identifier, kills=killed,
         reach=CONTACT_REACH, rolls=rolls))
+    return bool(victims)
+
+
+def contact_attacks_spent(battle: "Battle", attacker: "Regiment") -> bool:
+    """Whether the unit has already made its contact attacks in the current segment."""
+    return attacker.contact_attack_segment == battle.tick_count // SEGMENT_TICKS
+
+
+def make_contact_attacks(battle: "Battle", attacker: "Regiment", target: "Regiment") -> bool:
+    """The attacker's contact attacks on the target, spent for the segment (game_rules.md 7.7; the Behaviour 14
+    test of notes/script_behaviours.md 1.6). Returns whether any wound was caused. The attacks are
+    `_contact_attack_rolls`, so the reach and the all-hits-automatic rule are that function's simplifications."""
+    attacker.contact_attack_segment = battle.tick_count // SEGMENT_TICKS
+    return _strike_router(battle, attacker, target)
 
 
 def _marked(battle: "Battle", unit: "Regiment") -> bool:
@@ -988,6 +1005,64 @@ def resolve_router_contact_attacks(battle: "Battle") -> None:
                 attacker.contact_attack_segment = segment
                 _strike_router(battle, attacker, router)
                 break
+
+
+SQUIG_MELEE_CLASSES = frozenset({1, 2, 3, 4, 5, 6})  # Infantry, Cavalry, Archers, Artillery (crew), Wizard, Monster
+SQUIG_TOUCH_CLASSES = frozenset({4, 7, 8})  # Artillery, RollingStock, Special: touching one counts as a hit
+SQUIG_MELEE_COARSE_LIMIT = 204  # coarse filter against a unit in close combat (notes/script_spawn_move.md 5)
+
+
+def squig_landing(battle: "Battle", hopper: "Regiment") -> bool:
+    """The squig hopper's landing collision (notes/script_spawn_move.md 5, step 2), at the leader model's position:
+    every model of an Infantry, Cavalry, Archers, Artillery, Wizard or Monster unit within 12 units (18 against
+    Cavalry, 24 against Monsters) takes one wound roll at the hopper's own Strength, armour saves allowed. Every
+    unit of any side except the hopper's own is tested, none stops the scan, and a coarse filter first requires the
+    unit's centre to be nearer than its bounding radius (doubled when it is charging, 204 when it is in melee).
+    Artillery, RollingStock and Special units, buildings and scenery that it touches count as a hit although they
+    take no harm from it, and the hopper never dies. Returns whether the landing hit anything.
+
+    PROVISIONAL / Not modelled: the D6 rolls against an artillery machine or rolling stock, the automatic wounds on
+    a Special unit, and whether a unit of the hopper's own army is spared (the report has no side test). Scenery
+    and buildings count when the leader stands inside their footprint circle (`Battle.shooting_objects`)."""
+    positions = hopper.model_positions()
+    leader = hopper.living_leader_index
+    px, py = positions[leader] if leader is not None else (hopper.x, hopper.y)
+    strength = min(9, hopper.strength + hopper.strength_bonus)
+    hit = False
+    for other in sorted(battle.regiments.values(), key=lambda r: r.identifier):
+        if other is hopper or not other.active or other.hidden:
+            continue
+        limit = other.bounding_radius()
+        if other.in_melee:
+            limit = SQUIG_MELEE_COARSE_LIMIT
+        elif other.attack_target is not None:
+            limit *= 2
+        if math.hypot(other.x - px, other.y - py) >= limit:
+            continue
+        if other.unit_class in SQUIG_TOUCH_CLASSES:
+            hit = True
+        if other.unit_class not in SQUIG_MELEE_CLASSES:
+            continue
+        reach = {2: 18.0, 6: 24.0}.get(other.unit_class or 0, 12.0)
+        victims: set[int] = set()
+        for index, (mx, my) in enumerate(other.model_positions()):
+            if math.hypot(mx - px, my - py) > reach or index >= len(other.melee_models):
+                continue
+            model = other.melee_models[index]
+            if _d6(battle.rng) < wfb_to_wound(strength, other.model_toughness(model)):
+                continue
+            armour = other.model_armour(model)
+            threshold = 4 if armour == 6 else _armour_threshold(armour, strength)
+            if _d6(battle.rng) < threshold:
+                victims.add(index)
+        if victims:
+            kill_models(other, victims, battle=battle, killer=hopper.identifier)
+            hit = True
+    for obj in battle.shooting_objects:  # placed scenery and buildings, ruins included
+        radius = float(obj.get("radius") or 0)
+        if radius > 0 and math.hypot(float(obj.get("x") or 0) - px, float(obj.get("y") or 0) - py) < radius:
+            hit = True
+    return hit
 
 
 def resolve_building_assaults(battle: "Battle") -> None:

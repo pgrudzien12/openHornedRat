@@ -404,7 +404,8 @@ class ScriptInterpreter:
         the other unit as its contact record and its re-check state off; a troops regiment touched gets the same
         (the reciprocal). Marked units are not touched at all. A latched unit that touches nothing any more is
         released; a latched unit's movement is rolled back by the engine (Battle._resolve_latched_step); wagon event
-        0x27 is raise_wagon_collisions. Not modelled: push-apart (the engine's own), contact attacks on routers,
+        0x27 is raise_wagon_collisions. Contact attacks on routers are combat.resolve_router_contact_attacks. Not
+        modelled: push-apart (the engine's own),
         fanatic footprints."""
         touching: set[str] = set()
         neighbours: dict[str, list["Regiment"]] = {}
@@ -2707,10 +2708,20 @@ class ScriptInterpreter:
             self.event_bus.queue_event(unit.identifier, Event(code=0x36))
 
     def _threat_in_reach(self, unit: "Regiment", state: UnitScriptState) -> None:
-        """Code 14 (notes/script_behaviours.md 1.6): 0x03 when an enemy that is not hidden or marked is closer
-        than the threat range. Not modelled: test 1, the contact attacks nearby chargers make on the unit."""
-        if any(other.active and not other.hidden and self._hostile(unit, other) and not self._leaving(other)
-               and self._octagonal(unit, other) < state.threat_range for other in self.battle.regiments.values()):
+        """Code 14 (notes/script_behaviours.md 1.6), 0x03 to self if either test is true. Test 1: every live unit,
+        of any side, that is charging or pursuing, has not yet made its contact attacks this segment and is nearer
+        than the threat range makes them on this unit now and spends them; true if any wound was caused (no early
+        stop). Test 2, only when test 1 is false: an enemy that is not hidden or marked is nearer than the range."""
+        wounded = False
+        for other in list(self.battle.regiments.values()):
+            if (other is unit or not other.active or other.routing or combat.contact_attacks_spent(self.battle, other)
+                    or not (other.attack_target is not None or other.pursuing)
+                    or self._octagonal(unit, other) >= state.threat_range):
+                continue
+            wounded = combat.make_contact_attacks(self.battle, other, unit) or wounded
+        if wounded or any(other.active and not other.hidden and self._hostile(unit, other) and not self._leaving(other)
+                          and self._octagonal(unit, other) < state.threat_range
+                          for other in self.battle.regiments.values()):
             self.event_bus.queue_event(unit.identifier, Event(code=0x03))
 
     def _signal_threat(self, unit: "Regiment", state: UnitScriptState) -> None:
@@ -4366,15 +4377,20 @@ class ScriptInterpreter:
 
     def op_FanaticRelease(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
-        """FanaticRelease, the squig hop landing (notes/script_spawn_move.md 5): clears CantMelee; a landing that
-        wounds or touches something is true and keeps the counter; otherwise the counter drops by one (wrapping
-        0 to 255) and the condition is "still non-zero". With no target, event 0x01 goes to the unit itself.
-        Not modelled: the landing collision and its wounds, so every landing counts as a miss."""
+        """FanaticRelease, the squig hop landing (notes/script_spawn_move.md 5): clears CantMelee, then runs the
+        landing collision (`combat.squig_landing`). A landing that wounded or touched something is true and keeps
+        the counter; otherwise the counter drops by one (wrapping 0 to 255) and the condition is "still non-zero".
+        With no target, event 0x01 goes to the unit itself."""
         unit = self.battle.regiments.get(unit_id)
+        hit = False
         if unit is not None:
             unit.psychology = unit.psychology - {"CantMelee"}
-        state.hop_counter = (state.hop_counter - 1) & 0xFF
-        state.cond_flags = state.hop_counter != 0
+            hit = combat.squig_landing(self.battle, unit)
+        if hit:
+            state.cond_flags = True
+        else:
+            state.hop_counter = (state.hop_counter - 1) & 0xFF
+            state.cond_flags = state.hop_counter != 0
         if state.current_target is None:
             self.event_bus.queue_event(unit_id, Event(code=0x01))
         return state.pc + 1
