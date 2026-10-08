@@ -2467,6 +2467,7 @@ class ScriptInterpreter:
                 regiment.charge_started_target = None
             if target_id in self.battle.regiments:
                 regiment.attack_target = target_id
+                regiment.route_pause_ticks = 0  # the straight run has no route pause (notes/attack_order_flow.md 1)
                 state.fear_passed = False  # a new charge clears it (notes/script_grid_events.md 0)
                 # Battle.tick() handles the actual charging movement
         return state.pc + 1
