@@ -210,6 +210,6 @@ in issues #156 and #155; parsing those names does not by itself make the behavio
 
 - 🟡 `script:` versus `res:` precedence in hotspots and mission records remains unverified for unused fallback paths.
 - 🟡 Hotspot `res=-2` special value (no hint) was read from usage, not from the hint code.
-- 🟡 Exact `upsfx`/`downsfx` sound-table values remain to be checked while implementing issue #156.
+- ✅ `downsfx=4` maps to the press cue `B4.WAV`, and `upsfx=3` maps to the release cue `B3.WAV`; implementing shared playback remains issue #156.
 - ⬜ The effect of `set:book` (window ↔ book number) and hotspot `textx`/`texty` remains unverified.
 - ⬜ Whether an idle timer ever fires `[DEMODEFAULT]` in this build (the script command form was found inert).
