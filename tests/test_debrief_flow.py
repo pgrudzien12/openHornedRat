@@ -80,9 +80,8 @@ class DebriefFlowTests(PostMissionCaravanTests):
         self.assertIsInstance(machine.active, BattleScene)
         machine.active.battle.resolve_no_battle()
         machine.update(0.1)
-        self.assertIsInstance(machine.active, ResultScene)
+        self.assertNotIsInstance(machine.active, ResultScene)
 
-        machine.handle("continue")
         machine.handle("done")  # the battle's debrief screen closes
         machine.handle("done")  # so does the summary the mission script asks for next
         machine.update(0.1)

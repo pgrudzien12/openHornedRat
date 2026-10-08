@@ -130,9 +130,8 @@ class BattleHandoffTests(unittest.TestCase):
     def test_given_a_played_win_when_the_result_is_dismissed_then_the_campaign_continues(self):
         self._open_mission("missionawindow.0")
         self._win()
-        self.assertIsInstance(self.machine.active, ResultScene)
+        self.assertNotIsInstance(self.machine.active, ResultScene)  # straight into the debrief
 
-        self.machine.handle("continue")
         self.machine.handle("done")  # the debrief screen closes
 
         self.assertIs(self.machine.active, self.map_scene)
