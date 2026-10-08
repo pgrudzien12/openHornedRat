@@ -139,6 +139,26 @@ class InnateWeaponTests(BehaviourTestCase):
             breaths.append((len(self.battle.events) > before, monks.reload_ticks == reload + 1))
         self.assertEqual(breaths, [(False, False), (True, False), (True, True)])
 
+    def test_innate_reload_clock_reads_the_leader_block(self):
+        wheel = unit("W", 0, 0, Side.ENEMY, initiative=0)  # own block: (10 - 0) x 18 = 180
+        wheel.leader_initiative = 5  # leader block: (10 - 5) x 18 = 90
+        self.make(wheel)
+        self.assertEqual((ranged.reload_time(wheel), ranged.reload_time(wheel, leader_block=True)), (180, 90))
+        self.run_code(26)
+        self.assertEqual(wheel.reload_ticks, 91)  # stamped with the leader block's time + 1
+
+    def test_doomwheel_rider_runs_code_26_from_a_detect_threat_even_when_braced(self):
+        wheel = unit("W", 0, 0, Side.ENEMY)
+        wheel.leader_missile_code = 13
+        wheel.braced = True
+        self.make(wheel)
+        self.run_code(11)
+        self.assertEqual(len([e for e in self.battle.events if e.kind == "doomwheel_bolts"]), 1)
+        plain = unit("P", 500, 500, Side.ENEMY)
+        self.make(plain)
+        self.run_code(11)
+        self.assertEqual([e for e in self.battle.events if e.kind == "doomwheel_bolts"], [])
+
     def test_doomwheel_fires_three_bolts_when_reloaded(self):
         wheel = unit("W", 0, 0, Side.ENEMY)
         wheel.direction = 100

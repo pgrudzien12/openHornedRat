@@ -253,13 +253,13 @@ def _centre_d(unit: Regiment, x: float, y: float) -> int:
 
 def reference_figure(unit: Regiment) -> tuple[float, float]:
     """The leader model, or without one the roster entry frontage - 1 (entry 0 when that is past the unit's size)
-    (A 2.1). PROVISIONAL: the engine has no leader identity; the leader is the front-rank model nearest that
-    rank's centre (the slot a re-form gives the leader), and entry frontage - 1 is in the engine's own model order."""
+    (A 2.1). The leader is `Regiment.leader_model_index`. PROVISIONAL: without a leader, entry frontage - 1 is
+    taken in the engine's own model order."""
     positions = unit.model_positions()
     if not positions:
         return unit.x, unit.y
-    leader_index = unit.living_leader_index
-    if leader_index is not None:
+    leader_index = unit.leader_model_index
+    if leader_index is not None and leader_index < len(positions):
         return positions[leader_index]
     index = unit.frontage - 1
     return positions[index] if 0 <= index < len(positions) else positions[0]
