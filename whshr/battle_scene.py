@@ -3,14 +3,15 @@
 
 import os
 from os import PathLike
-from . import battle_log, behaviour, casualties, combat, figure_capture, payments, roster, skirmish_log
+from typing import Any
+from . import battle_log, behaviour, casualties, combat, figure_capture, npc_merge, payments, roster, skirmish_log
 from .assets import AssetId
 from .battlefield import Battlefield, WORLD_PER_MESH, sprite_files
 from .clock import FixedStepClock
 from .debrief_screen import UnitOutcome
 from .engine import Battle, DEFAULT_SEED, Side
 from .battle_events import BattleEvent
-from .script import View
+from .script import View, unit_view
 from .skirmish_log import SkirmishLogger
 from .result_scene import ResultScene
 from .glue_scene import GlueScene
@@ -36,7 +37,7 @@ class BattleScene(Scene):
 
     def __init__(self, battle: AssetId = FIRST_BATTLE, log_dir: str | PathLike[str] | None = None, seed: int = DEFAULT_SEED,
                  glue_scene: GlueScene | None = None, request_id: int | None = None,
-                 player_army: View | None = None) -> None:
+                 player_army: View | None = None, npc_company: dict[int, Any] | None = None) -> None:
         self.battle_id = battle
         self.manifest = SceneManifest(immediate=(battle,) if glue_scene is None and player_army is None else ())
         self.player_army = player_army
@@ -52,12 +53,18 @@ class BattleScene(Scene):
         self.glue_scene = glue_scene
         self.request_id = request_id
         self.no_battle = False
+        self.npc_company: dict[int, Any] | None = npc_company  # the company's units, for objective G's army merge
         self.win_requested = False  # the debug win key was pressed; settled at the next tick
 
     def enter(self, context: SceneAssets) -> None:
         if self.player_army is None and self.glue_scene is not None and self.glue_scene.campaign is not None:
             self.player_army = self.glue_scene.campaign.marching_army()
         self.field = context.load_battle(self.battle_id, self.player_army)
+        objectives = (self.field.script.get("mission") or {}).get("objectives")
+        if (self.npc_company is None and npc_merge.objective_value(objectives, "G")
+                and self.glue_scene is not None and self.glue_scene.campaign is not None):
+            self.npc_company = {record.whoami: unit_view(record.raw)
+                                for record in self.glue_scene.campaign.company if record.raw is not None}
         script_dll = self._load_script_dll(context)
         # The logger must exist before Battle.from_script so ScriptInterpreter can be handed it
         # directly (script_logger=); WHSHR_TRACE_SCRIPTS=1 turns on its per-opcode trace records
@@ -66,7 +73,7 @@ class BattleScene(Scene):
         path = battle_log.default_log_path(self.log_dir, self.battle_id.name) if self.log_dir is not None else None
         self.logger = battle_log.BattleLogger(path, trace_scripts=bool(os.environ.get("WHSHR_TRACE_SCRIPTS")))
         self.battle = Battle.from_script(self.field.script, seed=self.seed, script_dll=script_dll,
-                                         script_logger=self.logger)
+                                         script_logger=self.logger, company=self.npc_company)
         self.battle.ground_height = lambda x, y: self.field.ground_height(x, y) * WORLD_PER_MESH
         # Seed every regiment's figures now, in battle order, so the first draw never has to (seeding draws from the
         # battle-wide stagger sequence; doing it lazily in draw order would make live play and replay differ).
@@ -89,7 +96,7 @@ class BattleScene(Scene):
             self.logger.write_header(
                 battle_asset=str(self.battle_id), bts_path=self.field.script.get("file"), seed=self.seed,
                 width=self.battle.width, height=self.battle.height,
-                player_army=self.player_army,
+                player_army=self.player_army, npc_company=self.npc_company,
                 regiments=battle_log.regiment_header_rows(self.battle, sprite_bases))
 
     def _load_script_dll(self, context: SceneAssets) -> behaviour.ScriptDll | None:
@@ -390,6 +397,7 @@ class BattleScene(Scene):
         battle_items = {regiment.whoami: regiment.items for _, regiment in player if regiment.whoami in marching}
         campaign.company = tuple(roster.with_items(record, battle_items[record.whoami])
                                  if record.whoami in battle_items else record for record in campaign.company)
+        marching = [whoami for whoami in marching if whoami not in self.battle.swapped_regiments]  # objective I
         if len(player) != len(marching):
             campaign.battle_outcome = {}
             casualties.after_battle(campaign)
@@ -400,10 +408,28 @@ class BattleScene(Scene):
             dead = max(0, self.initial_models[identifier] - regiment.models)
             outcomes[whoami] = UnitOutcome(regiment.models - routed, routed, dead + routed, regiment.kills,
                                            regiment.experience_gained)
+        outcomes.update(self._npc_outcomes())
         campaign.battle_outcome = outcomes
         campaign.campaign_over_movie = casualties.campaign_over_movie(campaign)
         if campaign.campaign_over_movie is None:  # a lost campaign merges and pays nothing
             casualties.after_battle(campaign)  # wounded bookkeeping before the debrief screen
+
+    def _npc_outcomes(self) -> dict[int, UnitOutcome]:
+        """What the allied NPC regiments (side at the battle's end) of a G or I battle came out with, written like player regiments
+        (notes/allied_npc_merge.md section 5). One that left the field (destroyed or fled) has its casualties
+        reset to 0; its routed models and kills are written unchanged."""
+        outcomes: dict[int, UnitOutcome] = {}
+        for identifier, whoami in self.battle.npc_regiments.items():
+            regiment = self.battle.regiments[identifier]
+            if regiment.side != Side.NEUTRAL:  # the writer reads the side at the battle's end (report Q8)
+                continue
+            fled = regiment.fled
+            left = fled or regiment.models == 0
+            routed = regiment.models if fled else 0
+            dead = 0 if left else max(0, self.initial_models[identifier] - regiment.models)
+            outcomes[whoami] = UnitOutcome(regiment.models - routed, routed, dead + routed if not left else 0,
+                                           regiment.kills, regiment.experience_gained)
+        return outcomes
 
     def _casualty_summary(self) -> list[str]:
         return [f"{regiment.name}: {regiment.models}/{self.initial_models[identifier]} models"

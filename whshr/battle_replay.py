@@ -105,7 +105,9 @@ def replay(installation: Installation | PathArg, log_path: PathArg, until: int |
     # Only orders accepted live are recorded (the F10 win is refused and unrecorded without --debug), so a replay
     # accepts them all.
     context.debug = True
-    scene = BattleScene(battle_id, log_dir=None, seed=header["seed"], player_army=header.get("player_army"))
+    scene = BattleScene(battle_id, log_dir=None, seed=header["seed"], player_army=header.get("player_army"),
+                        npc_company=({int(key): unit for key, unit in header["npc_company"].items()}
+                                     if header.get("npc_company") else None))
     scene.enter(context)
 
     orders_by_tick: dict[int, list[tuple[Any, ...]]] = {}

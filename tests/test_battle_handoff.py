@@ -75,6 +75,24 @@ class BattleHandoffTests(unittest.TestCase):
         self.assertEqual(len(data["merc"]["armies"][0]["units"]), 3)
         scene.exit(context)
 
+    def test_given_a_g_battle_when_it_loads_through_the_campaign_then_an_allied_npc_is_built_from_the_company(self):
+        from whshr import roster
+        from tests.test_roster import MRC
+        from tests.test_savegame import ROWS
+        from tests.test_npc_merge import NPC_SIDE, source, unit
+
+        self.campaign.company = roster.parse_company(MRC, ROWS)  # Grudgebringer Cavalry (2), Cannon Crew (14, 3 models)
+        data = source([["G", 1, 4]], [unit("NPC_Cannon<Crew", 14, 2, NPC_SIDE, x=400, y=500)])
+        context = SceneAssets(self.context.locator, self.context.catalog, AssetCache(),
+                              {"battle-script": lambda _, path: SimpleNamespace(script=data)})
+        scene = BattleScene(glue_scene=self.map_scene)
+        scene.enter(context)
+
+        npc = scene.battle.regiments["NPC_Cannon<Crew"]
+        self.assertEqual((npc.models, npc.name, npc.whoami), (3, "Cannon Crew", 14))  # the company's current strength
+        self.assertEqual(scene.battle.npc_regiments, {"NPC_Cannon<Crew": 14})
+        scene.exit(context)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

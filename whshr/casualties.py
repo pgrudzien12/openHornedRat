@@ -10,8 +10,8 @@ fought) and ``returning`` (wounded that rejoin at the current debrief's Done).
 Deviations, all invisible in prices, "destroyed" and the disband test because those read the present count:
 - the original returns routed models to a mode-2 army only when the next troop selection is confirmed; here they
   rejoin at Done, so between Done and troop selection the reinforcement window does not reserve room for them;
-- allied story regiments fighting as NPCs are not written into the battle outcome, so their wounded and
-  experience are not merged back (report 2.5, 3.8 B5).
+- allied NPC regiments of battles with objective G or I are written into the outcome (notes/allied_npc_merge.md),
+  but the debrief troop page does not list them (that report's Q7, not yet checked on screen).
 """
 
 from dataclasses import replace

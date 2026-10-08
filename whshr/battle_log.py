@@ -96,7 +96,8 @@ class BattleLogger:
             self.close()
 
     def write_header(self, *, battle_asset: str, bts_path: str | None, seed: int, width: float, height: float,
-                     regiments: list[Record], player_army: Record | None = None) -> None:
+                     regiments: list[Record], player_army: Record | None = None,
+                     npc_company: Mapping[Any, Any] | None = None) -> None:
         self._write({
             "type": "header", "tick": 0, "format_version": FORMAT_VERSION,
             "battle_asset": battle_asset, "bts_path": bts_path, "seed": seed,
@@ -104,6 +105,7 @@ class BattleLogger:
             "started_at": datetime.now(timezone.utc).isoformat(),  # wall clock: never read by the simulation
             "regiments": regiments,
             "player_army": player_army,
+            "npc_company": npc_company,
         })
 
     def write_order(self, tick: int, event: Iterable[Any]) -> None:
