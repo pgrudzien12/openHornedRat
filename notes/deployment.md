@@ -498,13 +498,17 @@ These are proposed implementation tests, not new observations of the running ori
 
 ## 7. Remaining checks for full original parity
 
-Tracked in [research issue #5](https://github.com/pgrudzien12/openHornedRat/issues/5);
-implementation is tracked in [#6](https://github.com/pgrudzien12/openHornedRat/issues/6).
+[Research issue #5](https://github.com/pgrudzien12/openHornedRat/issues/5) and
+[implementation issue #6](https://github.com/pgrudzien12/openHornedRat/issues/6) are complete.
+The comparisons below limit any claim of exact original-game parity; they are not standing
+requirements for the shipped deployment feature. File a focused bug if a reproducible
+mismatch affects a shipped mission. A different control scheme or an undo action is a
+separate feature request.
 
 The follow-up resolved the rule questions about collision order, artillery dragging,
 main/minimap input, Ctrl-waypoint gestures, cancellation, timer gates and custom-region
 selection. These findings were not newly observed in a running original-game session.
-The remaining work is confirmation of visible outcomes and exact coordinate edge cases:
+Visible outcomes and exact coordinate edge cases that have not been observed directly:
 
 | Check | Expected rule / next observation |
 |---|---|
@@ -514,12 +518,12 @@ The remaining work is confirmation of visible outcomes and exact coordinate edge
 | Main view versus minimap | Confirm both drag paths, front-anchor swing, Ctrl-click route planning, nine-destination limit, route clearing on direct selection, retention across Start and leaving-minimap release. |
 | Cancellation and unavailable commands (lower priority) | Confirm right-drag camera/pan and Esc do not undo, and no ordinary keyboard shortcut bypasses §4.1. |
 | Multiple/missing regions and outside starts | Confirm shared remembered region, initial-acquisition/switch overshoot, boundary-order selection and missing-zone translation refusal using custom data. |
-| Mission setup timing (required) | Confirm §5.1–5.2: BF003 ambient updates, nearest-enemy refusal, preserved timers/scripts, BF001 event-gated delay, and scripted wagon staging. Combat time starts only on Start. |
+| Mission setup timing | Compare §5.1–5.2: BF003 ambient updates, nearest-enemy refusal, preserved timers/scripts, BF001 event-gated delay, and scripted wagon staging. Combat time starts only on Start. |
 
-Default placement, marching-order effects and boundary identification are ready for
-implementation. These remaining checks prevent claiming a fully verified reproduction of
-the original's interaction and edge cases. Research output here changes documentation only;
-engine implementation must be independently written from the public rules.
+Default placement, marching-order effects and boundary identification are implemented.
+These unobserved cases prevent claiming a fully verified reproduction of the original's
+interaction and edge cases. Research output here changes documentation only; engine
+implementation must be independently written from the public rules.
 
 ## 8. Deployment HUD reference
 
