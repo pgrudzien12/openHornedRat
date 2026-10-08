@@ -249,7 +249,7 @@ first/last data chunk time, end time, speech file + duration, text), `check_scen
 Output: `extracted/scene_scripts/<SCENE>.json` (30 files; game data, not for distribution).
 
 ## Open questions
-> **Historical questions:** issue #42 is closed. These notes preserve the findings; the remaining unknowns are not standing research tasks. Reopen a focused issue only when a shipped feature or reproducible defect needs an answer.
+> **Historical questions:** issue #42 is closed. EVT playback semantics moved to `notes/si_omni.md` and issue #41; the other remaining unknowns are not standing research tasks.
 
 
 - Contents of `.evt` chunks (20/24/4/8 B): subtitle trigger / text id? To be checked by whoever extracts `.SI`.
