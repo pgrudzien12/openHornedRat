@@ -68,9 +68,17 @@ class SquigLandingTests(unittest.TestCase):
         state = self.release(battle, interp)
         self.assertEqual((bool(state.cond_flags), state.hop_counter, wagon.models), (True, 4, 2))
 
-    def test_given_scenery_under_the_leader_then_it_counts_as_a_hit(self):
+    def test_given_a_standing_building_under_the_leader_then_it_counts_as_a_hit(self):
         battle, interp = battle_of(self.hopper, regiment("V", 1000, 1500, Side.PLAYER),
                                    scenery=[{"name": "Menhir", "x": 1000, "y": 1005}])
+        self.assertEqual(len(battle.buildings), 1)  # Menhir is a building type
+        state = self.release(battle, interp)
+        self.assertEqual((bool(state.cond_flags), state.hop_counter), (True, 4))
+
+    def test_given_an_active_map_object_under_the_leader_then_it_counts_as_a_hit(self):
+        battle, interp = battle_of(self.hopper, regiment("V", 1000, 1500, Side.PLAYER))
+        battle.objects.append({"x": 1000, "y": 1005, "radius": 30, "status": ["os_active"]})
+        self.assertEqual(battle.buildings, [])
         state = self.release(battle, interp)
         self.assertEqual((bool(state.cond_flags), state.hop_counter), (True, 4))
 
@@ -87,9 +95,9 @@ class SquigLandingTests(unittest.TestCase):
         interp.op_FanaticRelease(state, None, [word("FanaticRelease")], "H", 0, battle.rng)
         self.assertEqual((state.hop_counter, [event.code for event in state.event_queue]), (1, [0x01]))
 
-    def test_given_a_non_solid_map_object_under_the_leader_then_it_is_not_a_hit(self):
+    def test_given_an_inactive_map_object_under_the_leader_then_it_is_not_a_hit(self):
         battle, interp = battle_of(self.hopper, regiment("V", 1000, 1500, Side.PLAYER))
-        battle.shooting_objects.append({"x": 1000, "y": 1000, "radius": 30, "status": ["os_active"]})
+        battle.objects.append({"x": 1000, "y": 1000, "radius": 30, "status": ["os_solid"]})
         state = self.release(battle, interp)
         self.assertEqual((bool(state.cond_flags), state.hop_counter), (True, 3))  # a miss: the counter dropped
 
