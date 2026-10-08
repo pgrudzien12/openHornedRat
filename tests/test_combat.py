@@ -479,6 +479,85 @@ class ContactAttackTests(unittest.TestCase):
 
         self.assertEqual([e for e in battle.events if e.kind == "contact_attack"], [])
 
+    def test_given_a_standing_unit_overlapping_a_fleeing_enemy_then_it_makes_contact_attacks(self):
+        # notes/script_behaviours.md 2.2: the attacker need not be charging.
+        guard = _regiment("g", 0, 0, Side.PLAYER, strength=6, attacks=2, speed_per_tick=0.0)
+        fleeing = _regiment("f", 0, 6, Side.ENEMY, toughness=2, armour=0, speed_per_tick=0.0)
+        fleeing.routing = True
+        battle = Battle(1000, 1000, [guard, fleeing], seed=1)
+        self.assertTrue(formation.penetrates(guard.block(), fleeing.block()))
+
+        combat.resolve_router_contact_attacks(battle)
+
+        events = [e for e in battle.events if e.kind == "contact_attack"]
+        self.assertEqual([(e.data["attacker"], e.data["target"]) for e in events], [("g", "f")])
+
+    def test_given_a_fleeing_friend_underfoot_then_no_contact_attacks_are_made(self):
+        guard = _regiment("g", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        friend = _regiment("f", 0, 6, Side.PLAYER, speed_per_tick=0.0)
+        friend.routing = True
+        battle = Battle(1000, 1000, [guard, friend], seed=1)
+
+        combat.resolve_router_contact_attacks(battle)
+
+        self.assertEqual([e for e in battle.events if e.kind == "contact_attack"], [])
+
+    def test_given_a_fleeing_enemy_that_only_comes_near_then_no_contact_attacks_are_made(self):
+        guard = _regiment("g", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        fleeing = _regiment("f", 0, 60, Side.ENEMY, speed_per_tick=0.0)
+        fleeing.routing = True
+        battle = Battle(1000, 1000, [guard, fleeing], seed=1)
+
+        combat.resolve_router_contact_attacks(battle)
+
+        self.assertEqual([e for e in battle.events if e.kind == "contact_attack"], [])
+
+    def test_given_a_unit_in_melee_then_it_makes_no_contact_attacks_on_an_overlapping_router(self):
+        guard = _regiment("g", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        fleeing = _regiment("f", 0, 6, Side.ENEMY, speed_per_tick=0.0)
+        fleeing.routing = guard.in_melee = True
+        battle = Battle(1000, 1000, [guard, fleeing], seed=1)
+
+        combat.resolve_router_contact_attacks(battle)
+
+        self.assertEqual([e for e in battle.events if e.kind == "contact_attack"], [])
+
+    def _guard_and_router(self, **router_extra):
+        guard = _regiment("g", 0, 0, Side.PLAYER, strength=6, attacks=2, speed_per_tick=0.0)
+        fleeing = _regiment("f", 0, 6, Side.ENEMY, toughness=2, armour=0, speed_per_tick=0.0, **router_extra)
+        fleeing.routing = True
+        return guard, fleeing, Battle(1000, 1000, [guard, fleeing], seed=1)
+
+    def test_given_a_router_that_passes_between_segment_boundaries_then_the_overlap_is_still_caught(self):
+        guard, fleeing, battle = self._guard_and_router()
+        battle.tick_count = 7  # mid-segment: the old per-segment poll would not have run
+        combat.resolve_router_contact_attacks(battle)
+        self.assertEqual(len([e for e in battle.events if e.kind == "contact_attack"]), 1)
+
+    def test_given_an_overlap_lasting_several_ticks_then_the_attacker_strikes_once_per_segment(self):
+        guard, fleeing, battle = self._guard_and_router()
+        for tick in (3, 4, 5):
+            battle.tick_count = tick
+            combat.resolve_router_contact_attacks(battle)
+        self.assertEqual(len([e for e in battle.events if e.kind == "contact_attack"]), 1)
+        battle.tick_count = combat.SEGMENT_TICKS + 1  # the next segment
+        combat.resolve_router_contact_attacks(battle)
+        self.assertEqual(len([e for e in battle.events if e.kind == "contact_attack"]), 2)
+
+    def test_given_a_cantmelee_router_then_collisions_make_no_contact_attacks_on_it(self):
+        guard, fleeing, battle = self._guard_and_router(psychology=frozenset({"CantMelee"}))
+        combat.resolve_router_contact_attacks(battle)
+        self.assertEqual([e for e in battle.events if e.kind == "contact_attack"], [])
+
+    def test_given_a_marked_attacker_or_router_then_nothing_happens(self):
+        from whshr import interpreter
+        for marked in ("g", "f"):
+            with self.subTest(marked=marked):
+                guard, fleeing, battle = self._guard_and_router()
+                battle.event_bus.unit_states[marked].unit_flags |= interpreter.LEAVING_BATTLE_FLAG
+                combat.resolve_router_contact_attacks(battle)
+                self.assertEqual([e for e in battle.events if e.kind == "contact_attack"], [])
+
 
 class EngagementGeometryTests(unittest.TestCase):
     """game_rules.md, "What triggers engagement": real footprint overlap, not proximity."""
