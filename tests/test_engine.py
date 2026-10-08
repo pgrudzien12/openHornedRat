@@ -1354,7 +1354,15 @@ class FormationTurnExceptionTests(unittest.TestCase):
         self.assertNotEqual(regiment.direction, 256)
         self.assertEqual(regiment.turn_mode, "halted")
 
-    def test_given_a_new_move_order_behind_when_issued_then_it_snaps_180(self):
+    def test_given_a_move_order_behind_a_unit_at_rest_when_issued_then_it_snaps_180(self):
+        battle, regiment = self._battle(models=12, ranks=3)
+        battle.order_move("r", 100, 10)
+        battle.tick()
+
+        self.assertEqual(regiment.direction, 256)
+
+    def test_given_a_move_order_behind_a_moving_unit_when_issued_then_it_turns_without_a_snap(self):
+        # notes/close_point_move.md 2: the move-start snap is from rest only; a moving unit halts and turns.
         battle, regiment = self._battle(models=12, ranks=3)
         battle.order_move("r", 100, 600)
         battle.tick()
@@ -1362,7 +1370,8 @@ class FormationTurnExceptionTests(unittest.TestCase):
         battle.order_move("r", 100, 10)
         battle.tick()
 
-        self.assertEqual(regiment.direction, 256)
+        self.assertNotIn(regiment.direction, (0, 128, 256, 384))  # turning gradually, not snapped
+        self.assertEqual(regiment.turn_mode, "halted")
 
     def test_given_a_wagon_when_the_camera_moves_then_facing_snaps_to_the_camera_relative_grid(self):
         battle, regiment = self._battle(models=2, ranks=1)

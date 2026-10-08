@@ -1889,17 +1889,15 @@ class ScriptInterpreter:
 
     def _start_point_move(self, unit: "Regiment", goal: tuple[float, float], follows_unit: bool = False) -> None:
         """An ordinary move to a point: a new plan replaces any charge, turn order or earlier destination.
-        A unit starting from rest first snaps 90/180 degrees towards it (game_rules.md, real time and movement)."""
-        was_moving = unit.moving
+        A unit starting from rest snaps 90/180 degrees at its first movement update, toward the first plan's heading
+        (the steer heading if that plan already steers round something), not the raw goal; a unit already moving
+        does not snap (notes/attack_order_flow.md 3, notes/close_point_move.md 2)."""
         unit.waypoints.clear()
         unit.attack_target = None
         unit.charge_started_target = None
         unit.turn_order_key = None
         self.battle.set_point_route(unit, (float(goal[0]), float(goal[1])))
         unit.route_follows_unit = follows_unit
-        if not was_moving:
-            heading = round(math.atan2(goal[0] - unit.x, goal[1] - unit.y) * 512 / math.tau) % 512
-            self.battle.snap_move_start(unit, heading)
 
     def op_MoveToTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
@@ -2467,11 +2465,25 @@ class ScriptInterpreter:
             if building is not None and not building.destroyed:
                 regiment.attack_target = target_id
                 regiment.charge_started_target = None
+                self._hand_over_to_charge(regiment)
             if target_id in self.battle.regiments:
                 regiment.attack_target = target_id
+                self._hand_over_to_charge(regiment)
                 state.fear_passed = False  # a new charge clears it (notes/script_grid_events.md 0)
                 # Battle.tick() handles the actual charging movement
         return state.pc + 1
+
+    @staticmethod
+    def _hand_over_to_charge(regiment: "Regiment") -> None:
+        """The straight run replaces the approach walk: no route pause, and no point route or steering left for
+        other units' route filters to read (notes/attack_order_flow.md 1)."""
+        regiment.route_pause_ticks = 0
+        regiment.free_charging = False
+        regiment.target_x = regiment.target_y = None
+        regiment.waypoints.clear()
+        regiment.avoid_target = None
+        regiment.route_side, regiment.route_planned_for = 0, None
+        regiment.route_follows_unit = False
 
     def op_FireAtTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
@@ -3190,6 +3202,12 @@ class ScriptInterpreter:
         unit.waypoints = []
         unit.attack_target = unit.charge_started_target = None
         unit.free_charging = True
+        # A charge is a straight run (notes/attack_order_flow.md 1): no route pause, and no steering or route plan
+        # left from an earlier move for other units' route filters to read.
+        unit.route_pause_ticks = 0
+        unit.avoid_target = None
+        unit.route_side, unit.route_planned_for = 0, None
+        unit.route_follows_unit = False
         unit.hidden = False
         state.fear_passed = False
         state.cond_flags = True
