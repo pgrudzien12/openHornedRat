@@ -126,6 +126,45 @@ class JoiningTests(unittest.TestCase):
         self.assertAlmostEqual(model.heading_y, (target_y - py) / distance)
 
 
+class RepairingTests(unittest.TestCase):
+    """game_rules.md "Battle grid procedure" steps 4, 6 and 8: a placed model of either side whose opponent died
+    takes an orthogonally adjacent enemy again, and a model holding a cell it has not reached walks to it."""
+
+    def setUp(self):
+        self.defender = _regiment("aaa_def", 0, 0, Side.ENEMY, initiative=5)
+        self.attacker = _regiment("bbb_att", 0, 14, Side.PLAYER, initiative=5, models=12, ranks=3)
+        self.battle = Battle(1000, 1000, [self.defender, self.attacker], seed=0)
+        for _ in range(combat.SEGMENT_TICKS * 3):
+            self.battle.tick()
+        self.grid = _grid(self.battle, self.defender)
+        self.owner = self.battle.regiments[self.grid.owner_id]
+        self.joiner = self.attacker if self.owner is self.defender else self.defender
+
+    def test_given_a_placed_joiner_model_without_opponent_when_an_enemy_is_adjacent_then_it_pairs_again(self):
+        model = next(m for m in self.joiner.melee_models if m.cell is not None and m.opponent is not None)
+        model.opponent = None
+
+        battle_grid.update(self.battle, self.joiner.melee_group, self.grid, [self.owner, self.joiner])
+
+        self.assertIsNotNone(model.opponent)
+        enemy_id, enemy_uid = model.opponent
+        enemy_model = self.battle.regiments[enemy_id].melee_models[self.battle.regiments[enemy_id].index_of(enemy_uid)]
+        (row, col), (enemy_row, enemy_col) = model.cell, enemy_model.cell
+        self.assertEqual(abs(row - enemy_row) + abs(col - enemy_col), 1)
+
+    def test_given_a_model_at_rest_away_from_its_cell_when_the_grid_updates_then_it_walks_to_it(self):
+        index, model = next((i, m) for i, m in enumerate(self.owner.melee_models) if m.cell is not None)
+        wx, wy = self.grid.cell_world(*model.cell)
+        self.owner.positions[index] = (wx + 6.0, wy)
+        model.at_rest = True
+
+        battle_grid.update(self.battle, self.owner.melee_group, self.grid, [self.owner, self.joiner])
+        self.battle._advance_models(self.owner, 1)
+
+        self.assertFalse(model.arrived)
+        self.assertLess(self.owner.positions[index][0], wx + 6.0)
+
+
 class PileOnTests(unittest.TestCase):
     """game_rules.md 5.7: several units share one grid, one cell pool and one pair of tallies."""
 

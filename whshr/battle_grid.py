@@ -161,6 +161,8 @@ def _sync_arrival(grid: BattleGrid, members: Sequence["Regiment"]) -> None:
             wx, wy = grid.cell_world(*model.cell)
             px, py = positions[index]
             model.arrived = math.hypot(wx - px, wy - py) <= ARRIVAL_DISTANCE
+            if not model.arrived:
+                model.at_rest = False  # a model given a cell it has not reached walks to it (step 6)
 
 
 def _owner_outnumbers(owner: "Regiment", members: Sequence["Regiment"]) -> bool:
@@ -203,6 +205,7 @@ def _pair_joiner(battle: "Battle", grid: BattleGrid, regiment: "Regiment", membe
     enemies = _enemy_models_on_grid(battle, grid, regiment, members)
     if not enemies:
         return
+    _pair_adjacent(battle, grid, regiment)
     budget = max(1, regiment.front_rank_models())
     positions = regiment.model_positions()
     for index, model in enumerate(regiment.melee_models):
@@ -296,7 +299,14 @@ def _candidate_cells(enemy_cell: Cell, direction: int, distance: float) -> list[
 
 
 def _pair_owner(battle: "Battle", grid: BattleGrid, regiment: "Regiment", members: Sequence["Regiment"]) -> None:
-    """The owner's unpaired models take any enemy model orthogonally adjacent on the grid."""
+    """The owner's unpaired models take any enemy model orthogonally adjacent on the grid (5.8 step 5).
+    Not modelled: "otherwise move next to an engaged comrade"."""
+    _pair_adjacent(battle, grid, regiment)
+
+
+def _pair_adjacent(battle: "Battle", grid: BattleGrid, regiment: "Regiment") -> None:
+    """Every placed, unpaired model takes an enemy model orthogonally adjacent to its cell (5.8 step 4; a survivor
+    whose opponent died is re-paired this way, step 8)."""
     for model in regiment.melee_models:
         if model.opponent is not None or model.cell is None:
             continue
