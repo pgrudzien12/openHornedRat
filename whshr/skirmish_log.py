@@ -68,7 +68,7 @@ def check_grid(battle: "Battle", grid: battle_grid.BattleGrid, members: Sequence
     seen_cells: dict[battle_grid.Cell, str] = {}
     attackers_per_target: dict[tuple[str, int], list[str]] = {}
     for regiment in members:
-        positions = regiment.model_positions()
+        positions = regiment.seeded_positions()
         if len(regiment.melee_models) != regiment.models:
             problems.append(
                 f"{regiment.identifier}: {len(regiment.melee_models)} model states for "

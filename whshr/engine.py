@@ -466,6 +466,14 @@ class Regiment:
         s_rlmv = self.speed_per_tick * 16 / MOVING_FREELY_K
         return 12 * (s_rlmv + 1)
 
+    def seeded_positions(self) -> list[Point]:
+        """The per-model positions for display and logging, without ever seeding them (empty until the battle seeds
+        the regiment). `model_positions` seeds lazily and draws from the battle-wide stagger sequence, so a viewer or
+        logger calling it would change the battle and break replay."""
+        if len(self.positions) != self.models or len(self.melee_models) != len(self.positions):
+            return []
+        return self.positions
+
     def model_positions(self, spacing: float = formation.MODEL_SPACING) -> list[Point]:
         """Current per-model positions (BTS world units): seeded in formation, then advanced by `Battle.tick`."""
         if len(self.positions) != self.models:

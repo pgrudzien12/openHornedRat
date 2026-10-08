@@ -121,6 +121,39 @@ class RecordAndReplayTests(SyntheticInstallation):
         self.assertEqual(replayed.battle.tick_count, scene.battle.tick_count)
         self.assertEqual(replayed.battle.regiments["Player_Cav"].x, scene.battle.regiments["Player_Cav"].x)
 
+    def test_given_an_order_on_a_snapshot_tick_when_replayed_then_it_is_still_identical(self):
+        # A live snapshot is written at the end of the update that produced its tick, before that tick's orders.
+        context = self._context()
+        scene = BattleScene(log_dir=self.log_dir, seed=7)
+        machine = SceneMachine(scene, context)
+        scene.handle(("select", "Player_Cav"), context)
+        while scene.battle.update_count < combat.SEGMENT_TICKS:
+            machine.update(BATTLE_TICK_SECONDS)
+        scene.handle(("ranks_down",), context)  # exactly on the snapshot tick; changes the ranks at once
+        for _ in range(combat.SEGMENT_TICKS * 2):
+            machine.update(BATTLE_TICK_SECONDS)
+        machine.active.exit(context)
+
+        _replayed, _header, divergence, _timeline = battle_replay.replay(
+            self.root, scene.logger.path, context=self._context())
+
+        self.assertIsNone(divergence)
+
+    def test_given_frames_shorter_than_a_tick_when_replayed_then_it_is_identical(self):
+        context = self._context()
+        scene = BattleScene(log_dir=self.log_dir, seed=7)
+        machine = SceneMachine(scene, context)
+        scene.handle(("select", "Player_Cav"), context)
+        scene.handle(("move_to", 400, 400), context)
+        for _ in range(combat.SEGMENT_TICKS * 2 * 6):
+            machine.update(BATTLE_TICK_SECONDS / 6)
+        machine.active.exit(context)
+
+        _replayed, _header, divergence, _timeline = battle_replay.replay(
+            self.root, scene.logger.path, context=self._context())
+
+        self.assertIsNone(divergence)
+
     def test_given_every_line_of_a_written_log_when_parsed_then_it_is_valid_json_and_the_header_comes_first(self):
         context = self._context()
         scene = BattleScene(log_dir=self.log_dir, seed=1)

@@ -1165,6 +1165,25 @@ def formation_positions(regiment):
                            formation.block_slots(regiment.models, regiment.ranks))
 
 
+class SeededPositionsTests(unittest.TestCase):
+    """Display and logging read figure positions without seeding them: seeding draws from the battle-wide stagger
+    sequence, so a reader that seeds would make live play and replay differ."""
+
+    def test_given_an_unseeded_regiment_when_read_for_display_then_it_stays_unseeded(self):
+        regiment = Regiment("r", "R", 100, 100, 0, Side.PLAYER, models=6, ranks=2)
+        Battle(1000, 1000, [regiment])
+
+        self.assertEqual(regiment.seeded_positions(), [])
+        self.assertEqual(regiment.melee_models, [])
+
+    def test_given_a_seeded_regiment_when_read_for_display_then_its_positions_are_returned(self):
+        regiment = Regiment("r", "R", 100, 100, 0, Side.PLAYER, models=6, ranks=2)
+        Battle(1000, 1000, [regiment])
+        regiment.model_positions()
+
+        self.assertEqual(regiment.seeded_positions(), regiment.positions)
+
+
 class OrdinaryMovePlanTests(unittest.TestCase):
     """notes/movement_formation.md 1.4: an ordinary move re-plans at intervals, turns a large angle by halves, and
     halts within 32 units of its point; a multi-leg route visits every leg (GitHub #183)."""

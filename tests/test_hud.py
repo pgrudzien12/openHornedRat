@@ -1198,6 +1198,13 @@ class SpritePickTests(unittest.TestCase):
         self.assertEqual(view._sprite_pick(pixel, projection), "near")
 
 
+def _seeded(battle):
+    """A battle as a scene hands it to the view: every regiment's figures seeded (BattleScene.enter)."""
+    for regiment in battle.regiments.values():
+        regiment.model_positions()
+    return battle
+
+
 class BattleBannerVisibilityTests(unittest.TestCase):
     def test_given_hidden_player_or_ally_then_banner_is_drawn_without_revealing_it(self):
         for side in (Side.PLAYER, Side.NEUTRAL, Side.ENEMY):
@@ -1220,7 +1227,7 @@ class BattleBannerVisibilityTests(unittest.TestCase):
             ground_height=lambda x, y: 2.0,
         )
         view = BattleView.__new__(BattleView)
-        view.scene = SimpleNamespace(field=field, battle=Battle(1000, 800, [regiment]), selected_id="player")
+        view.scene = SimpleNamespace(field=field, battle=_seeded(Battle(1000, 800, [regiment])), selected_id="player")
         view.camera = SimpleNamespace(yaw=180)
         view.capacity = 1
         return view
@@ -1247,7 +1254,7 @@ class BattleBannerVisibilityTests(unittest.TestCase):
         field = SimpleNamespace(ui_sheets={"banner": banner}, sprite_sheet=lambda resource: None,
                                ground_height=lambda x, y: 2.0)
         view = BattleView.__new__(BattleView)
-        view.scene = SimpleNamespace(field=field, battle=Battle(1000, 800, [regiment]), selected_id="player")
+        view.scene = SimpleNamespace(field=field, battle=_seeded(Battle(1000, 800, [regiment])), selected_id="player")
         view.camera = SimpleNamespace(yaw=180)
         view.capacity = 1
 
@@ -1273,7 +1280,7 @@ class BattleBannerVisibilityTests(unittest.TestCase):
             sprite_sheet=lambda resource: None, ground_height=lambda x, y: 2.0,
         )
         view = BattleView.__new__(BattleView)
-        view.scene = SimpleNamespace(field=field, battle=Battle(1000, 800, [player, enemy]), selected_id="player")
+        view.scene = SimpleNamespace(field=field, battle=_seeded(Battle(1000, 800, [player, enemy])), selected_id="player")
         view.camera, view.capacity = SimpleNamespace(yaw=180), 2
 
         instances = view._instances()

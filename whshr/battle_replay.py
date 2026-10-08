@@ -125,9 +125,8 @@ def replay(installation: Installation | PathArg, log_path: PathArg, until: int |
     timeline: list[Record] = []
     tick = 0
     while True:
-        for event in orders_by_tick.get(tick, []):
-            scene.handle(event, context)
-            timeline.append({"tick": tick, "kind": "order", "event": list(event)})
+        # A live snapshot for tick T is written at the end of the update that produced T, before the orders the
+        # player gives at T are handled: compare first, then apply the orders.
         if tick in snapshots_by_tick:
             record = snapshots_by_tick[tick]
             mismatch = _compare_snapshot(record["regiments"], scene.battle.snapshot())
@@ -138,6 +137,9 @@ def replay(installation: Installation | PathArg, log_path: PathArg, until: int |
                 if field_name in record and record[field_name] != actual and divergence is None:
                     divergence = {"tick": tick, "regiment": None, "field": field_name,
                                   "recorded": record[field_name], "replayed": actual}
+        for event in orders_by_tick.get(tick, []):
+            scene.handle(event, context)
+            timeline.append({"tick": tick, "kind": "order", "event": list(event)})
         if scene.battle.result is not None or tick >= max_tick:
             break
         scene.update(BATTLE_TICK_SECONDS, context)  # exactly one recorded tick, never wall-clock time

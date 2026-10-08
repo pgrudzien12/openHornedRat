@@ -67,6 +67,10 @@ class BattleScene(Scene):
         self.battle = Battle.from_script(self.field.script, seed=self.seed, script_dll=script_dll,
                                          script_logger=self.logger)
         self.battle.ground_height = lambda x, y: self.field.ground_height(x, y) * WORLD_PER_MESH
+        # Seed every regiment's figures now, in battle order, so the first draw never has to (seeding draws from the
+        # battle-wide stagger sequence; doing it lazily in draw order would make live play and replay differ).
+        for regiment in self.battle.regiments.values():
+            regiment.model_positions()
         if context.glue is not None:
             self.battle.text_resources = context.glue.strings("GMTXT")
         self.initial_models = {identifier: regiment.models for identifier, regiment in self.battle.regiments.items()}

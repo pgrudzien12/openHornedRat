@@ -683,7 +683,8 @@ class BattleView(SceneView[BattleScene]):
             # walk "never faster than the unit's s_rlmv", notes/engine_architecture.md
             # "Formation catch-up") - the banner should hover over the rendered troops themselves,
             # not the anchor, or it visibly floats ahead of/behind the block it marks.
-            positions = regiment.model_positions() if regiment.active else []
+            # Read-only: seeding here would draw stagger values in draw order and break replay determinism.
+            positions = regiment.seeded_positions() if regiment.active else []
             if sheet is not None and regiment.active:
                 unit_sheet: SpriteSheet = sheet
                 # Each model already steps its own action/program counter every tick
