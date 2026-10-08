@@ -1442,7 +1442,7 @@ class CollisionTests(unittest.TestCase):
         self.assertEqual((cavalry.x, cavalry.y, infantry.x, infantry.y), (1090, 639, 1112, 585))
         self.assertFalse(cavalry.walking or infantry.walking)
 
-    def test_given_regiment_ordered_into_a_standing_one_when_ticked_then_only_the_moving_regiment_gives_way(self):
+    def test_given_regiment_ordered_into_a_standing_friend_when_ticked_then_both_give_way_and_end_clear(self):
         standing = Regiment("standing", "Standing", 200, 0, 0, Side.PLAYER, models=18, ranks=4, speed_per_tick=5.0)
         walker = Regiment("walker", "Walker", 0, 0, 0, Side.PLAYER, models=18, ranks=4, speed_per_tick=5.0)
         battle = Battle(1000, 1000, [standing, walker])
@@ -1451,7 +1451,7 @@ class CollisionTests(unittest.TestCase):
         for _ in range(80):
             battle.tick()
 
-        self.assertEqual((standing.x, standing.y), (200, 0))
+        self.assertNotEqual((standing.x, standing.y), (200, 0))  # pushed apart by half the overlap each
         distance = math.hypot(standing.x - walker.x, standing.y - walker.y)
         self.assertGreaterEqual(distance, standing.bounding_radius() + walker.bounding_radius() - 1e-6)
 
