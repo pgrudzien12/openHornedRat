@@ -144,11 +144,15 @@ State per regiment: `offered` = `min(roster reinforcements of that whoami, orgsi
 present models plus the wounded/away count (computed for every regiment when the book opens); `taken` starts at 0 (a regiment
 that was already reopened keeps its `taken`).
 
-- **+1**: if `taken < offered`: `taken += 1`, the regiment's current size `+= 1` **at once** (so the cost line grows immediately), repaint.
-- **-1**: if `taken > 0`: `taken -= 1`, size `-= 1`, repaint.
-- **Take** (`0x201`): the offer is consumed: `offered := 0`, the roster's reinforcements `-= taken` (the untaken rest stays in the roster
-  for a later visit), the window closes, and if anything was taken the book page is repainted. There is no cancel: paging away
+- **+1**: if `taken < offered`: `taken += 1` and repaint the popup. The book's active count and cost stay fixed until Hire.
+- **-1**: if `taken > 0`: `taken -= 1` and repaint the popup. No regiment or payment state changes.
+- **Take/Hire** (`0x201`): add `taken` to the regiment, update its cost, consume the offer (`offered := 0`), and subtract
+  `taken` from the roster's reinforcements (the untaken rest stays in the roster for a later visit). The window closes and,
+  if anything was taken, the book page is repainted. There is no cancel: paging away
   closes the window without change and `taken` survives until the offer is answered.
+
+The delayed book and payment update above corrects the earlier immediate-update description based on a player observation
+reported on 2026-10-08. The exact original-game payment timing beyond this popup remains unverified.
 
 Where the reinforcement figures come from and how unused ones are discarded when the caravan is left: `notes/campaign.md` §2.4.
 The three sub-window buttons play the same click cues as the other buttons.

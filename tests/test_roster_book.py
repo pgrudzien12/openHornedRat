@@ -125,16 +125,26 @@ class ReinforcementTests(unittest.TestCase):
                 self.assertEqual(ledger.offered[5], offer)
                 self.assertEqual(ledger.has_offer(5), offer > 0)
 
-    def test_given_an_offer_when_a_man_is_added_then_the_regiment_grows_at_once_up_to_the_offer(self):
+    def test_given_an_offer_when_men_are_selected_then_only_the_popup_changes_until_hire(self):
         ledger, company = self._ledger(10, 16, 2)
 
         self.assertTrue(ledger.increase(5))
         self.assertTrue(ledger.increase(5))
         self.assertFalse(ledger.increase(5))
 
-        self.assertEqual(company[5].models, 12)
+        self.assertEqual(ledger.taken_count(5), 2)
         self.assertEqual(ledger.offer_left(5), 0)
+        self.assertEqual(company[5].models, 10)
+        self.assertEqual(company[5].price, 100)
+        self.assertEqual(ledger.available[5], 2)
+        self.assertFalse(ledger.changed)
+
+        self.assertEqual(ledger.take(5), 2)
+
+        self.assertEqual(company[5].models, 12)
         self.assertEqual(company[5].price, 120)
+        self.assertEqual(ledger.available[5], 0)
+        self.assertTrue(ledger.changed)
 
     def test_given_men_taken_when_one_is_removed_then_the_regiment_shrinks_but_never_below_the_start(self):
         ledger, company = self._ledger(10, 16, 3)
@@ -144,6 +154,8 @@ class ReinforcementTests(unittest.TestCase):
         self.assertFalse(ledger.decrease(5))
 
         self.assertEqual(company[5].models, 10)
+        self.assertEqual(ledger.taken_count(5), 0)
+        self.assertFalse(ledger.changed)
 
     def test_given_men_taken_when_the_offer_is_answered_then_the_pool_keeps_the_untaken_rest(self):
         ledger, company = self._ledger(10, 16, 5)
@@ -431,8 +443,18 @@ class CaravanBookWiringTests(unittest.TestCase):
         campaign.add_reinforcements(2, 3)
         machine, _ = self._recruit_caravan(campaign)
         machine.handle(GlueInput("hotspot-release", "ArmyBook"))
-        for event in ("reinf:up", "reinf:up", "reinf:take", "book:done"):
-            machine.handle(event)
+        book_scene = machine.active
+        machine.handle("reinf:up")
+        machine.handle("reinf:up")
+        self.assertEqual(book_scene.model.company[2].models, 8)
+        self.assertEqual(book_scene.model.company[2].price, 80)
+        self.assertEqual(book_scene.model.ledger.available[2], 3)
+        self.assertFalse(book_scene.model.dirty)
+        machine.handle("reinf:take")
+        self.assertEqual(book_scene.model.company[2].models, 10)
+        self.assertEqual(book_scene.model.ledger.available[2], 1)
+        self.assertTrue(book_scene.model.dirty)
+        machine.handle("book:done")
 
         self.assertEqual(campaign.company[0].models, 10)
         self.assertEqual(campaign.reinforcements, {2: 1})

@@ -9,9 +9,9 @@ class ReinforcementLedger:
     """The reinforcement offer per regiment; notes/builtin_widgets.md §2.4, notes/campaign.md §2.4.
 
     ``available`` is the roster's reinforcement pool (glue ``addtroop``). When a book opens, each regiment
-    is offered ``min(pool, orgsize - models - wounded)`` men. ``increase``/``decrease`` move men into or out of the
-    regiment at once (so its price changes immediately); ``take`` consumes the offer and keeps the unused
-    rest of the pool for a later visit. ``company`` is shared with the owning model and updated in place.
+    is offered ``min(pool, orgsize - models - wounded)`` men. ``increase``/``decrease`` edit only the pending
+    popup choice; ``take`` adds those men to the regiment and consumes them from the pool. ``company`` is
+    shared with the owning model and updated in place when Hire is pressed.
     """
 
     def __init__(self, company: dict[int, Regiment], available: Mapping[int, int],
@@ -50,20 +50,21 @@ class ReinforcementLedger:
         if self.offer_left(whoami) <= 0:
             return False
         self.taken[whoami] = self.taken.get(whoami, 0) + 1
-        self.company[whoami] = with_models(self.company[whoami], self.company[whoami].models + 1)
-        self.changed = True
         return True
 
     def decrease(self, whoami: int) -> bool:
         if self.taken.get(whoami, 0) <= 0:
             return False
         self.taken[whoami] -= 1
-        self.company[whoami] = with_models(self.company[whoami], self.company[whoami].models - 1)
         return True
 
     def take(self, whoami: int) -> int:
-        """The Take button: consume the offer, return how many men joined."""
+        """The Hire button: apply the pending choice and retain unused men for a later visit."""
         taken = self.taken.get(whoami, 0)
+        if taken:
+            regiment = self.company[whoami]
+            self.company[whoami] = with_models(regiment, regiment.models + taken)
+            self.changed = True
         self.available[whoami] = max(0, self.available.get(whoami, 0) - taken)
         self.offered[whoami] = 0
         self.taken[whoami] = 0
