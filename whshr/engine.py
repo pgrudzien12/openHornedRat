@@ -6,7 +6,7 @@ import math
 import random
 from typing import Any, Callable, Literal
 
-from . import animation, battle_grid, behaviour, combat, deployment, formation, interpreter, navigation, ranged, visibility
+from . import animation, battle_grid, behaviour, buildings, combat, deployment, formation, interpreter, navigation, ranged, visibility
 from . import magic, objectives as objective_table, spell_effects, steering
 from . import nodes as node_table
 from .battle_events import BattleEvent
@@ -672,10 +672,16 @@ class Battle:
         self.scenery_names = [str(item.get("name", "")) for item in scenery]  # furniture types, in file order
         self.shooting_objects = list(objects) + [
             {"x": item.get("x"), "y": item.get("y"),
-             "radius": 24 if any(word in str(item.get("name", "")).casefold()
-                                  for word in ("tower", "house", "wall")) else 12,
+             "radius": buildings.footprint_radius(str(item.get("name", ""))),
              "status": ["os_solid"], "name": item.get("name")}
             for item in scenery]
+        # Building pseudo-units (issue #173): the building-type furniture, addressable by `building:N`.
+        self.buildings: list[buildings.Building] = buildings.from_scenery(scenery)
+        self.building_index: dict[str, buildings.Building] = {b.identifier: b for b in self.buildings}
+        offset = len(objects)
+        for building in self.buildings:
+            self.shooting_objects[offset + int(building.identifier[len(buildings.PREFIX):])]["building"] = (
+                building.identifier)
         # Camera rotation in 1/512 turns, set by the frontend; wagons snap to it (see set_view_angle).
         self.view_angle: float | None = None
         self._snapped_view_angle: float | None = None
@@ -1317,18 +1323,34 @@ class Battle:
         unit.shooting_mode = mode
         return feedback
 
+    def destroy_building(self, building: buildings.Building) -> None:
+        """A building at its wounds-to-destroy ends: it stops being solid and stops counting as a target, every
+        live scripted unit gets event 0x18 (notes/battle_end_objectives.md 12.1) and a battle event is recorded.
+        Not modelled: the ruin variant of the piece."""
+        building.destroyed = True
+        building.models = 0
+        for obj in self.shooting_objects:
+            if obj.get("building") == building.identifier:
+                obj["status"] = []
+        for unit_id in list(self.event_bus.unit_states):
+            self.event_bus.queue_event(unit_id, interpreter.Event(code=0x18, source=building.identifier,
+                                                                  x=int(building.x), y=int(building.y)))
+        self.events.append(BattleEvent(f"{building.name} is destroyed.", "building_destroyed",
+                                       building=building.identifier, x=building.x, y=building.y))
+
     def _post_fire_event(self, unit: Regiment, mode: str, target_id: str | None, point: Point | None,
                          object_index: int | None) -> None:
         """With behaviour scripts running, a player Fire order is the event the shooter's script handles
         (notes/script_shooting.md 5.1): 0x1F at a unit, 0x1E at a building, 0x20 on itself, 0x21 on the ground;
-        an independent Archers unit gets 0x25 (unit or building) and 0x24 (itself). PROVISIONAL: placed
-        buildings are not units here, so a building order carries the object's position and no source."""
+        an independent Archers unit gets 0x25 (unit or building) and 0x24 (itself). A building order names the
+        building pseudo-unit as its source (issue #173); other solid objects carry only their position."""
         hunts = unit.independent and unit.hud_class == "arch"
         if mode == "target":
             event = interpreter.Event(code=0x25 if hunts else 0x1F, source=target_id)
         elif mode == "building" and object_index is not None:
             obj = self.shooting_objects[object_index]
-            event = interpreter.Event(code=0x25 if hunts else 0x1E, x=int(obj.get("x") or 0), y=int(obj.get("y") or 0))
+            event = interpreter.Event(code=0x25 if hunts else 0x1E, source=obj.get("building"),
+                                      x=int(obj.get("x") or 0), y=int(obj.get("y") or 0))
         elif mode == "search":
             event = interpreter.Event(code=0x24 if hunts else 0x20, x=-1, y=-1)
         else:

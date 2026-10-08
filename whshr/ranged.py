@@ -510,6 +510,30 @@ def _damage_unit(battle: Battle, unit: Regiment, projectile: Projectile,
             combat.start_rout(unit, battle)
 
 
+def _damage_buildings(battle: Battle, p: Projectile, flight: bool) -> None:
+    """Building pseudo-units under an impact (notes/ranged_combat_handoff.md 3): inside the footprint is a direct
+    hit (wound die of the weapon at building strength), a blast margin is one wound at half strength; no armour
+    save. Bows and crossbows have no building strength and never reach here with damage. Not modelled: kill credit
+    for the shooter."""
+    from . import buildings
+    if not p.building_strength:
+        return
+    for building in battle.buildings:
+        if building.destroyed:
+            continue
+        q = math.hypot(building.x - p.x, building.y - p.y)
+        if q < building.radius:
+            strength, wounds = p.building_strength, battle.rng.randint(1, p.wounds)
+        elif not flight and p.radius and q < building.radius + p.radius:
+            strength, wounds = p.building_strength // 2, 1
+        else:
+            continue
+        if battle.rng.randint(1, 6) < wfb_to_wound(strength, buildings.BUILDING_TOUGHNESS):
+            continue
+        if building.take_wounds(wounds):
+            battle.destroy_building(building)
+
+
 def _impact(battle: Battle, p: Projectile, *, flight: bool,
             hit_unit: str | None = None) -> None:
     for unit in battle.regiments.values():
@@ -527,6 +551,8 @@ def _impact(battle: Battle, p: Projectile, *, flight: bool,
         elif not flight and p.radius and q < radius + p.radius:
             count = max(1, int((radius+p.radius-q)*unit.models/(radius+p.radius)))
             _damage_unit(battle, unit, p, False, count)
+    if not (flight and hit_unit is not None):
+        _damage_buildings(battle, p, flight)
     if p.radius > 0:
         battle.impact_effects.append((p.x, p.y, p.code, battle.tick_count))
     battle.events.append(BattleEvent("Missile impact.", "projectile_impact", code=p.code,

@@ -1,0 +1,112 @@
+"""Building pseudo-units (GitHub issue #173): creation from furniture, missile damage, destruction, the fire order
+event and the node-area side-32 query (notes/battle_end_objectives.md 12.1, notes/ranged_combat_handoff.md)."""
+
+import unittest
+
+from whshr import buildings, interpreter, objectives
+from whshr.engine import Battle, Regiment
+from whshr.nodes import ScriptNode
+from whshr.ranged import Projectile
+from whshr import ranged
+from whshr.rules import Side
+
+SCENERY = [{"name": "Tree1", "x": 10, "y": 10}, {"name": "Farm", "x": 500, "y": 500},
+           {"name": "WoodShack", "x": 900, "y": 900}, {"name": "HumanTent", "x": 100, "y": 100}]
+
+
+def battle(scenery=SCENERY):
+    shooter = Regiment("S", "S", 0, 0, 0, Side.PLAYER, models=5, ranks=1, unit_class=1)
+    return Battle(2000, 2000, [shooter], seed=1995, scenery=scenery)
+
+
+def cannonball(x, y, strength=6, wounds=6, radius=0):
+    return Projectile(source="S", code=0, x0=x, y0=y, z0=0, x1=x, y1=y, z1=0, radius=radius, strength=3,
+                      wounds=wounds, building_strength=strength, x=x, y=y)
+
+
+class CreationTests(unittest.TestCase):
+    def test_only_building_type_furniture_becomes_a_building(self):
+        b = battle()
+        self.assertEqual([x.name for x in b.buildings], ["Farm", "WoodShack", "HumanTent"])
+
+    def test_identifier_is_the_furniture_position_and_wounds_follow_the_type(self):
+        b = battle()
+        self.assertEqual([(x.identifier, x.wounds_to_destroy, x.models) for x in b.buildings],
+                         [("building:1", 6, 3), ("building:2", 3, 1), ("building:3", 1, 1)])
+
+    def test_objective_count_drops_when_a_building_is_destroyed(self):
+        b = battle()
+        self.assertEqual(objectives.building_count(b), 3)
+        b.destroy_building(b.buildings[0])
+        self.assertEqual(objectives.building_count(b), 2)
+
+
+class DamageTests(unittest.TestCase):
+    def test_wounds_accumulate_until_the_building_is_destroyed(self):
+        farm = battle().buildings[0]
+        self.assertFalse(farm.take_wounds(5))
+        self.assertTrue(farm.take_wounds(1))
+        self.assertEqual((farm.destroyed, farm.models), (True, 0))
+
+    def test_a_direct_cannon_hit_can_destroy_a_tent_and_event_0x18_reaches_scripted_units(self):
+        b = battle()
+        tent = b.buildings[2]
+        for _ in range(60):
+            ranged._damage_buildings(b, cannonball(tent.x, tent.y), flight=False)
+            if tent.destroyed:
+                break
+        self.assertTrue(tent.destroyed)
+        queue = b.event_bus.unit_states["S"].event_queue
+        self.assertIn((0x18, "building:3"), [(e.code, e.source) for e in queue])
+        solid = [o for o in b.shooting_objects if o.get("building") == "building:3"]
+        self.assertEqual(solid[0]["status"], [])
+
+    def test_a_missile_without_building_strength_does_no_damage(self):
+        b = battle()
+        farm = b.buildings[0]
+        ranged._damage_buildings(b, cannonball(farm.x, farm.y, strength=0), flight=False)
+        self.assertEqual(farm.wounds_taken, 0)
+
+    def test_a_miss_outside_footprint_and_blast_does_no_damage(self):
+        b = battle()
+        farm = b.buildings[0]
+        for _ in range(30):
+            ranged._damage_buildings(b, cannonball(farm.x + 200, farm.y, radius=20), flight=False)
+        self.assertEqual(farm.wounds_taken, 0)
+
+    def test_blast_margin_wounds_once_per_hit_at_half_strength(self):
+        b = battle()
+        farm = b.buildings[0]
+        for _ in range(40):
+            ranged._damage_buildings(b, cannonball(farm.x + farm.radius + 5, farm.y, radius=20, wounds=6),
+                                     flight=False)
+        self.assertTrue(0 < farm.wounds_taken <= 40 and farm.wounds_taken < 6 or farm.destroyed)
+
+    def test_a_destroyed_building_takes_no_more_damage(self):
+        b = battle()
+        tent = b.buildings[2]
+        b.destroy_building(tent)
+        before = len(b.events)
+        ranged._damage_buildings(b, cannonball(tent.x, tent.y), flight=False)
+        self.assertEqual(len(b.events), before)
+
+
+class OrderTests(unittest.TestCase):
+    def test_fire_order_at_a_building_carries_the_building_as_source(self):
+        b = battle()
+        b.interpreter = object()  # only its presence matters: the order becomes an event
+        index = next(i for i, o in enumerate(b.shooting_objects) if o.get("building") == "building:1")
+        b._post_fire_event(b.regiments["S"], "building", None, None, index)
+        event = b.event_bus.unit_states["S"].event_queue[-1]
+        self.assertEqual((event.code, event.source), (0x1E, "building:1"))
+
+
+class SideCodeTests(unittest.TestCase):
+    def test_nearest_picks_the_closest_and_ties_go_to_file_order(self):
+        items = buildings.from_scenery([{"name": "Farm", "x": 1010, "y": 1000}, {"name": "Farm", "x": 990, "y": 1000},
+                                        {"name": "Farm", "x": 1100, "y": 1000}])
+        self.assertEqual(buildings.nearest_to_point(items, 1000, 1000).identifier, "building:0")
+
+
+if __name__ == "__main__":
+    unittest.main()

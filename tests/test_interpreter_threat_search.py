@@ -4,7 +4,8 @@
 import unittest
 from unittest import mock
 
-from whshr import interpreter
+from whshr import buildings, interpreter
+from whshr.nodes import ScriptNode
 from whshr.engine import Battle, Regiment
 from whshr.interpreter import Event
 from whshr.rules import Side
@@ -233,10 +234,53 @@ class AttackNearestFamilyTests(SearchTestCase):
         self.call("AttackNearestEnemyOfClass", 0)
         self.assertEqual(self.picked(), [(4, "L")])
 
-    def test_attack_unit_at_node_finds_no_building(self):
+    def make_with_building(self, searcher, name, x, y, node=(1000, 1000), **extra):
+        self.make(searcher)
+        self.battle.script_nodes = [ScriptNode(node[0], node[1])]
+        self.battle.buildings = buildings.from_scenery([{"name": name, "x": x, "y": y}])
+        self.battle.building_index = {b.identifier: b for b in self.battle.buildings}
+
+    def test_attack_unit_at_node_with_no_building_is_false(self):
         self.make(self.searcher(), unit("P", 0, 0))
-        self.call("AttackUnitAtNode", 30)
+        self.battle.script_nodes = [ScriptNode(30, 30)]
+        self.call("AttackUnitAtNode", 0)
         self.assertEqual((self.picked(), self.state.cond_flags), ([], 0))
+
+    def test_attack_unit_at_node_queues_attack_event_naming_the_building(self):
+        self.make_with_building(self.searcher(), "Farm", 1030, 1000)
+        self.call("AttackUnitAtNode", 0)
+        self.assertEqual((self.picked(), self.state.cond_flags), ([(4, "building:0")], 1))
+
+    def test_attack_unit_at_node_reach_is_at_least_48_for_a_small_building(self):
+        for x, expected in ((1040, True), (1050, False)):
+            with self.subTest(x=x):
+                self.make_with_building(self.searcher(), "WoodShack", x, 1000)
+                self.battle.buildings[0].radius = 20
+                self.call("AttackUnitAtNode", 0)
+                self.assertEqual(bool(self.state.cond_flags), expected)
+
+    def test_attack_unit_at_node_ignores_regiments_at_the_node(self):
+        self.make(self.searcher(), unit("E", 1000, 1000, Side.PLAYER))
+        self.battle.script_nodes = [ScriptNode(1000, 1000)]
+        self.call("AttackUnitAtNode", 0)
+        self.assertEqual(self.state.cond_flags, 0)
+
+    def test_attack_unit_at_node_fails_for_a_held_unit_and_for_a_destroyed_building(self):
+        self.make_with_building(self.searcher(), "Farm", 1030, 1000)
+        self.s.held = True
+        self.call("AttackUnitAtNode", 0)
+        self.assertEqual(self.picked(), [])
+        self.s.held = False
+        self.battle.buildings[0].destroyed = True
+        self.call("AttackUnitAtNode", 0)
+        self.assertEqual((self.picked(), self.state.cond_flags), ([], 0))
+
+    def test_take_event_target_from_a_building_aims_at_its_centre_without_a_unit_target(self):
+        self.make_with_building(self.searcher(), "Farm", 1030, 1000)
+        self.state.current_event = Event(code=0x04, source="building:0")
+        self.call("TakeEventTarget")
+        self.assertEqual((self.state.current_target, self.state.approach_point, self.state.cond_flags),
+                         (None, (1030.0, 1000.0), 1))
 
 
 class ReactToThreatTests(SearchTestCase):
