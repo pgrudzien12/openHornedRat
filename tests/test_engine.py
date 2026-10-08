@@ -31,11 +31,12 @@ class BattleTests(unittest.TestCase):
         self.assertTrue(self.player.moving)
         self.assertTrue(self.player.walking)
 
-    def test_given_nearby_destination_when_tick_reaches_it_then_order_completes_without_overshoot(self):
+    def test_given_a_destination_within_32_units_when_ordered_then_the_unit_halts_at_once_and_re_forms(self):
+        # notes/movement_formation.md 1.4: a plan that finds the point within 32 units halts and re-forms.
         self.battle.order_move("player", self.player.x, self.player.y + self.speed / 2)
         self.battle.tick()
 
-        self.assertAlmostEqual(self.player.y, 10 + self.speed / 2)
+        self.assertAlmostEqual(self.player.y, 10)
         self.assertFalse(self.player.moving)
 
     def test_given_enemy_or_outside_destination_when_ordered_then_the_order_is_rejected(self):
@@ -1162,6 +1163,66 @@ def formation_positions(regiment):
     from whshr import formation
     return formation.place(regiment.x, regiment.y, regiment.direction,
                            formation.block_slots(regiment.models, regiment.ranks))
+
+
+class OrdinaryMovePlanTests(unittest.TestCase):
+    """notes/movement_formation.md 1.4: an ordinary move re-plans at intervals, turns a large angle by halves, and
+    halts within 32 units of its point; a multi-leg route visits every leg (GitHub #183)."""
+
+    def _move(self, bearing, distance, models=11, ranks=3):
+        regiment = Regiment("w", "W", 500, 500, 0, Side.PLAYER, models=models, ranks=ranks, speed_per_tick=2.0)
+        battle = Battle(1000, 1000, [regiment], seed=1)
+        battle.phase = "battle"
+        point = (500 + distance * math.sin(math.radians(bearing)), 500 + distance * math.cos(math.radians(bearing)))
+        battle.order_move("w", *point)
+        for _ in range(400):
+            if not regiment.moving:
+                break
+            battle.tick()
+        return regiment, point
+
+    def test_given_a_close_off_axis_destination_when_moving_then_the_unit_stops_within_32_units(self):
+        for bearing, distance in ((90, 80), (135, 80), (170, 80), (60, 40), (90, 25)):
+            with self.subTest(bearing=bearing, distance=distance):
+                regiment, point = self._move(bearing, distance)
+                self.assertFalse(regiment.moving)
+                self.assertLessEqual(math.dist((regiment.x, regiment.y), point), 32)
+
+    def test_given_a_long_straight_move_when_it_ends_then_it_halts_short_of_the_point_and_re_forms(self):
+        regiment, point = self._move(0, 300)
+
+        self.assertFalse(regiment.moving)
+        self.assertLess(regiment.y, point[1])
+        self.assertLessEqual(point[1] - regiment.y, 32)
+        self.assertTrue(regiment.reforming)
+
+    def test_given_a_large_turn_when_planned_then_the_halted_turn_owes_half_the_angle(self):
+        regiment = Regiment("w", "W", 500, 500, 0, Side.PLAYER, models=11, ranks=3, speed_per_tick=2.0)
+        battle = Battle(1000, 1000, [regiment], seed=1)
+        battle.phase = "battle"
+        regiment.target_x, regiment.target_y = 800.0, 500.0  # 128/512 to the right, far away, no snap (not issued)
+        regiment.turn_order_key = ("move", 0, 0)
+
+        battle._advance_move(regiment, (800.0, 500.0), regiment.speed_per_tick, ("move", 800.0, 500.0), 1.0)
+
+        self.assertEqual(regiment.turn_mode, "halted")
+        assert regiment.turn_goal is not None
+        self.assertAlmostEqual(regiment.turn_goal, 64, delta=9)
+
+    def test_given_a_three_point_route_when_followed_then_the_middle_point_is_visited(self):
+        regiment = Regiment("w", "W", 100, 100, 0, Side.PLAYER, models=1, ranks=1, speed_per_tick=3.0)
+        battle = Battle(1000, 1000, [regiment], seed=1)
+        battle.phase = "battle"
+        regiment.target_x, regiment.target_y = 100.0, 200.0
+        regiment.waypoints = [(200.0, 200.0), (200.0, 300.0)]
+        visited = []
+        for _ in range(400):
+            battle.tick()
+            current = (regiment.target_x, regiment.target_y)
+            if regiment.moving and (not visited or visited[-1] != current):
+                visited.append(current)
+
+        self.assertEqual(visited, [(100.0, 200.0), (200.0, 200.0), (200.0, 300.0)])
 
 
 class FormationTurnExceptionTests(unittest.TestCase):

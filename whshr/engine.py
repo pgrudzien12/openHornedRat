@@ -249,6 +249,10 @@ class Regiment:
     # notes/reform_while_moving.md 4: a player Move, Face point, Charge or Attack order given while re-forming is
     # held here as (Battle method name, *args) and applied on the first tick after the re-form ends.
     pending_order: tuple[Any, ...] | None = None
+    # Ordinary-move planning (notes/movement_formation.md 1.4): countdown to the next plan, and whether the last
+    # plan owed a turn (the next plan comes when it finishes).
+    move_plan_countdown: float = -1.0
+    move_turn_owed: bool = False
     routing: bool = False  # fleeing the field; ignores orders, moves away from the nearest enemy
     # game_rules.md "Flight and catching fleeing units": the flight bearing is fixed once, "directly
     # away from its opponent", when the rout starts (combat.start_rout) - not re-aimed every tick
@@ -1706,15 +1710,14 @@ class Battle:
                         chase = (regiment.x + 256 * math.sin(facing), regiment.y + 256 * math.cos(facing))
                     moved = self._advance_toward(regiment, chase, speed * move_scale, arrive=False,
                                                  order_key=("charge", target.identifier), scale=scale)
-            elif regiment.target_x is not None and regiment.target_y is not None:
+            elif regiment.target_x is not None and regiment.target_y is not None and regiment.free_charging:
                 moved = self._advance_toward(regiment, (regiment.target_x, regiment.target_y),
-                                             (regiment.speed_for_mode(CHARGING_K) if regiment.free_charging
-                                              else regiment.speed_per_tick) * move_scale,
-                                             arrive=not regiment.route_follows_unit or bool(regiment.waypoints),
-                                             order_key=(("charge", "forward") if regiment.free_charging else
-                                                        ("move", regiment.target_x, regiment.target_y)), scale=scale)
-                if not regiment.moving and regiment.waypoints:
-                    regiment.waypoints.pop(0)
+                                             regiment.speed_for_mode(CHARGING_K) * move_scale, arrive=True,
+                                             order_key=("charge", "forward"), scale=scale)
+            elif regiment.target_x is not None and regiment.target_y is not None:
+                moved = self._advance_move(regiment, (regiment.target_x, regiment.target_y),
+                                           regiment.speed_per_tick * move_scale,
+                                           ("move", regiment.target_x, regiment.target_y), scale)
             elif regiment.turn_order_key is not None and regiment.turn_order_key[0] == "turn":
                 # Standalone turn order (game_rules.md "Turning, wheeling and reversing"): speed zero,
                 # shift 8; pivot about the inner front corner like all other gradual turns. Suspended
@@ -1905,6 +1908,100 @@ class Battle:
         regiment.x += math.sin(angle) * min(step, distance)
         regiment.y += math.cos(angle) * min(step, distance)
         return True
+
+    def _advance_move(self, regiment: Regiment, target: Point, step: float, order_key: TurnKey, scale: float) -> bool:
+        """One tick of an ordinary point move (notes/movement_formation.md 1.4).
+
+        The move re-plans only at intervals: after each plan a countdown of `min(2 d, 150)` (`d` = distance to the
+        current waypoint, or to the steer point while steering round an obstruction) falls by `s_rlmv` every tick,
+        and the next plan comes when it goes negative or when a turn the last plan owed has finished. At a plan:
+        a needed turn over 64/512 starts a halted turn owing **half** the angle; otherwise, while `d > 32` (or the
+        route follows a unit on its last leg) the unit keeps moving, wheeling if the turn is 11/512 or more and
+        `d > 32` (a smaller one is absorbed); within 32 units it goes on to its next waypoint, or with none left
+        halts and re-forms. A point move therefore stops within 32 units of its point. Between plans it translates
+        along its facing (half speed in a wheel, none in a halted turn). While re-forming no plan is made and the
+        turn is suspended (notes/reform_while_moving.md 5).
+        """
+        steering_target = self._steering_target(regiment, target, order_key)
+        if steering_target is None:
+            regiment.route_speed = 0.0
+            regiment.target_x = regiment.target_y = None
+            regiment.waypoints.clear()
+            regiment.avoid_target = None
+            regiment.route_side, regiment.route_planned_for = 0, None
+            return False
+        dx, dy = steering_target[0] - regiment.x, steering_target[1] - regiment.y
+        distance = math.hypot(dx, dy)
+        goal = round(math.atan2(dx, dy) * 512 / math.tau) % 512 if distance > 1e-9 else regiment.direction
+        if order_key != regiment.turn_order_key:
+            # game_rules.md "Real time and movement": the 90/180 snap only when a move order is issued (every order
+            # clears `turn_order_key`); a new waypoint or a script re-aim only brings the next plan forward.
+            if regiment.turn_order_key is None:
+                self._snap_order_turn(regiment, goal)
+            regiment.turn_order_key = order_key
+            regiment.move_plan_countdown = -1.0
+        suspended = regiment.reforming and not regiment.pursuing
+        turn_finished = regiment.move_turn_owed and regiment.turn_mode is None
+        halted_turn = regiment.move_turn_owed and regiment.turn_mode == "halted"  # re-plans only when done
+        if not suspended and ((regiment.move_plan_countdown < 0 and not halted_turn) or turn_finished):
+            regiment.move_plan_countdown = min(2 * distance, 150.0)
+            regiment.move_turn_owed = False
+            delta = self._turn_delta(regiment.direction, goal)
+            current = (regiment.target_x, regiment.target_y)
+            follows_last_leg = regiment.route_follows_unit and (not regiment.waypoints or regiment.waypoints == [current])
+            if abs(delta) > 64:
+                self._owe_turn(regiment, delta / 2, "halted", 8)
+            elif distance > 32 or follows_last_leg:
+                if abs(delta) >= 11 and distance > 32:
+                    self._owe_turn(regiment, delta, "wheel", 7)
+                elif abs(delta) < 11:
+                    regiment.direction = goal  # absorbed
+                    regiment.turn_mode = None
+            else:
+                # Within 32 units: on to the next waypoint, or halt and re-form. A Ctrl-queued route keeps its current
+                # destination at the head of the list; a planned route keeps only the legs still to come.
+                if regiment.waypoints and regiment.waypoints[0] == current:
+                    regiment.waypoints.pop(0)
+                regiment.route_speed = 0.0
+                regiment.turn_mode = None
+                if regiment.waypoints:
+                    regiment.target_x, regiment.target_y = regiment.waypoints[0]
+                    regiment.move_plan_countdown = -1.0
+                    regiment.turn_order_key = ("move", regiment.target_x, regiment.target_y)
+                    return True
+                regiment.target_x = regiment.target_y = None
+                regiment.turn_order_key = None
+                if regiment.models > 0 and not regiment.in_melee:
+                    self.reform_to_ranks(regiment, regiment.ranks)
+                return False
+        if suspended:
+            mode = regiment.turn_mode
+            if mode == "halted":
+                step = 0
+        elif (mode := self._step_turn(regiment, scale)) is None or regiment.turns_on_the_spot:
+            pass
+        elif mode == "wheel":
+            step /= 2
+        else:
+            step = 0
+        regiment.move_plan_countdown -= regiment.speed_per_tick * 16 / MOVING_FREELY_K * scale
+        if step <= 0:
+            regiment.route_speed = 0.0
+            return True
+        angle = regiment.direction * math.tau / formation.FULL_TURN
+        regiment.route_speed = step
+        regiment.x += math.sin(angle) * step
+        regiment.y += math.cos(angle) * step
+        return True
+
+    @staticmethod
+    def _owe_turn(regiment: Regiment, delta: float, mode: str, shift: int) -> None:
+        """Start a gradual turn of `delta` (signed, 1/512 turn) that the next plan waits for."""
+        regiment.turn_goal = (regiment.direction + delta) % 512
+        regiment.turn_remaining = abs(delta)
+        regiment.turn_sign = 1 if delta > 0 else -1
+        regiment.turn_mode, regiment.turn_shift = mode, shift
+        regiment.move_turn_owed = True
 
     def _steering_target(self, regiment: Regiment, target: Point, order_key: TurnKey) -> Point | None:
         """Where the regiment heads this update (notes/obstacle_steering.md). The two-trial route plan runs only

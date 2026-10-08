@@ -1,5 +1,6 @@
 """Acceptance cases from notes/movement_boundaries_route_finding.md."""
 
+import math
 import json
 import tempfile
 import unittest
@@ -159,8 +160,10 @@ class BattleNavigationTests(unittest.TestCase):
             battle.tick()
             if not unit.moving and not unit.waypoints:
                 break
-        self.assertAlmostEqual(unit.x, 350)
-        self.assertAlmostEqual(unit.y, 200)
+        # notes/movement_formation.md 1.4: the last leg halts within 32 units of its point.
+        self.assertFalse(unit.moving)
+        self.assertLessEqual(math.dist((unit.x, unit.y), (350, 200)), 32)
+        self.assertGreater(unit.y, 200)  # came down the guide's far leg, not straight across
 
     def test_solid_object_causes_local_detour_without_becoming_a_waypoint(self):
         unit = Regiment("u", "U", 100, 200, 128, Side.PLAYER, models=1, ranks=1,
@@ -173,7 +176,8 @@ class BattleNavigationTests(unittest.TestCase):
         self.assertIsNotNone(unit.avoid_target)  # steering round the circle (notes/obstacle_steering.md section 4)
         for _ in range(100):
             battle.tick()
-        self.assertEqual((unit.x, unit.y), (350, 200))
+        self.assertFalse(unit.moving)
+        self.assertLessEqual(math.dist((unit.x, unit.y), (350, 200)), 32)  # movement_formation.md 1.4
 
     def test_moving_object_recalculates_detour_and_clear_path_resumes_direct_move(self):
         unit = Regiment("u", "U", 100, 200, 128, Side.PLAYER, models=1, ranks=1,
@@ -227,8 +231,8 @@ class BattleNavigationTests(unittest.TestCase):
             battle.tick()
             if not infantry.moving:
                 break
-        self.assertAlmostEqual(infantry.x, destination[0])
-        self.assertAlmostEqual(infantry.y, destination[1])
+        self.assertFalse(infantry.moving)
+        self.assertLessEqual(math.dist((infantry.x, infantry.y), destination), 32)  # movement_formation.md 1.4
 
     def test_same_side_route_filter_uses_speed_heading_and_octagonal_nearness(self):
         mover = Regiment("m", "Mover", 100, 200, 128, Side.PLAYER, models=1, ranks=1)
