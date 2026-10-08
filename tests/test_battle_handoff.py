@@ -173,6 +173,30 @@ class BattleHandoffTests(unittest.TestCase):
 
         self.assertIsNone(glue.runtime.state.pending)
 
+    def test_given_a_campaign_ending_battle_when_it_resolves_then_the_death_movie_leads_to_the_main_menu(self):
+        from unittest import mock
+
+        from whshr.scenes import Scene
+
+        created = []
+
+        class StubMovie(Scene):
+            def __init__(self, movie, successor=None, **_):
+                created.append((movie, successor))
+
+        self._open_mission("missionawindow.0")
+        players = sum(1 for r in self.machine.active.battle.regiments.values() if r.side == Side.PLAYER)
+        with mock.patch("whshr.casualties.campaign_over_movie", return_value="death02"), \
+                mock.patch("whshr.campaign_scenes.MovieScene", StubMovie), \
+                mock.patch.object(CampaignState, "ordered_march_units", new_callable=mock.PropertyMock,
+                                  return_value=tuple(range(100, 100 + players))):
+            self._win()
+
+        self.assertEqual([movie for movie, _ in created], ["death02"])
+        self.assertIsInstance(created[0][1], MainMenuScene)
+        self.assertEqual(self.campaign.completed, set())  # no debrief, payment or merge
+        self.assertIsNone(self.campaign.campaign_over_movie)
+
     def test_given_a_standalone_battle_when_its_result_is_dismissed_then_it_returns_to_the_main_menu(self):
         scene = BattleScene()
         machine = SceneMachine(scene, self.context)

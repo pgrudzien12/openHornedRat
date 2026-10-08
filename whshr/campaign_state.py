@@ -187,6 +187,9 @@ class CampaignState:
     # What each marching regiment (by whoami) came out of the latest played battle with; empty when no battle was
     # played (no-battle mode), in which case the debrief shows every marching regiment unharmed.
     battle_outcome: "dict[int, UnitOutcome]" = field(default_factory=dict, repr=False, compare=False)
+    # The death movie of a campaign the latest played battle ended (whshr.casualties.campaign_over_movie); the debrief
+    # is skipped and the movie leads to the main menu. Transient: never saved.
+    campaign_over_movie: str | None = field(default=None, repr=False, compare=False)
     # Roster wounded counters by whoami (notes/casualty_bookkeeping.md 3.1, whshr.casualties): the wounded of the
     # latest battle each regiment fought, and the wounded that rejoin at the current debrief's Done.
     wounded_last: dict[int, int] = field(default_factory=dict[int, int])
@@ -208,6 +211,7 @@ class CampaignState:
         self.objective_results = {}
         self.flawless_result = False
         self.battle_outcome = {}
+        self.campaign_over_movie = None
 
     def is_unit_in_army(self, unit_id: int) -> bool:
         return int(unit_id) in self.army_units
