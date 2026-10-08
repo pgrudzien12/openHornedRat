@@ -398,8 +398,9 @@ class ScriptInterpreter:
         that moved or charged this tick (PROVISIONAL stand-in for the collision re-check state) runs the
         fear-on-contact test and, unless latched, gets event 0x0B (checked) with the other unit as its contact
         record; a troops regiment touched gets the reciprocal 0x0B. Marked units are not touched at all. A latched
-        unit that touches nothing any more is released. Not modelled: push-apart (the engine's own), contact
-        attacks on routers, wagon event 0x27 and the latched-move rollback."""
+        unit that touches nothing any more is released; a latched unit's movement is rolled back by the engine
+        (Battle._resolve_latched_step). Not modelled: push-apart (the engine's own), contact attacks on routers
+        and wagon event 0x27."""
         touching: set[str] = set()
         for first, second in contacts:
             if self._leaving(first) or self._leaving(second):
@@ -1846,7 +1847,7 @@ class ScriptInterpreter:
         with no target unit, while re-forming, anchored or held (notes/movement_formation.md 3.1,
         notes/script_spawn_move.md 6). The destination is fixed until re-issued or re-aimed by
         IfTargetInChargeReach/ApproachTargetInReach. PROVISIONAL: the original follows the unit and never
-        ends this move by distance; this engine's ordinary arrival rule still applies (it posts no 0x34)."""
+        ends this move by distance; this engine's ordinary arrival rule still applies (the re-form that follows posts 0x34)."""
         pair = self._query_pair(state, unit_id)
         unit = pair[0] if pair else None
         state.cond_flags = False
@@ -3305,7 +3306,7 @@ class ScriptInterpreter:
 
     def _query_wander(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
         """Case 17: turn by 128 - trunc(rand(512) / 2), jump (rand(4) + 4) x 12 along the new heading (the
-        models stay) and re-form. Not modelled: the re-form end event 0x34 that repeats it."""
+        models stay) and re-form; the re-form's end event 0x34 repeats it."""
         unit.direction = (int(unit.direction) + 128 - rng.randrange(512) // 2) % 512
         step = (rng.randrange(4) + 4) * 12
         angle = unit.direction * math.tau / 512
