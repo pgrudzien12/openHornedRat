@@ -350,7 +350,10 @@ one an engine is most likely to get wrong by assuming the soldiers are rigidly a
    **`k = 2.5` while charging**.
 2. Every **model** keeps its own position, stored **relative to the anchor**. The moment the anchor translates,
    every model's stored position is decremented by exactly the same delta. The net effect is that a model's
-   **absolute world position is completely unchanged** by the unit's own movement.
+   **absolute world position is completely unchanged** by the unit's own movement. **Exceptions** ✅: while the
+   unit is re-forming (either re-form mode), while it holds the contact latch, and always for artillery, rolling
+   stock and building units, the compensation is skipped and the models are carried rigidly with the unit
+   (`notes/reform_while_moving.md` §2).
 
 So the anchor never drags the soldiers along. All it does is move the models' target slots out from under them,
 opening a gap of exactly one anchor-step every tick. The figures are then pulled forward only by a separate,
@@ -508,7 +511,7 @@ is set the unit switches away from the rank-dependent catch-up walk to a **separ
   same speed regardless of which rank it is in or is heading to.
 - **it decelerates into its slot.** Inside the last 6 world units the step is divided by `7 − distance`, so it
   covers the final approach at a half, a third, a quarter … of speed and settles smoothly instead of stopping
-  dead. (A separate cap holds any single step to one world unit, which only bites for the fastest units.)
+  dead. (Inside those last 6 units each axis component of the decelerated step is also capped at one world unit, which only bites for `s_rlmv > 16`; there is **no** cap outside them — `notes/reform_while_moving.md` §3.)
 - **arrival snaps the model's heading to the unit's facing**, which is what makes a finished formation suddenly
   read as aligned — the figures turn to face front only as they land.
 - **the unit's own translation speed is halved** for as long as the re-form is in progress, so a unit that is
