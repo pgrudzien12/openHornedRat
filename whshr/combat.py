@@ -531,6 +531,7 @@ def resolve_contacts(battle: "Battle") -> None:
     pending_counter: dict[str, int] = {}
     if battle.interpreter is not None:
         battle.interpreter.raise_contacts(contacts)
+        battle.interpreter.raise_wagon_collisions(active)
         for joiner_id, owner_id, counter in battle.engage_requests:
             if joiner_id in by_id and owner_id in by_id:
                 touching[joiner_id].add(owner_id)
