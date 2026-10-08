@@ -1566,6 +1566,7 @@ class Battle:
             regiment.melee_models = [regiment.melee_models[i] for i in order]
             regiment.reform_slots = []
             regiment.reforming = regiment.reform_walk_back = False
+            regiment.collision_recheck = True  # every formation re-layout, wagons and war machines included
             return
         walk_back = walk_back or (regiment.reforming and regiment.reform_walk_back)
         regiment.reform_slots = _slot_offsets(formation.reform_assignment(
@@ -1721,6 +1722,7 @@ class Battle:
             if not regiment.active:
                 regiment.walking = False
                 continue
+            regiment.update_counter += 1  # every update of a live unit, whatever it does (the throttle phase)
             regiment.model_positions()  # seed positions at the current anchor/facing before it moves
             anchor_before = regiment.x, regiment.y
             state = self.event_bus.unit_states.get(regiment.identifier)
@@ -1838,7 +1840,6 @@ class Battle:
             else:
                 models_catching_up = self._advance_models(regiment, scale)
             regiment.walking = moved or models_catching_up
-            regiment.update_counter += 1
             # notes/fanatic_collisions.md 5: a position step switches the re-check state on only on every 4th update
             # of the unit (staggered by slot); gradual turn steps do so every time. PROVISIONAL: a turn step is read
             # as "a turn is in progress while the unit moved".

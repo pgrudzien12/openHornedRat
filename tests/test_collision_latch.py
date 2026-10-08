@@ -206,6 +206,21 @@ class RecheckThrottleTests(unittest.TestCase):
         battle = Battle(2000, 2000, [a, b], seed=1995)
         self.assertEqual((a.update_counter, b.update_counter), (0, 1))
 
+    def test_a_wagon_or_war_machine_re_layout_switches_it_on_too(self):
+        cart = Regiment("W", "W", 500, 500, 0, Side.PLAYER, models=2, ranks=1, points=10, unit_class=7)
+        battle = Battle(2000, 2000, [cart], seed=1995)
+        cart.collision_recheck = False
+        battle.reform_to_ranks(cart, 1)
+        self.assertTrue(cart.collision_recheck)
+
+    def test_the_counter_counts_every_update_even_while_waiting_for_the_start(self):
+        regiment = unit("A", 500, 500)
+        battle = Battle(2000, 2000, [regiment], seed=1995)
+        battle.event_bus.unit_states["A"].waiting_for_start = True
+        for _ in range(3):
+            battle._advance_regiments(1.0, 0.1)
+        self.assertEqual(regiment.update_counter, 3)
+
     def test_a_re_form_switches_it_on_every_time(self):
         regiment = unit("A", 500, 500)
         battle = Battle(2000, 2000, [regiment], seed=1995)
@@ -228,6 +243,14 @@ class WagonEventScopeTests(unittest.TestCase):
         battle, wagon = self.make(unit("X", 500, 506), unit("Y", 505, 506))
         battle.interpreter.raise_wagon_collisions(list(battle.regiments.values()))
         self.assertEqual(codes(battle, "W"), [0x27, 0x27])
+
+    def test_scenery_and_buildings_ahead_count_too(self):
+        battle, wagon = self.make()
+        battle.objects.append({"name": "Tree", "x": 500, "y": 515, "radius": 12, "status": ["os_active"]})
+        battle.objects.append({"name": "Inactive", "x": 500, "y": 515, "radius": 12, "status": []})
+        battle.objects.append({"name": "Behind", "x": 500, "y": 485, "radius": 12, "status": ["os_active"]})
+        battle.interpreter.raise_wagon_collisions(list(battle.regiments.values()))
+        self.assertEqual(codes(battle, "W"), [0x27])
 
     def test_another_units_pass_touching_the_wagon_is_not_enough(self):
         battle, wagon = self.make(unit("X", 500, 506))
