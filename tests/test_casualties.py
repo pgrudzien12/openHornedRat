@@ -282,6 +282,10 @@ class CampaignOverTests(unittest.TestCase):
     def test_given_a_wiped_out_commander_without_z_then_the_campaign_goes_on_even_if_g_is_met(self):
         self.assertIsNone(self._over((0, 0, 1), G=True))
         self.assertIsNone(self._over((0, 0, 1)))
+        campaign = _campaign(_regiment(2, 1))
+        _battle(campaign, z_met=False, u2=(0, 0, 1))  # the P1 fallback: one routed model, merged back
+        self.assertEqual(_models(campaign, 2), 1)
+        self.assertEqual(campaign.battle_outcome[2].routed, 1)
 
     def test_given_a_commander_regiment_with_wounded_left_then_it_is_not_dead_for_the_test(self):
         self.assertEqual(self._over((0, 0, 20), Z=True, G=True), "death02")  # 13 wounded survive: G applies

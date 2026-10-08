@@ -75,6 +75,8 @@ def after_battle(campaign: "CampaignState") -> None:
             if _destroyed(present, artillery) and wounded > 0:
                 outcomes[whoami] = replace(outcome, routed=outcome.routed + 1)
                 campaign.wounded_last[whoami] = wounded - 1
+            elif present + wounded == 0:  # dead (report 3.6) but the campaign goes on: P1 gives one model back
+                outcomes[whoami] = replace(outcome, routed=outcome.routed + 1)
         elif regiment is not None and regiment.row.keep and present + wounded == 0:
             outcomes[whoami] = replace(outcome, routed=outcome.routed + 1)
     campaign.battle_outcome = outcomes
