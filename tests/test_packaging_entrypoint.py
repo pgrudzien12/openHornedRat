@@ -1,5 +1,6 @@
 """The frozen executable opens the launcher while retaining direct engine use."""
 
+import importlib.util
 import runpy
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ class PackageEntrypointTests(unittest.TestCase):
     def setUp(self):
         self.main = runpy.run_path(str(ENTRYPOINT), run_name="package_test")["main"]
 
+    @unittest.skipIf(importlib.util.find_spec("tkinter") is None, "the launcher GUI needs tkinter")
     def test_no_arguments_open_launcher(self):
         with patch("whshr.launcher.gui.main") as launcher:
             self.assertEqual(self.main([]), 0)
