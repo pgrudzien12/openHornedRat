@@ -1412,6 +1412,7 @@ class Battle:
         regiment.waypoints.clear()
         regiment.attack_target = regiment.charge_started_target = None
         regiment.free_charging = True
+        regiment.route_pause_ticks = 0  # a charge is a straight run with no route pause (notes/attack_order_flow.md 1)
         regiment.hidden = False
 
     def order_halt(self, identifier: str) -> None:

@@ -824,6 +824,8 @@ class ScriptInterpreter:
         A.1)."""
         if state.cond_bits & SWITCH_REFUSED:
             return
+        if state.pending_switch_high and state.cond_bits & SWITCH_PENDING and not high:
+            return  # a pending IfSwitchScriptHigh switch is locked (notes/script_grid_events.md 1)
         if override or state.pending_switch is None:
             state.pending_switch = script
             state.pending_switch_high = high
@@ -2463,19 +2465,24 @@ class ScriptInterpreter:
             if building is not None and not building.destroyed:
                 regiment.attack_target = target_id
                 regiment.charge_started_target = None
+                self._hand_over_to_charge(regiment)
             if target_id in self.battle.regiments:
                 regiment.attack_target = target_id
-                # The straight run replaces the approach walk: no route pause, and no point route or steering left
-                # for other units' route filters to read (notes/attack_order_flow.md 1).
-                regiment.route_pause_ticks = 0
-                regiment.target_x = regiment.target_y = None
-                regiment.waypoints.clear()
-                regiment.avoid_target = None
-                regiment.route_side, regiment.route_planned_for = 0, None
-                regiment.route_follows_unit = False
+                self._hand_over_to_charge(regiment)
                 state.fear_passed = False  # a new charge clears it (notes/script_grid_events.md 0)
                 # Battle.tick() handles the actual charging movement
         return state.pc + 1
+
+    @staticmethod
+    def _hand_over_to_charge(regiment: "Regiment") -> None:
+        """The straight run replaces the approach walk: no route pause, and no point route or steering left for
+        other units' route filters to read (notes/attack_order_flow.md 1)."""
+        regiment.route_pause_ticks = 0
+        regiment.target_x = regiment.target_y = None
+        regiment.waypoints.clear()
+        regiment.avoid_target = None
+        regiment.route_side, regiment.route_planned_for = 0, None
+        regiment.route_follows_unit = False
 
     def op_FireAtTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
@@ -3194,6 +3201,7 @@ class ScriptInterpreter:
         unit.waypoints = []
         unit.attack_target = unit.charge_started_target = None
         unit.free_charging = True
+        unit.route_pause_ticks = 0  # a charge is a straight run with no route pause (notes/attack_order_flow.md 1)
         unit.hidden = False
         state.fear_passed = False
         state.cond_flags = True

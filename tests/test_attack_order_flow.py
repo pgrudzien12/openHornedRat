@@ -5,7 +5,7 @@ the charge-reach test passes, and the charge itself is a straight run. Synthetic
 import unittest
 from unittest import mock
 
-from whshr import behaviour
+from whshr import behaviour, buildings, interpreter
 from whshr.engine import Battle, Regiment
 from whshr.rules import Side
 from tests.script_helpers import FakeDll, word
@@ -146,6 +146,50 @@ class AttackOrderGateAndHandOverTests(unittest.TestCase):
         self.assertIsNotNone(player.avoid_target)
         self.assertEqual(snaps, [])
         self.assertLess(player.direction, 90)
+
+
+class ChargeStartCleanupTests(unittest.TestCase):
+    """notes/attack_order_flow.md 1: every charge is a straight run; it keeps no route pause or approach route."""
+
+    def test_given_a_route_pause_when_a_straight_ahead_charge_is_ordered_then_the_pause_ends(self):
+        player = unit("player", 100, 500, Side.PLAYER)
+        battle = Battle(1000, 1000, [player], seed=1995)  # no scripts: the order charges directly
+        player.route_pause_ticks = 40
+        battle.order_charge_forward("player")
+        self.assertTrue(player.free_charging)
+        self.assertEqual(player.route_pause_ticks, 0)
+
+    def test_given_a_building_target_when_the_charge_starts_then_no_approach_route_or_pause_is_left(self):
+        player = unit("player", 100, 500, Side.PLAYER)
+        battle = Battle(1000, 1000, [player], seed=1995, script_dll=FakeDll(SCRIPTS), script_ids={"player": MAIN})
+        battle.buildings = buildings.from_scenery([{"name": "Farm", "x": 300, "y": 500}])
+        battle.building_index = {b.identifier: b for b in battle.buildings}
+        state = battle.event_bus.unit_states["player"]
+        state.current_target = (battle.buildings[0].identifier, 0)
+        player.target_x, player.target_y, player.avoid_target, player.route_pause_ticks = 300, 500, (150, 520), 20
+        battle.interpreter.op_ChargeTarget(state, None, [], "player", 0, battle.rng)
+        self.assertEqual(player.attack_target, battle.buildings[0].identifier)
+        self.assertEqual((player.target_x, player.avoid_target, player.route_pause_ticks), (None, None, 0))
+
+
+class HighPrioritySwitchLockTests(unittest.TestCase):
+    """notes/script_grid_events.md 1: only an IfSwitchScriptHigh request locks the pending switch."""
+
+    def test_given_a_pending_high_priority_switch_then_a_later_normal_switch_does_not_replace_it(self):
+        player = unit("player", 100, 500, Side.PLAYER)
+        battle = Battle(1000, 1000, [player], seed=1995, script_dll=FakeDll(SCRIPTS), script_ids={"player": MAIN})
+        state = battle.event_bus.unit_states["player"]
+        battle.interpreter.op_IfSwitchScriptHigh(state, APPROACH, [], "player", 0, battle.rng)
+        battle.interpreter.op_SwitchScript(state, 163, [], "player", 0, battle.rng)
+        self.assertEqual((state.pending_switch, state.pending_switch_high), (APPROACH, True))
+
+    def test_given_a_pending_normal_switch_then_a_later_switch_still_replaces_it(self):
+        player = unit("player", 100, 500, Side.PLAYER)
+        battle = Battle(1000, 1000, [player], seed=1995, script_dll=FakeDll(SCRIPTS), script_ids={"player": MAIN})
+        state = battle.event_bus.unit_states["player"]
+        battle.interpreter.op_SwitchScript(state, 163, [], "player", 0, battle.rng)
+        battle.interpreter.op_SwitchScript(state, APPROACH, [], "player", 0, battle.rng)
+        self.assertEqual(state.pending_switch, APPROACH)
 
 
 class ApproachObstacleTests(unittest.TestCase):
