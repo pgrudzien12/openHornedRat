@@ -824,6 +824,8 @@ class ScriptInterpreter:
         A.1)."""
         if state.cond_bits & SWITCH_REFUSED:
             return
+        if state.pending_switch_high and state.cond_bits & SWITCH_PENDING and not high:
+            return  # a pending IfSwitchScriptHigh switch is locked (notes/script_grid_events.md 1)
         if override or state.pending_switch is None:
             state.pending_switch = script
             state.pending_switch_high = high

@@ -126,6 +126,14 @@ class RouteUnitRelationTests(unittest.TestCase):
         self.ally.route_pause_ticks, self.ally.routing = 30, True
         self.assertGreater(self.battle.route_effective_speed(self.ally), 0.0)
 
+    def test_a_pursuing_friend_moves_at_the_pursuit_step_not_the_charge_speed(self):
+        # game_rules.md "Unit speed": min(flight speed, 10 x distance / 256) to the fugitive.
+        self.ally.pursuing, self.ally.attack_target = True, "enemy"
+        self.enemy.x = self.ally.x + 25  # close: 10 x 25 / 256 is below the flight speed
+        self.assertAlmostEqual(self.battle.route_effective_speed(self.ally), 10 * 25 / 256)
+        self.enemy.x = self.ally.x + 900  # far: capped at the flight speed
+        self.assertLess(self.battle.route_effective_speed(self.ally), self.ally.speed_for_mode(2.5))
+
     def test_a_friend_still_charging_across_the_path_pauses_the_mover(self):
         self.ally.direction = 128
         self._move(self.mover)

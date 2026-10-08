@@ -57,5 +57,22 @@ class ConvoyHaltScriptTests(unittest.TestCase):
         self.assertIsNotNone(self.cart.target_x)
 
 
+class HighPrioritySwitchLockTests(unittest.TestCase):
+    """notes/script_grid_events.md 1: only an IfSwitchScriptHigh request locks the pending switch."""
+
+    def test_given_a_pending_high_priority_switch_then_a_later_normal_switch_does_not_replace_it(self):
+        state = interpreter.UnitScriptState(script_id=3)
+        interp = interpreter.ScriptInterpreter(None, None, None)
+        interp.op_IfSwitchScriptHigh(state, 105, [], "u", 0, None)
+        interp.op_SwitchScript(state, 163, [], "u", 0, None)
+        self.assertEqual((state.pending_switch, state.pending_switch_high), (105, True))
+
+    def test_given_a_pending_normal_switch_then_a_later_switch_still_replaces_it(self):
+        state = interpreter.UnitScriptState(script_id=3)
+        interp = interpreter.ScriptInterpreter(None, None, None)
+        interp.op_SwitchScript(state, 163, [], "u", 0, None)
+        interp.op_SwitchScript(state, 105, [], "u", 0, None)
+        self.assertEqual(state.pending_switch, 105)
+
 if __name__ == "__main__":
     unittest.main()
