@@ -16,7 +16,8 @@ Simplifications common to this module (documented placeholders, not traced value
 - Break tests are timed and scored per the traced rules (game_rules.md 6.2): tallies accumulate rank
   and direction bonuses plus kills each strike; the first result comes two turns after contact, later
   ones every turn after that (the original varies this by Initiative). Rally follows game_rules.md 7.4's
-  schedule and casualties-based Leadership modifier, but at segment (not sub-segment) granularity.
+  schedule (shared with the pursuit-restraint test, notes/pursuit_restraint.md 2), its rally-attempt
+  gate and casualties-based Leadership modifier.
 
 Every event `whshr.battle_log.BattleLogger` needs for diagnosing the playtest bugs (strike rolls,
 Leadership tests, rout/rally, shooting) is emitted here as a `whshr.battle_events.BattleEvent`: a
@@ -885,8 +886,9 @@ def _react_to_rout(routed: "Regiment", opponents: Sequence["Regiment"], group_id
     Without this a victorious unit is simply released from the fight and stands idle until the player
     orders it somewhere, which is not what the original does.
 
-    Simplifications: the pursuit has no chase budget, restraint test or "more attractive target"
-    check (game_rules.md 7.5); it is an ordinary charge order at the fleeing
+    The chase budget, edge probe and restraint test run in `Battle._update_pursuits`
+    (notes/pursuit_map_edge.md 2, notes/pursuit_restraint.md 4). Simplifications: no "more attractive
+    target" check (game_rules.md 7.5); the pursuit is an ordinary charge order at the fleeing
     unit, which `resolve_contacts` will not turn back into close combat while that unit is routing
     (7.7: "pursuers never engage fleeing units in close combat"). Player missile troops never pursue,
     standing in for the traced "player artillery, wizards and archers never pursue".
