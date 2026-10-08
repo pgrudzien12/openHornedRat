@@ -16,7 +16,8 @@ Simplifications common to this module (documented placeholders, not traced value
 - Break tests are timed and scored per the traced rules (game_rules.md 6.2): tallies accumulate rank
   and direction bonuses plus kills each strike; the first result comes two turns after contact, later
   ones every turn after that (the original varies this by Initiative). Rally follows game_rules.md 7.4's
-  schedule and casualties-based Leadership modifier, but at segment (not sub-segment) granularity.
+  schedule (shared with the pursuit-restraint test, notes/pursuit_restraint.md 2), its rally-attempt
+  gate and casualties-based Leadership modifier.
 
 Every event `whshr.battle_log.BattleLogger` needs for diagnosing the playtest bugs (strike rolls,
 Leadership tests, rout/rally, shooting) is emitted here as a `whshr.battle_events.BattleEvent`: a
@@ -400,6 +401,50 @@ def segment_state(tick_count: int) -> tuple[int, int, int]:
     absolute_segment = tick_count // SEGMENT_TICKS
     turn, segment_in_turn = divmod(absolute_segment, SEGMENTS_PER_TURN)
     return absolute_segment, turn, SEGMENTS_PER_TURN - segment_in_turn
+
+
+def schedule_rally_segment(regiment: "Regiment", battle: "Battle") -> None:
+    """notes/pursuit_restraint.md 2: at a rout or pursuit start the scheduled segment is the current segment
+    number, so the first check comes one full turn (SEGMENTS_PER_TURN boundaries) later."""
+    regiment.rally_segment = segment_state(battle.tick_count)[2]
+    regiment.rally_schedule_tick = battle.tick_count
+
+
+def rally_check_due(regiment: "Regiment", battle: "Battle") -> bool:
+    """notes/pursuit_restraint.md 2: on a segment boundary, the scheduled check runs only when the new segment
+    number equals the scheduled segment **and** the rally-attempt state is on. When it runs, the schedule moves
+    3 segments on (`s - 3`, wrapped into 1..10); when the state is off nothing happens and `s` is kept."""
+    if (not regiment.rally_attempt or regiment.rally_segment is None
+            or battle.tick_count == regiment.rally_schedule_tick
+            or segment_state(battle.tick_count)[2] != regiment.rally_segment):
+        return False
+    regiment.rally_segment = next_rally_segment(regiment.rally_segment)
+    return True
+
+
+def next_rally_segment(segment: int) -> int:
+    """notes/pursuit_restraint.md 2: `s - 3`, plus 10 when below 1 (10 -> 7 -> 4 -> 1 -> 8 -> ...)."""
+    segment -= 3
+    return segment + SEGMENTS_PER_TURN if segment < 1 else segment
+
+
+def pursuit_restraint_test(battle: "Battle", regiment: "Regiment") -> bool:
+    """notes/pursuit_restraint.md 4 steps 2-3: the restraint test of a pursuer whose scheduled check runs.
+    `AlwaysPursue` skips the roll (the pursuit continues); otherwise a plain Leadership test with no modifier
+    against the effective Leadership (leader's Ld, else the regiment's). Casualties, nearby enemies and
+    `CantRally` do not matter here. Returns whether the pursuit stops."""
+    if "AlwaysPursue" in regiment.psychology:
+        battle.events.append(BattleEvent(
+            f"{regiment.name} always pursues: no restraint test.", "restraint_test",
+            regiment=regiment.identifier, leadership=regiment.effective_leadership, roll=None, passed=False))
+        return False
+    roll = _2_to_12(battle.rng)
+    passed = roll <= regiment.effective_leadership
+    battle.events.append(BattleEvent(
+        f"{regiment.name} takes a restraint test (Ld {regiment.effective_leadership}, roll {roll}): "
+        f"{'stops the pursuit' if passed else 'keeps pursuing'}.", "restraint_test",
+        regiment=regiment.identifier, leadership=regiment.effective_leadership, roll=roll, passed=passed))
+    return passed
 
 
 def _empty_breakdown() -> Breakdown:
@@ -821,10 +866,12 @@ def start_rout(regiment: "Regiment", battle: "Battle", flee_point: formation.Poi
     regiment.melee_touching = frozenset()
     regiment.attack_target = None
     regiment.target_x = regiment.target_y = None
-    # game_rules.md 7.4: the first rally attempt comes one full turn (SEGMENTS_PER_TURN segments) after
-    # the rout, then every 3 segments.
-    absolute_segment, _, _ = segment_state(battle.tick_count)
-    regiment.rally_next_segment = absolute_segment + SEGMENTS_PER_TURN
+    # notes/pursuit_restraint.md 2: a rout resets the rally-attempt state, switching it on only for a player
+    # regiment with Independent set, and schedules the first rally attempt one full turn later.
+    regiment.pursuing = False
+    regiment.pursuit_budget = regiment.pursuit_point = None
+    regiment.rally_attempt = regiment.side == Side.PLAYER and regiment.independent
+    schedule_rally_segment(regiment, battle)
     battle.events.append(BattleEvent(
         f"{regiment.name} routs!", "rout_start",
         regiment=regiment.identifier, x=regiment.x, y=regiment.y, flee_x=flee_x, flee_y=flee_y))
@@ -839,8 +886,9 @@ def _react_to_rout(routed: "Regiment", opponents: Sequence["Regiment"], group_id
     Without this a victorious unit is simply released from the fight and stands idle until the player
     orders it somewhere, which is not what the original does.
 
-    Simplifications: the pursuit has no chase budget, restraint test or "more attractive target"
-    check (game_rules.md 7.5); it is an ordinary charge order at the fleeing
+    The chase budget, edge probe and restraint test run in `Battle._update_pursuits`
+    (notes/pursuit_map_edge.md 2, notes/pursuit_restraint.md 4). Simplifications: no "more attractive
+    target" check (game_rules.md 7.5); the pursuit is an ordinary charge order at the fleeing
     unit, which `resolve_contacts` will not turn back into close combat while that unit is routing
     (7.7: "pursuers never engage fleeing units in close combat"). Player missile troops never pursue,
     standing in for the traced "player artillery, wizards and archers never pursue".
@@ -866,6 +914,10 @@ def _react_to_rout(routed: "Regiment", opponents: Sequence["Regiment"], group_id
         opponent.target_x = opponent.target_y = None
         opponent.pursuing = True  # notes/pursuit_map_edge.md: a pursuit, not a charge
         opponent.pursuit_budget = opponent.pursuit_point = None
+        # notes/pursuit_restraint.md 2: a pursuit start switches the rally-attempt state off (even for an
+        # Independent regiment) and schedules the first possible restraint test one full turn later.
+        opponent.rally_attempt = False
+        schedule_rally_segment(opponent, battle)
         battle.events.append(BattleEvent(
             f"{opponent.name} pursues {routed.name}!", "pursuit_start",
             regiment=opponent.identifier, target=routed.identifier))
@@ -949,21 +1001,21 @@ def _rally_modifier(regiment: "Regiment") -> int | None:
 
 
 def resolve_rally(battle: "Battle") -> None:
-    """A routing regiment may rally once its scheduled segment has come and no enemy is within
-    FLEE_SAFE_DISTANCE (game_rules.md 7.4). Logs every due rally check, including why it was skipped
-    (CantRally, too many casualties, enemy too close); a regiment whose segment has not come yet, or
-    that has "CantRally", makes no attempt at all."""
-    absolute_segment, _, _ = segment_state(battle.tick_count)
+    """A routing regiment may rally once its scheduled segment has come, its rally-attempt state is on (the
+    player's Rally order, or Independent at the rout) and no enemy is within FLEE_SAFE_DISTANCE (game_rules.md
+    "Rally", notes/pursuit_restraint.md 2). Logs every due rally check, including why it was skipped
+    (CantRally, too many casualties, enemy too close); a regiment whose segment has not come yet, or whose
+    rally-attempt state is off, makes no attempt at all (an AI regiment never gets the state on, so it keeps
+    fleeing)."""
     for regiment in battle.regiments.values():
         # A regiment that has fled off the field is permanently out (game_rules.md, "Flight"): once
         # `fled`, `active` is false forever, so it must never be offered another rally attempt.
         if not regiment.routing or not regiment.active or regiment.flight_complete:
             continue
-        if regiment.rally_next_segment is None or absolute_segment < regiment.rally_next_segment:
+        # The scheduled segment has come with the state on: whatever happens below, the next poll (if the unit
+        # is still routing) is 3 segments away, independent of why this attempt did not rally.
+        if not rally_check_due(regiment, battle):
             continue
-        # The scheduled segment has come: whatever happens below, the next poll (if the unit is still
-        # routing) is 3 segments away (game_rules.md 7.4), independent of why this attempt did not rally.
-        regiment.rally_next_segment = absolute_segment + 3
         if "CantRally" in regiment.psychology:
             battle.events.append(BattleEvent(
                 f"{regiment.name} cannot rally (CantRally).", "rally_test",
@@ -992,13 +1044,13 @@ def resolve_rally(battle: "Battle") -> None:
             regiment=regiment.identifier, cant_rally=False, blocked_by_enemy=False,
             leadership=regiment.base_leadership, roll=roll, modifier=modifier, passed=passed))
         if passed:
-            regiment.rally_next_segment = None
             if battle.interpreter is not None:
                 # The common event handler switches to script 163; its Rally opcode halts and
                 # re-forms the unit. Clearing routing here strands an idling script at the edge.
                 battle.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x10), route="self")
             else:
                 regiment.routing = False
+                regiment.rally_attempt = False  # as the Rally opcode (notes/pursuit_restraint.md 5)
 
 
 def resolve_shooting(battle: "Battle") -> None:

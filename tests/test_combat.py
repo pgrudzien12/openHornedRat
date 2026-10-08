@@ -97,7 +97,7 @@ class LeaderMoraleTests(unittest.TestCase):
                 unit = _regiment("unit", 100, 100, Side.PLAYER, models=10,
                                  leadership=6, has_leader=True, leader_leadership=8,
                                  leader_ws=10, leader_strength=9,
-                                 routing=True, rally_next_segment=0)
+                                 routing=True, rally_attempt=True, rally_segment=10)
                 battle = Battle(2000, 2000, [unit])
                 if not leader_alive:
                     combat.kill_models(unit, [unit.living_leader_index], battle)
@@ -661,13 +661,14 @@ class FleeBearingTests(unittest.TestCase):
 
 
 class RallyTimingTests(unittest.TestCase):
-    """game_rules.md 7.4: the first rally attempt is one full turn after the rout, then every 3 segments."""
+    """game_rules.md "Rally", notes/pursuit_restraint.md 2: the first rally attempt is one full turn after the rout,
+    then every 3 segments, while the rally-attempt state is on."""
 
     def test_given_a_regiment_that_just_routed_when_checked_before_its_scheduled_segment_then_no_attempt_is_made(self):
-        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_next_segment=5)
+        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_attempt=True, rally_segment=5)
         enemy = _regiment("e", 1000, 1000, Side.ENEMY)
         battle = Battle(2000, 2000, [routing, enemy], seed=0)
-        battle.tick_count = 4 * combat.SEGMENT_TICKS  # absolute_segment 4, still before segment 5
+        battle.tick_count = 4 * combat.SEGMENT_TICKS  # segment number 6, not yet 5
 
         combat.resolve_rally(battle)
 
@@ -675,10 +676,10 @@ class RallyTimingTests(unittest.TestCase):
         self.assertTrue(routing.routing)
 
     def test_given_a_regiment_whose_scheduled_segment_has_come_when_checked_then_an_attempt_is_made(self):
-        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_next_segment=5)
+        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_attempt=True, rally_segment=5)
         enemy = _regiment("e", 1000, 1000, Side.ENEMY)
         battle = Battle(2000, 2000, [routing, enemy], seed=0)
-        battle.tick_count = 5 * combat.SEGMENT_TICKS
+        battle.tick_count = 5 * combat.SEGMENT_TICKS  # segment number 5
 
         combat.resolve_rally(battle)
 
@@ -696,19 +697,20 @@ class RallyTimingTests(unittest.TestCase):
             found = next((e for e in battle.events if e.kind == "rout_start"), None)
             if found is not None:
                 rout_event = found
-                segment_at_rout = battle.tick_count // combat.SEGMENT_TICKS
+                segment_at_rout = combat.segment_state(battle.tick_count)[2]
                 break
 
         self.assertIsNotNone(rout_event)
         routed = battle.regiments[rout_event.data["regiment"]]
         self.assertTrue(routed.routing)
-        self.assertEqual(routed.rally_next_segment, segment_at_rout + combat.SEGMENTS_PER_TURN)
+        # notes/pursuit_restraint.md 2: the current segment number, next met again one full turn later.
+        self.assertEqual(routed.rally_segment, segment_at_rout)
 
 
 class CasualtiesAndCantRallyTests(unittest.TestCase):
     def test_scripted_rally_at_map_edge_waits_for_reform_script(self):
         rider = _regiment("Goblin_Wolfriders", 969, 1625, Side.ENEMY,
-                          leadership=9, routing=True, rally_next_segment=0)
+                          leadership=9, routing=True, rally_attempt=True, rally_segment=10)
         enemy = _regiment("player", 100, 100, Side.PLAYER)
         battle = Battle(1440, 1680, [rider, enemy], seed=0)
         battle.interpreter = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
@@ -717,7 +719,7 @@ class CasualtiesAndCantRallyTests(unittest.TestCase):
 
         state = battle.event_bus.unit_states[rider.identifier]
         self.assertTrue(rider.routing)
-        self.assertIsNone(rider.rally_next_segment)
+        self.assertEqual(rider.rally_segment, 7)  # rescheduled 3 segments on
         self.assertEqual([event.code for event in state.event_queue], [0x10])
         combat.resolve_rally(battle)
         self.assertEqual([event.code for event in state.event_queue], [0x10])
@@ -726,7 +728,7 @@ class CasualtiesAndCantRallyTests(unittest.TestCase):
         self.assertFalse(rider.moving)
 
     def test_given_no_enemy_nearby_when_the_leadership_test_passes_then_the_unit_rallies(self):
-        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_next_segment=0)
+        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_attempt=True, rally_segment=10)
         enemy = _regiment("e", 1000, 1000, Side.ENEMY)
         battle = Battle(2000, 2000, [routing, enemy], seed=0)  # seed 0: the roll passes Ld 9
 
@@ -738,7 +740,7 @@ class CasualtiesAndCantRallyTests(unittest.TestCase):
         self.assertTrue(rally.data["passed"])
 
     def test_given_an_enemy_within_the_safe_distance_when_checked_then_no_rally_is_attempted(self):
-        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_next_segment=0)
+        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_attempt=True, rally_segment=10)
         enemy = _regiment("e", 50, 0, Side.ENEMY)  # well within FLEE_SAFE_DISTANCE
         battle = Battle(2000, 2000, [routing, enemy], seed=0)
 
@@ -748,7 +750,7 @@ class CasualtiesAndCantRallyTests(unittest.TestCase):
         self.assertTrue(battle.events[-1].data["blocked_by_enemy"])
 
     def test_given_cant_rally_psychology_when_checked_then_the_unit_never_rallies(self):
-        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_next_segment=0,
+        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_attempt=True, rally_segment=10,
                             psychology=frozenset({"CantRally"}))
         enemy = _regiment("e", 1000, 1000, Side.ENEMY)
         battle = Battle(2000, 2000, [routing, enemy], seed=0)
@@ -758,7 +760,7 @@ class CasualtiesAndCantRallyTests(unittest.TestCase):
         self.assertTrue(routing.routing)
 
     def test_given_casualties_at_or_below_a_quarter_of_strength_when_checked_then_the_unit_cannot_rally(self):
-        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_next_segment=0,
+        routing = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, rally_attempt=True, rally_segment=10,
                             models=2, original_models=10)  # 8 casualties >= 3 x 2 models left
         enemy = _regiment("e", 1000, 1000, Side.ENEMY)
         battle = Battle(2000, 2000, [routing, enemy], seed=0)
@@ -771,7 +773,7 @@ class CasualtiesAndCantRallyTests(unittest.TestCase):
     def test_given_a_regiment_that_has_fled_the_field_when_checked_then_it_is_never_offered_a_rally_attempt(self):
         # Bug: fled regiments (routing off the map edge) kept passing rally tests and returning, because
         # resolve_rally only checked `routing`, never `active` (which `fled` makes permanently False).
-        fled = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, fled=True, rally_next_segment=0)
+        fled = _regiment("r", 0, 0, Side.PLAYER, leadership=9, routing=True, fled=True, rally_attempt=True, rally_segment=10)
         enemy = _regiment("e", 1000, 1000, Side.ENEMY)
         battle = Battle(2000, 2000, [fled, enemy], seed=0)
 

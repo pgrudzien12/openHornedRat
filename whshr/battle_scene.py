@@ -156,6 +156,12 @@ class BattleScene(Scene):
                     self.battle.toggle_independent(self.selected_id)
                 except ValueError:
                     pass
+        elif kind == "rally":
+            if self.selected_id is not None:
+                try:
+                    self.battle.order_rally(self.selected_id)
+                except ValueError:
+                    pass  # not a pursuing or broken player regiment (notes/pursuit_restraint.md 3)
         elif kind == "fight_harder":
             if self.selected_id is not None:
                 try:
