@@ -268,7 +268,7 @@ Per-object details: `extracted/si/INDEX.md` and `extracted/si/<SI>/objects.json`
 
 ## Open questions
 > **Tracked on GitHub**: these open items are tracked as issue #41 (`topic:cutscenes`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+> reference; the broad backlog audit (issue #45) is closed. Issue #41 now tracks only EVT behavior needed for generic playback.
 
 
 - `MxHd` second u32 (`0x100`), `MxOb.unk14` (1 for Events), `unk_a/unk_b` (always 0),

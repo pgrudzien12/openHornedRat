@@ -399,8 +399,7 @@ money delta and marks the mission taken; abort with something selected requires 
 **several mission records** (e.g. one with forced units, one with exclusions) to avoid hardcoding the first mission.
 
 ## 11. Open questions
-> **Tracked on GitHub**: these open items are tracked as issue #26 (`topic:campaign-glue`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+> **Historical questions:** issue #26 is closed. These notes preserve the findings; the remaining unknowns are not standing research tasks. Reopen a focused issue only when a shipped feature or reproducible defect needs an answer.
 
 
 - ✅ Banner frame on the row: second record of the set (§3.3). Placement offsets of RingMark / rank icon / banner are read from the draw code (§3.3); 🟡 only an on-screen comparison is missing.

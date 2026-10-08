@@ -199,12 +199,17 @@ the battle/army formats (`notes/game_rules.md`).
 - Treat `setmask`, `bkindex` (bitmap), `[SUBWINDOW]`, `[MIDI] volume` and hotspot `textx/texty` as no-ops until something needs them.
 
 ## 6. Open questions
-> **Tracked on GitHub**: these open items are tracked as issue #30 (`topic:campaign-glue`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+> **Historical questions:** issue #30 is closed. These notes preserve the findings; the remaining unknowns are not standing research tasks. Reopen a focused issue only when a shipped feature or reproducible defect needs an answer.
 
+The engine parses `set:book`, `textx`/`texty`, `upsfx`/`downsfx`, `clickres`/`clickrescnt` and
+`[DEMODEFAULT]`. It uses `set:res` for hints and `res:` for hotspot actions, including named
+click speech with consecutive lines. The shipped target paths use `res:`; the `script:` fallback
+question does not block them. The `-1` hint displays current coffers. `setdemodefault` is inert
+in this build. Click sounds and `PopContext` hotspot actions remain focused implementation work
+in issues #156 and #155; parsing those names does not by itself make the behavior complete.
 
-- 🟡 `script:` versus `res:` precedence in hotspots and mission records (which is tried first and what counts as "not found").
-- 🟡 Hotspot `res=-1` / `-2` special values (gold hint, no hint) were read from usage, not from the hint code.
-- 🟡 Numbers for `upsfx`/`downsfx` (sound-effect table used) and the meaning of `clickres`/`clickrescnt` beyond the example.
-- ⬜ `set:book` (window ↔ book number), `textx`/`texty`.
+- 🟡 `script:` versus `res:` precedence in hotspots and mission records remains unverified for unused fallback paths.
+- 🟡 Hotspot `res=-2` special value (no hint) was read from usage, not from the hint code.
+- 🟡 Exact `upsfx`/`downsfx` sound-table values remain to be checked while implementing issue #156.
+- ⬜ The effect of `set:book` (window ↔ book number) and hotspot `textx`/`texty` remains unverified.
 - ⬜ Whether an idle timer ever fires `[DEMODEFAULT]` in this build (the script command form was found inert).

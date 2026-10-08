@@ -249,8 +249,7 @@ first/last data chunk time, end time, speech file + duration, text), `check_scen
 Output: `extracted/scene_scripts/<SCENE>.json` (30 files; game data, not for distribution).
 
 ## Open questions
-> **Tracked on GitHub**: these open items are tracked as issue #42 (`topic:cutscenes`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+> **Historical questions:** issue #42 is closed. These notes preserve the findings; the remaining unknowns are not standing research tasks. Reopen a focused issue only when a shipped feature or reproducible defect needs an answer.
 
 
 - Contents of `.evt` chunks (20/24/4/8 B): subtitle trigger / text id? To be checked by whoever extracts `.SI`.

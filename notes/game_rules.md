@@ -2585,7 +2585,7 @@ chart for shooting).
 
 ## 11. Open points
 > **Tracked on GitHub**: these open items are tracked as issue #44 (`topic:combat-rules`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+> reference; the broad backlog audit (issue #45) is closed. Reassess a row when its engine behavior is needed.
 
 
 Everything that is not established, as a register for the next sessions. **Priority** is for an

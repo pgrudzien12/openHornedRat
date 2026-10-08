@@ -250,8 +250,7 @@ python3 scripts/anim_export.py ".../WARFB"      # all 72 directional sets: 274 G
 (e.g. by `render_battle` once names map to files, ROADMAP 1.4).
 
 ## Open questions
-> **Tracked on GitHub**: these open items are tracked as issue #35 (`topic:sprites-animation`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+> **Historical questions:** issue #35 is closed. These notes preserve the findings; the remaining unknowns are not standing research tasks. Reopen a focused issue only when a shipped feature or reproducible defect needs an answer.
 
 
 - Zero point of the `dir` → direction mapping (the clockwise sense is established) — compare a unit's
