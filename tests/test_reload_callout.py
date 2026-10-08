@@ -46,13 +46,14 @@ class ReloadCalloutTests(unittest.TestCase):
         return seen
 
     def test_player_artillery_says_reload_ten_ticks_after_the_shot(self):
+        # The shot is handled in the first tick; the 10-tick wait ends on the tenth update, so "Reload!" is
+        # said exactly there: not one update earlier, not later, and once.
         cannon = unit("cannon")
         battle = self.make(cannon)
         self.fire(battle, "cannon")
-        early = self.advance(battle, 9)
-        later = self.advance(battle, 4)
-        self.assertEqual(early, [])
-        self.assertEqual(later, [("cannon", 12, "Reload!")])
+        self.assertEqual(self.advance(battle, 9), [])
+        self.assertEqual(self.advance(battle, 1), [("cannon", 12, "Reload!")])
+        self.assertEqual(self.advance(battle, 5), [])
 
     def test_it_comes_with_the_human_speech_cue_and_the_portrait_popup(self):
         cannon = unit("cannon")
