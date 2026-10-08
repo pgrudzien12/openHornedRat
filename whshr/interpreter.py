@@ -20,7 +20,7 @@ import random
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from . import animation, behaviour, buildings, combat, formation, magic, nodes, spell_effects, visibility
+from . import animation, behaviour, buildings, combat, magic, nodes, spell_effects, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import Side, side_of_code
