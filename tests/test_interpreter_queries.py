@@ -4,7 +4,7 @@
 import unittest
 
 from tests.script_helpers import FakeDll, word
-from whshr import behaviour, interpreter
+from whshr import combat, behaviour, interpreter
 from whshr.engine import Battle, Regiment
 from whshr.interpreter import Event
 from whshr.rules import Side
@@ -262,6 +262,22 @@ class UnitTestOpcodeTests(QueryTestCase):
         self.assertTrue(self.call("IfMachineDestroyed"))  # no leader model
         self.s.has_leader = True
         self.assertFalse(self.call("IfMachineDestroyed"))
+
+    def test_if_machine_destroyed_follows_the_leader_model_not_the_whole_unit(self):
+        self.make()
+        self.s.has_leader = True
+        self.s.model_positions()
+        self.s.leader_wounds = 3
+        self.assertFalse(self.call("IfMachineDestroyed"))
+        leader = self.s.melee_models[self.s.leader_model_index]
+        leader.wounds_taken = 2
+        self.assertFalse(self.call("IfMachineDestroyed"))  # wounded, still standing
+        leader.wounds_taken = 3
+        self.assertTrue(self.call("IfMachineDestroyed"))  # all its wounds taken
+        leader.wounds_taken = 0
+        combat.kill_models(self.s, [self.s.leader_model_index], self.battle)
+        self.assertTrue(self.s.models > 0)
+        self.assertTrue(self.call("IfMachineDestroyed"))  # the leader died, the unit did not
 
     def test_if_objective_tests_the_battle_file_letters(self):
         self.make()

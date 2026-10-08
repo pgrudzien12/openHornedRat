@@ -201,6 +201,8 @@ class Regiment:
     leader_wounds: int | None = None
     leader_armour: int | None = None
     leader_leadership: int | None = None
+    leader_initiative: int | None = None  # the leader block's I: innate-weapon reload clocks read it (script_behaviours.md 1.10)
+    leader_missile_code: int | None = None  # the leader block's missile weapon code (S_BalWeap)
     spells: tuple[int, ...] = ()  # spell codes from the unit's addspell: lines, in file order (whshr.magic)
     items: tuple[str, ...] = ()  # magic items in its 5 slots, loaded ones first (notes/battle_end_objectives.md 12.2)
     used_items: set[str] = field(default_factory=set[str])  # battle-only activation state
@@ -373,6 +375,41 @@ class Regiment:
                    + int("ItemGrudgeBringer" in self.items) + int("ItemSwordOfMight" in self.items)
                    + 3 * int(self.potion_strength))
 
+    def _assign_leader(self) -> None:
+        """Give a unit with a leader block its leader figure once: the machine in the first slot of a war machine,
+        else the middle model of the front rank (the slot a re-form gives the leader)."""
+        if self.has_leader and self.leader_uid is None and self.melee_models:
+            centre = 0 if self.hud_class == "art" else (max(1, self.front_rank_models()) - 1) // 2
+            self.leader_uid = self.melee_models[min(centre, len(self.melee_models) - 1)].uid
+
+    @property
+    def leader_model_index(self) -> int | None:
+        """Index of the model the rules call the leader (the champion or character, or the machine of a war
+        machine), or None while there is none: it died, the unit has no leader block, or the machine was destroyed
+        (notes/script_animation_sound.md 2.3, notes/script_queries.md B3). A war machine without a leader block
+        keeps its machine in the first rank slot."""
+        if not self.melee_models or (self.anchored and not self.machine_alive):
+            return None
+        self._assign_leader()
+        if self.leader_uid is not None:
+            return self.living_leader_index
+        return 0 if self.anchored else None
+
+    @property
+    def leader_destroyed(self) -> bool:
+        """IfMachineDestroyed's condition (notes/script_queries.md B3): no leader model, or its wounds taken have
+        reached its Wounds. It does not look at the class: for an ordinary regiment it means the character is dead.
+        Without any model state yet (a unit never drawn) only the whole unit's destruction counts."""
+        if not (self.has_leader or self.anchored):
+            return True
+        if not self.melee_models:
+            return self.destroyed
+        index = self.leader_model_index
+        if index is None:
+            return True
+        model = self.melee_models[index]
+        return self.leader_uid is not None and model.wounds_taken >= self.model_wounds(model)
+
     def leader_model(self, model: ModelState) -> bool:
         return self.leader_uid is not None and model.uid == self.leader_uid
 
@@ -503,9 +540,7 @@ class Regiment:
             self.melee_models = [ModelState(uid=self._next_uid + offset,
                                             stagger=self.stagger_counter.next_value())
                                  for offset in range(len(self.positions))]
-            if self.has_leader and self.leader_uid is None and self.melee_models:
-                centre = 0 if self.hud_class == "art" else (max(1, self.front_rank_models()) - 1) // 2
-                self.leader_uid = self.melee_models[centre].uid
+            self._assign_leader()
             self._next_uid += len(self.positions)
             # A reseed (casualties changing the model count outside kill_models, reinforcement, ...)
             # invalidates any in-progress re-slotting: `reform_slots` would no longer be index-parallel
@@ -611,6 +646,8 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
         "leader_wounds": int(leader_profile["W"]) if "W" in leader_profile else None,
         "leader_armour": stat_int(stat_fields(leader.get("stats") or {})[0], "s_armr") if leader else None,
         "leader_leadership": int(leader_profile["Ld"]) if "Ld" in leader_profile else None,
+        "leader_initiative": int(leader_profile["I"]) if "I" in leader_profile else None,
+        "leader_missile_code": stat_int(stat_fields(leader.get("stats") or {})[0], "S_BalWeap") if leader else None,
         "toughness": int(profile.get("T", DEFAULT_PROFILE["T"])),
         "wounds": int(profile.get("W", DEFAULT_PROFILE["W"])),
         "initiative": int(profile.get("I", DEFAULT_PROFILE["I"])),
@@ -2628,6 +2665,7 @@ class Battle:
         # 0.1); a model's own request beats it for one update (0.2).
         if regiment.script_action and regiment.script_action_key != regiment.activity_key():
             regiment.script_action = 0
+        machine_index = regiment.leader_model_index  # a war machine's volley is the machine model alone
         for model_index, model in enumerate(regiment.melee_models):
             if model.own_request:
                 requested, model.own_request = model.own_request, 0
@@ -2635,7 +2673,7 @@ class Battle:
                 requested = regiment.script_action
             elif regiment.in_melee:
                 requested = animation.FIGHT if model.opponent is not None else animation.WEAPON_READY
-            elif regiment.volley_countdown is not None and (regiment.hud_class != "art" and not special_shot or model_index == 0):
+            elif regiment.volley_countdown is not None and (regiment.hud_class != "art" and not special_shot or model_index == machine_index):
                 requested = animation.SHOOT
             elif not model.at_rest:
                 requested = animation.WALK

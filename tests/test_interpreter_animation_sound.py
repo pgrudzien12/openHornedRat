@@ -7,7 +7,7 @@ animation programs reach their event steps.
 import unittest
 
 from tests.script_helpers import word
-from whshr import animation, interpreter
+from whshr import combat, animation, interpreter
 from whshr.engine import Battle, Regiment
 from whshr.rules import Side
 
@@ -78,8 +78,27 @@ class RequestTests(AnimationTestCase):
         self.assertEqual(self.request(), (34, 4, 6))
         self.unit.has_leader = True
         self.call("PlayLeaderAnimation", 7, 44)
-        self.assertEqual((self.request(), self.unit.melee_models[0].own_request, self.unit.script_action),
+        leader = self.unit.leader_model_index
+        self.assertNotEqual(leader, 0)  # the middle of the front rank, not simply the first model
+        self.assertEqual((self.request(), self.unit.melee_models[leader].own_request, self.unit.script_action),
                          ((44, 1, 1), 7, 0))
+        self.assertEqual(sum(model.own_request for model in self.unit.melee_models), 7)  # only the leader
+
+    def test_play_leader_animation_follows_the_leader_figure_through_casualties(self):
+        self.unit.has_leader = True
+        uid = self.unit.melee_models[self.unit.leader_model_index].uid
+        combat.kill_models(self.unit, [0, 1], self.battle)  # models in front of the leader die: its index shifts, its identity stays
+        self.call("PlayLeaderAnimation", 7, 44)
+        self.assertEqual(self.unit.melee_models[self.unit.leader_model_index].uid, uid)
+        self.assertEqual(self.unit.melee_models[self.unit.leader_model_index].own_request, 7)
+
+    def test_play_leader_animation_after_the_leader_died_changes_nothing(self):
+        self.unit.has_leader = True
+        combat.kill_models(self.unit, [self.unit.leader_model_index], self.battle)
+        self.state.anim_event, self.state.anim_divisor, self.state.anim_countdown = 34, 4, 6
+        self.call("PlayLeaderAnimation", 7, 44)
+        self.assertEqual((self.request(), sum(model.own_request for model in self.unit.melee_models)),
+                         ((34, 4, 6), 0))
 
     def test_clear_animation_request_leaves_the_poses(self):
         self.unit.melee_models[0].action = SHOOT

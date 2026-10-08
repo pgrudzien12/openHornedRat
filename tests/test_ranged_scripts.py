@@ -8,7 +8,7 @@ that posted the fire event.
 import unittest
 
 from tests.script_helpers import FakeDll, word
-from whshr import behaviour, interpreter, ranged
+from whshr import animation, behaviour, interpreter, ranged
 from whshr.engine import Battle, Regiment
 from whshr.interpreter import Event
 from whshr.nodes import ScriptNode
@@ -176,6 +176,22 @@ class NodeManningReadinessTests(SeamTestCase):
         gun.models, gun.machine_alive = 3, False
         self.assertFalse(self.call("gun", "IfArtilleryManned", 0xFFFF))
         self.assertFalse(self.call("bow", "IfArtilleryManned", -1 & 0xFFFF))  # self is not artillery
+
+    def test_a_war_machine_shot_is_posted_by_the_machine_model_alone(self):
+        # notes/script_shooting.md 6.2: only the machine (the leader model) takes the shoot pose and launches.
+        gun = shooter("gun", 0, 0, code=11, models=4, cls="art", unit_class=4)
+        gun.has_leader = True
+        self.make(gun)
+        gun.model_positions()
+        machine = gun.leader_model_index
+        self.assertEqual(machine, 0)
+        gun.volley_countdown = 1  # artillery: one post per fire event, so the countdown only has to be positive
+        poses = []
+        for _ in range(12):
+            self.battle._step_animations(gun)
+            poses.extend(index for index, model in enumerate(gun.melee_models) if model.action == animation.SHOOT)
+        self.assertEqual(set(poses), {machine})  # no crewman takes the shoot pose
+        self.assertEqual(set(gun.fire_post_positions), {gun.positions[machine]})
 
     def test_ready_to_fire_and_its_messages(self):
         gun = shooter("gun", 0, 0, code=11, models=3, cls="art", unit_class=4)

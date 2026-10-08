@@ -2686,11 +2686,16 @@ class ScriptInterpreter:
     def _detect_threat(self, unit: "Regiment", state: UnitScriptState) -> None:
         """Code 11 (notes/script_behaviours.md 1.3): spot; unless braced, a threat that targets this unit (any
         threat for an independent unit) closer than the threat range refreshes the stored score and queues 0x03;
-        otherwise only an independent unit re-picks as Query 1. Not modelled: the Doomwheel rider (leader missile
-        code 13), never combined with this code in shipped data."""
+        otherwise only an independent unit re-picks as Query 1. Step 4, the Doomwheel rider (leader missile code 13),
+        runs code 26 as well, even when braced."""
         self._spot(unit)
-        if unit.braced:
-            return
+        if not unit.braced:
+            self._answer_threat(unit, state)
+        if unit.leader_missile_code == 13:
+            self._doomwheel_bolts(unit)
+
+    def _answer_threat(self, unit: "Regiment", state: UnitScriptState) -> None:
+        """Code 11 steps 2-3: the threat slot's 0x03 or, for an independent unit, a fresh pick."""
         threat = self.battle.regiments.get(state.threat) if state.threat is not None else None
         if (threat is not None and (self._targets(threat, unit.identifier) or unit.independent)
                 and self._octagonal(unit, threat) < state.threat_range):
@@ -2750,16 +2755,16 @@ class ScriptInterpreter:
     def _elapsed_and_reload(self, unit: "Regiment") -> tuple[int, int]:
         """(ticks since the last reload stamp, reload time). The stamp sets `reload_ticks` to the reload time + 1
         and the engine counts it down, so elapsed = reload + 1 - reload_ticks while it runs. PROVISIONAL: the
-        reload uses the unit's own Initiative and weapon, not the leader block's."""
+        reload is the leader block's (Initiative, missile code; notes/script_behaviours.md 1.10)."""
         from . import ranged
-        reload = int(ranged.reload_time(unit))
+        reload = int(ranged.reload_time(unit, leader_block=True))
         if unit.reload_ticks <= 0:
             return reload + 1, reload
         return reload + 1 - int(unit.reload_ticks), reload
 
     def _stamp(self, unit: "Regiment") -> None:
         from . import ranged
-        unit.reload_ticks = ranged.reload_time(unit) + 1
+        unit.reload_ticks = ranged.reload_time(unit, leader_block=True) + 1
 
     def _doomwheel_bolts(self, unit: "Regiment") -> None:
         """Code 26: once reloaded, stamp and fire three bolts ahead, right and left (notes/script_behaviours.md
@@ -3696,10 +3701,11 @@ class ScriptInterpreter:
             tick_count: int, rng: random.Random) -> int | None:
         """PlayLeaderAnimation A E: the leader (or war machine) model alone requests action A, and the
         request becomes (E, 1, 1); a unit without a leader changes nothing at all (section 2.3).
-        PROVISIONAL: the engine has no leader-model identity, so the first model plays the leader."""
+        The leader model is `Regiment.leader_model_index`; one that died leaves the request as it was."""
         unit = self.battle.regiments.get(unit_id)
-        if unit is not None and (unit.has_leader or unit.anchored) and unit.melee_models:
-            unit.melee_models[0].own_request = operand or 0
+        index = unit.leader_model_index if unit is not None else None
+        if unit is not None and index is not None:
+            unit.melee_models[index].own_request = operand or 0
             event = script_words[state.pc + 2] if state.pc + 2 < len(script_words) else 0
             state.anim_event, state.anim_divisor, state.anim_countdown = event, 1, 1
         return state.pc + 3
@@ -4397,10 +4403,9 @@ class ScriptInterpreter:
     def op_IfMachineDestroyed(self, state: UnitScriptState, operand: int | None, script_words: Words,
             unit_id: str, tick_count: int, rng: random.Random) -> int | None:
         """IfMachineDestroyed: condition := the unit has no leader model (the machine of a war machine is its
-        leader), or the leader has taken all its wounds (notes/script_queries.md B3). PROVISIONAL: the engine
-        keeps no leader wounds, so a leader counts as dead only when the whole unit is."""
+        leader), or the leader has taken all its wounds (notes/script_queries.md B3; `Regiment.leader_destroyed`)."""
         unit = self.battle.regiments.get(unit_id)
-        state.cond_flags = unit is None or not (unit.has_leader or unit.anchored) or unit.destroyed
+        state.cond_flags = unit is None or unit.leader_destroyed
         return state.pc + 1
 
     # For any other opcode not explicitly handled, the dispatcher will raise NotImplementedError,
