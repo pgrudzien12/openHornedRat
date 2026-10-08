@@ -7,7 +7,7 @@ effects, §1.7 per-tick order, §2 projectiles and scatter, §4 the magical hit)
 (part B: §0.1 "the unit under the point", §0.2 spell-entry states, §5 dispel, §7 winds and the item re-arm). Those
 sections are reused by reference and not restated. Earlier public rules: `game_rules.md` §8 "Impact" (the blast
 path, radius > 0), "Special weapons", "Spells", "Magic items in battle"; `script_magic.md` §2.2 (AI rules);
-`script_grid_events.md` §1.3 (event 0x2D, `TakeEventTarget`); `script_behaviours.md` §1.10 (behaviour 26);
+`script_grid_events.md` §1.3 (event 0x2D, `TakeSpellEventTarget`); `script_behaviours.md` §1.10 (behaviour 26);
 `casualty_bookkeeping.md` §2 (kill credit).
 
 Conventions as part A: distances in battle units (24 = 1"), `d` = `trunc(sqrt(dx² + dy²))`, angles in 1/512 turn
@@ -200,9 +200,9 @@ each succeeds (the launch never tests "used"). Derived from the click path, not 
 1. The order reaches the unit on its next script run. A unit **held by Tangling Thorn refuses it** (no event; the use
    is lost). Unlike a spell order, an item order does **not halt** a moving unit.
 2. Event **0x2D** (source none, argument = the item code, point = the click) → handled only by library 152 (every
-   mission handler reaches it through libraries 153–156): set the condition, `TakeEventTarget`, keep the target
+   mission handler reaches it through libraries 153–156): set the condition, `TakeSpellEventTarget`, keep the target
    across the cast, `CastPending` — **at once**: no cast pose, no "busy casting" test, no turn.
-3. `TakeEventTarget` for an item (`script_grid_events.md` §1.3 row 0x2D): pending := the item code; **if the unit
+3. `TakeSpellEventTarget` for an item (`script_grid_events.md` §1.3 row 0x2D): pending := the item code; **if the unit
    already has a current target, the target is kept and the clicked point is ignored**; otherwise target := none and
    point := the click.
 4. `CastPending` (`script_magic.md` §3.3): aims at the current target's aim model if there is one (and the aim-at-point
