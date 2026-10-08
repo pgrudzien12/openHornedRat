@@ -206,6 +206,35 @@ class SquigLandingTests(MoveTestCase):
         self.battle.objects.append({"x": 505, "y": 1000, "radius": 30, "status": ["os_active"]})
         self.assertEqual(self.release(4), (4, True))
 
+    def test_artillery_is_touched_even_when_the_crew_rolls_fail_and_its_machine_is_not_rolled_for(self):
+        gun = Regiment("g", "G", 505, 1000, 0, Side.PLAYER, models=3, ranks=1, unit_class=4, hud_class="art",
+                       toughness=3, has_leader=True)
+        self.make(self.hopper, gun)
+        self.state = self.bus.unit_states["s"]
+        gun.model_positions()
+        machine = gun.leader_model_index
+        assert machine is not None
+        self.assertEqual(self.release(4, 1, 1), (4, True))  # the crew models in reach roll 1: no wound, still a touch
+        self.assertEqual((gun.models, gun.melee_models[machine].wounds_taken), (3, 0))
+
+    def test_a_special_unit_is_touched_not_wounded(self):
+        special = Regiment("x", "X", 505, 1000, 0, Side.PLAYER, models=3, ranks=1, unit_class=8, toughness=3)
+        self.make(self.hopper, special)
+        self.state = self.bus.unit_states["s"]
+        self.assertEqual(self.release(4), (4, True))
+        self.assertEqual(special.models, 3)
+
+    def test_the_reach_follows_the_target_class(self):
+        for unit_class, wounded in ((1, False), (2, True), (6, True)):
+            with self.subTest(unit_class=unit_class):
+                far = Regiment("f", "F", 500, 1012, 0, Side.PLAYER, models=2, ranks=1, unit_class=unit_class,
+                               toughness=3)
+                self.make(self.hopper, far)
+                self.state = self.bus.unit_states["s"]
+                # its two models stand 13.4 from the hopper: outside 12, inside 18 and 24
+                self.release(4, *((6, 1, 6, 1) if wounded else ()))
+                self.assertEqual(far.models, 0 if wounded else 2)
+
     def test_a_multi_wound_model_survives_a_single_wound(self):
         self.victim.wounds = 2
         self.assertEqual(self.release(4, 6, 1, 6, 1), (4, True))

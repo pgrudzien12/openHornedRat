@@ -941,12 +941,14 @@ def resolve_contact_attacks(battle: "Battle") -> None:
     monster 24), and contact hits still ignore the rout pause's timed "turning" state, in which a model
     would get a to-hit roll -- every target model here is taken to be running.
     """
+    segment = battle.tick_count // SEGMENT_TICKS
     for attacker in sorted(battle.regiments.values(), key=lambda r: r.identifier):
-        if not attacker.active or attacker.routing or attacker.in_melee:
-            continue
+        if not attacker.active or attacker.routing or attacker.in_melee or attacker.contact_attack_segment == segment:
+            continue  # a unit that made its contact attacks this segment (for instance for behaviour 14) is spent
         target = battle.regiments.get(attacker.attack_target) if attacker.attack_target else None
         if target is None or not target.active or not target.routing:
             continue  # contact attacks only matter against a unit that cannot fight back
+        attacker.contact_attack_segment = segment
         contact_attack(battle, attacker, target)
 
 
@@ -966,7 +968,9 @@ def contact_attack(battle: "Battle", attacker: "Regiment", target: "Regiment") -
     return killed
 
 
-LANDING_REACH = {"cavalry": 18.0, "monster": 24.0}  # PROVISIONAL: the cavalry test reads the s_race class code 2
+CLASS_CAVALRY, CLASS_ARTILLERY, CLASS_MONSTER = 2, 4, 6  # s_race >> 3 (game_rules.md 3, s_race)
+TOUCH_ONLY_CLASSES = frozenset({0, 7, 8, 9})  # no type, rolling stock, special, furniture: touched, never wounded
+LANDING_REACH = {CLASS_CAVALRY: 18.0, CLASS_MONSTER: 24.0}  # everything else 12
 LANDING_MELEE_FILTER = 204.0  # the coarse filter's radius for a unit in melee (notes/script_spawn_move.md 5)
 
 
@@ -974,13 +978,14 @@ def squig_landing(battle: "Battle", hopper: "Regiment") -> bool:
     """The hop landing collision of FanaticRelease (notes/script_spawn_move.md 5): at the hopper's leader model, every
     model of a fighting unit within reach (12, 18 against cavalry, 24 against monsters) takes the hopper's Strength
     wound roll with the armour save allowed, one wound each; artillery crews are hit the same way. Rolling stock,
-    standing buildings and scenery are only touched (the engine tells no other special units apart). The hopper never dies. Every object is
-    tested; the result is True when a model was wounded or anything was touched.
+    special units, furniture, standing buildings and scenery are only touched; an artillery piece is touched too, and
+    its crew models are wounded but not its machine. The hopper never dies. Every object is tested; the result is
+    True when a model was wounded or anything was touched.
 
     PROVISIONAL: the coarse filter before the per-model test (the unit's bounding radius, twice that when it is
     charging, 204 in melee); a unit leaving the battle or hidden is not touched; the D6 rolls the fanatic makes
-    against an artillery machine are not made (nothing is documented about what they do); buildings and scenery are
-    touched within their footprint radius."""
+    against an artillery machine are not made (nothing is documented about what they do), so the machine model takes
+    no wound roll; buildings and scenery are touched within their footprint radius."""
     positions = hopper.model_positions()
     leader = hopper.leader_model_index
     lx, ly = positions[leader] if leader is not None and leader < len(positions) else (hopper.x, hopper.y)
@@ -993,15 +998,17 @@ def squig_landing(battle: "Battle", hopper: "Regiment") -> bool:
         limit = LANDING_MELEE_FILTER if other.in_melee else other.bounding_radius() * (2 if charging else 1)
         if math.hypot(other.x - lx, other.y - ly) >= limit:
             continue
-        if other.is_wagon:
-            engaged = True  # rolling stock: touched, nothing more
+        if other.is_wagon or other.unit_class in TOUCH_ONLY_CLASSES:
+            engaged = True  # rolling stock, a special unit or furniture: touched, nothing more
             continue
-        reach = (LANDING_REACH["monster"] if other.hud_class == "mon"
-                 else LANDING_REACH["cavalry"] if other.unit_class == 2 else CONTACT_REACH)
+        artillery = other.unit_class == CLASS_ARTILLERY or other.hud_class == "art"
+        engaged = engaged or artillery  # an artillery piece counts as touched whatever the crew rolls do
+        machine = other.leader_model_index if artillery else None
+        reach = LANDING_REACH.get(other.unit_class if other.unit_class is not None else -1, CONTACT_REACH)
         victims: list[int] = []
         rolls: list[Roll] = []
         for index, (mx, my) in enumerate(other.model_positions()):
-            if math.hypot(mx - lx, my - ly) > reach:
+            if index == machine or math.hypot(mx - lx, my - ly) > reach:
                 continue
             model = other.melee_models[index]
             need = wfb_to_wound(strength, other.model_toughness(model))
