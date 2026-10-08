@@ -133,6 +133,11 @@ class Building:
         sin, cos = math.sin(angle), math.cos(angle)
         return dx * cos - dy * sin, dx * sin + dy * cos
 
+    def contains(self, px: float, py: float) -> bool:
+        """Whether a world point lies inside the footprint rectangle."""
+        lx, ly = self._local(px, py)
+        return abs(lx) <= self.half_x and abs(ly) <= self.half_y
+
     def penetration(self, px: float, py: float, radius: float) -> tuple[float, float] | None:
         """The world-space push that moves a circle clear of the footprint rectangle, or None when it does not
         overlap. A centre inside the rectangle is pushed out along the nearest side."""

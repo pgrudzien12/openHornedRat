@@ -2795,6 +2795,10 @@ class Battle:
         return self._advance_toward(regiment, centre, regiment.speed_for_mode(CHARGING_K) * move_scale, arrive=False,
                                     order_key=("charge", building.identifier), scale=scale)
 
+    def building_at(self, x: float, y: float) -> str | None:
+        """Identifier of the standing building whose footprint contains the point (a click target), or None."""
+        return next((b.identifier for b in self.buildings if not b.destroyed and b.contains(x, y)), None)
+
     def order_attack_building(self, identifier: str, building_id: str) -> None:
         """Order a player regiment to charge a standing building (notes/building_units.md 6): with behaviour
         scripts the order is event 0x04 with the building as source, otherwise the regiment charges at once.

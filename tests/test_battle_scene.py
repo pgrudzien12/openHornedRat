@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import tempfile
 import unittest
 
+from whshr import buildings
 from whshr.assets import AssetLocator
 from whshr.battle_scene import BATTLE_TICK_SECONDS, BattleScene
 from whshr.cache import AssetCache
@@ -192,6 +193,22 @@ class BattleSceneTests(unittest.TestCase):
 
         regiment = scene.battle.regiments["Grudgebringer_Infantry"]
         self.assertEqual(regiment.attack_target, "Clanrat_Warriors")
+
+    def test_given_a_selected_regiment_when_ordered_to_attack_a_building_then_it_charges_the_building(self):
+        scene = BattleScene()
+        SceneMachine(scene, self.context)
+        scene.handle(("select", "Grudgebringer_Infantry"), self.context)
+        battle = scene.battle
+        battle.buildings = buildings.from_scenery([{"name": "Farm", "x": 900, "y": 900}])
+        battle.building_index = {b.identifier: b for b in battle.buildings}
+        battle.phase = "battle"
+        battle.interpreter = None
+
+        scene.handle(("attack", "building:0"), self.context)
+
+        self.assertEqual(battle.regiments["Grudgebringer_Infantry"].attack_target, "building:0")
+        self.assertEqual(battle.building_at(900, 900), "building:0")
+        self.assertIsNone(battle.building_at(100, 100))
 
     def test_given_a_moving_selected_regiment_when_halted_then_its_destination_is_cleared(self):
         scene = BattleScene()
