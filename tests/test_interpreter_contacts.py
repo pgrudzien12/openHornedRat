@@ -169,5 +169,75 @@ class CollisionPassTests(ContactTestCase):
         self.assertEqual((a.melee_group, a.charge_counter), (u.melee_group, 7))
 
 
+class WorkedExampleTests(ContactTestCase):
+    """notes/script_behaviours.md 2.8: two hostile regiments marching into each other, tick by tick. Events are
+    handled last in, first out; the standard handlers are reduced to what the example names (0x0B runs the contact
+    handler, 0x07 and 0x0A change nothing here)."""
+
+    def setUp(self):
+        self.a = regiment("A", 0, 0, Side.PLAYER)
+        self.b = regiment("B", 0, 30, Side.ENEMY)  # footprints overlap
+        self.make(self.a, self.b)
+
+    def handle_all(self, unit_id):
+        """Dispatch the unit's queue as the handler would, newest event first; returns the codes handled."""
+        state = self.bus.unit_states[unit_id]
+        handled = []
+        while state.event_queue:
+            event = state.event_queue.pop()
+            handled.append(event.code)
+            if event.code == 0x0B:
+                self.interp.op_Query(state, 8, [word("Query"), 8], unit_id, 0, self.battle.rng)
+        return handled
+
+    def test_tick_t_a_steps_first_and_both_units_get_the_contact_event(self):
+        self.a.collision_recheck = True
+        self.interp.raise_contacts([(self.a, self.b)])
+        self.assertEqual((self.codes("A"), self.codes("B")), ([(0x0B, None)], [(0x0B, None)]))
+        self.assertFalse(self.b.collision_recheck)
+
+    def test_tick_t_b_takes_a_as_target_warns_it_and_raises_the_next_contacts(self):
+        self.a.collision_recheck = True
+        self.interp.raise_contacts([(self.a, self.b)])
+        state_b = self.bus.unit_states["B"]
+        self.handle_all("B")
+        self.assertEqual((state_b.current_target, state_b.contact_latch, self.b.collision_recheck),
+                         (("A", 0), False, True))
+        self.interp.raise_contacts([(self.a, self.b)])  # B's own move and pass
+        self.assertEqual(self.codes("A"), [(0x0B, None), (0x07, "B"), (0x0B, None)])
+        self.assertEqual(self.codes("B"), [(0x0B, None)])
+
+    def test_tick_t_plus_1_a_becomes_the_joiner_with_the_charge_counter_and_b_the_owner(self):
+        self.a.collision_recheck = True
+        self.interp.raise_contacts([(self.a, self.b)])
+        self.handle_all("B")
+        self.interp.raise_contacts([(self.a, self.b)])
+        state_a = self.bus.unit_states["A"]
+        self.handle_all("A")
+        self.assertEqual(state_a.current_target, ("B", 0))
+        self.assertTrue(state_a.contact_latch)
+        self.assertEqual(self.battle.engage_requests, [("A", "B", int(1.5 * self.a.frontage))])
+        self.assertEqual(self.codes("B"), [(0x0B, None), (0x07, "A"), (0x0A, "A")])
+        self.interp.raise_contacts([(self.a, self.b)])  # A latched: no event for A; reciprocal 0x0B to B
+        self.assertEqual(self.codes("B")[-1], (0x0B, None))
+        combat.resolve_contacts(self.battle)
+        self.assertTrue(self.a.in_melee and self.b.in_melee)
+        self.assertEqual((self.a.melee_group, self.a.charge_counter), (self.b.melee_group, int(1.5 * self.a.frontage)))
+
+    def test_tick_t_plus_1_b_handles_the_engagement_again_without_changing_anything(self):
+        self.a.collision_recheck = True
+        self.interp.raise_contacts([(self.a, self.b)])
+        self.handle_all("B")
+        self.interp.raise_contacts([(self.a, self.b)])
+        self.handle_all("A")
+        self.interp.raise_contacts([(self.a, self.b)])
+        combat.resolve_contacts(self.battle)
+        counter = self.a.charge_counter
+        self.handle_all("B")
+        combat.resolve_contacts(self.battle)
+        self.assertEqual((self.a.charge_counter, self.b.charge_counter, self.b.in_melee), (counter, 0, True))
+        self.assertEqual(self.battle.engage_requests, [])
+
+
 if __name__ == "__main__":
     unittest.main()
