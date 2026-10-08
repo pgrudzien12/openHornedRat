@@ -593,6 +593,7 @@ class BattleView(SceneView[BattleScene]):
         if tilt := keys[pygame.K_PAGEUP] - keys[pygame.K_PAGEDOWN]:
             self.camera.tilt(tilt * TILT_SPEED * seconds)
         self.scene.battle.set_view_angle(view_angle(self.camera.yaw))
+        self._publish_view_rect()
         for event in self.scene.battle.events:
             if hasattr(event, "kind") and event.kind in {"projectile_launch", "projectile_impact"}:
                 code = event.data.get("code")
@@ -621,6 +622,18 @@ class BattleView(SceneView[BattleScene]):
         battle_sounds: BattleSounds | None = getattr(self, "battle_sounds", None)  # tests build views without __init__
         if battle_sounds is not None:
             battle_sounds.handle(self.scene.battle.events)
+
+    def _publish_view_rect(self) -> None:
+        """Tell the battle which ground the camera shows (the "on screen" test for enemy reactions)."""
+        field, camera = self.scene.field, self.camera
+        width, height = self.gpu.target.size
+        projection = camera.projection(width, height, field.width, field.height,
+                                       field.ground_height(camera.target_x, camera.target_y))
+        min_x, min_z, max_x, max_z = picking.view_rect(
+            projection, width, height, (camera.target_x / WORLD_PER_MESH, camera.target_y / WORLD_PER_MESH),
+            lambda x, z: field.ground_height(x * WORLD_PER_MESH, z * WORLD_PER_MESH))
+        self.scene.battle.set_view_rect((min_x * WORLD_PER_MESH, min_z * WORLD_PER_MESH,
+                                         max_x * WORLD_PER_MESH, max_z * WORLD_PER_MESH))
 
     def status(self) -> Sequence[str]:
         camera, scene = self.camera, self.scene

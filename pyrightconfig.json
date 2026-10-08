@@ -25,6 +25,7 @@
   "disableTaggedHints": true,
   "strict": [
     "whshr/figure_capture.py",
+    "whshr/portrait_popup.py",
     "whshr/steering.py",
     "whshr/paths.py",
     "whshr/debrief_rules.py",

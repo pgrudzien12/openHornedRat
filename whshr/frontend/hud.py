@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 import pygame
 
 from ..battlefield import WORLD_PER_MESH, Battlefield, SpriteFrame, SpriteSheet
+from ..portrait_popup import overlay_frames
 from ..rules import Side
 from .gpu import Gpu, ScreenQuad
 
@@ -719,17 +720,24 @@ class Hud:
         return tuple(range(base, base + 8))
 
     def _draw_readout(self, regiment: "Regiment | None") -> None:
+        """The portrait rectangle: the compass, or the reacting unit's portrait while the pop-up is up
+        (notes/react_portrait.md 3-4); selecting a regiment never changes it."""
         rx, ry = READOUT_RECT[0], READOUT_RECT[1]
-        if regiment is None:
+        popup = self.battle.portrait_popup if self.battle is not None else None
+        shown = self._regiment(popup.unit_id) if popup is not None and popup.active else None
+        if popup is None or shown is None:
             for quad in self.compass_quads:
                 self._draw_panel(quad, rx + 4, ry + 12)
             return
         self._draw_panel(self.portrait_bg_quad, rx + 4, ry + 12)
-        portrait_sheet = self._sheet(regiment.portrait)
-        if portrait_sheet is not None and portrait_sheet.frames:
-            portrait_quad = self._sheet_frame_quad(portrait_sheet.frames[0])
-            self._draw_panel(portrait_quad, rx + 4, ry + 12)
-        for frame_index in self._readout_ornament_frames(regiment) or ():
+        portrait_sheet = self._sheet(shown.portrait)
+        if portrait_sheet is not None and portrait_sheet.frames and shown.living_leader_index is not None:
+            frames = portrait_sheet.frames
+            eyes, mouth = overlay_frames(popup.expression, len(frames), popup.age)
+            for index in (0, eyes, mouth):
+                if index < len(frames):
+                    self._draw_panel(self._sheet_frame_quad(frames[index]), rx + 4, ry + 12)
+        for frame_index in self._readout_ornament_frames(shown) or ():
             # Ornament piece offsets within the readout are not individually given by
             # notes/game_rules.md ("fixed offsets"); PROVISIONAL until confirmed.
             self._draw_panel(self._icon(frame_index), rx, ry)
