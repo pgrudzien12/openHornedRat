@@ -22,7 +22,7 @@ from typing import Any
 import pygame
 import zengl
 
-from .. import animation, picking
+from .. import animation, figure_capture, picking
 from ..battle3d import SPRITE_DEPTH_BIAS
 from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, bake_mesh, sprite_direction, view_angle
 from ..camera import BattleCamera
@@ -302,6 +302,15 @@ class BattleView(SceneView[BattleScene]):
             camera.rotate(event.rel[0] * DRAG_ROTATE)
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_HOME:
             self.camera = replace(self.initial_camera)
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_F2:
+            # Debugging aid (whshr.figure_capture): trace the selected regiment's figures for 5 s.
+            battle = self.scene.battle
+            unit_id = figure_capture.capture_unit(battle, self.scene.selected_id)
+            if unit_id is not None and self.scene.log_dir is not None:
+                self.battle_log.append(("", f"Capturing {battle.regiments[unit_id].name} figures "
+                                            f"from tick {battle.update_count} for 5 s"))
+                self.log_scroll = 0
+                return (("capture", unit_id),)
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             self.order_mode = None
             self._set_cursor("default")

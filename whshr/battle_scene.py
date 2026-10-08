@@ -3,7 +3,7 @@
 
 import os
 from os import PathLike
-from . import battle_log, behaviour, casualties, combat, payments, roster, skirmish_log
+from . import battle_log, behaviour, casualties, combat, figure_capture, payments, roster, skirmish_log
 from .assets import AssetId
 from .battlefield import Battlefield, WORLD_PER_MESH, sprite_files
 from .clock import FixedStepClock
@@ -47,6 +47,8 @@ class BattleScene(Scene):
         self.logger: battle_log.BattleLogger | None = None
         self.skirmishes: SkirmishLogger | None = None  # whshr.skirmish_log.SkirmishLogger, one file per close combat
         self._log_closed = True
+        # Running F2 figure captures (whshr.figure_capture), each written to disk once it finishes.
+        self.captures: list[figure_capture.FigureCapture] = []
         self.glue_scene = glue_scene
         self.request_id = request_id
         self.no_battle = False
@@ -107,6 +109,9 @@ class BattleScene(Scene):
     def close_log(self, reason: str) -> None:
         """Write the `end` record and close the log file; idempotent, so both a normal transition and
         an early frontend shutdown (the player closing the window mid-battle) can safely call it."""
+        for capture in self.captures:
+            capture.close()
+        self.captures = []
         if self.logger is not None and not self._log_closed:
             self.logger.write_end(self.battle.update_count, reason)
             if self.skirmishes is not None:
@@ -120,6 +125,12 @@ class BattleScene(Scene):
         kind, *args = event
         if kind == "start_battle":
             self.battle.start_battle()
+        elif kind == "capture":
+            # Debugging aid only; a replay (no log directory) re-handles the logged request as a no-op.
+            unit_id = figure_capture.capture_unit(self.battle, args[0] if args else self.selected_id)
+            if self.log_dir is not None and unit_id is not None:
+                self.captures.append(figure_capture.FigureCapture(self.log_dir, self.battle_id.name,
+                                                                  self.battle, unit_id))
         elif kind == "pause":
             if self.battle.phase == "battle" and not self.battle.can_leave:
                 self.battle.paused = not self.battle.paused
@@ -289,6 +300,11 @@ class BattleScene(Scene):
                     self.logger.write_snapshot(self.battle.update_count, self.battle)
             if self.skirmishes is not None:
                 self.skirmishes.observe(self.battle)
+            for capture in self.captures:
+                capture.observe(self.battle)
+                if capture.done:
+                    capture.close()
+            self.captures = [capture for capture in self.captures if not capture.done]
             if self.battle.result is not None:
                 break
         if self.battle.result is not None:
