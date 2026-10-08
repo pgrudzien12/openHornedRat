@@ -1358,6 +1358,10 @@ class Battle:
         ruin still pushes regiments apart and intercepts shots. Not modelled: the ruin's own size and height."""
         building.destroyed = True
         building.models = 0
+        credited = self.regiments.get(building.credit or "")
+        if credited is not None:  # +1 kill per piece, no experience: building points are 0 (casualty_bookkeeping.md)
+            credited.kills += building.pieces
+        building.credit = None
         self.release_building_assaults(building.identifier)
         for unit_id in list(self.event_bus.unit_states):
             self.event_bus.queue_event(unit_id, interpreter.Event(code=0x18, source=building.identifier,

@@ -984,7 +984,7 @@ def resolve_building_assaults(battle: "Battle") -> None:
         battle.events.append(BattleEvent(
             f"{regiment.name} hacks at the {building.name}.", "building_hit",
             regiment=regiment.identifier, building=building.identifier, wounds=wounds))
-        if building.take_wounds(wounds):
+        if building.take_wounds(wounds, regiment.identifier):
             battle.destroy_building(building)
 
 

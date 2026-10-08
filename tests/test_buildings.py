@@ -127,6 +127,41 @@ class DamageTests(unittest.TestCase):
         self.assertEqual(len(b.events), before)
 
 
+class KillCreditTests(unittest.TestCase):
+    """notes/casualty_bookkeeping.md 2.1: +1 kill per piece, no experience; lethal-only sources are credited only
+    by the destroying wound, melee by any wound."""
+
+    def test_the_destroyer_gains_a_kill_per_piece_and_no_experience(self):
+        b = battle()
+        farm = b.buildings[0]  # three pieces
+        farm.take_wounds(6, "S", lethal_only=True)
+        b.destroy_building(farm)
+        self.assertEqual((b.regiments["S"].kills, b.regiments["S"].experience_gained), (3, 0))
+
+    def test_a_single_piece_building_is_worth_one_kill(self):
+        b = battle()
+        tent = b.buildings[2]
+        tent.take_wounds(1, "S", lethal_only=True)
+        b.destroy_building(tent)
+        self.assertEqual(b.regiments["S"].kills, 1)
+
+    def test_a_non_lethal_missile_wound_leaves_the_credit_and_a_melee_wound_takes_it(self):
+        farm = battle().buildings[0]
+        farm.take_wounds(1, "M", lethal_only=True)
+        self.assertIsNone(farm.credit)
+        farm.take_wounds(1, "M")
+        self.assertEqual(farm.credit, "M")
+        farm.take_wounds(1, "S", lethal_only=True)
+        self.assertEqual(farm.credit, "M")
+        farm.take_wounds(5, "S", lethal_only=True)
+        self.assertEqual(farm.credit, "S")
+
+    def test_a_building_destroyed_with_no_credit_pays_nothing(self):
+        b = battle()
+        b.destroy_building(b.buildings[0])
+        self.assertEqual(b.regiments["S"].kills, 0)
+
+
 class OrderTests(unittest.TestCase):
     def test_fire_order_at_a_building_carries_the_building_as_source(self):
         b = battle()

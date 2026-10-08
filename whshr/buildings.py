@@ -105,6 +105,8 @@ class Building:
     half_y: float = 0.0  # half-extent front-to-back
     toughness: int = 0  # close-combat T of the first model
     height: int = 0
+    pieces: int = 1  # models at the start of the battle: the kills a destroyer is credited with
+    credit: str | None = None  # regiment that last wounded the first model (kill credit on destruction)
 
     @property
     def side_code(self) -> int:
@@ -115,16 +117,20 @@ class Building:
         """Counts for the "protect the buildings" objective: not destroyed."""
         return not self.destroyed
 
-    def take_wounds(self, wounds: int) -> bool:
-        """Add wounds to the first model; returns True when this call destroys the building."""
+    def take_wounds(self, wounds: int, source: str | None = None, lethal_only: bool = False) -> bool:
+        """Add wounds to the first model; returns True when this call destroys the building. `source` is the
+        regiment credited: every wound credits it, except that a lethal-only source (missiles, spells) is credited
+        only by the wound that destroys the building (notes/casualty_bookkeeping.md 2.1)."""
         if self.destroyed:
             return False
         self.wounds_taken += wounds
-        if self.wounds_taken >= self.wounds_to_destroy:
+        destroyed = self.wounds_taken >= self.wounds_to_destroy
+        if source is not None and (destroyed or not lethal_only):
+            self.credit = source
+        if destroyed:
             self.destroyed = True
             self.models = 0
-            return True
-        return False
+        return destroyed
 
     def _local(self, px: float, py: float) -> tuple[float, float]:
         """A world point in the building's own frame: x sideways, y front-to-back."""
@@ -174,7 +180,7 @@ def from_scenery(scenery: Iterable[Mapping[str, Any]]) -> list[Building]:
         buildings.append(Building(f"{PREFIX}{index}", name, float(item.get("x") or 0), float(item.get("y") or 0),
                                   float(kind.radius), kind.wounds, models=kind.models,
                                   direction=int(item.get("dir") or 0) % 512, half_x=float(hx), half_y=float(hy),
-                                  toughness=kind.toughness, height=kind.height))
+                                  toughness=kind.toughness, height=kind.height, pieces=kind.models))
     return buildings
 
 
