@@ -98,10 +98,14 @@ manual test on a machine with the game installed.
 
 See `THIRD_PARTY_NOTICES.md` for the full conclusion. Summary: pygame-ce is LGPL 2.1 and
 zengl is MIT; PyInstaller bundles pygame-ce's native libraries (SDL2 and friends, all
-permissive-licensed) as separate DLL files loaded dynamically at runtime rather than
-statically merged into the frozen executable, which satisfies LGPL 2.1 §6(b)'s
-shared-library exception. `THIRD_PARTY_NOTICES.md` and `licenses/LGPL-2.1.txt` are installed
-alongside the app (see `installer.iss`'s `[Files]` section).
+permissive-licensed, apart from the LGPL 2.1 FluidSynth, mpg123, libsndfile and ALSA in the
+Linux and macOS wheels) as separate shared-library files loaded dynamically at runtime rather
+than statically merged into the frozen executable, which satisfies LGPL 2.1 §6(b)'s
+shared-library exception. `THIRD_PARTY_NOTICES.md`, `licenses/LGPL-2.1.txt` and
+`licenses/Apache-2.0.txt` (PortMidi) are installed alongside the app by every package
+(see `installer.iss`'s `[Files]` section and the `build-*.sh` / rpm spec install steps).
+The notices list the native libraries per platform; `tests/test_packaging_notices.py` fails
+when the installed pygame-ce ships a library the notices do not name.
 
 ## CI (#99)
 

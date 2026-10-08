@@ -53,6 +53,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 ; scripts/ helper modules, and their third-party license notices as extracted below).
 Source: "{#DistDir}\*"; DestDir: "{app}"; Excludes: "__pycache__\*,__pycache__"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
