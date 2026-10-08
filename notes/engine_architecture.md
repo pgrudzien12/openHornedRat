@@ -536,8 +536,10 @@ byte-faithful port; every simplification is called out in each module's docstrin
 - **Win/lose and the result scene.** `Battle._update_result` (guarded so a one-sided synthetic battle,
   as most movement tests use, never auto-resolves) sets `result` to `"victory"`/`"defeat"` once every
   regiment on the other/own side is destroyed or has fled, and `Battle.tick` becomes a no-op afterwards.
-  `BattleScene.update` then returns a `Transition` to the new `whshr.result_scene.ResultScene` (title +
-  a casualty summary line per regiment); `ResultScene` is kept out of `campaign_scenes.py` and imports
+  `BattleScene.update` then returns a `Transition`: for a standalone battle to the `whshr.result_scene.ResultScene`
+  (title + a casualty summary line per regiment); a battle a glue program started shows no result screen and
+  resolves its battle request at once, so the flow goes straight on to the debrief (notes/native-windows.md 9.11).
+  `ResultScene` is kept out of `campaign_scenes.py` and imports
   `MainMenuScene` lazily inside `handle` to avoid an import cycle (`battle_scene` -> `result_scene` ->
   `campaign_scenes` -> `battle_scene`). `frontend/result_view.py` renders it; any key or click returns to
   the main menu.
