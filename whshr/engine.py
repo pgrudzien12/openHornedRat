@@ -1694,13 +1694,17 @@ class Battle:
                     # (notes/pursuit_map_edge.md 2); a charge re-aims at its target every update.
                     chase = (regiment.pursuit_point if regiment.pursuing and regiment.pursuit_point is not None
                              else (target.x, target.y))
-                    if regiment.pursuing and math.dist(chase, (regiment.x, regiment.y)) < 2 * regiment.speed_for_mode(CHARGING_K):
+                    # game_rules.md "Unit speed" and R39: a pursuer moves at the pursuit step,
+                    # min(24 * s_rlmv, 10 * distance) / 256 world units per tick, instead of the charge speed.
+                    speed = (min(regiment.speed_for_mode(FLEEING_K),
+                                 10 * math.hypot(target.x - regiment.x, target.y - regiment.y) / 256)
+                             if regiment.pursuing else regiment.speed_for_mode(CHARGING_K))
+                    if regiment.pursuing and math.dist(chase, (regiment.x, regiment.y)) < 2 * speed:
                         # PROVISIONAL: having reached the chase point before the next re-aim, run on along the facing
                         # instead of circling it.
                         facing = regiment.direction * math.tau / 512
                         chase = (regiment.x + 256 * math.sin(facing), regiment.y + 256 * math.cos(facing))
-                    moved = self._advance_toward(regiment, chase,
-                                                 regiment.speed_for_mode(CHARGING_K) * move_scale, arrive=False,
+                    moved = self._advance_toward(regiment, chase, speed * move_scale, arrive=False,
                                                  order_key=("charge", target.identifier), scale=scale)
             elif regiment.target_x is not None and regiment.target_y is not None:
                 moved = self._advance_toward(regiment, (regiment.target_x, regiment.target_y),

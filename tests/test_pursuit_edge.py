@@ -117,3 +117,33 @@ class OrderGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PursuitStepTests(unittest.TestCase):
+    """game_rules.md "Unit speed" / R39: a pursuer moves at the pursuit step, min(24 * s_rlmv, 10 * distance) / 256
+    world units per tick -- at most 1.5 * s_rlmv / 16, the fugitive's own factor, not the charge speed."""
+
+    def _pursuer(self, gap):
+        cavalry = Regiment("cav", "Cavalry", 300, 300, 128, Side.PLAYER, models=8, ranks=2,
+                           speed_per_tick=20 * 1.8 / 16)  # s_rlmv 20
+        fugitive = Regiment("fug", "Fugitives", 300 + gap, 300, 128, Side.ENEMY, models=8, ranks=2, routing=True)
+        battle = Battle(2000, 2000, [cavalry, fugitive], seed=1995)
+        battle.phase = "battle"
+        battle.tick_count = 1  # off the segment boundary
+        cavalry.attack_target, cavalry.pursuing = "fug", True
+        cavalry.charge_started_target = "fug"
+        return battle, cavalry
+
+    def test_given_a_distant_fugitive_when_pursued_then_the_pursuer_moves_1_5_s_rlmv_over_16(self):
+        battle, cavalry = self._pursuer(200)
+
+        battle.tick()
+
+        self.assertAlmostEqual(cavalry.x - 300, 1.5 * 20 / 16, places=5)
+
+    def test_given_a_close_fugitive_when_pursued_then_the_step_is_ten_times_the_distance_over_256(self):
+        battle, cavalry = self._pursuer(20)
+
+        battle.tick()
+
+        self.assertAlmostEqual(cavalry.x - 300, 10 * 20 / 256, places=5)
