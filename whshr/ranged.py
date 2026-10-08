@@ -513,7 +513,7 @@ def _damage_unit(battle: Battle, unit: Regiment, projectile: Projectile,
 def _damage_buildings(battle: Battle, p: Projectile, flight: bool) -> None:
     """Building pseudo-units under an impact (notes/ranged_combat_handoff.md 3): inside the footprint is a direct
     hit (wound die of the weapon at building strength), a blast margin is one wound at half strength; no armour
-    save. Bows and crossbows have no building strength and never reach here with damage. Not modelled: kill credit
+    save, and the wound roll uses toughness 0 (automatic from strength 8; notes/building_units.md 3). Bows and crossbows have no building strength and never reach here with damage. Not modelled: kill credit
     for the shooter."""
     from . import buildings
     if not p.building_strength:
@@ -528,7 +528,8 @@ def _damage_buildings(battle: Battle, p: Projectile, flight: bool) -> None:
             strength, wounds = p.building_strength // 2, 1
         else:
             continue
-        if battle.rng.randint(1, 6) < wfb_to_wound(strength, buildings.BUILDING_TOUGHNESS):
+        if strength < buildings.AUTOMATIC_WOUND_STRENGTH and (
+                battle.rng.randint(1, 6) < wfb_to_wound(strength, buildings.MISSILE_TOUGHNESS)):
             continue
         if building.take_wounds(wounds):
             battle.destroy_building(building)

@@ -1352,14 +1352,11 @@ class Battle:
         return feedback
 
     def destroy_building(self, building: buildings.Building) -> None:
-        """A building at its wounds-to-destroy ends: it stops being solid and stops counting as a target, every
-        live scripted unit gets event 0x18 (notes/battle_end_objectives.md 12.1) and a battle event is recorded.
-        Not modelled: the ruin variant of the piece."""
+        """A building at its wounds-to-destroy ends: it stops counting as a target, every live scripted unit gets
+        event 0x18 (notes/building_units.md 7) and a battle event is recorded. The footprint stays solid -- the
+        ruin still pushes regiments apart and intercepts shots. Not modelled: the ruin's own size and height."""
         building.destroyed = True
         building.models = 0
-        for obj in self.shooting_objects:
-            if obj.get("building") == building.identifier:
-                obj["status"] = []
         for unit_id in list(self.event_bus.unit_states):
             self.event_bus.queue_event(unit_id, interpreter.Event(code=0x18, source=building.identifier,
                                                                   x=int(building.x), y=int(building.y)))
