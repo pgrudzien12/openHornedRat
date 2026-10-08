@@ -23,7 +23,7 @@ from ..speech import load_speech
 from ..controlpanel import button_y, control_panel
 from ..glue_animation import GlueBitmapAnimator
 from ..glue_render import GlueRenderModel, RenderBitmap, RenderHotspot, RenderText, build_render_model
-from ..glue_runtime import (SPEECH_OVERLAYS, Diagnostic, GlueInput, GlueRuntimeState, PlayMusic, PlaySpeech, StopMusic,
+from ..glue_runtime import (SPEECH_OVERLAYS, Diagnostic, GlueInput, GlueRuntimeState, PlayClickCue, PlayMusic, PlaySpeech, StopMusic,
                             StopSpeech)
 from ..glue_palette import AppPalette
 from .bitmap_font import BitmapFont
@@ -192,6 +192,8 @@ class GlueView(NativeScreenView[GlueScene]):
                     pass
             elif isinstance(effect, PlaySpeech):
                 self._play_speech(effect.string_id)
+            elif isinstance(effect, PlayClickCue):
+                self._click_cue(effect.cue)
             elif isinstance(effect, StopSpeech):
                 self._stop_speech()
             elif isinstance(effect, StopMusic):
@@ -498,11 +500,11 @@ class GlueView(NativeScreenView[GlueScene]):
                 return (GlueInput("mission-select", mission.key),)
             self._pressed_button = self._panel_button_at(point)
             self.pressed = None if self._pressed_button is not None else self.hotspot_at(self.models, point)
-            if self._pressed_button is not None:
-                self._play_click_cue(4)
-            elif self.pressed is not None:
-                self._play_click_cue(self.pressed.downsfx)
             self.cursors.update(self.hotspot_at(self.models, point), self.pressed)
+            if self._pressed_button is not None:
+                return (GlueInput("panel-press"),)
+            if self.pressed is not None:
+                return (GlueInput("hotspot-press", cue=self.pressed.downsfx),)
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             point = self._native_point(event.pos)
             pressed_button, self._pressed_button = self._pressed_button, None
@@ -510,24 +512,18 @@ class GlueView(NativeScreenView[GlueScene]):
             self.cursors.update(self.hotspot_at(self.models, point), None)
             released_button = self._panel_button_at(point)
             if pressed_button is not None and pressed_button == released_button:
-                self._play_click_cue(3)
-                return (GlueInput("panel-action", pressed_button),)
+                return (GlueInput("panel-release-cue"), GlueInput("panel-action", pressed_button))
             released = self.hotspot_at(self.models, point)
-            if released is not None:
-                self._play_click_cue(released.upsfx)
+            cue = (GlueInput("hotspot-release-cue", cue=released.upsfx),) if released is not None else ()
             if pressed is not None and pressed == released and pressed.click_text is not None:
-                return (GlueInput("hotspot-speech", f"{pressed.click_text}:{pressed.click_count}:{pressed.speech_variant or ''}"),)
+                return (*cue, GlueInput("hotspot-speech", f"{pressed.click_text}:{pressed.click_count}:{pressed.speech_variant or ''}"))
             if pressed is not None and pressed == released:
-                return (GlueInput("hotspot-release", pressed.target),)
+                return (*cue, GlueInput("hotspot-release", pressed.target))
+            if cue:
+                return cue
             if pressed is None and released is None and pressed_button is None and released_button is None:
                 return (GlueInput("dialogue-drain"),)
         return ()
-
-    def _play_click_cue(self, cue: int | None) -> None:
-        if cue is None:
-            return
-        playing = self._speech_sound is not None and self._speech_sound.get_num_channels() > 0
-        self._click_cue(cue, speech_playing=playing, speech_enabled=self.scene.require_runtime().speech_enabled)
 
     def animate(self, seconds: float) -> None:
         changed = False

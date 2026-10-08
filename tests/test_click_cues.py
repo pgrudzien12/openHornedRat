@@ -55,17 +55,30 @@ class ClickCueTests(unittest.TestCase):
         import pygame
         from whshr.frontend.glue_view import GlueView
         from whshr.glue_render import RenderHotspot
+        from whshr.glue_runtime import GlueInput
         pressed = RenderHotspot(0, 0, 10, 10, None, "one", None, None, None, downsfx=4, upsfx=3)
         released = RenderHotspot(10, 0, 10, 10, None, "two", None, None, None, downsfx=4, upsfx=3)
-        cues: list[int] = []
         view = SimpleNamespace(models=(), pressed=None, _pressed_button=None, cursors=Mock(),
                                _native_point=lambda pos: pos, _mission_at=lambda point: None,
                                _panel_button_at=lambda point: None,
-                               hotspot_at=lambda models, point: pressed if point[0] < 10 else released,
-                               _play_click_cue=cues.append)
+                               hotspot_at=lambda models, point: pressed if point[0] < 10 else released)
         down = pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=(5, 5))
         up = pygame.event.Event(pygame.MOUSEBUTTONUP, button=1, pos=(15, 5))
 
-        self.assertEqual(GlueView.events(view, down), ())
-        self.assertEqual(GlueView.events(view, up), ())
-        self.assertEqual(cues, [4, 3])
+        self.assertEqual(GlueView.events(view, down), (GlueInput("hotspot-press", cue=4),))
+        self.assertEqual(GlueView.events(view, up), (GlueInput("hotspot-release-cue", cue=3),))
+
+    def test_glue_panel_cue_precedes_the_button_action(self):
+        import pygame
+        from whshr.frontend.glue_view import GlueView
+        from whshr.glue_runtime import GlueInput
+        view = SimpleNamespace(models=(), pressed=None, _pressed_button=None, cursors=Mock(),
+                               _native_point=lambda pos: pos, _mission_at=lambda point: None,
+                               _panel_button_at=lambda point: "accept" if point[0] < 10 else None,
+                               hotspot_at=lambda models, point: None)
+        down = pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=(5, 5))
+        up = pygame.event.Event(pygame.MOUSEBUTTONUP, button=1, pos=(5, 5))
+
+        self.assertEqual(GlueView.events(view, down), (GlueInput("panel-press"),))
+        self.assertEqual(GlueView.events(view, up),
+                         (GlueInput("panel-release-cue"), GlueInput("panel-action", "accept")))
