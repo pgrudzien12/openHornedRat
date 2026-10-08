@@ -16,6 +16,7 @@ from whshr.campaign import parse_mission_windows
 from whshr.campaign_scenes import MainMenuScene, TroopSelectionScene
 from whshr.campaign_state import CampaignState
 from whshr.catalog import build
+from whshr.debrief_scene import DebriefScene
 from whshr.glue_content import GlueContent
 from whshr.glue_runtime import EndGame, GlueInput
 from whshr.glue_scene import GlueScene
@@ -210,6 +211,38 @@ class BattleHandoffTests(unittest.TestCase):
         machine.handle("done")  # the debrief screen closes
 
         self.assertIsInstance(machine.active, MainMenuScene)
+
+
+class SkippedDebriefTests(BattleHandoffTests):
+    """notes/native-windows.md 9.11 scenario 4: BF001 (debrief index 6) lost, whose evaluator list has no text."""
+
+    # the inherited scenarios belong to BattleHandoffTests; only its fixtures are reused here
+    for _name in [name for name in vars(BattleHandoffTests) if name.startswith("test_")]:
+        locals()[_name] = None
+    del _name
+
+    def setUp(self):
+        from unittest import mock
+
+        patcher = mock.patch.dict(RESOURCES, {"MSCRIPT": "[RUN]\n[START]\nautosave:\nsetdebrief:6\n"
+                                              "encounterplaygamewithdebrief:bf001\ngocaravan:select\n[END]"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        super().setUp()
+
+    def test_given_a_glue_started_defeat_without_debrief_text_then_no_screen_opens_and_the_flow_resumes(self):
+        self._open_mission("missionawindow.0")
+        for regiment in self.machine.active.battle.regiments.values():
+            if regiment.side == Side.PLAYER:
+                regiment.models = 0
+        self.machine.update(BATTLE_TICK_SECONDS)
+        self.assertNotIsInstance(self.machine.active, ResultScene)
+
+        self.machine.update(0.1)  # the debrief has nothing to show: its completion runs at once
+
+        self.assertNotIsInstance(self.machine.active, (ResultScene, DebriefScene))
+        self.assertEqual(self.campaign.completed, {601})
+        self.assertIsNone(self.map_scene.runtime.state.pending)
 
 
 if __name__ == "__main__":
