@@ -23,10 +23,11 @@ from ..speech import load_speech
 from ..controlpanel import button_y, control_panel
 from ..glue_animation import GlueBitmapAnimator
 from ..glue_render import GlueRenderModel, RenderBitmap, RenderHotspot, RenderText, build_render_model
-from ..glue_runtime import (SPEECH_OVERLAYS, Diagnostic, GlueInput, GlueRuntimeState, PlayMusic, PlaySpeech, StopMusic,
+from ..glue_runtime import (SPEECH_OVERLAYS, Diagnostic, GlueInput, GlueRuntimeState, PlayClickCue, PlayMusic, PlaySpeech, StopMusic,
                             StopSpeech)
 from ..glue_palette import AppPalette
 from .bitmap_font import BitmapFont
+from .click_cues import set_speech_sound
 from .cursors import CursorController
 from .glue_bitmap import load_optional_bitmap
 from .gpu import Gpu, QuadCache, ScreenQuad, TextLabel
@@ -191,6 +192,8 @@ class GlueView(NativeScreenView[GlueScene]):
                     pass
             elif isinstance(effect, PlaySpeech):
                 self._play_speech(effect.string_id)
+            elif isinstance(effect, PlayClickCue):
+                self._click_cue(effect.cue)
             elif isinstance(effect, StopSpeech):
                 self._stop_speech()
             elif isinstance(effect, StopMusic):
@@ -215,6 +218,7 @@ class GlueView(NativeScreenView[GlueScene]):
             self._speech_sound = pygame.mixer.Sound(io.BytesIO(data))
             self._speech_sound.set_volume(audio_settings.volume("dialogue"))
             self._speech_sound.play()
+            set_speech_sound(self._speech_sound)
         except pygame.error:
             self._speech_sound = None
 
@@ -222,6 +226,7 @@ class GlueView(NativeScreenView[GlueScene]):
         if self._speech_sound is not None:
             self._speech_sound.stop()
             self._speech_sound = None
+            set_speech_sound(None)
 
     def _refresh_bitmaps(self, models: Models, frames: Frames, palette: AppPalette) -> None:
         visibility = tuple(tuple(_bitmap_visible(bitmap, self.scene.campaign) for bitmap in model.bitmaps)
@@ -496,6 +501,10 @@ class GlueView(NativeScreenView[GlueScene]):
             self._pressed_button = self._panel_button_at(point)
             self.pressed = None if self._pressed_button is not None else self.hotspot_at(self.models, point)
             self.cursors.update(self.hotspot_at(self.models, point), self.pressed)
+            if self._pressed_button is not None:
+                return (GlueInput("panel-press"),)
+            if self.pressed is not None:
+                return (GlueInput("hotspot-press", cue=self.pressed.downsfx),)
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             point = self._native_point(event.pos)
             pressed_button, self._pressed_button = self._pressed_button, None
@@ -503,12 +512,15 @@ class GlueView(NativeScreenView[GlueScene]):
             self.cursors.update(self.hotspot_at(self.models, point), None)
             released_button = self._panel_button_at(point)
             if pressed_button is not None and pressed_button == released_button:
-                return (GlueInput("panel-action", pressed_button),)
+                return (GlueInput("panel-release-cue"), GlueInput("panel-action", pressed_button))
             released = self.hotspot_at(self.models, point)
+            cue = (GlueInput("hotspot-release-cue", cue=released.upsfx),) if released is not None else ()
             if pressed is not None and pressed == released and pressed.click_text is not None:
-                return (GlueInput("hotspot-speech", f"{pressed.click_text}:{pressed.click_count}:{pressed.speech_variant or ''}"),)
+                return (*cue, GlueInput("hotspot-speech", f"{pressed.click_text}:{pressed.click_count}:{pressed.speech_variant or ''}"))
             if pressed is not None and pressed == released:
-                return (GlueInput("hotspot-release", pressed.target),)
+                return (*cue, GlueInput("hotspot-release", pressed.target))
+            if cue:
+                return cue
             if pressed is None and released is None and pressed_button is None and released_button is None:
                 return (GlueInput("dialogue-drain"),)
         return ()

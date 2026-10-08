@@ -185,6 +185,8 @@ class DebriefView(NativeScreenView[DebriefScene]):
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             point = self._native_point(event.pos)
             self.pressed_button = next((action for rect, action in self.buttons if rect.collidepoint(point)), None)
+            if self.pressed_button is not None:
+                self._click_cue(4)
             self.refresh()
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             point = self._native_point(event.pos)
@@ -192,6 +194,7 @@ class DebriefView(NativeScreenView[DebriefScene]):
             self.refresh()
             if pressed is not None and any(rect.collidepoint(point) and action == pressed
                                            for rect, action in self.buttons):
+                self._click_cue(3)
                 return (pressed,)
         return ()
 

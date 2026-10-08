@@ -87,11 +87,14 @@ class CreditsView(DialogView[CreditsScene]):
     def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.pressed = self._action_at(event.pos) is not None
+            if self.pressed:
+                self._click_cue(4)
             self.refresh()
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             was_pressed, self.pressed = self.pressed, False
             self.refresh()
             if was_pressed and self._action_at(event.pos) == "credits:done":
+                self._click_cue(3)
                 return ("credits:done",)
         return ()
 
