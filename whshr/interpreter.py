@@ -430,16 +430,19 @@ class ScriptInterpreter:
                 state.contact_latch = False
 
     def raise_wagon_collisions(self, regiments: list["Regiment"]) -> None:
-        """Event 0x27 (notes/script_behaviours.md 2.2): a wagon that moved this tick and overlaps a footprint of any
-        kind (any side, any unit type) within +-45 degrees of its facing is sent 0x27 (checked, no source), once per
-        tick. Units leaving the battle are not touched. Not modelled: building footprints, which are not units."""
+        """Event 0x27 (notes/fanatic_collisions.md 4): raised inside the wagon's own collision pass, so only while
+        its re-check state is on. For every other active footprint whose circle overlaps the wagon's (no corner
+        test) and whose centre lies strictly within 45 degrees of the wagon's facing, the wagon is sent 0x27
+        (checked, no source), once per such footprint. Units leaving the battle are not touched. Not modelled:
+        building footprints, which are not units."""
         for wagon in regiments:
             if not wagon.is_wagon or self._leaving(wagon) or not wagon.collision_recheck:
                 continue
-            if any(other is not wagon and not other.hidden and not self._leaving(other)
-                   and formation.penetrates(wagon.block(), other.block()) and self._in_arc(wagon, other)
-                   for other in regiments):
-                self.event_bus.queue_event(wagon.identifier, Event(code=0x27), checked=True)
+            for other in regiments:
+                if (other is not wagon and not other.hidden and not self._leaving(other)
+                        and math.hypot(wagon.x - other.x, wagon.y - other.y)
+                        < wagon.bounding_radius() + other.bounding_radius() and self._in_arc(wagon, other)):
+                    self.event_bus.queue_event(wagon.identifier, Event(code=0x27), checked=True)
 
     def _contact_fear(self, mover: "Regiment", other: "Regiment") -> None:
         state = self.event_bus.unit_states.get(mover.identifier)

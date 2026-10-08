@@ -185,5 +185,56 @@ class CollisionRecheckStateTests(unittest.TestCase):
         self.assertTrue(a.collision_recheck)
 
 
+class RecheckThrottleTests(unittest.TestCase):
+    """notes/fanatic_collisions.md 5: a position step switches the re-check state on every 4th update of the unit."""
+
+    def test_a_moving_unit_gets_its_pass_on_every_fourth_update_only(self):
+        mover = unit("A", 100, 100)  # slot 0: counter 0, so its updates count 1, 2, 3, 4, ...
+        other = unit("B", 1500, 1500, side=Side.ENEMY)
+        battle = Battle(2000, 2000, [mover, other], seed=1995)
+        battle.interpreter = battle.interpreter or interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        mover.target_x, mover.target_y = 600, 100
+        raised = []
+        for _ in range(8):
+            mover.collision_recheck = False
+            battle._advance_regiments(1.0, 0.1)
+            raised.append(mover.collision_recheck)
+        self.assertEqual(raised, [False, False, False, True, False, False, False, True])
+
+    def test_slot_staggers_the_phase(self):
+        a, b = unit("A", 100, 100), unit("B", 300, 100)
+        battle = Battle(2000, 2000, [a, b], seed=1995)
+        self.assertEqual((a.update_counter, b.update_counter), (0, 1))
+
+    def test_a_re_form_switches_it_on_every_time(self):
+        regiment = unit("A", 500, 500)
+        battle = Battle(2000, 2000, [regiment], seed=1995)
+        regiment.collision_recheck = False
+        battle.reform_to_ranks(regiment, 2)
+        self.assertTrue(regiment.collision_recheck)
+
+
+class WagonEventScopeTests(unittest.TestCase):
+    """notes/fanatic_collisions.md 4: the wagon's own pass, circle test only, once per footprint."""
+
+    def make(self, *others):
+        wagon = Regiment("W", "W", 500, 500, 0, Side.PLAYER, models=2, ranks=1, points=10, unit_class=7)
+        battle = Battle(2000, 2000, [wagon, *others], seed=1995)
+        battle.interpreter = battle.interpreter or interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        wagon.collision_recheck = True
+        return battle, wagon
+
+    def test_one_event_per_overlapping_footprint_ahead(self):
+        battle, wagon = self.make(unit("X", 500, 506), unit("Y", 505, 506))
+        battle.interpreter.raise_wagon_collisions(list(battle.regiments.values()))
+        self.assertEqual(codes(battle, "W"), [0x27, 0x27])
+
+    def test_another_units_pass_touching_the_wagon_is_not_enough(self):
+        battle, wagon = self.make(unit("X", 500, 506))
+        wagon.collision_recheck = False
+        battle.interpreter.raise_wagon_collisions(list(battle.regiments.values()))
+        self.assertEqual(codes(battle, "W"), [])
+
+
 if __name__ == "__main__":
     unittest.main()
