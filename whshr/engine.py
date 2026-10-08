@@ -1379,17 +1379,22 @@ class Battle:
             raise ValueError("attack target is hidden")
         if not target.active:
             raise ValueError(f"{target_id} is no longer on the field")
-        if self._hold_while_reforming(regiment, ("order_attack", target_id)):
-            return
         if self.interpreter is not None:
             # notes/attack_order_flow.md 1: the order is event 0x04 to the unit; its handler takes the target and
             # runs the approach walk (an ordinary follow-unit move), and the charge starts only once the charge-reach
             # test passes. The order is dropped while the unit is charging (at a target or straight ahead) or in
-            # melee (3). Without scripts the order charges directly.
+            # melee (3). Without scripts the order charges directly. During a re-form it is accepted at once with a
+            # React 13 reply, replacing any held order; the approach itself waits for the re-form
+            # (notes/reform_while_moving.md 4).
             if regiment.attack_target is not None or regiment.free_charging or regiment.in_melee:
                 return
+            if self.phase == "battle" and regiment.reforming:
+                self.react(regiment.identifier, 13)
+            regiment.pending_order = None
             regiment.clear_shooting()
             self.event_bus.queue_event(identifier, interpreter.Event(code=0x04, source=target_id))
+            return
+        if self._hold_while_reforming(regiment, ("order_attack", target_id)):
             return
         regiment.target_x = regiment.target_y = None
         regiment.route_pause_ticks = 0

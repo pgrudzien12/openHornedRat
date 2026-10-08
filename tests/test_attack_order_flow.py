@@ -110,6 +110,19 @@ class AttackOrderGateAndHandOverTests(unittest.TestCase):
                 battle.order_attack("player", "enemy")
                 self.assertEqual(len(battle.event_bus.unit_states["player"].event_queue), 0)
 
+    def test_given_a_re_forming_unit_then_an_attack_order_is_accepted_at_once_with_react_13(self):
+        # notes/reform_while_moving.md 4: unlike a move, Attack is not held; it replaces a held order.
+        player = unit("player", 100, 500, Side.PLAYER)
+        battle = self.battle(player, unit("enemy", 400, 500, Side.ENEMY, direction=384))
+        player.reforming, player.pending_order = True, ("order_move", 300.0, 300.0)
+        reacts = []
+        with mock.patch.object(battle, "react", lambda identifier, code: reacts.append((identifier, code))):
+            battle.order_attack("player", "enemy")
+        queue = battle.event_bus.unit_states["player"].event_queue
+        self.assertEqual([(event.code, event.source) for event in queue], [(0x04, "enemy")])
+        self.assertIsNone(player.pending_order)
+        self.assertEqual(reacts, [("player", 13)])
+
     def test_given_the_charge_takes_over_then_no_approach_route_is_left(self):
         player = unit("player", 100, 500, Side.PLAYER)
         battle = self.battle(player, unit("enemy", 400, 500, Side.ENEMY, direction=384))
