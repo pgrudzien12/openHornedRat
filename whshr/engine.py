@@ -1689,6 +1689,9 @@ class Battle:
         self._resolve_collisions()
         self._check_flight_edges()
         combat.resolve_contacts(self)
+        if self.interpreter is None:  # no scripted contact pass consumes the re-check states
+            for regiment in self.regiments.values():
+                regiment.collision_recheck = False
         combat.refresh_braced_state(self)
         if self.interpreter:
             self.interpreter.stop_ended_charge_sounds()
@@ -2675,56 +2678,62 @@ class Battle:
         combat.pay_removal_credits(self, regiment)
 
     def _resolve_collisions(self, deployment_id: str | None = None) -> None:
-        """Push regiments under orders out of the regiments they overlap (a simplified push-apart;
-        game_rules.md, "Routes, collisions and visibility"), not the polygon obstruction routing (`Nav*`).
-
-        Standing regiments never give way, so scripted deployments that already overlap (BF001's Grudgebringer
-        cavalry and infantry) stay where the script placed them. Pairs are visited in identifier order.
+        """Push regiments apart (a simplified push-apart; game_rules.md, "Routes, collisions and visibility"), not
+        the polygon obstruction routing (`Nav*`). In the battle phase the pass runs for the units whose collision
+        re-check state is on, in identifier order (`_push_apart_pass`); during deployment only the dragged
+        regiment yields to the regiments it overlaps, so scripted deployments that already overlap (BF001's
+        Grudgebringer cavalry and infantry) stay where the script placed them.
         """
         regiments = [self.regiments[key] for key in sorted(self.regiments) if self.regiments[key].active]
         if deployment_id is None:
             for regiment in regiments:
                 self._correct_boundaries(regiment)
                 self._correct_solid_objects(regiment)
-        else:
-            # notes/deployment.md 2: collision correction follows the zone clipping, with no final zone clamp.
-            self._correct_boundaries(self.regiments[deployment_id])
-            self._correct_solid_objects(self.regiments[deployment_id])
-        for i, first in enumerate(regiments):
-            for second in regiments[i + 1:]:
-                if first.in_melee or second.in_melee:
+            for mover in regiments:
+                if mover.collision_recheck:
+                    self._push_apart_pass(mover, regiments)
+            return
+        # notes/deployment.md 2: collision correction follows the zone clipping, with no final zone clamp.
+        dragged = self.regiments[deployment_id]
+        self._correct_boundaries(dragged)
+        self._correct_solid_objects(dragged)
+        for other in regiments:
+            if other is dragged or other.in_melee or dragged.in_melee:
+                continue
+            self._push_pair(dragged, other, 1.0, 0.0)
+
+    def _push_apart_pass(self, mover: Regiment, regiments: Sequence[Regiment]) -> None:
+        """The push-apart rows of the collision pass for one unit (notes/script_behaviours.md 2.2): a marked unit
+        is not touched at all; a unit in melee neither pushes nor is pushed; a pair that can fight never pushes
+        apart (it makes contact instead), except that a war machine or wagon pair is pushed apart when the mover is
+        broken or in a catch-up (walk-back) re-form; any other pair is pushed apart by half the overlap each
+        unless either unit is broken or pursuing. Both units' re-check state goes on. Not modelled: fanatic
+        footprints (notes/script_behaviours.md 2.2 marks them unconfirmed)."""
+        if mover.in_melee or self._marked(mover):
+            return
+        for other in regiments:
+            if other is mover or other.in_melee or other.routing or self._marked(other):
+                continue
+            if may_engage(mover, other):
+                machine = (mover.is_wagon or mover.hud_class == "art") or (other.is_wagon or other.hud_class == "art")
+                if not (machine and (mover.routing or (mover.reforming and mover.reform_walk_back))):
                     continue
-                if deployment_id is None and (self._marked(first) or self._marked(second)):
-                    # notes/script_behaviours.md 2.2: a marked unit (the script's "leaving the battle" state, set on
-                    # BF003's peasants and other non-combatants) is not touched at all: no push, no contact.
-                    continue
-                if may_engage(first, second) and deployment_id is None:
-                    # A pair that can actually fight never pushes apart: a charging regiment must be
-                    # free to close all the way to footprint contact (combat.resolve_contacts), not
-                    # stop at circle distance (see combat.resolve_contacts: contact needs real
-                    # overlap). A pair that can never fight (same side, or the Player-Neutral
-                    # exception rules.can_fight documents) still pushes apart like same-side
-                    # regiments always did, so e.g. peasants don't sit interpenetrating the player.
-                    continue
-                first_yields = (first.identifier == deployment_id if deployment_id is not None else
-                                first.moving or first.routing or first.attack_target is not None)
-                second_yields = (second.identifier == deployment_id if deployment_id is not None else
-                                 second.moving or second.routing or second.attack_target is not None)
-                yielding = first_yields + second_yields
-                if not yielding:
-                    continue
-                dx, dy = second.x - first.x, second.y - first.y
-                distance = math.hypot(dx, dy)
-                overlap = first.bounding_radius() + second.bounding_radius() - distance
-                if overlap <= 0:
-                    continue
-                ux, uy = (dx / distance, dy / distance) if distance > 1e-6 else (1.0, 0.0)
-                share = overlap / yielding
-                if first_yields:
-                    self._translate_regiment(first, -ux * share, -uy * share)
-                if second_yields:
-                    self._translate_regiment(second, ux * share, uy * share)
-                first.collision_recheck = second.collision_recheck = True
+            elif mover.routing or mover.pursuing or other.pursuing:
+                continue
+            self._push_pair(mover, other, 0.5, 0.5)
+
+    def _push_pair(self, first: Regiment, second: Regiment, first_share: float, second_share: float) -> None:
+        """Move two overlapping circles apart along their centre line, `first_share` and `second_share` of the
+        overlap each, and switch both re-check states on."""
+        dx, dy = second.x - first.x, second.y - first.y
+        distance = math.hypot(dx, dy)
+        overlap = first.bounding_radius() + second.bounding_radius() - distance
+        if overlap <= 0:
+            return
+        ux, uy = (dx / distance, dy / distance) if distance > 1e-6 else (1.0, 0.0)
+        self._translate_regiment(first, -ux * overlap * first_share, -uy * overlap * first_share)
+        self._translate_regiment(second, ux * overlap * second_share, uy * overlap * second_share)
+        first.collision_recheck = second.collision_recheck = True
 
     def _update_pursuits(self) -> None:
         """The once-per-segment pursuit update (notes/pursuit_map_edge.md 2): a pursuit stops when the target is no

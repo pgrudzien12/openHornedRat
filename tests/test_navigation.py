@@ -261,6 +261,7 @@ class BattleNavigationTests(unittest.TestCase):
                          target_x=200, target_y=100)
         ally = Regiment("a", "Ally", 116, 100, 0, Side.NEUTRAL, models=1, ranks=1)
         battle = Battle(500, 500, [mover, ally])
+        mover.collision_recheck = True  # it has just stepped
         self.assertEqual(mover.bounding_radius() + ally.bounding_radius(), 16)
         battle._resolve_collisions()
         self.assertEqual(mover.x, 100)
@@ -339,6 +340,7 @@ class BattleNavigationTests(unittest.TestCase):
         moving = Regiment("m", "M", 210, 200, 0, Side.PLAYER, models=1, ranks=1,
                           target_x=350, target_y=200)
         battle = Battle(500, 500, [standing, moving])
+        moving.collision_recheck = True  # it has just stepped
         before = moving.model_positions()[0]
         old_x, old_y = moving.x, moving.y
         battle._resolve_collisions()
@@ -353,6 +355,7 @@ class BattleNavigationTests(unittest.TestCase):
         infantry = Regiment("i", "Infantry", 215, 200, 0, Side.PLAYER, models=1, ranks=1,
                             target_x=350, target_y=200)
         battle = Battle(500, 500, [peasants, infantry])
+        infantry.collision_recheck = True  # it has just stepped
         old = (infantry.x, infantry.y)
         battle._resolve_collisions()
         self.assertNotEqual((infantry.x, infantry.y), old)
