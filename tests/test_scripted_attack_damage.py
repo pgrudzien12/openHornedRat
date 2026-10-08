@@ -114,6 +114,9 @@ class ThreatInReachTests(unittest.TestCase):
         self.state = self.battle.event_bus.unit_states["S"]
         self.state.threat_range = 160
 
+    def spent(self):
+        return self.charger.contact_attack_segment == self.battle.tick_count // combat.SEGMENT_TICKS
+
     def run_code_14(self):
         self.interp._threat_in_reach(self.peasant, self.state)
         return [event.code for event in self.state.event_queue]
@@ -123,13 +126,13 @@ class ThreatInReachTests(unittest.TestCase):
             codes = self.run_code_14()
         self.assertEqual(codes, [0x03])
         self.assertLess(self.peasant.models, 10)
-        self.assertTrue(combat.contact_attacks_spent(self.battle, self.charger))
+        self.assertTrue(self.spent())
 
     def test_given_a_friendly_charger_whose_attacks_wound_nothing_then_there_is_no_0x03(self):
         with mock.patch.object(combat, "_d6", return_value=1):
             codes = self.run_code_14()
         self.assertEqual((codes, self.peasant.models), ([], 10))
-        self.assertTrue(combat.contact_attacks_spent(self.battle, self.charger))
+        self.assertTrue(self.spent())
 
     def test_given_spent_attacks_then_a_second_run_in_the_segment_attacks_nothing(self):
         with mock.patch.object(combat, "_d6", return_value=6):
@@ -143,7 +146,7 @@ class ThreatInReachTests(unittest.TestCase):
         with mock.patch.object(combat, "_d6", return_value=6):
             codes = self.run_code_14()
         self.assertEqual((codes, self.peasant.models), ([], 10))
-        self.assertFalse(combat.contact_attacks_spent(self.battle, self.charger))
+        self.assertFalse(self.spent())
 
     def test_given_a_pursuing_unit_then_it_attacks_too(self):
         self.charger.attack_target, self.charger.pursuing = None, True
@@ -156,17 +159,11 @@ class ThreatInReachTests(unittest.TestCase):
         with mock.patch.object(combat, "_d6", return_value=6):
             codes = self.run_code_14()
         self.assertEqual((codes, self.peasant.models), ([], 10))
-        self.assertFalse(combat.contact_attacks_spent(self.battle, self.charger))
+        self.assertFalse(self.spent())
 
     def test_given_a_hostile_unit_near_but_no_wound_then_test_two_still_queues_0x03(self):
         self.charger.side = Side.ENEMY
         with mock.patch.object(combat, "_d6", return_value=1):
-            codes = self.run_code_14()
-        self.assertEqual(codes, [0x03])
-
-    def test_given_a_charger_that_is_also_broken_then_it_still_makes_its_contact_attacks(self):
-        self.charger.routing = True
-        with mock.patch.object(combat, "_d6", return_value=6):
             codes = self.run_code_14()
         self.assertEqual(codes, [0x03])
 

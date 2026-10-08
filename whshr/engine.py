@@ -201,6 +201,8 @@ class Regiment:
     leader_wounds: int | None = None
     leader_armour: int | None = None
     leader_leadership: int | None = None
+    leader_initiative: int | None = None  # the leader block's I: innate-weapon reload clocks read it (script_behaviours.md 1.10)
+    leader_missile_code: int | None = None  # the leader block's missile weapon code (S_BalWeap)
     spells: tuple[int, ...] = ()  # spell codes from the unit's addspell: lines, in file order (whshr.magic)
     items: tuple[str, ...] = ()  # magic items in its 5 slots, loaded ones first (notes/battle_end_objectives.md 12.2)
     used_items: set[str] = field(default_factory=set[str])  # battle-only activation state
@@ -373,6 +375,41 @@ class Regiment:
                    + int("ItemGrudgeBringer" in self.items) + int("ItemSwordOfMight" in self.items)
                    + 3 * int(self.potion_strength))
 
+    def _assign_leader(self) -> None:
+        """Give a unit with a leader block its leader figure once: the machine in the first slot of a war machine,
+        else the middle model of the front rank (the slot a re-form gives the leader)."""
+        if self.has_leader and self.leader_uid is None and self.melee_models:
+            centre = 0 if self.hud_class == "art" else (max(1, self.front_rank_models()) - 1) // 2
+            self.leader_uid = self.melee_models[min(centre, len(self.melee_models) - 1)].uid
+
+    @property
+    def leader_model_index(self) -> int | None:
+        """Index of the model the rules call the leader (the champion or character, or the machine of a war
+        machine), or None while there is none: it died, the unit has no leader block, or the machine was destroyed
+        (notes/script_animation_sound.md 2.3, notes/script_queries.md B3). A war machine without a leader block
+        keeps its machine in the first rank slot."""
+        if not self.melee_models or not self.machine_alive:
+            return None
+        self._assign_leader()
+        if self.leader_uid is not None:
+            return self.living_leader_index
+        return 0 if self.anchored else None
+
+    @property
+    def leader_destroyed(self) -> bool:
+        """IfMachineDestroyed's condition (notes/script_queries.md B3): no leader model, or its wounds taken have
+        reached its Wounds. It does not look at the class: for an ordinary regiment it means the character is dead.
+        Without any model state yet (a unit never drawn) only the whole unit's destruction counts."""
+        if not (self.has_leader or self.anchored):
+            return True
+        if not self.melee_models:
+            return self.destroyed
+        index = self.leader_model_index
+        if index is None:
+            return True
+        model = self.melee_models[index]
+        return self.leader_uid is not None and model.wounds_taken >= self.model_wounds(model)
+
     def leader_model(self, model: ModelState) -> bool:
         return self.leader_uid is not None and model.uid == self.leader_uid
 
@@ -503,9 +540,7 @@ class Regiment:
             self.melee_models = [ModelState(uid=self._next_uid + offset,
                                             stagger=self.stagger_counter.next_value())
                                  for offset in range(len(self.positions))]
-            if self.has_leader and self.leader_uid is None and self.melee_models:
-                centre = 0 if self.hud_class == "art" else (max(1, self.front_rank_models()) - 1) // 2
-                self.leader_uid = self.melee_models[centre].uid
+            self._assign_leader()
             self._next_uid += len(self.positions)
             # A reseed (casualties changing the model count outside kill_models, reinforcement, ...)
             # invalidates any in-progress re-slotting: `reform_slots` would no longer be index-parallel
@@ -611,6 +646,8 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
         "leader_wounds": int(leader_profile["W"]) if "W" in leader_profile else None,
         "leader_armour": stat_int(stat_fields(leader.get("stats") or {})[0], "s_armr") if leader else None,
         "leader_leadership": int(leader_profile["Ld"]) if "Ld" in leader_profile else None,
+        "leader_initiative": int(leader_profile["I"]) if "I" in leader_profile else None,
+        "leader_missile_code": stat_int(stat_fields(leader.get("stats") or {})[0], "S_BalWeap") if leader else None,
         "toughness": int(profile.get("T", DEFAULT_PROFILE["T"])),
         "wounds": int(profile.get("W", DEFAULT_PROFILE["W"])),
         "initiative": int(profile.get("I", DEFAULT_PROFILE["I"])),
@@ -973,11 +1010,23 @@ class Battle:
     def route_effective_speed(self, regiment: Regiment) -> float:
         """The speed the route filter compares (notes/obstacle_steering.md section 6): the unit's travel speed while
         it is not pausing and has a move, flight, pursuit or charge under way; 0 otherwise. PROVISIONAL: the
-        travel speed is the free-move speed, the charge speed while charging and the flight speed while broken."""
-        if regiment.route_pause_ticks > 0:
-            return 0.0
+        travel speed is the free-move speed, the charge speed while charging and the flight speed while broken.
+
+        A unit in melee or braced is 0: engagement and bracing end its movement and its charge, and the attack
+        target it keeps does not count (notes/convoy_jam_and_melee_obstacles.md B.1). So a friendly unit fighting
+        in melee is an ordinary obstacle that a mover detours round, never a reason for the 54-update pause. A broken
+        unit flees at flight speed even if it was still braced, or in a route pause, when it broke."""
         if regiment.routing:
             return regiment.speed_for_mode(FLEEING_K)
+        if regiment.route_pause_ticks > 0 or regiment.in_melee or regiment.braced:
+            return 0.0
+        if regiment.pursuing:
+            # The pursuit step (game_rules.md "Unit speed", R39): min(flight speed, 10 x distance / 256).
+            target = self.regiments.get(regiment.attack_target) if regiment.attack_target is not None else None
+            speed = regiment.speed_for_mode(FLEEING_K)
+            if target is None:
+                return speed
+            return min(speed, 10 * math.hypot(target.x - regiment.x, target.y - regiment.y) / 256)
         if regiment.attack_target is not None or regiment.free_charging and regiment.moving:
             return regiment.speed_for_mode(CHARGING_K)
         if regiment.moving or regiment.waypoints:
@@ -1072,11 +1121,7 @@ class Battle:
         if half_x == 0 and half_y == 0:
             return
         if drag.rotate:
-            goal = round(math.atan2(dx, dy) * 512 / math.tau) % 512
-            shift_x, shift_y = formation.turn_pivot_shift(regiment.direction, goal, regiment.models, regiment.ranks)
-            regiment.direction = goal
-            regiment.x += shift_x
-            regiment.y += shift_y
+            self._pivot_about_centre(regiment, round(math.atan2(dx, dy) * 512 / math.tau) % 512)
         else:
             matching = next((region for region in self.deployment_regions if region.contains(drag.target)), None)
             switched = matching is not None and matching is not self.deployment_region
@@ -1087,6 +1132,18 @@ class Battle:
                 proposed = self.deployment_region.clip((base[0] + half_x, base[1] + half_y))
                 regiment.x += proposed[0] - old[0]
                 regiment.y += proposed[1] - old[1]
+        self._settle_deployment_placement(regiment)
+
+    @staticmethod
+    def _pivot_about_centre(regiment: Regiment, goal: int) -> None:
+        """Face `goal` at once, the block swinging about its stationary formation centre (notes/deployment.md §3)."""
+        shift_x, shift_y = formation.turn_pivot_shift(regiment.direction, goal, regiment.models, regiment.ranks)
+        regiment.direction = goal
+        regiment.x += shift_x
+        regiment.y += shift_y
+
+    def _settle_deployment_placement(self, regiment: Regiment) -> None:
+        """Collision correction, then the immediate deployment layout of a placed or turned regiment."""
         # Correction deliberately follows clipping, without a final zone clamp (§2).
         for _ in range(10):
             before = (regiment.x, regiment.y)
@@ -1103,6 +1160,24 @@ class Battle:
         regiment.positions = formation.place(regiment.x, regiment.y, regiment.direction, slots)
         regiment.reforming = False
         regiment.reform_slots = []
+
+    def _deployment_turn(self, identifier: str, goal: Callable[[Regiment], int | None]) -> bool:
+        """Engine extension, not original parity (notes/deployment.md §4.1, "Facing buttons"): during
+        deployment the turn-left/right, about-face and face-point buttons set facing at once, exactly as a
+        Ctrl-drag does - the block pivots about its formation centre and its layout snaps. Returns False
+        outside deployment so the caller issues the normal battle turn order. `goal` may return None for
+        a turn with no direction (face-point on the formation centre), which changes nothing."""
+        if self.phase != "deployment":
+            return False
+        regiment = self.regiments[identifier]
+        if (regiment.side != Side.PLAYER or not regiment.active or regiment.routing or regiment.held
+                or regiment.hud_class not in {"inf", "arch", "wiz", "mon", "art"}):
+            raise ValueError("regiment cannot be turned during deployment")
+        new_direction = goal(regiment)
+        if new_direction is not None:
+            self._pivot_about_centre(regiment, new_direction % 512)
+            self._settle_deployment_placement(regiment)
+        return True
 
     def _require_battle_order(self) -> None:
         if self.phase == "deployment":
@@ -1443,6 +1518,26 @@ class Battle:
             event = interpreter.Event(code=0x21, x=int(x), y=int(y))
         self.event_bus.queue_event(unit.identifier, event)
 
+    def win_by_objectives(self, entries: Any = None) -> bool:
+        """Testing aid (--debug F10): destroy the enemy, run the mission's objectives, mark them completed and leave
+        through the tent, so the debrief gets the objectives' own records (`Objectives.complete`). False, doing
+        nothing, for a battle without objectives or one that is already over."""
+        if self.objectives is None or self.result is not None:
+            return False
+        self.start_battle()
+        mark = len(self.events)
+        for regiment in self.regiments.values():
+            if regiment.side == Side.ENEMY:
+                regiment.models = 0
+        self.objectives.complete(self, entries)
+        self.objectives.tent = True  # the tent is offered even if no letter decided the battle
+        self.leave()
+        # The next tick replaces `events` with the pending feedback: carry the decision message, speech cue and
+        # result over so they are shown and logged.
+        self.pending_feedback.extend(self.events[mark:])
+        del self.events[mark:]
+        return True
+
     def resolve_no_battle(self) -> None:
         """No-battle mode (a campaign-progression shortcut, not a game rule): skip this fight and
         settle it as an immediate, lossless win -- every enemy regiment destroyed, no player
@@ -1513,6 +1608,8 @@ class Battle:
 
     def order_turn_left(self, identifier: str) -> None:
         """Rotate a player regiment 90° counter-clockwise in place (game_rules.md, opcodes 0x0C)."""
+        if self._deployment_turn(identifier, lambda r: round((r.direction or 0) - 128)):
+            return
         regiment = self._check_turn_order(identifier)
         goal = (regiment.direction - 128) % 512
         self._plan_turn_order(regiment, goal)
@@ -1523,6 +1620,8 @@ class Battle:
 
     def order_turn_right(self, identifier: str) -> None:
         """Rotate a player regiment 90° clockwise in place (game_rules.md, opcodes 0x0D)."""
+        if self._deployment_turn(identifier, lambda r: round((r.direction or 0) + 128)):
+            return
         regiment = self._check_turn_order(identifier)
         goal = (regiment.direction + 128) % 512
         self._plan_turn_order(regiment, goal)
@@ -1533,6 +1632,8 @@ class Battle:
 
     def order_about_face(self, identifier: str) -> None:
         """Rotate a player regiment 180° in place (game_rules.md, opcodes 0x0E)."""
+        if self._deployment_turn(identifier, lambda r: round((r.direction or 0) + 256)):
+            return
         regiment = self._check_turn_order(identifier)
         goal = (regiment.direction + 256) % 512
         self._plan_turn_order(regiment, goal)
@@ -1543,6 +1644,8 @@ class Battle:
 
     def order_face_point(self, identifier: str, x: float, y: float) -> None:
         """Turn a player regiment to face world coordinates (x, y) in place."""
+        if self._deployment_turn(identifier, lambda r: self._bearing_from_centre(r, x, y)):
+            return
         regiment = self._check_turn_order(identifier)
         dx, dy = x - regiment.x, y - regiment.y
         if math.hypot(dx, dy) < 1e-9:
@@ -1555,6 +1658,14 @@ class Battle:
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
         regiment.route_speed = 0.0
+
+    def _bearing_from_centre(self, regiment: Regiment, x: float, y: float) -> int | None:
+        """Facing toward (x, y) from the formation centre, by the Ctrl-drag rule; None on the centre itself."""
+        centre = self.formation_centre(regiment)
+        dx, dy = x - centre[0], y - centre[1]
+        if math.hypot(dx, dy) < 1e-9:
+            return None
+        return round(math.atan2(dx, dy) * 512 / math.tau) % 512
 
     @staticmethod
     def begin_script_turn(regiment: Regiment, goal: float) -> None:
@@ -2628,6 +2739,8 @@ class Battle:
         # 0.1); a model's own request beats it for one update (0.2).
         if regiment.script_action and regiment.script_action_key != regiment.activity_key():
             regiment.script_action = 0
+        # A war machine's volley is the machine (leader) model alone; other special shooters use the first model.
+        shooter_index = regiment.leader_model_index if regiment.hud_class == "art" else 0
         for model_index, model in enumerate(regiment.melee_models):
             if model.own_request:
                 requested, model.own_request = model.own_request, 0
@@ -2635,7 +2748,7 @@ class Battle:
                 requested = regiment.script_action
             elif regiment.in_melee:
                 requested = animation.FIGHT if model.opponent is not None else animation.WEAPON_READY
-            elif regiment.volley_countdown is not None and (regiment.hud_class != "art" and not special_shot or model_index == 0):
+            elif regiment.volley_countdown is not None and (regiment.hud_class != "art" and not special_shot or model_index == shooter_index):
                 requested = animation.SHOOT
             elif not model.at_rest:
                 requested = animation.WALK

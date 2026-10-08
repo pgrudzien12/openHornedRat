@@ -109,6 +109,7 @@ class UnitScriptState:
     event_queue: deque[Event] = field(default_factory=lambda: deque[Event](maxlen=128))  # pending events
     interrupt_script: int | None = None  # set by SetInterruptScript; called by CallInterruptScript
     pending_switch: int | None = None  # set by SwitchScript; applied after event handling
+    pending_switch_high: bool = False  # the pending switch came from IfSwitchScriptHigh (restarts even the running script)
 
     # Unit state (flags set by SetUnitFlags, SetCondFlags, etc.)
     unit_flags: int = 0  # primary unit flag bits (game_rules.md)
@@ -404,9 +405,8 @@ class ScriptInterpreter:
         the other unit as its contact record and its re-check state off; a troops regiment touched gets the same
         (the reciprocal). Marked units are not touched at all. A latched unit that touches nothing any more is
         released; a latched unit's movement is rolled back by the engine (Battle._resolve_latched_step); wagon event
-        0x27 is raise_wagon_collisions. Contact attacks on routers are combat.resolve_router_contact_attacks. Not
-        modelled: push-apart (the engine's own),
-        fanatic footprints."""
+        0x27 is raise_wagon_collisions. Contact attacks on routers are `combat.resolve_router_contact_attacks` (run
+        every tick, not inside this pass). Not modelled: push-apart (the engine's own), fanatic footprints."""
         touching: set[str] = set()
         neighbours: dict[str, list["Regiment"]] = {}
         for first, second in contacts:
@@ -650,9 +650,10 @@ class ScriptInterpreter:
                 self._should_yield = False
                 break
 
-        # After main loop: apply pending script switch
+        # After main loop: apply pending script switch (a normal one to the running script is ignored)
+        high = state.pending_switch_high
         switch = self._take_pending_switch(state)
-        if switch is not None:
+        if switch is not None and not (switch == state.script_id and not high):
             state.script_id = switch
             state.pc = 0
             state.interrupt_return = None  # the switch abandons the handler, as in op_ReturnInterrupt
@@ -815,14 +816,19 @@ class ScriptInterpreter:
         return 0
 
     @staticmethod
-    def _request_switch(state: UnitScriptState, script: int, override: bool) -> None:
+    def _request_switch(state: UnitScriptState, script: int, override: bool, high: bool = False) -> None:
         """Record a deferred switch (notes/unit_script_control.md 1 and 6: the SwitchScript family sets the pending
         bit 8 of the condition word and is refused while bit 0x20 is set). `override` replaces a switch already
-        pending; otherwise the first request of the tick stands."""
+        pending; otherwise the first request of the tick stands. `high` marks an `IfSwitchScriptHigh` request, the
+        only kind that restarts the script the unit is already running (notes/convoy_jam_and_melee_obstacles.md
+        A.1)."""
         if state.cond_bits & SWITCH_REFUSED:
             return
+        if state.pending_switch_high and state.cond_bits & SWITCH_PENDING and not high:
+            return  # a pending IfSwitchScriptHigh switch is locked (notes/script_grid_events.md 1)
         if override or state.pending_switch is None:
             state.pending_switch = script
+            state.pending_switch_high = high
         state.cond_bits |= SWITCH_PENDING
 
     @staticmethod
@@ -831,6 +837,7 @@ class ScriptInterpreter:
         (`ClearCondFlags 8`) has cancelled it."""
         switch = state.pending_switch if state.cond_bits & SWITCH_PENDING else None
         state.pending_switch = None
+        state.pending_switch_high = False
         state.cond_bits &= ~SWITCH_PENDING
         return switch
 
@@ -853,9 +860,10 @@ class ScriptInterpreter:
     def op_IfSwitchScriptHigh(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """IfSwitchScriptHigh N: request switching to script N at end of tick, overriding any
-        other pending switch this tick (the "high priority" variant per game_rules.md)."""
+        other pending switch this tick (the "high priority" variant per game_rules.md). Unlike the normal
+        switches it restarts the requested script even when the unit is already running it."""
         if operand is not None:
-            self._request_switch(state, operand, override=True)
+            self._request_switch(state, operand, override=True, high=True)
         return state.pc + 1
 
     def op_IfNotSwitchScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -2687,11 +2695,16 @@ class ScriptInterpreter:
     def _detect_threat(self, unit: "Regiment", state: UnitScriptState) -> None:
         """Code 11 (notes/script_behaviours.md 1.3): spot; unless braced, a threat that targets this unit (any
         threat for an independent unit) closer than the threat range refreshes the stored score and queues 0x03;
-        otherwise only an independent unit re-picks as Query 1. Not modelled: the Doomwheel rider (leader missile
-        code 13), never combined with this code in shipped data."""
+        otherwise only an independent unit re-picks as Query 1. Step 4, the Doomwheel rider (leader missile code 13),
+        runs code 26 as well, even when braced."""
         self._spot(unit)
-        if unit.braced:
-            return
+        if not unit.braced:
+            self._answer_threat(unit, state)
+        if unit.leader_missile_code == 13:
+            self._doomwheel_bolts(unit)
+
+    def _answer_threat(self, unit: "Regiment", state: UnitScriptState) -> None:
+        """Code 11 steps 2-3: the threat slot's 0x03 or, for an independent unit, a fresh pick."""
         threat = self.battle.regiments.get(state.threat) if state.threat is not None else None
         if (threat is not None and (self._targets(threat, unit.identifier) or unit.independent)
                 and self._octagonal(unit, threat) < state.threat_range):
@@ -2708,22 +2721,23 @@ class ScriptInterpreter:
             self.event_bus.queue_event(unit.identifier, Event(code=0x36))
 
     def _threat_in_reach(self, unit: "Regiment", state: UnitScriptState) -> None:
-        """Code 14 (notes/script_behaviours.md 1.6), 0x03 to self if either test is true. Test 1: every live unit,
-        of any side, that is charging or pursuing, has not yet made its contact attacks this segment and is nearer
-        than the threat range makes them on this unit now and spends them; true if any wound was caused (no early
-        stop; no broken test on the attacker). The unit itself is skipped: the report allows it only "in principle", and
-        a unit hitting its own models has no sensible meaning. Test 2, only when test 1 is false: an enemy that is not
-        hidden or marked is nearer than the range."""
+        """Code 14 (notes/script_behaviours.md 1.6): 0x03 when either test is true. Test 1: every live unit that is
+        charging or pursuing, has not made its contact attacks this segment and is closer than the threat range
+        makes them on this unit now (and spends them), true if any wound was caused -- the damage mechanism for
+        marked non-combatants, which the collision pass ignores. Test 2: an enemy that is not hidden or marked is
+        closer than the threat range. PROVISIONAL: a wound is a model killed, the reach is the engine's flat 12."""
+        segment = self.battle.tick_count // combat.SEGMENT_TICKS
         wounded = False
-        for other in list(self.battle.regiments.values()):
-            if (other is unit or not other.active or combat.contact_attacks_spent(self.battle, other)
-                    or not (other.attack_target is not None or other.pursuing)
+        for other in sorted(self.battle.regiments.values(), key=lambda r: r.identifier):
+            if (other is unit or not other.active or other.in_melee or other.routing or self._leaving(other)
+                    or other.contact_attack_segment == segment
+                    or not (other.pursuing or other.attack_target is not None or other.free_charging)
                     or self._octagonal(unit, other) >= state.threat_range):
                 continue
-            wounded = combat.make_contact_attacks(self.battle, other, unit) or wounded
+            other.contact_attack_segment = segment
+            wounded = combat.contact_attack(self.battle, other, unit) > 0 or wounded
         if wounded or any(other.active and not other.hidden and self._hostile(unit, other) and not self._leaving(other)
-                          and self._octagonal(unit, other) < state.threat_range
-                          for other in self.battle.regiments.values()):
+               and self._octagonal(unit, other) < state.threat_range for other in self.battle.regiments.values()):
             self.event_bus.queue_event(unit.identifier, Event(code=0x03))
 
     def _signal_threat(self, unit: "Regiment", state: UnitScriptState) -> None:
@@ -2763,16 +2777,16 @@ class ScriptInterpreter:
     def _elapsed_and_reload(self, unit: "Regiment") -> tuple[int, int]:
         """(ticks since the last reload stamp, reload time). The stamp sets `reload_ticks` to the reload time + 1
         and the engine counts it down, so elapsed = reload + 1 - reload_ticks while it runs. PROVISIONAL: the
-        reload uses the unit's own Initiative and weapon, not the leader block's."""
+        reload is the leader block's (Initiative, missile code; notes/script_behaviours.md 1.10)."""
         from . import ranged
-        reload = int(ranged.reload_time(unit))
+        reload = int(ranged.reload_time(unit, leader_block=True))
         if unit.reload_ticks <= 0:
             return reload + 1, reload
         return reload + 1 - int(unit.reload_ticks), reload
 
     def _stamp(self, unit: "Regiment") -> None:
         from . import ranged
-        unit.reload_ticks = ranged.reload_time(unit) + 1
+        unit.reload_ticks = ranged.reload_time(unit, leader_block=True) + 1
 
     def _doomwheel_bolts(self, unit: "Regiment") -> None:
         """Code 26: once reloaded, stamp and fire three bolts ahead, right and left (notes/script_behaviours.md
@@ -2923,8 +2937,21 @@ class ScriptInterpreter:
         requested one (game_rules.md: opcode 0x14 "end of an event handler: return to the
         interrupted script or apply a pending switch"). Falls through if neither applies (e.g. this
         opcode reached without ever going through CallInterruptScript).
+
+        A normal-priority switch to the interrupted script itself is ignored: the unit resumes that script where it
+        was interrupted, so a wagon re-sent 0x27 while already in its halt script reaches the halt instead of
+        restarting at the script's first `Yield` (notes/convoy_jam_and_melee_obstacles.md A.1, A.3). Only a
+        different script or an `IfSwitchScriptHigh` request starts at pc 0. From a nested handler the comparison is
+        with the outermost interrupted script, and the outer handlers are abandoned as for any switch.
         """
+        high = state.pending_switch_high
         switch = self._take_pending_switch(state)
+        resumed = state.outer_returns[0] if state.outer_returns else state.interrupt_return
+        if switch is not None and not high and resumed is not None and resumed[0] == switch:
+            state.script_id, pc = resumed
+            state.interrupt_return = None
+            state.outer_returns.clear()
+            return pc
         if switch is not None:
             state.script_id = switch
             state.interrupt_return = None
@@ -3709,10 +3736,11 @@ class ScriptInterpreter:
             tick_count: int, rng: random.Random) -> int | None:
         """PlayLeaderAnimation A E: the leader (or war machine) model alone requests action A, and the
         request becomes (E, 1, 1); a unit without a leader changes nothing at all (section 2.3).
-        PROVISIONAL: the engine has no leader-model identity, so the first model plays the leader."""
+        The leader model is `Regiment.leader_model_index`; one that died leaves the request as it was."""
         unit = self.battle.regiments.get(unit_id)
-        if unit is not None and (unit.has_leader or unit.anchored) and unit.melee_models:
-            unit.melee_models[0].own_request = operand or 0
+        index = unit.leader_model_index if unit is not None else None
+        if unit is not None and index is not None:
+            unit.melee_models[index].own_request = operand or 0
             event = script_words[state.pc + 2] if state.pc + 2 < len(script_words) else 0
             state.anim_event, state.anim_divisor, state.anim_countdown = event, 1, 1
         return state.pc + 3
@@ -4379,17 +4407,15 @@ class ScriptInterpreter:
 
     def op_FanaticRelease(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
-        """FanaticRelease, the squig hop landing (notes/script_spawn_move.md 5): clears CantMelee, then runs the
-        landing collision (`combat.squig_landing`). A landing that wounded or touched something is true and keeps
-        the counter; otherwise the counter drops by one (wrapping 0 to 255) and the condition is "still non-zero".
-        With no target, event 0x01 goes to the unit itself."""
+        """FanaticRelease, the squig hop landing (notes/script_spawn_move.md 5): clears CantMelee; a landing that
+        wounds or touches something is true and keeps the counter; otherwise the counter drops by one (wrapping
+        0 to 255) and the condition is "still non-zero". With no target, event 0x01 goes to the unit itself.
+        The landing collision is `combat.squig_landing`."""
         unit = self.battle.regiments.get(unit_id)
-        hit = False
         if unit is not None:
             unit.psychology = unit.psychology - {"CantMelee"}
-            hit = combat.squig_landing(self.battle, unit)
-        if hit:
-            state.cond_flags = True
+        if unit is not None and combat.squig_landing(self.battle, unit):
+            state.cond_flags = True  # it wounded or touched something: the counter is not changed
         else:
             state.hop_counter = (state.hop_counter - 1) & 0xFF
             state.cond_flags = state.hop_counter != 0
@@ -4415,10 +4441,9 @@ class ScriptInterpreter:
     def op_IfMachineDestroyed(self, state: UnitScriptState, operand: int | None, script_words: Words,
             unit_id: str, tick_count: int, rng: random.Random) -> int | None:
         """IfMachineDestroyed: condition := the unit has no leader model (the machine of a war machine is its
-        leader), or the leader has taken all its wounds (notes/script_queries.md B3). PROVISIONAL: the engine
-        keeps no leader wounds, so a leader counts as dead only when the whole unit is."""
+        leader), or the leader has taken all its wounds (notes/script_queries.md B3; `Regiment.leader_destroyed`)."""
         unit = self.battle.regiments.get(unit_id)
-        state.cond_flags = unit is None or not (unit.has_leader or unit.anchored) or unit.destroyed
+        state.cond_flags = unit is None or unit.leader_destroyed
         return state.pc + 1
 
     # For any other opcode not explicitly handled, the dispatcher will raise NotImplementedError,

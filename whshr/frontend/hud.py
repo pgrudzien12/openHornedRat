@@ -88,6 +88,8 @@ ORDER_SUPPORTED: set[str] = {"move", "attack", "charge", "fire", "halt", "ranks_
 # Buttons that only change which sub-panel is shown (pure HUD state, always clickable when present).
 SET_ENTRY: dict[str, str] = {"move": "move", "attack": "attack", "ranks_subset": "ranks", "facing_subset": "facing",
             "back": "idle"}
+# Sub-panel navigation that deployment honours: only the facing sub-panel and its Back (§4.1 extension).
+DEPLOYMENT_SET_ENTRY = frozenset({"facing_subset", "back"})
 
 CLASSES = ("inf", "arch", "art", "wiz", "mon")
 PANEL_LAYOUT: dict[tuple[str, str | None], dict[str, str]] = {}
@@ -129,10 +131,13 @@ _set("melee_caster", ("wiz",), TR="withdraw", BR="items", BL="magic", C="fight_h
 _set("melee_noncaster", ("inf", "arch", "art", "mon"), TR="withdraw", C="fight_harder")
 _set("melee_noncaster", ("wiz",), TR="withdraw", BL="magic", C="fight_harder")
 
+# notes/deployment.md §4 panels, plus one engine extension (§4.1, "Facing buttons"): the centre slot opens a
+# facing sub-panel whose turns apply at once. For infantry and archers it replaces the rank decoration.
 _set("deployment", ("inf", "arch"), TL="ranks_up", TR="move", BR="independent", BL="ranks_down",
-    C="ranks_decoration")
-_set("deployment", ("wiz", "mon"), TR="move", BR="independent")
-_set("deployment", ("art",), BR="independent")
+    C="facing_subset")
+_set("deployment", ("wiz", "mon"), TR="move", BR="independent", C="facing_subset")
+_set("deployment", ("art",), BR="independent", C="facing_subset")
+_set("deployment_facing", CLASSES, TL="turn_left", TR="turn_right", BL="about_face", BR="face_point", C="back")
 
 _set("charging", CLASSES)  # none
 
@@ -350,6 +355,8 @@ class Hud:
         if self.battle is not None and self.battle.phase == "deployment":
             if regiment is None or regiment.side != Side.PLAYER:
                 return "deployment", None
+            if self.panel_set == "facing" and regiment.hud_class is not None:
+                return "deployment_facing", regiment.hud_class
             return "deployment", regiment.hud_class
         if regiment is None:
             return "idle", None
@@ -445,6 +452,10 @@ class Hud:
 
     def press(self, name: str) -> str | None:
         """Apply a clicked command's panel-navigation effect; returns the order to issue, if any."""
+        if name == "start_battle":
+            # The deployment facing sub-panel has no battle counterpart for every class; start on the idle panel.
+            self.panel_set = "idle"
+            self.pending_order = None
         if name in {"start_battle", "pause", "leave_battle", "next_regiment", "prev_regiment"}:
             return name
         if name == "items":
@@ -457,7 +468,8 @@ class Hud:
         self.item_list_open = False
         if self.battle is not None and self.battle.phase == "deployment" and name not in self.slots().values():
             return None
-        if name in SET_ENTRY and not (self.battle is not None and self.battle.phase == "deployment"):
+        if name in SET_ENTRY and (name in DEPLOYMENT_SET_ENTRY
+                                  or not (self.battle is not None and self.battle.phase == "deployment")):
             self.panel_set = SET_ENTRY[name]
         if name in ("move", "attack", "fire", "face_point"):
             self.pending_order = name

@@ -4,9 +4,10 @@ Vectors follow the report's tables: unit S at (0, 0), threat range 240 unless st
 """
 
 import unittest
+from unittest import mock
 
 from tests.script_helpers import word
-from whshr import behaviour, interpreter, ranged
+from whshr import behaviour, combat, interpreter, ranged
 from whshr.engine import Battle, Regiment
 from whshr.interpreter import Event
 from whshr.nodes import ScriptNode
@@ -124,6 +125,40 @@ class SignalAndBombardTests(BehaviourTestCase):
         self.assertEqual(self.queued(), [(0x03, None)])
 
 
+class ThreatInReachContactTests(BehaviourTestCase):
+    """notes/script_behaviours.md 1.6, test 1: nearby chargers and pursuers make their contact attacks."""
+
+    def run_with_dice(self, *dice):
+        with mock.patch.object(self.battle.rng, "randint", side_effect=list(dice)):
+            self.run_code(14)
+
+    def peasant_and_raider(self, side=Side.ENEMY):
+        peasant = unit("S", 0, 0, Side.PLAYER, toughness=3)
+        peasant.models, peasant.ranks = 2, 1
+        raider = unit("C", 0, 6, side, strength=4)
+        raider.models, raider.ranks = 1, 1
+        raider.pursuing = True
+        self.make(peasant, raider)
+        return peasant, raider
+
+    def test_a_pursuer_in_range_wounds_the_unit_and_spends_its_attacks(self):
+        peasant, raider = self.peasant_and_raider()
+        self.run_with_dice(6, 1)  # wound 6, save 1: one peasant dies
+        self.assertEqual((peasant.models, self.queued()), (1, [(3, None)]))
+        self.assertEqual(raider.contact_attack_segment, self.battle.tick_count // combat.SEGMENT_TICKS)
+
+    def test_a_friendly_charger_that_wounds_nobody_raises_nothing(self):
+        peasant, raider = self.peasant_and_raider(Side.PLAYER)
+        self.run_with_dice(1)  # the wound roll fails
+        self.assertEqual((peasant.models, self.queued()), (2, []))  # no enemy near either
+
+    def test_attacks_spent_this_segment_are_not_made_again(self):
+        peasant, raider = self.peasant_and_raider(Side.PLAYER)
+        raider.contact_attack_segment = self.battle.tick_count // combat.SEGMENT_TICKS
+        self.run_with_dice()  # no dice may be drawn
+        self.assertEqual((peasant.models, self.queued()), (2, []))
+
+
 class InnateWeaponTests(BehaviourTestCase):
     def test_pestilent_breath_partial_and_full_reloads(self):
         monks = unit("M", 0, 0, Side.ENEMY, initiative=0)  # reload (10 - 0) x 18 = 180
@@ -138,6 +173,26 @@ class InnateWeaponTests(BehaviourTestCase):
             self.run_code(27)
             breaths.append((len(self.battle.events) > before, monks.reload_ticks == reload + 1))
         self.assertEqual(breaths, [(False, False), (True, False), (True, True)])
+
+    def test_innate_reload_clock_reads_the_leader_block(self):
+        wheel = unit("W", 0, 0, Side.ENEMY, initiative=0)  # own block: (10 - 0) x 18 = 180
+        wheel.leader_initiative = 5  # leader block: (10 - 5) x 18 = 90
+        self.make(wheel)
+        self.assertEqual((ranged.reload_time(wheel), ranged.reload_time(wheel, leader_block=True)), (180, 90))
+        self.run_code(26)
+        self.assertEqual(wheel.reload_ticks, 91)  # stamped with the leader block's time + 1
+
+    def test_doomwheel_rider_runs_code_26_from_a_detect_threat_even_when_braced(self):
+        wheel = unit("W", 0, 0, Side.ENEMY)
+        wheel.leader_missile_code = 13
+        wheel.braced = True
+        self.make(wheel)
+        self.run_code(11)
+        self.assertEqual(len([e for e in self.battle.events if e.kind == "doomwheel_bolts"]), 1)
+        plain = unit("P", 500, 500, Side.ENEMY)
+        self.make(plain)
+        self.run_code(11)
+        self.assertEqual([e for e in self.battle.events if e.kind == "doomwheel_bolts"], [])
 
     def test_doomwheel_fires_three_bolts_when_reloaded(self):
         wheel = unit("W", 0, 0, Side.ENEMY)

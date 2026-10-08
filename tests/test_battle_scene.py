@@ -316,6 +316,26 @@ class BattleSceneTests(unittest.TestCase):
         flawless.assert_called_once()  # paid in full, like no-battle mode
         played.assert_not_called()
 
+    def test_given_a_mission_with_objectives_when_the_win_key_is_used_then_they_decide_and_are_marked_completed(self):
+        script = {**SCRIPT, "mission": {"objectives": [["A", 2, 2], ["B", 80, 12]]}}
+        self.context.loaders["battle-script"] = lambda _record, _path: SimpleNamespace(script=script)
+        self.context.debug = True
+        scene = BattleScene()
+        machine = SceneMachine(scene, self.context)
+        machine.update(BATTLE_TICK_SECONDS)
+        self.assertIsNotNone(scene.battle.objectives)
+
+        machine.handle(("win_battle",))
+        machine.update(BATTLE_TICK_SECONDS)
+
+        self.assertIsInstance(machine.active, ResultScene)
+        self.assertEqual(scene.battle.result, "victory")
+        self.assertFalse(scene.no_battle)  # not the shortcut: the objectives did it
+        results = scene.battle.objectives.results()
+        self.assertTrue(results["A"][0] and results["B"][0])
+        self.assertFalse(results["Z"][0])
+        self.assertTrue(scene.battle.objectives.finished)  # the real final pass ran
+
     def test_given_a_battle_that_is_already_over_then_the_win_key_changes_nothing(self):
         self.context.debug = True
         scene = BattleScene()

@@ -147,6 +147,78 @@ class DeploymentPlacementTests(unittest.TestCase):
                 battle.begin_deployment_drag("player0", 100, 100)
             setattr(r, field, original)
 
+    # Facing buttons during deployment: an engine extension (notes/deployment.md §4.1, "Facing buttons").
+    def block(self, battle):
+        r = battle.regiments["player0"]
+        r.models, r.ranks = 12, 3
+        battle.order_reform("player0", 3)
+        return r
+
+    def test_given_deployment_when_facing_buttons_are_used_then_the_block_turns_at_once_about_its_centre(self):
+        for name, start, expected in (("order_turn_right", 0, 128), ("order_turn_left", 0, 384),
+                                      ("order_about_face", 0, 256), ("order_turn_right", 448, 64)):
+            with self.subTest(order=name, start=start):
+                battle = self.battle()
+                r = self.block(battle)
+                r.direction = start
+                battle.order_reform("player0", 3)
+                centre, anchor = self.centre(r), (r.x, r.y)
+                getattr(battle, name)("player0")
+                self.assertEqual(r.direction, expected)
+                self.assertEqual(self.centre(r), centre)
+                self.assertNotEqual((r.x, r.y), anchor)
+                self.assertFalse(r.reforming)
+                self.assertIsNone(r.turn_order_key)
+                self.assertEqual(sorted(r.model_positions()),
+                                 sorted(formation.place(r.x, r.y, r.direction, formation.block_slots(12, 3))))
+
+    def test_given_deployment_when_face_point_is_used_then_it_matches_a_ctrl_drag_toward_that_point(self):
+        for offset in ((100, 0), (0, -100), (-70, 70)):
+            with self.subTest(offset=offset):
+                clicked, dragged = self.battle(), self.battle()
+                a, b = self.block(clicked), self.block(dragged)
+                centre = self.centre(a)
+                clicked.order_face_point("player0", centre[0] + offset[0], centre[1] + offset[1])
+                dragged.begin_deployment_drag("player0", *centre)
+                dragged.update_deployment_drag(centre[0] + offset[0], centre[1] + offset[1], rotate=True)
+                dragged.tick()
+                self.assertEqual((a.direction, a.x, a.y), (b.direction, b.x, b.y))
+                self.assertEqual(self.centre(a), centre)
+
+    def test_given_deployment_when_face_point_hits_the_formation_centre_then_nothing_changes(self):
+        battle = self.battle()
+        r = self.block(battle)
+        before = (r.direction, r.x, r.y)
+        battle.order_face_point("player0", *self.centre(r))
+        self.assertEqual((r.direction, r.x, r.y), before)
+
+    def test_given_deployment_when_a_turn_is_used_then_a_prepared_route_is_kept(self):
+        battle = self.battle()
+        r = self.block(battle)
+        battle.order_move("player0", 800, 800)
+        battle.append_waypoint("player0", 900, 900)
+        battle.order_turn_left("player0")
+        self.assertEqual(r.waypoints, [(800, 800), (900, 900)])
+
+    def test_given_enemy_or_ineligible_regiment_then_deployment_facing_is_refused(self):
+        battle = self.battle()
+        r = battle.regiments["player0"]
+        for field, value in (("routing", True), ("held", True), ("side", Side.ENEMY), ("hud_class", None)):
+            original = getattr(r, field)
+            setattr(r, field, value)
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                battle.order_turn_right("player0")
+            setattr(r, field, original)
+        self.assertEqual(r.direction, 0)
+
+    def test_given_battle_started_then_facing_buttons_are_normal_gradual_turn_orders_again(self):
+        battle = self.battle()
+        r = self.block(battle)
+        battle.start_battle()
+        battle.order_about_face("player0")
+        self.assertEqual(r.direction, 0)
+        self.assertEqual(r.turn_order_key, ("turn", 256))
+
     def test_given_collision_at_zone_edge_then_correction_can_push_centre_outside_without_final_clamp(self):
         from whshr.engine import Regiment
         battle = self.battle([region(0, 0, 200, 200)])
@@ -467,16 +539,12 @@ class DeploymentLifecycleTests(unittest.TestCase):
         self.assertNotEqual((regiment.x, regiment.y), before)
         self.assertEqual(regiment.waypoints, [(800, 800), (900, 900)])
 
-    def test_given_deployment_when_combat_or_facing_orders_are_requested_then_they_are_rejected(self):
+    def test_given_deployment_when_combat_orders_are_requested_then_they_are_rejected(self):
         data = source(1)
         data["armies"] = [{"count": 1, "units": [unit("enemy", 129)]}]
         battle = Battle.from_script(data)
         for order in (lambda: battle.order_attack("player0", "enemy"),
-                      lambda: battle.order_halt("player0"),
-                      lambda: battle.order_turn_left("player0"),
-                      lambda: battle.order_turn_right("player0"),
-                      lambda: battle.order_about_face("player0"),
-                      lambda: battle.order_face_point("player0", 900, 900)):
+                      lambda: battle.order_halt("player0")):
             with self.subTest(order=order), self.assertRaises(ValueError):
                 order()
 

@@ -153,8 +153,8 @@ class BattleScene(Scene):
                 self.captures.append(figure_capture.FigureCapture(self.log_dir, self.battle_id.name,
                                                                   self.battle, unit_id))
         elif kind == "win_battle":
-            # Testing aid (F10, --debug runs only): finish this battle as an instant, lossless win, settled and paid
-            # like no-battle mode, so a battle can be skipped in the middle of a playthrough. Only requested here; the
+            # Testing aid (F10, --debug runs only): finish this battle as a win through its objectives (marked completed,
+            # real final pass), or as a no-battle shortcut when it has none. Only requested here; the
             # settlement happens at the start of the next simulation tick (`update`), so a live run and its replay
             # reach the same terminal tick and final snapshot.
             self.win_requested = True
@@ -330,9 +330,13 @@ class BattleScene(Scene):
             if self.win_requested:
                 self.win_requested = False
                 if self.battle.result is None:  # a battle already over stays as it is
-                    self.no_battle = True
-                    self.battle.start_battle()
-                    self.battle.resolve_no_battle()
+                    objectives = (self.field.script.get("mission") or {}).get("objectives", ())
+                    # Through the mission's own objectives when it has any (the debrief then gets their records);
+                    # a mission-less battle falls back to the no-battle shortcut.
+                    if not self.battle.win_by_objectives(objectives):
+                        self.no_battle = True
+                        self.battle.start_battle()
+                        self.battle.resolve_no_battle()
             tick_number = self.battle.update_count
             self.battle.tick(BATTLE_TICK_SECONDS)
             if self.logger is not None and self.logger.enabled:

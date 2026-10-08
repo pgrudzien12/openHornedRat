@@ -152,11 +152,11 @@ class PanelStateTests(unittest.TestCase):
 
     def test_given_deployment_then_each_class_has_only_its_documented_controls(self):
         expected = {
-            "inf": {"TL": "ranks_up", "TR": "move", "BR": "independent", "BL": "ranks_down", "C": "ranks_decoration"},
-            "arch": {"TL": "ranks_up", "TR": "move", "BR": "independent", "BL": "ranks_down", "C": "ranks_decoration"},
-            "wiz": {"TR": "move", "BR": "independent"},
-            "mon": {"TR": "move", "BR": "independent"},
-            "art": {"BR": "independent"}, None: {},
+            "inf": {"TL": "ranks_up", "TR": "move", "BR": "independent", "BL": "ranks_down", "C": "facing_subset"},
+            "arch": {"TL": "ranks_up", "TR": "move", "BR": "independent", "BL": "ranks_down", "C": "facing_subset"},
+            "wiz": {"TR": "move", "BR": "independent", "C": "facing_subset"},
+            "mon": {"TR": "move", "BR": "independent", "C": "facing_subset"},
+            "art": {"BR": "independent", "C": "facing_subset"}, None: {},
         }
         for unit_class, slots in expected.items():
             with self.subTest(unit_class=unit_class):
@@ -168,6 +168,34 @@ class PanelStateTests(unittest.TestCase):
                              "withdraw", "fight_harder", "turn_left", "face_point", "ranks_subset"):
                     self.assertIsNone(hud.press(name))
                 self.assertEqual(hud.slots(), slots)
+
+    def test_given_deployment_facing_button_then_every_class_gets_the_turn_buttons_and_back_returns(self):
+        facing = {"TL": "turn_left", "TR": "turn_right", "BL": "about_face", "BR": "face_point", "C": "back"}
+        for unit_class in ("inf", "arch", "wiz", "mon", "art"):
+            with self.subTest(unit_class=unit_class):
+                hud = _hud()
+                hud.battle.phase = "deployment"
+                hud.battle.regiments["player"].hud_class = unit_class
+                self.assertIsNone(hud.press("facing_subset"))
+                self.assertEqual(hud.panel_state(), ("deployment_facing", unit_class))
+                self.assertEqual(hud.slots(), facing)
+                for name in ("turn_left", "turn_right", "about_face"):
+                    self.assertEqual(hud.press(name), name)
+                self.assertEqual(hud.slots(), facing)  # repeatable without reopening the sub-panel
+                self.assertIsNone(hud.press("face_point"))
+                self.assertEqual(hud.pending_order, "face_point")
+                self.assertIsNone(hud.press("ranks_up"))  # not on this sub-panel
+                hud.press("back")
+                self.assertEqual(hud.panel_state(), ("deployment", unit_class))
+
+    def test_given_deployment_facing_subpanel_when_battle_starts_then_the_idle_panel_is_shown(self):
+        hud = _hud()
+        hud.battle.phase = "deployment"
+        hud.battle.regiments["player"].hud_class = "wiz"
+        hud.press("facing_subset")
+        self.assertEqual(hud.press("start_battle"), "start_battle")
+        hud.battle.start_battle()
+        self.assertEqual(hud.panel_state(), ("idle", "wiz"))
 
     def test_given_deployment_without_selection_then_start_is_available_and_no_unit_controls_are_shown(self):
         hud = _hud(selected=None)

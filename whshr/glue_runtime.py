@@ -17,6 +17,7 @@ from .debrief_rules import STATUS_BIT_VICTORY_WITHOUT_C, STATUS_BIT_VICTORY_WITH
 from .glue_animation import GlueBitmapAnimator
 from .glue import AnimRecord, BitmapRecord, GlueInstruction, MissionRecord, MissionRef
 from .glue_content import GlueContent
+from .payments import parse_cash
 from .speech import clip_milliseconds
 from .portraits import PORTRAIT_SPRITES, SPEAKER_INDEX, PortraitAnimator
 
@@ -630,6 +631,17 @@ class GlueRuntime:
         else:
             self.campaign.enable_book(book, index)
 
+    def _set_mission_cash(self, argument: str, effects: list[GlueEffect]) -> None:
+        """``cash:type,initial,completion,rateA,rateB,letters`` inside a running script: the payment program of the
+        mission in progress (the same line a mission record carries, notes/campaign.md 2.5)."""
+        terms = parse_cash(argument)
+        if terms is None:
+            effects.append(Diagnostic("cash", f"invalid payment line {argument!r}"))
+        elif self.campaign is None:
+            effects.append(Diagnostic("cash", "campaign runtime is unavailable"))
+        else:
+            self.campaign.set_mission_cash(terms)
+
     def _add_cash(self, argument: str, effects: list[GlueEffect]) -> None:
         amount = self._parse_int(argument, None)
         if amount is None:
@@ -842,6 +854,8 @@ class GlueRuntime:
             self.state.gomissionselect_pending = True
         elif command in ("testforunitinarmy", "testforunitinmarch"):
             self._test_unit_membership(command, argument, effects)
+        elif command == "cash":
+            self._set_mission_cash(argument, effects)
         elif command in ("addcash", "iftrueaddcash"):
             if command == "addcash" or self._condition():
                 self._add_cash(argument, effects)

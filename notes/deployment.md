@@ -257,13 +257,25 @@ waypoint orders; direct dragging, rank changes and Independent are separate acti
 | Magic / spell casting | Unavailable | Unavailable | Unavailable | No pre-battle spell command. |
 | Items / special-item panel | Unavailable | Unavailable | Unavailable | Not offered in the deployment panel. |
 | Halt command | Unavailable | Unavailable | Unavailable | Starting a drag or Move targeting may halt/re-form as part of that action; no separate Halt button. |
-| Turn left / right, about-face, face-point button | Unavailable | Unavailable | Unavailable | Use Ctrl-drag to set facing; do not expose the battle facing sub-panel. |
+| Turn left / right, about-face, face-point button | Unavailable | Unavailable | Unavailable | Use Ctrl-drag to set facing; do not expose the battle facing sub-panel. *Engine extension: available, see "Facing buttons" below.* |
 | Normal rank/facing sub-panels | Unavailable | Unavailable | Unavailable | Block regiments have direct rank buttons instead. |
 | Withdraw | Unavailable | Unavailable | Unavailable | No pre-battle withdrawal/rout order. |
 | Rally | Unavailable | Unavailable | Unavailable | No pre-battle rally order. |
 | Fight harder | Unavailable | Unavailable | Unavailable | No pre-battle combat-effort command. |
 | Multi-selection with Shift | Unavailable | Unavailable | Unavailable | Deployment selection stays singular. |
 | Undo previous placements | Unavailable | Unavailable | Unavailable | Release, right-click and Esc do not restore an earlier placement. |
+
+**Facing buttons (engine extension, not original parity).** The original offers facing during
+deployment only through Ctrl-drag. Our engine additionally shows a facing button in the centre slot of
+every deployment panel (infantry, archers, wizards, monsters, artillery; for infantry and archers it
+replaces the rank decoration). It opens a sub-panel with turn left, turn right, about-face, face-point
+and Back. During deployment these turns are immediate placement edits, not queued battle orders: the
+regiment takes the new facing at once (±128, +256, or the bearing from its formation centre to the
+clicked point), pivoting about its stationary formation centre exactly like a Ctrl-drag, then receives
+the same collision correction and immediate layout snap. A prepared Move route is kept. Face-point on
+the formation centre itself does nothing. Refusals follow direct dragging (only an active, unbroken,
+unheld own regiment of a panel class). After battle start the buttons are the ordinary gradual turn
+orders again, and the HUD returns to the idle panel.
 
 The rank-display decoration in the centre slot is **not an action**. Selecting an enemy
 for inspection does not grant any deployment control over it. Classes outside these panel
