@@ -1109,11 +1109,7 @@ class Battle:
         if half_x == 0 and half_y == 0:
             return
         if drag.rotate:
-            goal = round(math.atan2(dx, dy) * 512 / math.tau) % 512
-            shift_x, shift_y = formation.turn_pivot_shift(regiment.direction, goal, regiment.models, regiment.ranks)
-            regiment.direction = goal
-            regiment.x += shift_x
-            regiment.y += shift_y
+            self._pivot_about_centre(regiment, round(math.atan2(dx, dy) * 512 / math.tau) % 512)
         else:
             matching = next((region for region in self.deployment_regions if region.contains(drag.target)), None)
             switched = matching is not None and matching is not self.deployment_region
@@ -1124,6 +1120,18 @@ class Battle:
                 proposed = self.deployment_region.clip((base[0] + half_x, base[1] + half_y))
                 regiment.x += proposed[0] - old[0]
                 regiment.y += proposed[1] - old[1]
+        self._settle_deployment_placement(regiment)
+
+    @staticmethod
+    def _pivot_about_centre(regiment: Regiment, goal: int) -> None:
+        """Face `goal` at once, the block swinging about its stationary formation centre (notes/deployment.md §3)."""
+        shift_x, shift_y = formation.turn_pivot_shift(regiment.direction, goal, regiment.models, regiment.ranks)
+        regiment.direction = goal
+        regiment.x += shift_x
+        regiment.y += shift_y
+
+    def _settle_deployment_placement(self, regiment: Regiment) -> None:
+        """Collision correction, then the immediate deployment layout of a placed or turned regiment."""
         # Correction deliberately follows clipping, without a final zone clamp (§2).
         for _ in range(10):
             before = (regiment.x, regiment.y)
@@ -1140,6 +1148,24 @@ class Battle:
         regiment.positions = formation.place(regiment.x, regiment.y, regiment.direction, slots)
         regiment.reforming = False
         regiment.reform_slots = []
+
+    def _deployment_turn(self, identifier: str, goal: Callable[[Regiment], int | None]) -> bool:
+        """Engine extension, not original parity (notes/deployment.md §4.1, "Facing buttons"): during
+        deployment the turn-left/right, about-face and face-point buttons set facing at once, exactly as a
+        Ctrl-drag does - the block pivots about its formation centre and its layout snaps. Returns False
+        outside deployment so the caller issues the normal battle turn order. `goal` may return None for
+        a turn with no direction (face-point on the formation centre), which changes nothing."""
+        if self.phase != "deployment":
+            return False
+        regiment = self.regiments[identifier]
+        if (regiment.side != Side.PLAYER or not regiment.active or regiment.routing or regiment.held
+                or regiment.hud_class not in {"inf", "arch", "wiz", "mon", "art"}):
+            raise ValueError("regiment cannot be turned during deployment")
+        new_direction = goal(regiment)
+        if new_direction is not None:
+            self._pivot_about_centre(regiment, new_direction % 512)
+            self._settle_deployment_placement(regiment)
+        return True
 
     def _require_battle_order(self) -> None:
         if self.phase == "deployment":
@@ -1570,6 +1596,8 @@ class Battle:
 
     def order_turn_left(self, identifier: str) -> None:
         """Rotate a player regiment 90° counter-clockwise in place (game_rules.md, opcodes 0x0C)."""
+        if self._deployment_turn(identifier, lambda r: round((r.direction or 0) - 128)):
+            return
         regiment = self._check_turn_order(identifier)
         goal = (regiment.direction - 128) % 512
         self._plan_turn_order(regiment, goal)
@@ -1580,6 +1608,8 @@ class Battle:
 
     def order_turn_right(self, identifier: str) -> None:
         """Rotate a player regiment 90° clockwise in place (game_rules.md, opcodes 0x0D)."""
+        if self._deployment_turn(identifier, lambda r: round((r.direction or 0) + 128)):
+            return
         regiment = self._check_turn_order(identifier)
         goal = (regiment.direction + 128) % 512
         self._plan_turn_order(regiment, goal)
@@ -1590,6 +1620,8 @@ class Battle:
 
     def order_about_face(self, identifier: str) -> None:
         """Rotate a player regiment 180° in place (game_rules.md, opcodes 0x0E)."""
+        if self._deployment_turn(identifier, lambda r: round((r.direction or 0) + 256)):
+            return
         regiment = self._check_turn_order(identifier)
         goal = (regiment.direction + 256) % 512
         self._plan_turn_order(regiment, goal)
@@ -1600,6 +1632,8 @@ class Battle:
 
     def order_face_point(self, identifier: str, x: float, y: float) -> None:
         """Turn a player regiment to face world coordinates (x, y) in place."""
+        if self._deployment_turn(identifier, lambda r: self._bearing_from_centre(r, x, y)):
+            return
         regiment = self._check_turn_order(identifier)
         dx, dy = x - regiment.x, y - regiment.y
         if math.hypot(dx, dy) < 1e-9:
@@ -1612,6 +1646,14 @@ class Battle:
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
         regiment.route_speed = 0.0
+
+    def _bearing_from_centre(self, regiment: Regiment, x: float, y: float) -> int | None:
+        """Facing toward (x, y) from the formation centre, by the Ctrl-drag rule; None on the centre itself."""
+        centre = self.formation_centre(regiment)
+        dx, dy = x - centre[0], y - centre[1]
+        if math.hypot(dx, dy) < 1e-9:
+            return None
+        return round(math.atan2(dx, dy) * 512 / math.tau) % 512
 
     @staticmethod
     def begin_script_turn(regiment: Regiment, goal: float) -> None:
