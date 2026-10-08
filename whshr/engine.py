@@ -1731,6 +1731,7 @@ class Battle:
             # long as the re-form is in progress".
             # notes/reform_while_moving.md 2: not in the Rally's walk-back mode.
             move_scale = scale * (0.5 if regiment.reforming and not regiment.reform_walk_back else 1.0)
+            latch_snapshot = self._latch_snapshot(regiment, state)
             if regiment.in_melee:
                 regiment.turn_order_key = regiment.turn_mode = None
                 pass  # frozen in place while fighting; the view shows the attack animation instead
@@ -1804,6 +1805,8 @@ class Battle:
             else:
                 regiment.turn_order_key = regiment.turn_mode = None
                 regiment.route_pause_ticks = 0
+            if latch_snapshot is not None:
+                moved = self._resolve_latched_step(regiment, state, latch_snapshot) and moved
             if regiment.in_melee or not (regiment.routing or regiment.attack_target or regiment.moving):
                 regiment.route_speed = 0.0
             if regiment.attack_target is None and not regiment.in_melee:
@@ -1820,6 +1823,43 @@ class Battle:
                 models_catching_up = self._advance_models(regiment, scale)
             regiment.walking = moved or models_catching_up
             self._step_animations(regiment)
+
+    def _latch_snapshot(self, regiment: Regiment, state: interpreter.UnitScriptState | None
+                        ) -> tuple[float, float, float, list[Point]] | None:
+        """The pose to restore if a latched unit's step is undone (notes/script_behaviours.md 2.5). Only a unit that
+        holds the contact latch and is not in melee, routing or pursuing moves under the latch rule."""
+        if (state is None or not state.contact_latch or regiment.in_melee or regiment.routing
+                or regiment.pursuing):
+            return None
+        return regiment.x, regiment.y, regiment.direction, list(regiment.positions)
+
+    def _resolve_latched_step(self, regiment: Regiment, state: interpreter.UnitScriptState | None,
+                              snapshot: tuple[float, float, float, list[Point]]) -> bool:
+        """Latch lifecycle for movement (notes/script_behaviours.md 2.5): a latched charger does not advance; an
+        ordinary move or turn that still overlaps something afterwards is undone and the unit halts and re-forms; a
+        step that leaves nothing overlapping stands and the latch goes off. Returns whether the unit still moved.
+        PROVISIONAL: "overlaps something" is any active, visible regiment it may engage whose footprint it
+        penetrates (the push-apart table for other footprint kinds, 2.2, is not modelled)."""
+        if state is None:
+            return True
+        charging = regiment.attack_target is not None
+        if not charging and (regiment.x, regiment.y, regiment.direction) == snapshot[:3]:
+            return False
+        if not charging and not self._overlaps_anything(regiment):
+            state.contact_latch = False
+            return True
+        regiment.x, regiment.y, regiment.direction, regiment.positions = snapshot
+        if not charging:
+            regiment.target_x = regiment.target_y = None
+            regiment.waypoints = []
+            regiment.turn_order_key = regiment.turn_mode = None
+            self.reform_to_ranks(regiment, regiment.ranks)
+        return False
+
+    def _overlaps_anything(self, regiment: Regiment) -> bool:
+        return any(other is not regiment and other.active and not other.hidden and not other.routing
+                   and may_engage(regiment, other) and formation.penetrates(regiment.block(), other.block())
+                   for other in self.regiments.values())
 
     @staticmethod
     def turn_to(regiment: Regiment, direction: float) -> None:
@@ -2434,6 +2474,8 @@ class Battle:
         self.events.append(BattleEvent(
             f"{regiment.name} completes its re-form.", "reform_complete",
             regiment=regiment.identifier))
+        # notes/movement_formation.md 1.2, 9: the unit sends itself event 0x34 when its models have settled.
+        self.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x34))
         return False
 
     def _step_dying(self, regiment: Regiment) -> None:

@@ -20,7 +20,7 @@ import random
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from . import animation, behaviour, buildings, combat, magic, nodes, spell_effects, visibility
+from . import animation, behaviour, buildings, combat, formation, magic, nodes, spell_effects, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import Side, side_of_code
@@ -398,8 +398,8 @@ class ScriptInterpreter:
         that moved or charged this tick (PROVISIONAL stand-in for the collision re-check state) runs the
         fear-on-contact test and, unless latched, gets event 0x0B (checked) with the other unit as its contact
         record; a troops regiment touched gets the reciprocal 0x0B. Marked units are not touched at all. A latched
-        unit that touches nothing any more is released. Not modelled: push-apart (the engine's own), contact
-        attacks on routers, wagon event 0x27 and the latched-move rollback."""
+        unit that touches nothing any more is released; a latched unit's movement is rolled back by the engine (Battle._resolve_latched_step);
+        wagon event 0x27 is raise_wagon_collisions. Not modelled: push-apart (the engine's own), contact attacks on routers."""
         touching: set[str] = set()
         for first, second in contacts:
             if self._leaving(first) or self._leaving(second):
@@ -417,6 +417,18 @@ class ScriptInterpreter:
         for unit_id, state in self.event_bus.unit_states.items():
             if state.contact_latch and unit_id not in touching:
                 state.contact_latch = False
+
+    def raise_wagon_collisions(self, regiments: list["Regiment"]) -> None:
+        """Event 0x27 (notes/script_behaviours.md 2.2): a wagon that moved this tick and overlaps a footprint of any
+        kind (any side, any unit type) within +-45 degrees of its facing is sent 0x27 (checked, no source), once per
+        tick. Units leaving the battle are not touched. Not modelled: building footprints, which are not units."""
+        for wagon in regiments:
+            if not wagon.is_wagon or self._leaving(wagon) or not self._rechecks(wagon):
+                continue
+            if any(other is not wagon and not other.hidden and not self._leaving(other)
+                   and formation.penetrates(wagon.block(), other.block()) and self._in_arc(wagon, other)
+                   for other in regiments):
+                self.event_bus.queue_event(wagon.identifier, Event(code=0x27), checked=True)
 
     @staticmethod
     def _rechecks(unit: "Regiment") -> bool:
@@ -1846,7 +1858,7 @@ class ScriptInterpreter:
         with no target unit, while re-forming, anchored or held (notes/movement_formation.md 3.1,
         notes/script_spawn_move.md 6). The destination is fixed until re-issued or re-aimed by
         IfTargetInChargeReach/ApproachTargetInReach. PROVISIONAL: the original follows the unit and never
-        ends this move by distance; this engine's ordinary arrival rule still applies (it posts no 0x34)."""
+        ends this move by distance; this engine's ordinary arrival rule still applies (the re-form that follows posts 0x34)."""
         pair = self._query_pair(state, unit_id)
         unit = pair[0] if pair else None
         state.cond_flags = False
@@ -3305,7 +3317,7 @@ class ScriptInterpreter:
 
     def _query_wander(self, state: UnitScriptState, unit: "Regiment", rng: random.Random) -> bool:
         """Case 17: turn by 128 - trunc(rand(512) / 2), jump (rand(4) + 4) x 12 along the new heading (the
-        models stay) and re-form. Not modelled: the re-form end event 0x34 that repeats it."""
+        models stay) and re-form; the re-form's end event 0x34 repeats it."""
         unit.direction = (int(unit.direction) + 128 - rng.randrange(512) // 2) % 512
         step = (rng.randrange(4) + 4) * 12
         angle = unit.direction * math.tau / 512
