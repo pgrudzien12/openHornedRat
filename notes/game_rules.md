@@ -851,8 +851,9 @@ The key visibility constants are recorded here for implementers.
   along it. `0xB0` routes and fanatic jumps, `0x200` `SightEdge` (spotting only), `8`
   `ViewEdge` and `0x40` `CameraEdge` (camera only), `0x20` leaving the table, `0x90` the rout probe.
 - **Collisions** (`ResolveUnitCollisions`, once per tick): every overlapping pair of footprints
-  or objects is resolved. **Friendly units and solid scenery push apart** by half the overlap each
-  (circle-circle resolution; a charging unit hitting something within its 45°
+  or objects is resolved. **Friendly units and solid scenery push apart**: the unit whose
+  pass finds the overlap moves itself away by half the overlap plus one unit; a friendly unit it overlaps moves itself
+  in its own pass (`script_behaviours.md` §2.2 "Push apart, exactly"; circle-circle resolution; a charging unit hitting something within its 45°
   front arc ends the charge, event 0x09). **Enemy contact** engages (fear test, charge, redirect, rout: section
   5.5 and 7.3); contact with a routing unit makes automatic contact attacks (section 7.7). An `INVSOLID` object
   straight ahead sends event 0x27. There is no sub-tick sweep, so fast units can briefly overlap.
