@@ -406,7 +406,7 @@ _PC_LOADS.update({b'\x66\x8b' + bytes([modrm]) + struct.pack('<I', VA_PC): reg
 _PC_PREINCREMENT = b'\x66\xff\x05' + struct.pack('<I', VA_PC)   # inc word [pc]
 
 
-def handler_returns(gamef):
+def handler_returns(gamef: PeImage) -> dict[int, tuple[set[int], bool]]:
     """Re-derives the 'return PC + n' increments of every handler from GAMEF.DLL.
 
     Recognises ``mov r16, [pc]`` followed (after pops or ``add esp, imm8``) by ``add r16, imm8``,
@@ -450,7 +450,7 @@ def handler_returns(gamef):
     return result
 
 
-def check_lengths(gamef):
+def check_lengths(gamef: PeImage) -> tuple[list[str], int]:
     """Compares LENGTHS with the handler code; returns (failures, number of opcodes confirmed)."""
     failures, confirmed = [], 0
     for opcode, (increments, preincrement) in handler_returns(gamef).items():
@@ -465,7 +465,7 @@ def check_lengths(gamef):
 
 # ---------------------------------------------------------------- checks
 
-def check(installation):
+def check(installation: str | PathLike[str]) -> bool:
     """Decodes every script of every mission DLL and cross-checks the battles. Prints one summary line."""
     game = Installation(installation)
     failures = []
@@ -532,11 +532,11 @@ def check(installation):
     return not failures
 
 
-def _script_values(path):
+def _script_values(path: Path) -> set[str]:
     """Distinct set:script= values of the unit blocks of a .BTS file."""
     values = set()
 
-    def walk(node):
+    def walk(node: script.Node) -> None:
         value = node['set'].get('script')
         if value is not None and node['kind'] in ('addunit', 'addleader'):
             values.add(str(value).strip())
@@ -558,7 +558,9 @@ def _find_dll(installation, name):
     raise FileNotFoundError(name)
 
 
-def main(installation, dll=None, ids=None, name_files=None):
+def main(installation: str | PathLike[str], dll: str | None = None,
+         ids: Sequence[str] | None = None,
+         name_files: Iterable[str | PathLike[str]] | None = None) -> int:
     names = load_names(name_files)
     if dll is None:
         for path in script_dlls(installation):
