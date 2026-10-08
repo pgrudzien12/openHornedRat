@@ -388,7 +388,7 @@ class Regiment:
         machine), or None while there is none: it died, the unit has no leader block, or the machine was destroyed
         (notes/script_animation_sound.md 2.3, notes/script_queries.md B3). A war machine without a leader block
         keeps its machine in the first rank slot."""
-        if not self.melee_models or (self.anchored and not self.machine_alive):
+        if not self.melee_models or not self.machine_alive:
             return None
         self._assign_leader()
         if self.leader_uid is not None:
@@ -2665,7 +2665,8 @@ class Battle:
         # 0.1); a model's own request beats it for one update (0.2).
         if regiment.script_action and regiment.script_action_key != regiment.activity_key():
             regiment.script_action = 0
-        machine_index = regiment.leader_model_index  # a war machine's volley is the machine model alone
+        # A war machine's volley is the machine (leader) model alone; other special shooters use the first model.
+        shooter_index = regiment.leader_model_index if regiment.hud_class == "art" else 0
         for model_index, model in enumerate(regiment.melee_models):
             if model.own_request:
                 requested, model.own_request = model.own_request, 0
@@ -2673,7 +2674,7 @@ class Battle:
                 requested = regiment.script_action
             elif regiment.in_melee:
                 requested = animation.FIGHT if model.opponent is not None else animation.WEAPON_READY
-            elif regiment.volley_countdown is not None and (regiment.hud_class != "art" and not special_shot or model_index == machine_index):
+            elif regiment.volley_countdown is not None and (regiment.hud_class != "art" and not special_shot or model_index == shooter_index):
                 requested = animation.SHOOT
             elif not model.at_rest:
                 requested = animation.WALK

@@ -194,6 +194,17 @@ class NodeManningReadinessTests(SeamTestCase):
         self.assertEqual(set(poses), {machine})  # no crewman takes the shoot pose
         self.assertEqual(set(gun.fire_post_positions), {gun.positions[machine]})
 
+    def test_a_special_shooter_without_a_leader_still_fires_from_the_first_model(self):
+        dragon = shooter("drake", 0, 0, models=3, cls="inf", unit_class=1)
+        dragon.shooting_code = 14  # a special shot (innate weapon) from a non-artillery unit
+        self.make(dragon)
+        dragon.model_positions()
+        self.assertIsNone(dragon.leader_model_index)
+        dragon.volley_countdown = 1
+        for _ in range(12):
+            self.battle._step_animations(dragon)
+        self.assertEqual(set(dragon.fire_post_positions), {dragon.positions[0]})
+
     def test_ready_to_fire_and_its_messages(self):
         gun = shooter("gun", 0, 0, code=11, models=3, cls="art", unit_class=4)
         self.make(gun)

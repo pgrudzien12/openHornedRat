@@ -281,6 +281,14 @@ class UnitTestOpcodeTests(QueryTestCase):
         self.assertTrue(self.s.models > 0)
         self.assertTrue(self.call("IfMachineDestroyed"))  # the leader died, the unit did not
 
+    def test_if_machine_destroyed_after_a_misfire_destroyed_the_machine_but_not_its_leader_model(self):
+        self.make()
+        self.s.has_leader = True
+        self.s.model_positions()
+        self.s.machine_alive = False  # a destructive misfire also clears the anchor
+        self.assertIsNone(self.s.leader_model_index)
+        self.assertTrue(self.call("IfMachineDestroyed"))
+
     def test_if_objective_tests_the_battle_file_letters(self):
         self.make()
         self.battle.objective_letters = frozenset("AG")
