@@ -61,6 +61,16 @@ class ObjectiveWinTests(unittest.TestCase):
         battle.result = None
         self.assertFalse(battle.win_by_objectives())
 
+    def test_the_decision_message_cue_and_result_survive_the_next_tick(self):
+        battle, _, _ = battle_with([["A", 20, 1]])
+        battle.win_by_objectives([["A", 20, 1]])
+
+        battle.tick()  # the settlement tick replaces `events` with the pending feedback
+
+        kinds = [event.kind for event in battle.events]
+        for expected in ("objective_decided", "message", "sound", "result"):
+            self.assertIn(expected, kinds)
+
     def test_the_final_pass_runs_once(self):
         battle, _, _ = battle_with([["A", 20, 1]])
         battle.win_by_objectives([["A", 20, 1]])

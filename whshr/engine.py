@@ -1450,12 +1450,17 @@ class Battle:
         if self.objectives is None or self.result is not None:
             return False
         self.start_battle()
+        mark = len(self.events)
         for regiment in self.regiments.values():
             if regiment.side == Side.ENEMY:
                 regiment.models = 0
         self.objectives.complete(self, entries)
         self.objectives.tent = True  # the tent is offered even if no letter decided the battle
         self.leave()
+        # The next tick replaces `events` with the pending feedback: carry the decision message, speech cue and
+        # result over so they are shown and logged.
+        self.pending_feedback.extend(self.events[mark:])
+        del self.events[mark:]
         return True
 
     def resolve_no_battle(self) -> None:
