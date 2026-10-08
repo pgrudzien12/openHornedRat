@@ -137,7 +137,8 @@ target's map object (centre C, bounding radius r = box half-diagonal, facing f_t
   `P = C + (trunc(SIN[a] × r / 256), trunc(COS[a] × r / 256))`. `SIN`/`COS` are the game's 512-entry tables,
   `trunc(256 × sin/cos(2π a / 512))`, and the divisions truncate toward zero. 🟡 The product `SIN[a] × r` is held in
   16 bits, so it wraps for r > 127. That needs a block of about 20 × 4 or larger and does not occur in practice.
-- **Other targets** (war machine, monster, wagon footprints): **P = C**, the target's centre.
+- **Other targets** (war machine, monster, wagon footprints, and **building** pseudo-units): **P = C**, the target's
+  centre (`building_units.md` §6).
 
 The reach distance is
 
