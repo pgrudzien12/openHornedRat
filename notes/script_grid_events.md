@@ -3,7 +3,8 @@
 Public implementation report, batch 9 of the interpreter requests (GitHub #3), part 1 of 3 (companions: `script_spawn_move.md`, `script_shooting.md`). Behaviour only; states by name, numbers only for script operands, event codes and battle-file data.
 
 
-Opcodes: `TakeEventTarget` (three opcodes: 0x3A, 0x88, 0xAF), `FearWhenCharged` 0x42, `ChargeForward` 0x4F,
+Opcodes: `TakeEventTarget` 0x3A, `TakeRangedEventTarget` 0x88, `TakeSpellEventTarget` 0xAF,
+`FearWhenCharged` 0x42, `ChargeForward` 0x4F,
 `CheckCollisions` 0xC7, `SwitchOpponentInGrid` 0x55. All are 1 word, no operand.
 
 Shipped uses (all 45 mission DLLs, library counted in every DLL): 0x3A 276, 0x88 450, 0xAF 315 (1041 together),
@@ -21,18 +22,18 @@ point P, final waypoint); `unit_script_control.md` (condition, LIFO queue, defer
 
 | State | Who reads / writes it here |
 |---|---|
-| **current target** (= engaged enemy; one slot) | `TakeEventTarget` (unit branch writes it; ground branch clears it), `FearWhenCharged` (writes it only if empty), `SwitchOpponentInGrid` (replaces it), contact fear in `CheckCollisions` (writes it) |
-| **pending spell** (a code; any value ≤ 0 counts as *none*) | `TakeEventTarget` **always** overwrites it with the event's argument |
-| **target point** | `TakeEventTarget` ground branch |
-| **braced** (the order-blocking state of `game_rules.md` "Braced"; orders are refused while braced) | cleared by `TakeEventTarget` when it accepts a named unit; nothing else here touches it |
+| **current target** (= engaged enemy; one slot) | target-taking family (unit branch writes it; ground branch clears it), `FearWhenCharged` (writes it only if empty), `SwitchOpponentInGrid` (replaces it), contact fear in `CheckCollisions` (writes it) |
+| **pending spell** (a code; any value ≤ 0 counts as *none*) | target-taking family **always** overwrites it with the event's argument |
+| **target point** | target-taking family ground branch |
+| **braced** (the order-blocking state of `game_rules.md` "Braced"; orders are refused while braced) | cleared by the target-taking family when it accepts a named unit; nothing else here touches it |
 | **fear-passed** (game_rules psychology "fear test passed: spares further fear tests until the next charge clears it") | cleared by `FearWhenCharged` (when its gate passes) and by a successful `ChargeForward` (and `ChargeTarget`); set by a passed fear test |
-| **final waypoint** | `TakeEventTarget` unit branch replaces it with the aim point P (`target_queries.md` §5.1/§5.3) |
+| **final waypoint** | target-taking family unit branch replaces it with the aim point P (`target_queries.md` §5.1/§5.3) |
 | **condition** | written by every opcode here except `SwitchOpponentInGrid` when the unit is not in melee |
 | **deferred script switch** | not written by these opcodes, but the idioms below depend on it: `SwitchScript`/`IfSwitchScript` record a pending switch that a **later** `SwitchScript` in the same handler pass **overwrites**; only `IfSwitchScriptHigh` locks it (`unit_script_control.md` §1/§6) |
 
 Event record (`threat_events_nodes.md` §0.2): recipient, code, **source unit** (or none), **argument**, **point x, y**.
 The argument and point that the game's order code puts in each event kind are listed in §1.3 — they matter because
-`TakeEventTarget` copies the argument into the pending spell unconditionally.
+the target-taking family copies the argument into the pending spell unconditionally.
 
 Unit states used by name: **charging**, **in melee**, **broken**, **pursuing** (set only by the start of a pursuit,
 `game_rules.md` "Charging flag … Pursuing flag"), **braced**, **busy casting** (= `IfCasting`'s definition,
@@ -40,7 +41,7 @@ Unit states used by name: **charging**, **in melee**, **broken**, **pursuing** (
 
 ---
 
-## 1. `TakeEventTarget` — 0x3A, 0x88, 0xAF
+## 1. Target-taking family — `TakeEventTarget` 0x3A, `TakeRangedEventTarget` 0x88, `TakeSpellEventTarget` 0xAF
 
 ### 1.1 One rule, one switch
 
@@ -52,8 +53,9 @@ The three opcodes run the same procedure. The only difference is a **"refuse bro
 | **0x88** | no | shooter handlers library 154 (artillery) and 156 (archers), events 0x1E–0x21, 0x24, 0x25 (450) |
 | **0xAF** | no | wizard handler library 155, events 0x28–0x2B, 0x2E, 0x2F; library 152 event 0x2D (item) (315) |
 
-0x88 and 0xAF are behaviourally identical (`game_rules.md` R59: "same helper, different arguments" — the
-different argument is only 0x3A's switch).
+0x88 (`TakeRangedEventTarget`) and 0xAF (`TakeSpellEventTarget`) are behaviourally identical;
+0x3A (`TakeEventTarget`) additionally refuses a broken named unit. The three names distinguish
+their shipped uses in disassembly and logs, while the engine uses one shared handler rule.
 
 ### 1.2 Procedure
 

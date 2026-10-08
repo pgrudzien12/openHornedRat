@@ -283,7 +283,7 @@ When the result is true:
 
 When false: no side effect. Shipped operand pairs: **`0 0`** (176 uses; library 103 cases 3/4/6 and 155 case 10:
 "ignore threats, new targets, being charged while casting") and **`1 1`** (44 uses; library 155 case 43 = event
-0x2B, the cast order: busy → message + re-enable, else `TakeEventTarget; GosubScript 132; Restart`).
+0x2B, the cast order: busy → message + re-enable, else `TakeSpellEventTarget; GosubScript 132; Restart`).
 
 ### 3.3 `TurningToCastMessage flag` (0x8A, 2 words)
 
@@ -310,7 +310,7 @@ magic batch).
 ### 3.5 Worked example: the player's cast order (library 155 → 132 → 141 → 142 → 133)
 
 ```
-155 CaseEvent 43 (0x2B): IfCasting 1 1; IfNot  TakeEventTarget; GosubScript 132; Restart  EndIf
+155 CaseEvent 43 (0x2B): IfCasting 1 1; IfNot  TakeSpellEventTarget; GosubScript 132; Restart  EndIf
 132: TestUnitFlags2 8 (held) ...; PendingInRangeArc 1 → GosubScript 142
      else PendingInRange 0 → (in melee? DropPendingSpell : TurningToCastMessage 0; GosubScript 141;
                               PlayLeaderAnimation 7 44)
