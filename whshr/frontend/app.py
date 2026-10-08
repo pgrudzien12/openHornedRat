@@ -108,7 +108,8 @@ def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), 
         frame_time: float | None = None, battle: str | None = None, camera: Sequence[float] | None = None,
         log_dir: str | PathLike[str] | None = None, seed: int = DEFAULT_SEED, glue_program: str | None = None,
         save_dir: str | PathLike[str] | None = None, no_battle: bool = False,
-        campaign_log_dir: str | PathLike[str] | None = None, profile_frames: bool = False) -> dict[str, Any]:
+        campaign_log_dir: str | PathLike[str] | None = None, profile_frames: bool = False,
+        debug: bool = False) -> dict[str, Any]:
     """Run the game until the window closes, or for ``frames`` frames when given.
 
     ``frame_time`` replaces the measured wall-clock frame duration, so a capture after a number of frames
@@ -129,7 +130,7 @@ def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), 
         # A hidden run is a development/test capture (--frames, --screenshot); it has no listener
         # and should not play audio through the machine's real device while running unattended.
         os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
-    context = scene_context(installation, save_dir=save_dir, no_battle=no_battle)
+    context = scene_context(installation, save_dir=save_dir, no_battle=no_battle, debug=debug)
     audio_settings.configure(context.save_dir)
     context.battle_log_dir = log_dir
     context.battle_seed = seed

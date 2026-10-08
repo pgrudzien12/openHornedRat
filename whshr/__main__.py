@@ -139,6 +139,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     engine_parser.add_argument("--no-battle", action="store_true",
                                help="skip battle simulation: every battle settles as an immediate, "
                                     "lossless win, so campaign progression can be walked through quickly")
+    engine_parser.add_argument("--debug", action="store_true",
+                               help="enable the testing keys: F10 wins the current battle at once")
     viewer_parser = commands.add_parser("viewer", help="render a static 3D battle scene to PNG")
     viewer_parser.add_argument("installation", type=Path, help="WARFB installation directory")
     viewer_parser.add_argument("battle", help="BTS filename or path")
@@ -251,7 +253,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = app.run(args.installation, (args.width, args.height), args.skip_intro, args.hidden,
                          args.frames, args.screenshot, args.frame_time, args.battle, args.camera,
                          log_dir, args.seed, args.glue_program, resolve_save_dir(args.save_dir), args.no_battle,
-                         None if args.no_campaign_log else args.campaign_log, args.profile_frames)
+                         None if args.no_campaign_log else args.campaign_log, args.profile_frames, debug=args.debug)
         print(f"{result['frames']} frames, {result['ticks']} ticks, final scene {result['scene']}")
         return 0
     if args.command == "viewer":

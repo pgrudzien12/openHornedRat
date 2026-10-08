@@ -265,7 +265,20 @@ class BattleSceneTests(unittest.TestCase):
         self.assertIs(machine.active, glue)
         self.assertEqual(glue.take_effects(), (EndGame(),))
 
+    def test_given_no_debug_mode_then_the_win_key_does_nothing(self):
+        self.context.debug = False
+        scene = BattleScene()
+        machine = SceneMachine(scene, self.context)
+        machine.update(BATTLE_TICK_SECONDS)
+
+        machine.handle(("win_battle",))
+        machine.update(BATTLE_TICK_SECONDS)
+
+        self.assertIs(machine.active, scene)
+        self.assertIsNone(scene.battle.result)
+
     def test_given_a_running_battle_when_the_win_key_is_used_then_it_ends_at_once_as_a_lossless_victory(self):
+        self.context.debug = True
         scene = BattleScene()
         machine = SceneMachine(scene, self.context)
         machine.update(BATTLE_TICK_SECONDS)
@@ -281,6 +294,7 @@ class BattleSceneTests(unittest.TestCase):
                 self.assertIn("16/16", line)
 
     def test_given_a_campaign_battle_when_the_win_key_is_used_then_the_flow_resumes_with_a_flawless_win(self):
+        self.context.debug = True
         self.context.glue = GlueContent.from_data(resources={
             "FLOW": "[RUN]\n[START]\nplaygame:bf001\nendgame:\n[END]",
         })
@@ -303,6 +317,7 @@ class BattleSceneTests(unittest.TestCase):
         played.assert_not_called()
 
     def test_given_a_battle_that_is_already_over_then_the_win_key_changes_nothing(self):
+        self.context.debug = True
         scene = BattleScene()
         machine = SceneMachine(scene, self.context)
         machine.update(BATTLE_TICK_SECONDS)

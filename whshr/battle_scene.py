@@ -144,8 +144,9 @@ class BattleScene(Scene):
                                                                   self.battle, unit_id))
         elif kind == "win_battle":
             # Testing aid (F10): finish this battle as an instant, lossless win, settled and paid like no-battle
-            # mode, so a battle can be skipped in the middle of a playthrough. A battle already over stays as it is.
-            if self.battle.result is None:
+            # mode, so a battle can be skipped in the middle of a playthrough. Only with --debug; a battle already
+            # over stays as it is.
+            if getattr(context, "debug", False) and self.battle.result is None:
                 self.no_battle = True
                 self.battle.start_battle()
                 self.battle.resolve_no_battle()

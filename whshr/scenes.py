@@ -71,6 +71,8 @@ class SceneAssets:
     # No-battle mode: BattleScene settles every battle it enters as an immediate, lossless win
     # instead of simulating it, so the campaign can be walked through quickly.
     no_battle: bool = False
+    # Debug mode (--debug): enables the testing keys, e.g. F10 wins the current battle (BattleScene "win_battle").
+    debug: bool = False
     # Optional whshr.campaign_log.CampaignLogger; observation only, never changes behaviour.
     campaign_log: "CampaignLogger | None" = None
     battle_loader: Callable[[AssetRecord, Path, dict[str, Any]], Any] | None = None
