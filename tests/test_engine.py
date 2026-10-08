@@ -747,6 +747,86 @@ class WalkBackReformTests(unittest.TestCase):
         self.assertFalse(any(event.kind == "reform_complete" for event in battle.events))
 
 
+class OrdersDuringReformTests(unittest.TestCase):
+    """notes/reform_while_moving.md 4: player Move, Face point, Charge and Attack orders given while the unit
+    re-forms are held and applied once the re-form ends; a later order replaces a held one."""
+
+    def setUp(self):
+        self.regiment = Regiment("m", "M", 100, 100, 0, Side.PLAYER, models=10, ranks=2,
+                                 speed_per_tick=20 * 1.8 / 16)
+        self.enemy = Regiment("e", "E", 100, 700, 256, Side.ENEMY, models=10, ranks=2)
+        self.battle = Battle(1000, 1000, [self.regiment, self.enemy], seed=1995)
+        self.battle.phase = "battle"
+        self.regiment.model_positions()
+        self.regiment.positions = [(x - 30, y) for x, y in self.regiment.positions]
+        self.battle.reform_to_ranks(self.regiment, 3, walk_back=True)
+
+    def _settle(self):
+        for _ in range(200):
+            self.battle.tick()
+            if not self.regiment.reforming:
+                return
+        self.fail("re-form never ended")
+
+    def test_given_a_re_forming_unit_when_ordered_to_move_then_the_order_is_held_and_the_unit_stays(self):
+        self.battle.order_move("m", 100, 500)
+        self.battle.tick()
+
+        self.assertEqual(self.regiment.pending_order, ("order_move", 100, 500))
+        self.assertIsNone(self.regiment.target_x)
+        self.assertEqual((self.regiment.x, self.regiment.y), (100, 100))
+
+    def test_given_a_held_move_when_the_re_form_ends_then_the_move_starts(self):
+        self.battle.order_move("m", 100, 500)
+        self._settle()
+        self.battle.tick()
+
+        self.assertIsNone(self.regiment.pending_order)
+        self.assertGreater(self.regiment.y, 100)
+
+    def test_given_a_held_order_when_another_order_follows_then_it_is_replaced(self):
+        self.battle.order_move("m", 100, 500)
+        self.battle.order_attack("m", "e")
+
+        self.assertEqual(self.regiment.pending_order, ("order_attack", "e"))
+
+    def test_given_a_re_forming_unit_when_ordered_to_attack_then_it_waits_and_attacks_after_the_re_form(self):
+        self.battle.order_attack("m", "e")
+        self.battle.tick()
+        self.assertIsNone(self.regiment.attack_target)
+        self.assertEqual(self.regiment.y, 100)
+
+        self._settle()
+        self.battle.tick()
+
+        self.assertEqual(self.regiment.attack_target, "e")
+
+    def test_given_a_held_order_when_halted_then_it_is_dropped_and_the_re_form_restarts(self):
+        self.battle.order_move("m", 100, 500)
+
+        self.battle.order_halt("m")
+
+        self.assertIsNone(self.regiment.pending_order)
+
+    def test_given_a_held_face_point_when_the_re_form_ends_then_the_turn_starts(self):
+        self.battle.order_face_point("m", 600, 100)
+        self.assertEqual(self.regiment.pending_order, ("order_face_point", 600, 100))
+
+        self._settle()
+        self.battle.tick()
+
+        self.assertIsNone(self.regiment.pending_order)
+        self.assertIsNotNone(self.regiment.turn_order_key)
+
+    def test_given_a_unit_not_re_forming_when_ordered_to_move_then_the_move_starts_at_once(self):
+        self._settle()
+
+        self.battle.order_move("m", 100, 500)
+
+        self.assertIsNone(self.regiment.pending_order)
+        self.assertIsNotNone(self.regiment.target_x)
+
+
 class ReformFormationDifferenceTests(unittest.TestCase):
     """game_rules.md "Formation differences" and "A formation change costs no time of its own"."""
 

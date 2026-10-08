@@ -243,6 +243,9 @@ class Regiment:
     # speed not halved, arrival keeps the figure's heading) instead of the shuffle mover; it lasts until the
     # re-form ends, through any new layout given meanwhile (12, treated as persisting).
     reform_walk_back: bool = False
+    # notes/reform_while_moving.md 4: a player Move, Face point, Charge or Attack order given while re-forming is
+    # held here as (Battle method name, *args) and applied on the first tick after the re-form ends.
+    pending_order: tuple[Any, ...] | None = None
     routing: bool = False  # fleeing the field; ignores orders, moves away from the nearest enemy
     # game_rules.md "Flight and catching fleeing units": the flight bearing is fixed once, "directly
     # away from its opponent", when the rout starts (combat.start_rout) - not re-aimed every tick
@@ -1087,6 +1090,29 @@ class Battle:
             return
         regiment.waypoints.append((float(x), float(y)))
 
+    def _hold_while_reforming(self, regiment: Regiment, order: tuple[Any, ...]) -> bool:
+        """Hold a player order while the regiment re-forms (notes/reform_while_moving.md 4): it becomes the
+        pending order, replacing any earlier one, with a `React 13` reply the first time. Attack is held the same
+        way: the original accepts it at once but its approach waits for the re-form, which looks the same."""
+        if self.phase != "battle" or not regiment.reforming:
+            return False
+        if regiment.pending_order is None:
+            self.react(regiment.identifier, 13)
+        regiment.pending_order = order
+        return True
+
+    def _apply_pending_orders(self) -> None:
+        """Apply each held order once its regiment's re-form has ended; an order no longer valid is dropped."""
+        for regiment in list(self.regiments.values()):
+            if regiment.pending_order is None or regiment.reforming:
+                continue
+            name, *args = regiment.pending_order
+            regiment.pending_order = None
+            try:
+                getattr(self, name)(regiment.identifier, *args)
+            except ValueError:
+                pass
+
     def order_move(self, identifier: str, x: float, y: float) -> None:
         regiment = self.regiments[identifier]
         if regiment.side != Side.PLAYER:
@@ -1111,6 +1137,8 @@ class Battle:
             regiment.target_x = regiment.target_y = None
             if math.hypot(x - regiment.x, y - regiment.y) >= 17:
                 self.append_waypoint(identifier, x, y)
+            return
+        if self._hold_while_reforming(regiment, ("order_move", x, y)):
             return
         regiment.waypoints.clear()
         regiment.clear_shooting()
@@ -1153,6 +1181,8 @@ class Battle:
             raise ValueError("attack target is hidden")
         if not target.active:
             raise ValueError(f"{target_id} is no longer on the field")
+        if self._hold_while_reforming(regiment, ("order_attack", target_id)):
+            return
         regiment.target_x = regiment.target_y = None
         regiment.route_pause_ticks = 0
         regiment.clear_shooting()
@@ -1169,6 +1199,8 @@ class Battle:
         if (regiment.side != Side.PLAYER or not regiment.active or regiment.routing or regiment.pursuing
                 or regiment.held or regiment.braced or regiment.anchored or regiment.in_melee):
             raise ValueError("regiment cannot charge")
+        if self._hold_while_reforming(regiment, ("order_charge_forward",)):
+            return
         if self.interpreter is not None:
             self.event_bus.queue_event(identifier, interpreter.Event(code=0x06), route="self")
             return
@@ -1193,6 +1225,7 @@ class Battle:
             raise ValueError(f"{identifier} is pursuing and cannot be ordered")
         if regiment.in_melee:
             raise ValueError(f"{identifier} is in melee and cannot be ordered")
+        regiment.pending_order = None  # a later order replaces a held one
         regiment.target_x = regiment.target_y = None
         regiment.route_pause_ticks = 0
         regiment.attack_target = None
@@ -1307,6 +1340,7 @@ class Battle:
             raise ValueError(f"{identifier} is held and cannot be ordered")
         if regiment.attack_target is not None or regiment.in_melee:
             raise ValueError(f"{identifier} is charging or in melee and cannot be ordered")
+        regiment.pending_order = None  # a later order replaces a held one
         self._begin_reform(regiment, formation.clamp_ranks(regiment.models, ranks))
         regiment.clear_shooting()
         if self.phase == "deployment":
@@ -1337,6 +1371,7 @@ class Battle:
         if regiment.held:  # notes/spell_area_effects.md 3.3: a thorn-held unit cannot move, charge or turn
             raise ValueError(f"{identifier} is held and cannot be ordered")
         regiment.clear_shooting()
+        regiment.pending_order = None  # a later order replaces a held one (a held face-point order sets it again)
         return regiment
 
     def order_turn_left(self, identifier: str) -> None:
@@ -1375,6 +1410,8 @@ class Battle:
         dx, dy = x - regiment.x, y - regiment.y
         if math.hypot(dx, dy) < 1e-9:
             return  # click on own position: ignore
+        if self._hold_while_reforming(regiment, ("order_face_point", x, y)):
+            return
         goal = round(math.atan2(dx, dy) * 512 / math.tau) % 512
         self._plan_turn_order(regiment, goal)
         regiment.target_x = regiment.target_y = None
@@ -1535,6 +1572,7 @@ class Battle:
             self.tick_count += 1
             return
         scale = seconds / TICK_SECONDS
+        self._apply_pending_orders()
         if (self.objectives is not None and self.phase == "battle" and self.tick_count > 0
                 and self.tick_count % objective_table.SEGMENT_TICKS == 0):
             # Segment boundary, before any unit is updated (notes/battle_end_objectives.md 3.2).
