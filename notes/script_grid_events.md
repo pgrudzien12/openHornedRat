@@ -52,8 +52,9 @@ The three opcodes run the same procedure. The only difference is a **"refuse bro
 | **0x88** | no | shooter handlers library 154 (artillery) and 156 (archers), events 0x1E–0x21, 0x24, 0x25 (450) |
 | **0xAF** | no | wizard handler library 155, events 0x28–0x2B, 0x2E, 0x2F; library 152 event 0x2D (item) (315) |
 
-0x88 and 0xAF are behaviourally identical (`game_rules.md` R59: "same helper, different arguments" — the
-different argument is only 0x3A's switch).
+0x88 (`TakeRangedEventTarget`) and 0xAF (`TakeSpellEventTarget`) are behaviourally identical;
+0x3A (`TakeEventTarget`) additionally refuses a broken named unit. The three names distinguish
+their shipped uses in disassembly and logs, while the engine uses one shared handler rule.
 
 ### 1.2 Procedure
 

@@ -36,6 +36,20 @@ class GridTestCase(unittest.TestCase):
 
 
 class TakeEventTargetTests(GridTestCase):
+    def test_distinct_opcode_names_dispatch_to_the_shared_rule(self):
+        self.assertEqual(
+            [behaviour.opcode_name(opcode) for opcode in (0x3A, 0x88, 0xAF)],
+            ["TakeEventTarget", "TakeRangedEventTarget", "TakeSpellEventTarget"],
+        )
+        for opcode, event in ((0x88, Event(code=0x1F, source="B")),
+                              (0xAF, Event(code=0x2B, parameter=22, x=5, y=5))):
+            with self.subTest(opcode=opcode):
+                self.setUp()
+                self.state.current_event = event
+                self.assertEqual(self.interp._dispatch(
+                    self.state, opcode, take_words(opcode), "A", 0, self.battle.rng), 1)
+                self.assertTrue(self.state.cond_flags)
+
     def test_attack_event_takes_the_source_and_drops_a_pending_spell(self):
         self.a.braced = True
         self.state.pending_spell = 22
