@@ -1023,6 +1023,13 @@ class Battle:
             return regiment.speed_for_mode(FLEEING_K)
         if regiment.route_pause_ticks > 0 or regiment.in_melee or regiment.braced:
             return 0.0
+        if regiment.pursuing:
+            # The pursuit step (game_rules.md "Unit speed", R39): min(flight speed, 10 x distance / 256).
+            target = self.regiments.get(regiment.attack_target) if regiment.attack_target is not None else None
+            speed = regiment.speed_for_mode(FLEEING_K)
+            if target is None:
+                return speed
+            return min(speed, 10 * math.hypot(target.x - regiment.x, target.y - regiment.y) / 256)
         if regiment.attack_target is not None or regiment.free_charging and regiment.moving:
             return regiment.speed_for_mode(CHARGING_K)
         if regiment.moving or regiment.waypoints:
