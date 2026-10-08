@@ -4,9 +4,10 @@ Vectors follow the report's tables: unit S at (0, 0), threat range 240 unless st
 """
 
 import unittest
+from unittest import mock
 
 from tests.script_helpers import word
-from whshr import behaviour, interpreter, ranged
+from whshr import behaviour, combat, interpreter, ranged
 from whshr.engine import Battle, Regiment
 from whshr.interpreter import Event
 from whshr.nodes import ScriptNode
@@ -122,6 +123,40 @@ class SignalAndBombardTests(BehaviourTestCase):
         self.battle.regiments["E"].hidden = False
         self.run_code(14)
         self.assertEqual(self.queued(), [(0x03, None)])
+
+
+class ThreatInReachContactTests(BehaviourTestCase):
+    """notes/script_behaviours.md 1.6, test 1: nearby chargers and pursuers make their contact attacks."""
+
+    def run_with_dice(self, *dice):
+        with mock.patch.object(self.battle.rng, "randint", side_effect=list(dice)):
+            self.run_code(14)
+
+    def peasant_and_raider(self, side=Side.ENEMY):
+        peasant = unit("S", 0, 0, Side.PLAYER, toughness=3)
+        peasant.models, peasant.ranks = 2, 1
+        raider = unit("C", 0, 6, side, strength=4)
+        raider.models, raider.ranks = 1, 1
+        raider.pursuing = True
+        self.make(peasant, raider)
+        return peasant, raider
+
+    def test_a_pursuer_in_range_wounds_the_unit_and_spends_its_attacks(self):
+        peasant, raider = self.peasant_and_raider()
+        self.run_with_dice(6, 1)  # wound 6, save 1: one peasant dies
+        self.assertEqual((peasant.models, self.queued()), (1, [(3, None)]))
+        self.assertEqual(raider.contact_attack_segment, self.battle.tick_count // combat.SEGMENT_TICKS)
+
+    def test_a_friendly_charger_that_wounds_nobody_raises_nothing(self):
+        peasant, raider = self.peasant_and_raider(Side.PLAYER)
+        self.run_with_dice(1)  # the wound roll fails
+        self.assertEqual((peasant.models, self.queued()), (2, []))  # no enemy near either
+
+    def test_attacks_spent_this_segment_are_not_made_again(self):
+        peasant, raider = self.peasant_and_raider(Side.PLAYER)
+        raider.contact_attack_segment = self.battle.tick_count // combat.SEGMENT_TICKS
+        self.run_with_dice()  # no dice may be drawn
+        self.assertEqual((peasant.models, self.queued()), (2, []))
 
 
 class InnateWeaponTests(BehaviourTestCase):

@@ -457,6 +457,24 @@ class ContactAttackTests(unittest.TestCase):
             self.assertIn("wound", roll)
             self.assertNotIn("hit", roll)
 
+    def test_given_attacks_already_spent_this_segment_then_the_pursuer_makes_none_and_spends_them_otherwise(self):
+        # notes/script_behaviours.md 1.6: the segment stamp is shared with behaviour 14's contact attacks.
+        chaser = _regiment("c", 0, 0, Side.PLAYER, strength=6, attacks=2, speed_per_tick=0.0)
+        fleeing = _regiment("f", 0, 6, Side.ENEMY, toughness=2, armour=0, speed_per_tick=0.0)
+        fleeing.routing = True
+        battle = Battle(1000, 1000, [chaser, fleeing], seed=1)
+        chaser.attack_target = "f"
+        segment = battle.tick_count // combat.SEGMENT_TICKS
+        chaser.contact_attack_segment = segment
+
+        combat.resolve_contact_attacks(battle)
+        self.assertEqual([e for e in battle.events if e.kind == "contact_attack"], [])
+
+        chaser.contact_attack_segment = -1
+        combat.resolve_contact_attacks(battle)
+        self.assertEqual(len([e for e in battle.events if e.kind == "contact_attack"]), 1)
+        self.assertEqual(chaser.contact_attack_segment, segment)
+
     def test_given_a_target_out_of_reach_when_a_segment_passes_then_nothing_happens(self):
         chaser = _regiment("c", 0, 0, Side.PLAYER, speed_per_tick=0.0)
         fleeing = _regiment("f", 0, 600, Side.ENEMY, speed_per_tick=0.0)

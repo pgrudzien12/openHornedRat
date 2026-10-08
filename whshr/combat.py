@@ -941,19 +941,23 @@ def resolve_contact_attacks(battle: "Battle") -> None:
     monster 24), and contact hits still ignore the rout pause's timed "turning" state, in which a model
     would get a to-hit roll -- every target model here is taken to be running.
     """
+    segment = battle.tick_count // SEGMENT_TICKS
     for attacker in sorted(battle.regiments.values(), key=lambda r: r.identifier):
-        if not attacker.active or attacker.routing or attacker.in_melee:
-            continue
+        if not attacker.active or attacker.routing or attacker.in_melee or attacker.contact_attack_segment == segment:
+            continue  # a unit that made its contact attacks this segment (for instance for behaviour 14) is spent
         target = battle.regiments.get(attacker.attack_target) if attacker.attack_target else None
         if target is None or not target.active or not target.routing:
             continue  # contact attacks only matter against a unit that cannot fight back
-        _strike_router(battle, attacker, target)
+        attacker.contact_attack_segment = segment
+        contact_attack(battle, attacker, target)
 
 
-def _strike_router(battle: "Battle", attacker: "Regiment", target: "Regiment") -> None:
+def contact_attack(battle: "Battle", attacker: "Regiment", target: "Regiment") -> int:
+    """The automatic contact attacks of `attacker`'s models on `target`'s models in reach (game_rules.md 7.7); returns
+    the models killed. The caller decides who may attack and stamps the segment."""
     victims, rolls = _contact_attack_rolls(attacker, target, battle.rng)
     if not rolls:
-        return
+        return 0
     killed = kill_models(target, victims, battle=battle, killer=attacker.identifier)
     battle.events.append(BattleEvent(
         f"{attacker.name} cuts down {killed} fleeing {target.name}."
@@ -961,6 +965,77 @@ def _strike_router(battle: "Battle", attacker: "Regiment", target: "Regiment") -
         "contact_attack",
         attacker=attacker.identifier, target=target.identifier, kills=killed,
         reach=CONTACT_REACH, rolls=rolls))
+    return killed
+
+
+CLASS_CAVALRY, CLASS_ARTILLERY, CLASS_MONSTER = 2, 4, 6  # s_race >> 3 (game_rules.md 3, s_race)
+TOUCH_ONLY_CLASSES = frozenset({0, 7, 8, 9})  # no type, rolling stock, special, furniture: touched, never wounded
+LANDING_REACH = {CLASS_CAVALRY: 18.0, CLASS_MONSTER: 24.0}  # everything else 12
+LANDING_MELEE_FILTER = 204.0  # the coarse filter's radius for a unit in melee (notes/script_spawn_move.md 5)
+
+
+def squig_landing(battle: "Battle", hopper: "Regiment") -> bool:
+    """The hop landing collision of FanaticRelease (notes/script_spawn_move.md 5): at the hopper's leader model, every
+    model of a fighting unit within reach (12, 18 against cavalry, 24 against monsters) takes the hopper's Strength
+    wound roll with the armour save allowed, one wound each; artillery crews are hit the same way. Rolling stock,
+    special units, furniture, standing buildings and scenery are only touched; an artillery piece is touched too, and
+    its crew models are wounded but not its machine. The hopper never dies. Every object is tested; the result is
+    True when a model was wounded or anything was touched.
+
+    PROVISIONAL: the coarse filter before the per-model test (the unit's bounding radius, twice that when it is
+    charging, 204 in melee); a unit leaving the battle or hidden is not touched; the D6 rolls the fanatic makes
+    against an artillery machine are not made (nothing is documented about what they do), so the machine model takes
+    no wound roll; buildings and scenery are touched within their footprint radius."""
+    positions = hopper.model_positions()
+    leader = hopper.leader_model_index
+    lx, ly = positions[leader] if leader is not None and leader < len(positions) else (hopper.x, hopper.y)
+    strength = hopper.strength + hopper.strength_bonus
+    engaged = False
+    for other in sorted(battle.regiments.values(), key=lambda r: r.identifier):
+        if other is hopper or not other.active or other.hidden or _marked(battle, other):
+            continue
+        charging = other.attack_target is not None or other.free_charging
+        limit = LANDING_MELEE_FILTER if other.in_melee else other.bounding_radius() * (2 if charging else 1)
+        if math.hypot(other.x - lx, other.y - ly) >= limit:
+            continue
+        if other.is_wagon or other.unit_class in TOUCH_ONLY_CLASSES:
+            engaged = True  # rolling stock, a special unit or furniture: touched, nothing more
+            continue
+        artillery = other.unit_class == CLASS_ARTILLERY or other.hud_class == "art"
+        engaged = engaged or artillery  # an artillery piece counts as touched whatever the crew rolls do
+        machine = other.leader_model_index if artillery else None
+        reach = LANDING_REACH.get(other.unit_class if other.unit_class is not None else -1, CONTACT_REACH)
+        victims: list[int] = []
+        rolls: list[Roll] = []
+        for index, (mx, my) in enumerate(other.model_positions()):
+            if index == machine or math.hypot(mx - lx, my - ly) > reach:
+                continue
+            model = other.melee_models[index]
+            need = wfb_to_wound(strength, other.model_toughness(model))
+            wound_roll = _d6(battle.rng)
+            if need > 6 or wound_roll < need:
+                rolls.append({"target_model": index, "wound": wound_roll, "save": None, "result": "no_wound"})
+                continue
+            save_roll = _d6(battle.rng)
+            if save_roll >= _armour_threshold(other.model_armour(model), strength):
+                rolls.append({"target_model": index, "wound": wound_roll, "save": save_roll, "result": "saved"})
+                continue
+            model.wounds_taken += 1
+            engaged = True
+            rolls.append({"target_model": index, "wound": wound_roll, "save": save_roll, "result": "wounded"})
+            if model.wounds_taken >= other.model_wounds(model):
+                victims.append(index)
+        if victims:
+            kill_models(other, victims, battle=battle, killer=hopper.identifier)
+        if rolls:
+            battle.events.append(BattleEvent(
+                f"{hopper.name} lands among {other.name}.", "squig_landing",
+                attacker=hopper.identifier, target=other.identifier, kills=len(victims), rolls=rolls))
+    point_hit = any(math.hypot(b.x - lx, b.y - ly) < b.radius for b in battle.buildings if not b.destroyed)
+    point_hit = point_hit or any(
+        math.hypot(float(obj.get("x") or 0) - lx, float(obj.get("y") or 0) - ly) < float(obj.get("radius") or 0)
+        for obj in battle.objects if "os_active" in {str(flag).casefold() for flag in obj.get("status") or ()})
+    return engaged or point_hit
 
 
 def _marked(battle: "Battle", unit: "Regiment") -> bool:
@@ -986,7 +1061,7 @@ def resolve_router_contact_attacks(battle: "Battle") -> None:
                     and "CantMelee" not in router.psychology and not _marked(battle, router)
                     and may_engage(attacker, router) and formation.penetrates(attacker.block(), router.block())):
                 attacker.contact_attack_segment = segment
-                _strike_router(battle, attacker, router)
+                contact_attack(battle, attacker, router)
                 break
 
 
