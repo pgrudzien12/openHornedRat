@@ -429,6 +429,9 @@ class ScriptInterpreter:
                     self._record_contact(other, mover)
         for unit_id, state in self.event_bus.unit_states.items():
             if state.contact_latch and unit_id not in touching:
+                held = self.battle.regiments.get(unit_id)
+                if held is not None and held.assaulting_building is None and self.battle.overlaps_building(held):
+                    continue  # still overlapping a building: the latch lasts (notes/script_behaviours.md 2.5, 2.9)
                 state.contact_latch = False
 
     def raise_wagon_collisions(self, regiments: list["Regiment"]) -> None:
@@ -3341,8 +3344,8 @@ class ScriptInterpreter:
         current = state.current_target[0] if state.current_target else None
         if building.identifier == current and not building.destroyed:
             self.battle.begin_building_assault(unit, building)
-            self.event_bus.queue_event(unit.identifier, Event(code=0x0A, source=None), checked=True)
-        elif unit.attack_target is not None:
+            self.event_bus.queue_event(unit.identifier, Event(code=0x0A, source=building.identifier), checked=True)
+        elif unit.attack_target is not None or unit.free_charging:
             self.battle.end_charge_at_building(unit, building)
         else:
             self._release_latch(state, unit)

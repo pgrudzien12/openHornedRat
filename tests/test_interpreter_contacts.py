@@ -213,7 +213,7 @@ class BuildingContactTests(ContactTestCase):
         self.interp.op_Query(self.state, 8, [word("Query"), 8], "A", 0, self.battle.rng)
         self.assertEqual((self.a.assaulting_building, self.a.attack_target, self.state.contact_latch),
                          ("building:0", None, True))
-        self.assertEqual(self.codes("A"), [(0x0A, None)])
+        self.assertEqual(self.codes("A"), [(0x0A, "building:0")])
         self.assertEqual(self.battle.engage_requests, [])
 
     def test_contact_with_another_building_ends_the_charge_and_keeps_the_latch(self):
@@ -224,6 +224,54 @@ class BuildingContactTests(ContactTestCase):
         self.assertIsNone(self.a.assaulting_building)
         self.assertTrue(self.state.contact_latch)
         self.assertIn((0x09, "A"), self.codes("E"))
+
+    def test_a_free_charge_touching_a_building_raises_contact_and_the_handler_halts_it(self):
+        self.a.free_charging = True
+        self.a.target_x, self.a.target_y = 1000.0, 1500.0
+        self.a.collision_recheck = True
+        self.battle._correct_buildings(self.a)
+        self.assertEqual(self.codes("A"), [(0x0B, None)])
+        self.interp.op_Query(self.state, 8, [word("Query"), 8], "A", 0, self.battle.rng)
+        self.assertEqual((self.a.free_charging, self.a.target_x, self.state.contact_latch), (False, None, True))
+
+    def test_a_unit_in_melee_touching_a_building_gets_the_contact_and_is_not_pushed(self):
+        self.a.in_melee = True
+        self.a.collision_recheck = True
+        before = (self.a.x, self.a.y)
+        self.battle._correct_buildings(self.a)
+        self.assertEqual((self.codes("A"), (self.a.x, self.a.y)), ([(0x0B, None)], before))
+
+    def test_a_scripted_walking_unit_is_pushed_only_while_its_re_check_state_is_on(self):
+        before = (self.a.x, self.a.y)
+        self.a.collision_recheck = False
+        self.battle._correct_buildings(self.a)
+        self.assertEqual((self.a.x, self.a.y), before)
+        self.a.collision_recheck = True
+        self.battle._correct_buildings(self.a)
+        self.assertNotEqual((self.a.x, self.a.y), before)
+        self.assertTrue(self.a.collision_recheck)  # a push switches the state back on
+
+    def test_the_pass_is_consumed_once_for_every_building_overlap(self):
+        self.battle.buildings = self.battle.buildings[:1] + self.battle.buildings[:1]
+        self.charge("building:0")
+        self.a.collision_recheck = True
+        self.battle._correct_buildings(self.a)
+        self.assertEqual(self.codes("A"), [(0x0B, None), (0x0B, None)])
+        self.assertFalse(self.a.collision_recheck)
+
+    def test_a_walking_unit_in_the_deployment_phase_is_still_pushed_clear(self):
+        self.battle.phase = "deployment"
+        self.a.collision_recheck = False
+        self.battle._correct_buildings(self.a)
+        self.assertFalse(self.battle.overlaps_building(self.a))
+
+    def test_the_latch_set_on_ending_a_charge_lasts_while_the_building_still_overlaps(self):
+        self.state.contact_latch = True
+        self.interp.raise_contacts([])
+        self.assertTrue(self.state.contact_latch)
+        self.a.y = 1500  # clear of the shack
+        self.interp.raise_contacts([])
+        self.assertFalse(self.state.contact_latch)
 
     def test_a_latched_unit_stepping_into_a_building_is_rolled_back(self):
         self.state.contact_latch = True
