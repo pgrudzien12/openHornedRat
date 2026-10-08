@@ -269,7 +269,7 @@ class SceneMachine:
                 return
             campaign = self.active.campaign
             movie = campaign.campaign_over_movie if campaign is not None and effect.mode in (2, 6) else None
-            if movie is not None:
+            if campaign is not None and movie is not None:
                 # notes/native-windows.md 9.9.5: the death movie, then the main menu; no debrief, payment or merge.
                 from .campaign_scenes import MainMenuScene, MovieScene
 
