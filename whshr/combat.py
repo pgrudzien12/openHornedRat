@@ -955,6 +955,39 @@ def resolve_contact_attacks(battle: "Battle") -> None:
             reach=CONTACT_REACH, rolls=rolls))
 
 
+def resolve_building_assaults(battle: "Battle") -> None:
+    """Regiments fighting a building strike in their own Initiative segment (notes/building_units.md 4): every
+    attacking model's attacks hit automatically and wound the building's first model at its own toughness, with
+    no save; the building never strikes back and nothing counts for a combat result. Frenzy doubles the attacks.
+
+    PROVISIONAL: the original lays the attackers along the building's sides on the battle grid; here the number of
+    attacking models is capped by the side cells, 2 x (frontage + depth) in 12-unit cells, and no grid is built.
+    Not modelled: the armour save (assumed none) and the Rocksplitter bonuses."""
+    _, _, segment_number = segment_state(battle.tick_count)
+    for regiment in sorted(battle.regiments.values(), key=lambda r: r.identifier):
+        building = battle.building_index.get(regiment.assaulting_building or "")
+        if regiment.assaulting_building is None:
+            continue
+        if building is None or building.destroyed or not regiment.active or regiment.routing:
+            regiment.assaulting_building = None
+            continue
+        if regiment.initiative != segment_number:
+            continue
+        cells = round(2 * building.half_x / 12) + round(2 * building.half_y / 12)
+        attackers = min(regiment.models, 2 * cells)
+        attacks = max(1, regiment.attacks) * (2 if "Frenzy" in regiment.psychology else 1)
+        strength = min(9, regiment.strength + regiment.strength_bonus + int(regiment.fight_harder))
+        need = wfb_to_wound(strength, building.toughness)
+        if need > 6:
+            continue
+        wounds = sum(1 for _ in range(attackers * attacks) if _d6(battle.rng) >= need)
+        battle.events.append(BattleEvent(
+            f"{regiment.name} hacks at the {building.name}.", "building_hit",
+            regiment=regiment.identifier, building=building.identifier, wounds=wounds))
+        if building.take_wounds(wounds):
+            battle.destroy_building(building)
+
+
 def _contact_attack_rolls(attacker: "Regiment", target: "Regiment", rng: random.Random) -> tuple[set[int], list[Roll]]:
     """Automatic hits from every attacking model against the target models within reach."""
     attacker_positions = attacker.model_positions()
