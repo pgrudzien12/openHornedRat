@@ -11,6 +11,7 @@ from whshr.catalog import build
 from whshr.glue_content import GlueContent
 from whshr.glue_runtime import EndGame
 from whshr.glue_scene import GlueScene
+from whshr.debrief_scene import DebriefScene
 from whshr.result_scene import ResultScene
 from whshr.rules import Side
 from whshr.scenes import SceneAssets, SceneMachine, Scene, Transition
@@ -80,7 +81,7 @@ class BattleSceneTests(unittest.TestCase):
         self.assertEqual((infantry.models, infantry.ranks, infantry.side), (16, 4, Side.PLAYER))
         self.assertEqual(len(infantry.model_positions()), 16)
 
-    def test_given_a_glue_battle_when_its_result_is_dismissed_then_its_same_runtime_resumes(self):
+    def test_given_a_glue_battle_when_it_resolves_then_the_debrief_follows_and_its_same_runtime_resumes(self):
         self.context.glue = GlueContent.from_data(resources={
             "FLOW": "[RUN]\n[START]\nplaygame:bf001\nendgame:\n[END]",
         })
@@ -91,10 +92,8 @@ class BattleSceneTests(unittest.TestCase):
         self.assertIs(machine.active.glue_scene, glue)
         machine.active.battle.result = "victory"
         machine.update(0)
-        self.assertIsInstance(machine.active, ResultScene)
-        self.assertEqual(glue.take_effects(), ())  # still waiting on the battle request
+        self.assertIsInstance(machine.active, DebriefScene)  # no result screen of its own
 
-        machine.handle("continue")
         machine.handle("done")  # the debrief screen closes
 
         self.assertIs(machine.active, glue)

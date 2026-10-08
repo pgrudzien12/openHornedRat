@@ -332,15 +332,16 @@ class BattleScene(Scene):
                 self.logger.write_snapshot(self.battle.update_count, self.battle)
                 self.logger.write_result(self.battle.update_count, self.battle)
                 self.close_log("result")
-            if self.glue_scene is not None and self.no_battle:
-                # No-battle mode: the completion handler runs at once, without a result screen.
-                self._store_flawless_results()
+            if self.glue_scene is not None:
+                # A battle a glue program started shows no result screen of its own: the flow goes straight on to
+                # the debrief (notes/native-windows.md 9.11, scenario 4). No-battle mode counts a flawless win.
+                if self.no_battle:
+                    self._store_flawless_results()
+                else:
+                    self._store_played_results()
                 self.glue_scene.finish_battle(self.request_id or 0)
                 return Transition(self.glue_scene, "glue battle resolved")
-            self._store_played_results()
-            return Transition(ResultScene(self.battle.result, self._casualty_summary(),
-                                          glue_scene=self.glue_scene, request_id=self.request_id),
-                              "battle resolved")
+            return Transition(ResultScene(self.battle.result, self._casualty_summary()), "battle resolved")
         return None
 
     def _store_flawless_results(self) -> None:

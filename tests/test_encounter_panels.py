@@ -196,9 +196,8 @@ class EncounterSceneTests(unittest.TestCase):
             if regiment.side != Side.PLAYER:
                 regiment.models = 0
         self.machine.update(BATTLE_TICK_SECONDS)
-        self.assertIsInstance(self.machine.active, ResultScene)
+        self.assertNotIsInstance(self.machine.active, ResultScene)
 
-        self.machine.handle("continue")
         self.machine.handle("done")  # the debrief screen closes
 
         self.assertIs(self.machine.active, self.scene)
