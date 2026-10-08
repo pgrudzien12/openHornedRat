@@ -656,6 +656,7 @@ class Battle:
         self.width = width
         self.height = height
         self.regiments: dict[str, Regiment] = {regiment.identifier: regiment for regiment in regiments}
+        self._recheck_carry: set[str] = set()  # re-check states set by the push-apart pass (see _carry_recheck)
         if len(self.regiments) != len(regiments):
             raise ValueError("regiment identifiers must be unique")
         self.stagger_counter = StaggerCounter()
@@ -1697,6 +1698,7 @@ class Battle:
         self._resolve_collisions()
         self._check_flight_edges()
         combat.resolve_contacts(self)
+        self._restore_carried_rechecks()
         combat.refresh_braced_state(self)
         if self.interpreter:
             self.interpreter.stop_ended_charge_sounds()
@@ -2712,6 +2714,7 @@ class Battle:
                 self._correct_buildings(regiment)
             for mover in regiments:
                 if mover.collision_recheck:
+                    self._recheck_carry.discard(mover.identifier)  # its own pass consumes the state
                     if self.interpreter is None:  # no scripted contact pass consumes the state afterwards
                         mover.collision_recheck = False
                     self._push_apart_pass(mover, regiments)
@@ -2745,12 +2748,14 @@ class Battle:
             if may_engage(mover, other):
                 machine = (mover.is_wagon or mover.hud_class == "art") or (other.is_wagon or other.hud_class == "art")
                 if not (machine and (mover.routing or (mover.reforming and mover.reform_walk_back))):
+                    if machine and self._circles_overlap(mover, other):
+                        self._carry_recheck(other)  # notes/script_behaviours.md 2.2: U re-check on, contact or not
                     continue
             elif mover.routing or mover.pursuing or other.pursuing:
                 continue
             if pushed or mover.is_wagon:
                 if self._circles_overlap(mover, other):
-                    mover.collision_recheck = other.collision_recheck = True
+                    self._carry_recheck(mover, other)
                 continue
             pushed = self._push_self(mover, other)
 
@@ -2774,8 +2779,21 @@ class Battle:
         if mover.attack_target is not None and abs(self._turn_delta(mover.direction, bearing)) < 64:
             self._end_charge_on_obstruction(mover, "a friendly unit")
         self._translate_regiment(mover, shift_x, shift_y)
-        mover.collision_recheck = other.collision_recheck = True
+        self._carry_recheck(mover, other)
         return True
+
+    def _carry_recheck(self, *regiments: Regiment) -> None:
+        """Switch the re-check state on for units whose state the collision pass sets. The scripted contact sweep
+        that follows clears the state of every unit it visited, so these units are switched on again after it
+        (`_restore_carried_rechecks`) unless their own pass runs later in the same update and consumes it."""
+        for regiment in regiments:
+            regiment.collision_recheck = True
+            self._recheck_carry.add(regiment.identifier)
+
+    def _restore_carried_rechecks(self) -> None:
+        for identifier in self._recheck_carry:
+            self.regiments[identifier].collision_recheck = True
+        self._recheck_carry.clear()
 
     def _push_pair(self, first: Regiment, second: Regiment, first_share: float, second_share: float) -> None:
         """Move two overlapping circles apart along their centre line, `first_share` and `second_share` of the

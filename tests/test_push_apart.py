@@ -3,8 +3,12 @@
 import unittest
 from unittest import mock
 
+from tests.script_helpers import FakeDll, word
+from whshr import behaviour
 from whshr.engine import Battle, Regiment
 from whshr.rules import Side
+
+IDLE = [word("PushPC"), word("Yield"), word("Loop"), behaviour.END]
 
 
 def unit(identifier, x, y, side=Side.PLAYER, **extra):
@@ -130,6 +134,30 @@ class PushApartTests(unittest.TestCase):
         mover.target_x, mover.target_y = 600, 500
         battle.tick()
         self.assertFalse(mover.collision_recheck or friend.collision_recheck)
+
+    def test_re_check_states_set_by_a_push_survive_the_scripted_contact_sweep(self):
+        # Through the real tick with a script running: the contact sweep clears every visited unit's state, so
+        # the final one-unit move of the 2.2 example (o = -1) only happens if the push's switch-ons are restored.
+        with mock.patch.object(Regiment, "bounding_radius", return_value=30):
+            mover, friend = unit("A", 500, 500), unit("B", 550, 500)
+            battle = Battle(2000, 2000, [mover, friend], seed=1995, script_dll=FakeDll(IDLE))
+            mover.collision_recheck = True
+            battle.tick()
+            self.assertEqual((mover.x, friend.x), (494, 553))
+            self.assertTrue(mover.collision_recheck)
+            battle.tick()
+            self.assertEqual((mover.x, friend.x), (493, 553))
+
+    def test_enemy_machine_with_overlapping_circles_gets_its_re_check_state_on(self):
+        with mock.patch.object(Regiment, "bounding_radius", return_value=22.5):
+            mover, cart = unit("A", 500, 500), wagon("W", 543, 500, Side.ENEMY)
+            battle = Battle(2000, 2000, [mover, cart], seed=1995)
+            battle._push_apart_pass(mover, [mover, cart])
+            self.assertEqual((mover.x, cart.x), (500, 543))  # not pushed apart
+            self.assertTrue(cart.collision_recheck)
+            cart.collision_recheck = False  # the contact sweep visited it
+            battle._restore_carried_rechecks()
+            self.assertTrue(cart.collision_recheck)
 
 
 if __name__ == "__main__":
