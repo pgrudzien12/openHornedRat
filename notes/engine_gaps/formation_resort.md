@@ -25,8 +25,8 @@ re-form flag, no alternate mover, and no model re-slotting search.
    - flat **`s_rlmv / 8`** world units/tick, no rank factor, **no ramp-up** — full speed on the first
      tick, held.
    - decelerates in the last 6 world units: step divided by `7 − distance`, so it slows to a half,
-     third, quarter... and settles smoothly (a separate 1-world-unit step cap only bites the fastest
-     units).
+     third, quarter... and settles smoothly; only there is each axis component capped at 1 world unit
+     (no cap elsewhere, `notes/reform_while_moving.md` §3).
    - **arrival snaps the model's heading** to the unit's facing.
    - **the unit's own translation speed is halved** for the whole re-form.
    - clearing the flag (last model settled) raises a "re-form complete" event.
@@ -52,6 +52,9 @@ machine resolves separately), so there is no live case in the original where the
 **Cost and gating**: a formation change costs no time of its own (only the walking); rank counts clamp
 to `[min, models/min]` with `min = max(1, trunc(0.75 × √models))`; a re-form is refused while fleeing,
 held, or charging.
+
+**Re-forming while the unit moves** (carried figures, the Rally walk-back mode, orders held during a
+re-form, turning suspended, pursuit start re-form): `notes/reform_while_moving.md`, implemented.
 
 ## Open questions
 
