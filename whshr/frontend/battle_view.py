@@ -302,6 +302,9 @@ class BattleView(SceneView[BattleScene]):
             camera.rotate(event.rel[0] * DRAG_ROTATE)
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_HOME:
             self.camera = replace(self.initial_camera)
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_F10:
+            # Testing aid: win the battle at once (BattleScene "win_battle"), settled like no-battle mode.
+            return (("win_battle",),)
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_F2:
             # Debugging aid (whshr.figure_capture): trace the selected regiment's figures for 5 s.
             battle = self.scene.battle

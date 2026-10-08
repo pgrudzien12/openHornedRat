@@ -142,6 +142,13 @@ class BattleScene(Scene):
             elif self.log_dir is not None and unit_id is not None:
                 self.captures.append(figure_capture.FigureCapture(self.log_dir, self.battle_id.name,
                                                                   self.battle, unit_id))
+        elif kind == "win_battle":
+            # Testing aid (F10): finish this battle as an instant, lossless win, settled and paid like no-battle
+            # mode, so a battle can be skipped in the middle of a playthrough. A battle already over stays as it is.
+            if self.battle.result is None:
+                self.no_battle = True
+                self.battle.start_battle()
+                self.battle.resolve_no_battle()
         elif kind == "pause":
             if self.battle.phase == "battle" and not self.battle.can_leave:
                 self.battle.paused = not self.battle.paused

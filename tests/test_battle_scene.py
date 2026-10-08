@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import unittest
+from unittest import mock
 
 from whshr import buildings
 from whshr.assets import AssetLocator
@@ -263,6 +264,54 @@ class BattleSceneTests(unittest.TestCase):
 
         self.assertIs(machine.active, glue)
         self.assertEqual(glue.take_effects(), (EndGame(),))
+
+    def test_given_a_running_battle_when_the_win_key_is_used_then_it_ends_at_once_as_a_lossless_victory(self):
+        scene = BattleScene()
+        machine = SceneMachine(scene, self.context)
+        machine.update(BATTLE_TICK_SECONDS)
+        self.assertIs(machine.active, scene)  # an ordinary battle is under way
+
+        machine.handle(("win_battle",))
+        machine.update(BATTLE_TICK_SECONDS)
+
+        self.assertIsInstance(machine.active, ResultScene)
+        self.assertEqual(machine.active.result, "victory")
+        for line in machine.active.summary:
+            if "Grudgebringer" in line:
+                self.assertIn("16/16", line)
+
+    def test_given_a_campaign_battle_when_the_win_key_is_used_then_the_flow_resumes_with_a_flawless_win(self):
+        self.context.glue = GlueContent.from_data(resources={
+            "FLOW": "[RUN]\n[START]\nplaygame:bf001\nendgame:\n[END]",
+        })
+        glue = GlueScene("FLOW")
+        machine = SceneMachine(glue, self.context)
+        battle_scene = machine.active
+        self.assertIsInstance(battle_scene, BattleScene)
+        machine.update(BATTLE_TICK_SECONDS)
+        self.assertIs(machine.active, battle_scene)  # still being fought
+
+        with mock.patch.object(battle_scene, "_store_flawless_results") as flawless, \
+                mock.patch.object(battle_scene, "_store_played_results") as played:
+            machine.handle(("win_battle",))
+            machine.update(BATTLE_TICK_SECONDS)
+
+        from whshr.debrief_scene import DebriefScene
+        self.assertIsInstance(machine.active, DebriefScene)  # the campaign flow goes on to the debrief
+        self.assertTrue(battle_scene.no_battle)
+        flawless.assert_called_once()  # paid in full, like no-battle mode
+        played.assert_not_called()
+
+    def test_given_a_battle_that_is_already_over_then_the_win_key_changes_nothing(self):
+        scene = BattleScene()
+        machine = SceneMachine(scene, self.context)
+        machine.update(BATTLE_TICK_SECONDS)
+        scene.battle.result = "defeat"
+
+        machine.handle(("win_battle",))
+
+        self.assertEqual(scene.battle.result, "defeat")
+        self.assertFalse(scene.no_battle)
 
     def test_given_the_result_scene_when_dismissed_then_it_returns_to_the_main_menu(self):
         from whshr.campaign_scenes import MainMenuScene
