@@ -62,7 +62,9 @@ class RangedOrders(unittest.TestCase):
                                shooting_code=code, **decoded)
             shooter.hud_class = "art" if unit_class == 4 else "arch"
             battle = Battle(2000, 2000, [shooter])
-            origin = shooter.model_positions()[shooter.living_leader_index]
+            leader_index = shooter.living_leader_index
+            assert leader_index is not None
+            origin = shooter.model_positions()[leader_index]
             battle.rng = ScatterDice()
             self.assertEqual(ranged.launch_shot(battle, shooter, origin, (100, 400)), "launched")
             self.assertEqual((battle.projectiles[0].x0, battle.projectiles[0].y0), origin)

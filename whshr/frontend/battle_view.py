@@ -471,11 +471,15 @@ class BattleView(SceneView[BattleScene]):
             # click on the visible body - not just the feet - misses it entirely. Fall back to a
             # screen-space hit test against each regiment's actual rendered sprite block.
             regiment_id = self._sprite_pick(pixel, projection)
+        # A building is a target of the attack order only when no regiment is under the click.
+        building_id = self.scene.battle.building_at(x, y) if regiment_id is None else None
         if direct:
             if self.scene.battle.phase == "deployment":
                 return ()
             if self.scene.selected_id is None:
                 return ()
+            if building_id is not None:
+                return (("attack", building_id),)
             return (("attack", regiment_id),) if regiment_id is not None else (("move_to", x, y),)
         if self.order_mode is None:
             if self.scene.battle.phase == "deployment":
@@ -490,6 +494,8 @@ class BattleView(SceneView[BattleScene]):
         self._set_cursor("default")
         self.hud.order_completed()
         if mode == "attack":
+            if building_id is not None:
+                return (("attack", building_id),)
             if regiment_id is None:
                 self._log_cannot("attack")
                 return ()

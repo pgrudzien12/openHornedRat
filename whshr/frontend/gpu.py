@@ -49,7 +49,7 @@ void main() {
 }
 """
 
-ALPHA_BLEND: dict[str, bool | str] = {
+ALPHA_BLEND: "zengl.BlendSettings" = {
     "enable": True,
     "src_color": "src_alpha", "dst_color": "one_minus_src_alpha",
     "src_alpha": "one", "dst_alpha": "one_minus_src_alpha",

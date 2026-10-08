@@ -253,9 +253,10 @@ engages through its own contacts**; it is engaged only when the *other* unit's h
   anything (§2.5).
 - **Collision re-check** state: the collision pass runs for a unit **only on updates where this state is on**
   (it is cleared at the start of the pass). Set by: the unit's own position step of an ordinary move, charge, pursuit or
-  flight (🟡 except in one special movement sub-state); the battle-edge repel moving it; another unit's collision
+  flight, **only on every 4th update of the unit** (a per-unit counter staggered by slot; `fanatic_collisions.md` §5);
+  each gradual turn step; every formation re-layout; the battle-edge repel moving it; another unit's collision
   pass touching or pushing it (§2.2); the contact handler's "clear the latch" branches; `Rally`. **Not** set by
-  turning in place, by re-forming, or by standing still.
+  standing still (corrected October 2026: turning and re-forming do set it).
 - **Footprint kinds** (each unit owns one footprint): **troops** (ordinary regiments), **monster** block, **war
   machine** block, **wagon** (rolling stock) block, **building/furniture**; plus fanatic footprints. "Regiment kinds"
   below = troops and monster.
@@ -287,7 +288,24 @@ footprint strictly inside the other footprint). Per overlapping footprint X (own
 | regiment kind, U **marked** | – | **nothing at all** (no push, no contact, no contact attacks) |
 | regiment kind, same army and U ≠ mover's current target | – | push apart unless X is a fanatic or either unit is in melee, broken or pursuing; both re-check on |
 | regiment kind, other army **or U is the current target**, mover **broken** | – | U makes contact attacks on the mover (`game_rules.md` §7.7; U need not be charging; once per segment) |
-| same, mover not broken | – | (a) **fear on contact**: if fear-passed is off and `MayEngage(mover, U)` refuses → current target := U, **0x0D** to the mover (checked); (b) X not a fanatic: U re-check on (if mover not in melee); **touch test → contact**; X a fanatic: the mover's contact attacks on the fanatic (🟡 fanatic details, R45) |
+| same, mover not broken | – | (a) **fear on contact**: if fear-passed is off and `MayEngage(mover, U)` refuses → current target := U, **0x0D** to the mover (checked); (b) X not a fanatic: U re-check on (if mover not in melee); **touch test → contact**; X a fanatic: the mover's contact attacks on the fanatic, only if the fanatic lacks `CantMelee` (never in shipped data; `fanatic_collisions.md` §2) |
+
+**"Push apart", exactly** (clarified October 2026, #197). Only the unit **running the pass** moves. The other unit
+does not move in this pass: it only gets its re-check state, so it moves itself in **its own** pass (later in the
+same update if it comes later in unit order, otherwise next update).
+- Overlap `o = trunc(centre distance) − r_mover − r_other` (negative). The mover's position moves **away from the
+  other centre** by `(|o| + 2) / 2` along the line between the centres: per axis `trunc(trunc(SIN/COS[b] × (o − 2) / 256) / 2)`,
+  truncating toward zero, with `b` the bearing between the centres. Its figures are shifted by the same amount and woken.
+- **One friendly push per pass**: after the first successful push against a regiment, war machine or wagon footprint,
+  further friendly overlaps in the same pass only set re-check states. Scenery and building pushes always apply.
+- A **rolling-stock** (wagon) mover is never moved by a push.
+- If the mover is **charging** and the overlapped footprint lies within ±45° of its facing, the push also **ends the
+  charge** (halt, 0x09 to its target). This applies to friendly footprints as well as scenery.
+
+Example: two friendly regiments, radii 30 and 30, centres 50 apart (`o = −10`), A moving, B standing. A's pass moves
+A 6 units away and switches B's and A's re-check on. B's pass then sees `o = −4` and moves B 3 units away. A's next
+pass sees `o = −1` and moves A 1 unit. The pair separates over a few passes, with **each unit moving itself**, not by
+"half each" in one step.
 
 **Contact** (touch test true and not in `CheckCollisions` probe mode):
 1. **Record on the mover**: if the mover's latch is **off** → mover re-check off, **0x0B** queued to the mover
