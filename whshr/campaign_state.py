@@ -42,6 +42,13 @@ CARAVAN_MODE_WINDOWS: dict[str, str] = {
     "recruitnospeech": "CARAVANRECRUITNOSPEECHANDRESUME",
 }
 
+# The two caravans the panel buttons open over a running screen (notes/mission_selection.md 4.2): the map's Caravan
+# button and panel 9's Caravan button. Not modes a script can name: ``gocaravan:selectmission`` stays an unknown name.
+PANEL_CARAVAN_WINDOWS: dict[str, str] = {
+    "selectmission": "CARAVANSELECTMISSION",
+    "continuemission": "CARAVANCONTINUEMISSION",
+}
+
 
 RECRUIT_VARIANTS = {"CARAVANAFTERMISSION": "CARAVANAFTERMISSIONWITHRECRUIT",
                     "CARAVANAFTERENCOUNTER": "CARAVANAFTERENCOUNTERWITHRECRUIT"}

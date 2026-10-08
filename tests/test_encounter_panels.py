@@ -41,10 +41,10 @@ class ControlPanelActionTests(unittest.TestCase):
         self.assertEqual(control_panel(7).actions[0], "encounter_evade")  # Decline
         self.assertEqual(control_panel(8).actions, ("encounter_battle",))  # Attack!
 
-    def test_given_the_still_unknown_panels_then_their_buttons_stay_disabled(self):
+    def test_given_the_still_unknown_panels_then_their_buttons_stay_disabled_and_panel_9_has_its_three_actions(self):
         for value in (5, 6, 10):
             self.assertEqual(control_panel(value).actions, ())
-        self.assertEqual(control_panel(9).actions, (None, "open_options", None))
+        self.assertEqual(control_panel(9).actions, ("open_caravan_continue", "open_options", "toggle_pause"))
 
 
 class EncounterRuntimeTests(unittest.TestCase):
