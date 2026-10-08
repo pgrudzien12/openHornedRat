@@ -1,4 +1,4 @@
-"""The ``cash`` command inside a running script (notes/glue_interpreter.md section 6, notes/campaign.md 2.5): it
+"""The ``cash`` command inside a running script (notes/glue_interpreter.md section 9, notes/campaign.md 2.5): it
 stores the payment program on the mission in progress, the same line a mission record carries."""
 
 import unittest
