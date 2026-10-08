@@ -1,6 +1,7 @@
 """Push-apart rows of the collision pass (notes/script_behaviours.md 2.2)."""
 
 import unittest
+from unittest import mock
 
 from whshr.engine import Battle, Regiment
 from whshr.rules import Side
@@ -26,14 +27,46 @@ class PushApartTests(unittest.TestCase):
         battle._resolve_collisions()
         return battle
 
-    def test_friends_are_pushed_apart_by_half_the_overlap_each_and_both_rechecked(self):
-        mover, friend = unit("A", 500, 500), unit("B", 510, 500)
-        needed = mover.bounding_radius() + friend.bounding_radius()
-        self.pass_for(mover, friend)
-        self.assertAlmostEqual(gap(mover, friend), needed)
-        self.assertAlmostEqual(mover.x, 500 - (needed - 10) / 2)
-        self.assertAlmostEqual(friend.x, 510 + (needed - 10) / 2)
-        self.assertTrue(mover.collision_recheck and friend.collision_recheck)
+    def test_only_the_pass_taker_moves_and_the_pair_separates_over_several_passes(self):
+        # notes/script_behaviours.md 2.2 "Push apart, exactly": radii 30 + 30, centres 50 apart (o = -10).
+        mover, friend = unit("A", 500, 500), unit("B", 550, 500)
+        with mock.patch.object(Regiment, "bounding_radius", return_value=30):
+            battle = Battle(2000, 2000, [mover, friend], seed=1995)
+            mover.collision_recheck = True
+            battle._resolve_collisions()  # A's pass: A moves 6 away; B (later in order) is flagged and moves 3 itself
+            self.assertEqual((mover.x, friend.x), (494, 553))
+            battle._resolve_collisions()  # B's push flagged A again: o = -1, A moves 1
+            self.assertEqual((mover.x, friend.x), (493, 553))
+            battle._resolve_collisions()  # overlap gone: nothing moves
+            self.assertEqual((mover.x, friend.x), (493, 553))
+
+    def test_one_friendly_push_per_pass_and_a_wagon_mover_is_never_moved(self):
+        with mock.patch.object(Regiment, "bounding_radius", return_value=30):
+            mover, left, right = unit("B", 500, 500), unit("A", 450, 500), unit("C", 550, 500)
+            battle = Battle(2000, 2000, [mover, left, right], seed=1995)
+            battle._push_apart_pass(mover, [left, mover, right])  # one unit's pass only
+            moved = (mover.x != 500)
+            self.assertTrue(moved)
+            self.assertEqual((left.x, right.x), (450, 550))  # neither neighbour moved in the pass
+            self.assertTrue(left.collision_recheck and right.collision_recheck)  # both only switched on
+            cart = wagon("W", 500, 500)
+            other = unit("O", 520, 500)
+            battle = Battle(2000, 2000, [cart, other], seed=1995)
+            cart.collision_recheck = True
+            battle._resolve_collisions()
+            self.assertEqual(cart.x, 500)
+            self.assertTrue(other.collision_recheck)
+
+    def test_a_push_ahead_of_a_charging_mover_ends_the_charge(self):
+        with mock.patch.object(Regiment, "bounding_radius", return_value=30):
+            charger, friend = unit("A", 500, 500), unit("B", 500, 540)  # B straight ahead (facing 0 = +y)
+            enemy = unit("E", 500, 900, Side.ENEMY)
+            battle = Battle(2000, 2000, [charger, friend, enemy], seed=1995)
+            charger.attack_target = charger.charge_started_target = "E"
+            charger.collision_recheck = True
+            battle._resolve_collisions()
+            self.assertIsNone(charger.attack_target)
+            self.assertIn(0x09, [e.code for e in battle.event_bus.unit_states["E"].event_queue])
 
     def test_no_pass_without_the_re_check_state(self):
         mover, friend = unit("A", 500, 500), unit("B", 510, 500)

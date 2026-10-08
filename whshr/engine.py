@@ -1692,9 +1692,6 @@ class Battle:
         self._resolve_collisions()
         self._check_flight_edges()
         combat.resolve_contacts(self)
-        if self.interpreter is None:  # no scripted contact pass consumes the re-check states
-            for regiment in self.regiments.values():
-                regiment.collision_recheck = False
         combat.refresh_braced_state(self)
         if self.interpreter:
             self.interpreter.stop_ended_charge_sounds()
@@ -2705,6 +2702,8 @@ class Battle:
                 self._correct_buildings(regiment)
             for mover in regiments:
                 if mover.collision_recheck:
+                    if self.interpreter is None:  # no scripted contact pass consumes the state afterwards
+                        mover.collision_recheck = False
                     self._push_apart_pass(mover, regiments)
             return
         # notes/deployment.md 2: collision correction follows the zone clipping, with no final zone clamp.
@@ -2718,14 +2717,18 @@ class Battle:
             self._push_pair(dragged, other, 1.0, 0.0)
 
     def _push_apart_pass(self, mover: Regiment, regiments: Sequence[Regiment]) -> None:
-        """The push-apart rows of the collision pass for one unit (notes/script_behaviours.md 2.2): a marked unit
-        is not touched at all; a unit in melee neither pushes nor is pushed; a pair that can fight never pushes
-        apart (it makes contact instead), except that a war machine or wagon pair is pushed apart when the mover is
-        broken or in a catch-up (walk-back) re-form; any other pair is pushed apart by half the overlap each
-        unless either unit is broken or pursuing. Both units' re-check state goes on. Not modelled: fanatic
-        footprints (notes/script_behaviours.md 2.2 marks them unconfirmed)."""
+        """The push-apart rows of the collision pass for one unit (notes/script_behaviours.md 2.2, "Push apart,
+        exactly"): a marked unit is not touched at all; a unit in melee neither pushes nor is pushed; a pair that
+        can fight never pushes apart (it makes contact instead), except that a war machine or wagon pair is pushed
+        apart when the mover is broken or in a catch-up (walk-back) re-form; any other pair is pushed apart unless
+        either unit is broken or pursuing. Only the unit running the pass moves, away from the other centre; the
+        other unit's re-check state goes on and it moves itself in its own pass. One friendly push per pass; a
+        wagon mover is never moved; a push of a charging mover by a footprint within +-45 degrees of its facing
+        ends the charge. Not modelled: fanatic footprints (the engine has no fanatic model, so none is skipped
+        here; notes/fanatic_collisions.md 2)."""
         if mover.in_melee or self._marked(mover):
             return
+        pushed = False
         for other in regiments:
             if other is mover or other.in_melee or other.routing or self._marked(other):
                 continue
@@ -2735,7 +2738,34 @@ class Battle:
                     continue
             elif mover.routing or mover.pursuing or other.pursuing:
                 continue
-            self._push_pair(mover, other, 0.5, 0.5)
+            if pushed or mover.is_wagon:
+                if self._circles_overlap(mover, other):
+                    mover.collision_recheck = other.collision_recheck = True
+                continue
+            pushed = self._push_self(mover, other)
+
+    @staticmethod
+    def _circles_overlap(first: Regiment, second: Regiment) -> bool:
+        return math.hypot(first.x - second.x, first.y - second.y) < first.bounding_radius() + second.bounding_radius()
+
+    def _push_self(self, mover: Regiment, other: Regiment) -> bool:
+        """Move `mover` away from `other` by (|o| + 2) / 2 along the line between the centres, per axis
+        trunc(trunc(SIN/COS[bearing] x (o - 2) / 256) / 2) with o = trunc(distance) - both radii (negative); switch
+        both re-check states on; end a charge that meets the footprint within +-45 degrees of its facing. Returns
+        whether a push was made."""
+        dx, dy = other.x - mover.x, other.y - mover.y
+        overlap = math.trunc(math.hypot(dx, dy)) - mover.bounding_radius() - other.bounding_radius()
+        if overlap >= 0:
+            return False
+        bearing = round(math.atan2(dx, dy) * 512 / math.tau) % 512 if (dx or dy) else 0
+        angle = bearing * math.tau / 512
+        shift_x = math.trunc(math.trunc(math.trunc(256 * math.sin(angle)) * (overlap - 2) / 256) / 2)
+        shift_y = math.trunc(math.trunc(math.trunc(256 * math.cos(angle)) * (overlap - 2) / 256) / 2)
+        if mover.attack_target is not None and abs(self._turn_delta(mover.direction, bearing)) < 64:
+            self._end_charge_on_obstruction(mover, "a friendly unit")
+        self._translate_regiment(mover, shift_x, shift_y)
+        mover.collision_recheck = other.collision_recheck = True
+        return True
 
     def _push_pair(self, first: Regiment, second: Regiment, first_share: float, second_share: float) -> None:
         """Move two overlapping circles apart along their centre line, `first_share` and `second_share` of the

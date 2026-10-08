@@ -266,6 +266,7 @@ class BattleNavigationTests(unittest.TestCase):
         battle._resolve_collisions()
         self.assertEqual(mover.x, 100)
         ally.x = 115
+        mover.collision_recheck = True
         battle._resolve_collisions()
         self.assertLess(mover.x, 100)
 
