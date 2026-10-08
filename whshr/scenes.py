@@ -267,6 +267,15 @@ class SceneMachine:
             effect = self.active.take_debrief_effect()
             if effect is None:
                 return
+            campaign = self.active.campaign
+            movie = campaign.campaign_over_movie if campaign is not None and effect.mode in (2, 6) else None
+            if movie is not None:
+                # notes/native-windows.md 9.9.5: the death movie, then the main menu; no debrief, payment or merge.
+                from .campaign_scenes import MainMenuScene, MovieScene
+
+                campaign.campaign_over_movie = None
+                self._apply(Transition(MovieScene(movie, successor=MainMenuScene()), "campaign over"))
+                return
             if not getattr(self.context, "no_battle", False):
                 from .debrief_scene import DebriefScene
 

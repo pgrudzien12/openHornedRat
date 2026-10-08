@@ -257,5 +257,45 @@ class DebriefModeTests(unittest.TestCase):
         master = next(r for r in restored.master if r.whoami == 2)
         self.assertEqual((master.models, master.experience), (5, 97))
 
+class CampaignOverTests(unittest.TestCase):
+    """notes/debrief_evaluation.md 3.1: the test that precedes the debrief and every merge."""
+
+    def _over(self, outcome, **objectives):
+        campaign = _campaign(_regiment(2, 20))
+        campaign.battle_outcome = {2: UnitOutcome(*outcome)}
+        campaign.objective_results = {letter: (met, (0, 0, 0, 0)) for letter, met in objectives.items()}
+        return casualties.campaign_over_movie(campaign)
+
+    def test_given_a_surviving_commander_when_g_or_y_is_met_then_the_campaign_is_over_with_death02(self):
+        self.assertEqual(self._over((10, 0, 10), G=True), "death02")
+        self.assertEqual(self._over((10, 0, 10), Y=True), "death02")
+        self.assertIsNone(self._over((10, 0, 10), G=False, Y=False))
+        self.assertIsNone(self._over((10, 0, 10)))
+
+    def test_given_a_surviving_commander_when_only_z_is_met_then_the_campaign_goes_on(self):
+        self.assertIsNone(self._over((10, 0, 10), Z=True))
+
+    def test_given_a_wiped_out_commander_when_z_is_met_then_the_campaign_is_over_with_death01(self):
+        # Dead = no models, none routed and no wounded: at most one model lost (1 killed -> 0 wounded).
+        self.assertEqual(self._over((0, 0, 1), Z=True), "death01")
+
+    def test_given_a_wiped_out_commander_without_z_then_the_campaign_goes_on_even_if_g_is_met(self):
+        self.assertIsNone(self._over((0, 0, 1), G=True))
+        self.assertIsNone(self._over((0, 0, 1)))
+        campaign = _campaign(_regiment(2, 1))
+        _battle(campaign, z_met=False, u2=(0, 0, 1))  # the P1 fallback: one routed model, merged back
+        self.assertEqual(_models(campaign, 2), 1)
+        self.assertEqual(campaign.battle_outcome[2].routed, 1)
+
+    def test_given_a_commander_regiment_with_wounded_left_then_it_is_not_dead_for_the_test(self):
+        self.assertEqual(self._over((0, 0, 20), Z=True, G=True), "death02")  # 13 wounded survive: G applies
+        self.assertIsNone(self._over((0, 0, 2), Z=True))  # 1 wounded survives: Z alone does not end it
+
+    def test_given_no_outcome_for_the_commander_then_there_is_no_campaign_over(self):
+        campaign = _campaign(_regiment(5, 20))
+        campaign.objective_results = {"G": (True, (0, 0, 0, 0))}
+        self.assertIsNone(casualties.campaign_over_movie(campaign))
+
+
 if __name__ == "__main__":
     unittest.main()

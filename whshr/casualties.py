@@ -10,8 +10,6 @@ fought) and ``returning`` (wounded that rejoin at the current debrief's Done).
 Deviations, all invisible in prices, "destroyed" and the disband test because those read the present count:
 - the original returns routed models to a mode-2 army only when the next troop selection is confirmed; here they
   rejoin at Done, so between Done and troop selection the reinforcement window does not reserve room for them;
-- the campaign-over test that precedes everything (report 3.3 P1) is not implemented (notes/native-windows.md
-  9.10), so after a total defeat the campaign continues;
 - allied story regiments fighting as NPCs are not written into the battle outcome, so their wounded and
   experience are not merged back (report 2.5, 3.8 B5).
 """
@@ -32,6 +30,24 @@ DISBAND_PERCENT = 20  # a regiment below this share of its original size is disb
 def wounded_of(outcome: UnitOutcome, wounded_percent: int = DEFAULT_DEAD_PERCENT) -> int:
     """Lost models (killed, not routed) times the wounded share, truncated (report 3.1)."""
     return max(0, outcome.casualties - outcome.routed) * wounded_percent // 100
+
+
+def campaign_over_movie(campaign: "CampaignState") -> str | None:
+    """The campaign-over test that precedes everything after a played battle (notes/debrief_evaluation.md 3.1): the
+    name of the death movie when the campaign ends, else ``None``. A commander regiment with nobody left (models,
+    routed and this battle's wounded all zero) ends the campaign only when objective ``Z`` was met (``death01``);
+    otherwise objective ``G`` or ``Y`` met ends it (``death02``)."""
+    outcome = campaign.battle_outcome.get(COMMANDER)
+    if outcome is None:
+        return None
+
+    def met(letter: str) -> bool:
+        record = campaign.objective_results.get(letter)
+        return record is not None and bool(record[0])
+
+    if outcome.models + outcome.routed + wounded_of(outcome) == 0:
+        return "death01" if met("Z") else None
+    return "death02" if met("G") or met("Y") else None
 
 
 def _destroyed(present: int, artillery: bool) -> bool:
@@ -59,6 +75,8 @@ def after_battle(campaign: "CampaignState") -> None:
             if _destroyed(present, artillery) and wounded > 0:
                 outcomes[whoami] = replace(outcome, routed=outcome.routed + 1)
                 campaign.wounded_last[whoami] = wounded - 1
+            elif present + wounded == 0:  # dead (report 3.6) but the campaign goes on: P1 gives one model back
+                outcomes[whoami] = replace(outcome, routed=outcome.routed + 1)
         elif regiment is not None and regiment.row.keep and present + wounded == 0:
             outcomes[whoami] = replace(outcome, routed=outcome.routed + 1)
     campaign.battle_outcome = outcomes

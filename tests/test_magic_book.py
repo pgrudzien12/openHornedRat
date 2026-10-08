@@ -47,7 +47,7 @@ class MagicBookTests(unittest.TestCase):
         scene = BattleScene()
         scene.glue_scene = SimpleNamespace(campaign=campaign)
         scene.battle = Battle(100, 100, [field_unit])
-        scene.battle.objectives = SimpleNamespace(results=lambda: ())
+        scene.battle.objectives = SimpleNamespace(results=lambda: {})
         scene.initial_models = {"unit2": field_unit.models}
 
         with patch("whshr.battle_scene.casualties.after_battle"):

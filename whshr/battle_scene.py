@@ -386,7 +386,9 @@ class BattleScene(Scene):
             outcomes[whoami] = UnitOutcome(regiment.models - routed, routed, dead + routed, regiment.kills,
                                            regiment.experience_gained)
         campaign.battle_outcome = outcomes
-        casualties.after_battle(campaign)  # wounded bookkeeping before the debrief screen
+        campaign.campaign_over_movie = casualties.campaign_over_movie(campaign)
+        if campaign.campaign_over_movie is None:  # a lost campaign merges and pays nothing
+            casualties.after_battle(campaign)  # wounded bookkeeping before the debrief screen
 
     def _casualty_summary(self) -> list[str]:
         return [f"{regiment.name}: {regiment.models}/{self.initial_models[identifier]} models"
