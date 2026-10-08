@@ -332,6 +332,7 @@ def refresh_melee_state(battle: "Battle") -> None:
         regiment.melee_camp = None
         regiment.melee_group = None
         regiment.melee_touching = frozenset()
+        _reform_for_pursuit(battle, regiment)
         if gone:
             _send_opponent_gone(battle, regiment)
         # The unit's *order* survives leaving a fight: leaving a grid never touches one (game_rules.md 5.7), and the
@@ -591,6 +592,7 @@ def resolve_contacts(battle: "Battle") -> None:
             regiment.melee_camp = None
             regiment.melee_group = None
             regiment.melee_touching = frozenset()
+            _reform_for_pursuit(battle, regiment)
             if gone:
                 _send_opponent_gone(battle, regiment)
 
@@ -755,6 +757,13 @@ def _break_test(regiment: "Regiment", modifier: float, group_id: str, breakdown:
         roll=roll, modifier=modifier, breakdown=breakdown, cant_break=False, passed=passed))
     if not passed:
         start_rout(regiment, battle)
+
+
+def _reform_for_pursuit(battle: "Battle", regiment: "Regiment") -> None:
+    """A pursuer leaving its fight starts the pursuit with a re-form to the script's ranks
+    (notes/reform_while_moving.md 4): the pursuit runs at half speed, its figures carried, until they settle."""
+    if regiment.pursuing and regiment.models > 0:
+        battle.reform_to_ranks(regiment, regiment.script_ranks)
 
 
 def leave_grid(battle: "Battle", regiment: "Regiment") -> None:

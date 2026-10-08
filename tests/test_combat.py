@@ -260,6 +260,22 @@ class PursuitTests(unittest.TestCase):
         self.assertFalse(winner.in_melee)
         self.assertEqual(winner.attack_target, "l")
 
+    def test_given_a_pursuer_when_it_leaves_the_fight_then_it_re_forms_to_its_script_ranks_in_shuffle_mode(self):
+        # notes/reform_while_moving.md 4: a pursuit starts with a re-form to the script's ranks (half speed, carried).
+        winner = _regiment("w", 0, 0, Side.PLAYER, models=12, ranks=4, initiative=5, speed_per_tick=1.0)
+        winner.script_ranks = 3
+        loser = _regiment("l", 0, 12, Side.ENEMY, initiative=5, speed_per_tick=1.0)
+        battle = Battle(1000, 1000, [winner, loser], seed=0)
+        _join_fight(battle, "g", winner, loser)
+        combat.start_rout(loser, battle)
+
+        combat.refresh_melee_state(battle)
+
+        self.assertTrue(winner.pursuing)
+        self.assertTrue(winner.reforming)
+        self.assertFalse(winner.reform_walk_back)
+        self.assertEqual(winner.ranks, 3)
+
     def test_given_player_missile_troops_when_their_opponent_routs_then_they_hold(self):
         archers = _regiment("a", 0, 0, Side.PLAYER, initiative=5, speed_per_tick=1.0,
                             missile_code=2, missile_range=720.0)
