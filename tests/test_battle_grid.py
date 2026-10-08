@@ -36,12 +36,14 @@ class GridSeedingTests(unittest.TestCase):
         seeded = [identifier for identifier, _ in grid.cells.values()]
         self.assertEqual(seeded.count(grid.owner_id), self.battle.regiments[grid.owner_id].models)
 
-    def test_given_a_seeded_owner_when_its_models_are_checked_then_they_are_already_in_their_cells(self):
-        # The grid is built around the owner's existing model positions, so they need no walk-in.
+    def test_given_a_seeded_owner_when_its_models_are_checked_then_they_hold_cells_at_rest_not_yet_fighting(self):
+        # The grid is built around the owner's existing model positions, so they need no walk-in; but standing in
+        # a cell is not fighting: an owner model fights only once woken (notes/grid_gap_closing.md 0, 3).
         self.battle.tick()
 
         owner = self.battle.regiments[_grid(self.battle, self.defender).owner_id]
-        self.assertTrue(all(model.arrived for model in owner.melee_models))
+        self.assertTrue(all(model.cell is not None and model.at_rest for model in owner.melee_models))
+        self.assertFalse(any(model.arrived for model in owner.melee_models))
 
     def test_given_an_at_rest_owner_in_melee_when_its_slot_changes_then_it_stays_put(self):
         self.battle.tick()
@@ -109,7 +111,7 @@ class JoiningTests(unittest.TestCase):
         model.distance_budget = 100.0
         model.heading_x, model.heading_y = 1.0, 0.0
 
-        placed = battle_grid._place_next_to_enemy(
+        placed = battle_grid.place_next_to_enemy(
             grid, joiner, model, px, py, [(owner, 0, owner.melee_models[0])])
 
         self.assertTrue(placed)
@@ -155,17 +157,123 @@ class RepairingTests(unittest.TestCase):
         (row, col), (enemy_row, enemy_col) = model.cell, enemy_model.cell
         self.assertEqual(abs(row - enemy_row) + abs(col - enemy_col), 1)
 
-    def test_given_a_model_at_rest_away_from_its_cell_when_the_grid_updates_then_it_walks_to_it(self):
+    def test_given_a_model_at_rest_away_from_its_cell_when_nothing_wakes_it_then_it_is_not_re_tested(self):
+        # notes/grid_gap_closing.md 0: at-rest models in a melee are not stepped or re-tested.
         index, model = next((i, m) for i, m in enumerate(self.owner.melee_models) if m.cell is not None)
         wx, wy = self.grid.cell_world(*model.cell)
         self.owner.positions[index] = (wx + 6.0, wy)
         model.at_rest = True
 
-        battle_grid.update(self.battle, self.owner.melee_group, self.grid, [self.owner, self.joiner])
         self.battle._advance_models(self.owner, 1)
 
-        self.assertFalse(model.arrived)
-        self.assertLess(self.owner.positions[index][0], wx + 6.0)
+        self.assertEqual(self.owner.positions[index], (wx + 6.0, wy))
+
+
+class ArrivalEventTests(unittest.TestCase):
+    """notes/grid_gap_closing.md 0, 2.4, 3, 4 and the section 8 vectors: fighting starts with an arrival event;
+    back-pairing does not wake; arrival, demotion and grabbing do."""
+
+    def setUp(self):
+        self.goblins = _regiment("gob", 0, 0, Side.ENEMY, models=1, ranks=1)
+        self.cavalry = _regiment("cav", 0, 40, Side.PLAYER, models=2, ranks=1)
+        self.battle = Battle(1000, 1000, [self.goblins, self.cavalry], seed=0)
+        self.goblins.model_positions()
+        self.cavalry.model_positions()
+        self.grid = battle_grid.BattleGrid("gob", 0, 0, 0, 1)
+        self.grid.seed(self.goblins)
+        self.g1 = self.goblins.melee_models[0]
+        self.c1, self.c2 = self.cavalry.melee_models
+
+    def _place_c1(self):
+        placed = battle_grid.place_next_to_enemy(self.grid, self.cavalry, self.c1, 0, 40,
+                                                  [(self.goblins, 0, self.g1)])
+        self.assertTrue(placed)
+
+    def test_given_an_at_rest_defender_when_a_far_joiner_is_placed_beside_it_then_it_is_paired_back_but_not_fighting(self):
+        self._place_c1()
+
+        self.assertEqual(self.g1.opponent, ("cav", self.c1.uid))
+        self.assertTrue(self.g1.at_rest)
+        self.assertFalse(self.g1.arrived)
+        self.assertEqual(battle_grid.fighting_models(self.battle, self.goblins), [])
+
+    def test_given_a_walking_joiner_when_it_arrives_then_it_fights_and_wakes_its_opponent(self):
+        self._place_c1()
+
+        battle_grid.on_arrival(self.battle, self.cavalry, self.c1)
+
+        self.assertTrue(self.c1.arrived)
+        self.assertFalse(self.g1.at_rest)
+        self.assertFalse(self.g1.arrived)  # it re-arrives in its cell on its next movement step
+
+    def test_given_a_fighting_pair_when_one_dies_then_the_survivor_is_woken_unpaired_and_keeps_its_cell(self):
+        self._place_c1()
+        battle_grid.on_arrival(self.battle, self.cavalry, self.c1)
+        self.g1.arrived = self.g1.at_rest = True
+        cell = self.g1.cell
+
+        combat.kill_models(self.cavalry, [0], battle=self.battle)
+
+        self.assertIsNone(self.g1.opponent)
+        self.assertFalse(self.g1.at_rest)
+        self.assertFalse(self.g1.arrived)
+        self.assertEqual(self.g1.cell, cell)
+
+    def test_given_a_ganging_attacker_when_its_victim_dies_then_it_is_unpaired_but_stays_at_rest(self):
+        self.c2.opponent = ("gob", self.g1.uid)
+        self.c2.arrived = self.c2.at_rest = True
+        self.g1.opponent = ("cav", self.c1.uid)  # the victim fights someone else
+
+        combat.kill_models(self.goblins, [0], battle=self.battle)
+
+        self.assertIsNone(self.c2.opponent)
+        self.assertTrue(self.c2.at_rest)
+
+    def test_given_an_unpaired_model_when_it_is_struck_then_it_is_grabbed_and_woken(self):
+        self.g1.reserve = True
+
+        battle_grid.grab(self.cavalry, self.c1, self.g1)
+
+        self.assertEqual(self.g1.opponent, ("cav", self.c1.uid))
+        self.assertFalse(self.g1.at_rest)
+        self.assertFalse(self.g1.reserve)
+
+    def test_given_a_reserve_when_it_arrives_then_it_stops_being_a_reserve_without_fighting(self):
+        self.c2.reserve = True
+
+        battle_grid.on_arrival(self.battle, self.cavalry, self.c2)
+
+        self.assertFalse(self.c2.reserve)
+        self.assertFalse(self.c2.arrived)
+
+
+class GapClosingTests(unittest.TestCase):
+    """notes/grid_gap_closing.md 2.2 and 2.3: the owner's unpaired models move beside paired comrades; a unit that
+    loses a model releases its reserves."""
+
+    def test_given_an_owner_model_behind_a_comrade_in_its_own_candidate_cell_then_it_stays_as_a_reserve(self):
+        self.assertEqual(battle_grid._beside_comrade_cells((9, 8), (8, 8))[0], (9, 8))
+
+    def test_given_an_owner_model_behind_on_the_higher_column_side_then_it_tries_the_side_cell_first(self):
+        self.assertEqual(battle_grid._beside_comrade_cells((10, 9), (8, 8)), [(8, 9), (9, 8)])
+
+    def test_given_an_owner_model_in_the_same_row_on_the_lower_column_side_then_it_gets_the_symmetric_cells(self):
+        self.assertEqual(battle_grid._beside_comrade_cells((8, 6), (8, 8)), [(8, 7), (7, 8), (9, 8)])
+
+    def test_given_a_unit_that_lost_a_model_when_the_grid_updates_then_its_reserves_are_released(self):
+        defender = _regiment("aaa_def", 0, 0, Side.ENEMY, initiative=5)
+        attacker = _regiment("bbb_att", 0, 14, Side.PLAYER, initiative=5, models=12, ranks=3)
+        battle = Battle(1000, 1000, [defender, attacker], seed=0)
+        battle.tick()
+        grid = _grid(battle, defender)
+        members = [defender, attacker]
+        battle_grid.update(battle, defender.melee_group, grid, members)
+        attacker.melee_models[-1].reserve = True
+        combat.kill_models(attacker, [0], battle=battle)
+
+        battle_grid._release_reserves(grid, members)
+
+        self.assertFalse(any(model.reserve for model in attacker.melee_models))
 
 
 class PileOnTests(unittest.TestCase):
@@ -295,7 +403,7 @@ class DirectionalCandidateCellTests(unittest.TestCase):
     def _place(self, approach_x, approach_y, identifier="joiner"):
         regiment = self._joiner(approach_x, approach_y, identifier)
         model = regiment.melee_models[0]
-        placed = battle_grid._place_next_to_enemy(
+        placed = battle_grid.place_next_to_enemy(
             self.grid, regiment, model, approach_x, approach_y,
             [(self.defender, self.target_index, self.target)])
         self.assertTrue(placed)
@@ -327,7 +435,7 @@ class DirectionalCandidateCellTests(unittest.TestCase):
         regiment = self._joiner(0, 40)
         model = regiment.melee_models[0]
 
-        placed = battle_grid._place_next_to_enemy(
+        placed = battle_grid.place_next_to_enemy(
             self.grid, regiment, model, 0, 40, [(self.defender, self.target_index, self.target)])
 
         self.assertFalse(placed)
@@ -339,7 +447,7 @@ class DirectionalCandidateCellTests(unittest.TestCase):
         regiment = self._joiner(near_x, near_y)
         model = regiment.melee_models[0]
 
-        placed = battle_grid._place_next_to_enemy(
+        placed = battle_grid.place_next_to_enemy(
             self.grid, regiment, model, near_x, near_y, [(self.defender, self.target_index, self.target)])
 
         self.assertTrue(placed)
@@ -389,17 +497,20 @@ class EngagementAsymmetryTests(unittest.TestCase):
     def _by_uid(self, regiment):
         return {model.uid: pos for model, pos in zip(regiment.melee_models, regiment.positions)}
 
-    def test_given_a_defender_when_the_fight_continues_then_its_surviving_models_never_move(self):
+    def test_given_a_defender_when_the_fight_continues_then_its_paired_models_never_move(self):
+        # Paired owner models fight where they were seeded; only unpaired ones move up beside an engaged comrade
+        # (notes/grid_gap_closing.md 2.2).
         self.battle.tick()
         owner = self._owner()
         before = self._by_uid(owner)
+        always_paired = {model.uid for model in owner.melee_models}
 
         for _ in range(combat.SEGMENT_TICKS * 6):
             self.battle.tick()
+            always_paired &= {model.uid for model in owner.melee_models if model.opponent is not None}
             now = self._by_uid(owner)
-            for uid, position in now.items():
-                if uid in before:
-                    self.assertEqual(position, before[uid])
+            for uid in always_paired:
+                self.assertEqual(now[uid], before[uid])
 
         self.assertTrue(battle_grid.fighting_models(self.battle, owner))
 
@@ -426,7 +537,7 @@ class EngagementAsymmetryTests(unittest.TestCase):
                 joiner = _regiment("j%d" % n, approach[0], approach[1], Side.PLAYER, initiative=5, models=1, ranks=1)
                 joiner.model_positions()
                 model = joiner.melee_models[0]
-                self.assertTrue(battle_grid._place_next_to_enemy(
+                self.assertTrue(battle_grid.place_next_to_enemy(
                     grid, joiner, model, approach[0], approach[1], [(defender, 0, target)]))
                 chosen.append((model.cell[0] - 8, model.cell[1] - 8))
             self.assertEqual(len(set(chosen)), 4)  # four distinct neighbouring cells

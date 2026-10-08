@@ -113,10 +113,13 @@ class InitiativeTimingTests(unittest.TestCase):
     """game_rules.md 5.1: a unit attacks once per turn, in the segment equal to its Initiative."""
 
     def test_given_two_engaged_regiments_with_different_initiative_when_ticked_one_full_turn_then_each_strikes_exactly_once(self):
-        high_i = _regiment("hi", 0, 0, Side.PLAYER, initiative=10, speed_per_tick=0.0)
-        low_i = _regiment("lo", 10, 0, Side.ENEMY, initiative=1, speed_per_tick=0.0)
+        # Models need a walking speed to step into their cells: only an arrival makes a model fight
+        # (notes/grid_gap_closing.md 0).
+        high_i = _regiment("hi", 0, 0, Side.PLAYER, initiative=10, speed_per_tick=1.5)
+        low_i = _regiment("lo", 10, 0, Side.ENEMY, initiative=1, speed_per_tick=1.5)
         battle = Battle(1000, 1000, [high_i, low_i], seed=1)
         _join_fight(battle, "g", high_i, low_i, turn=100)  # next_test_turn far ahead: never due here
+        _run(battle, combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN)  # a turn for the models to walk in
 
         events = _run(battle, combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN)
 
@@ -799,21 +802,22 @@ class CloseCombatStrikeTests(unittest.TestCase):
         self.defender.attack_target = "att"
 
     def test_given_two_touching_regiments_when_ticked_then_they_clash_and_the_engaged_unit_strikes(self):
-        # The grid is seeded around the unit that was engaged, so its models already stand in their
-        # cells and fight at once; the joining unit's models still have to walk in (game_rules.md 5.7).
+        # The grid is seeded around the unit that was engaged; its models stand in their cells at rest and
+        # fight only once a joining model has walked in and woken them (notes/grid_gap_closing.md 3).
         self.battle.tick()
+        self.assertEqual([e.kind for e in self.battle.events], ["clash"])
 
-        kinds = [e.kind for e in self.battle.events]
-        self.assertEqual(kinds, ["clash", "melee_strike"])
+        events = _run(self.battle, combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN)
+
+        kinds = [e.kind for e in events]
         # No break test yet: the first one is due two turns after contact (game_rules.md 6.2).
         self.assertNotIn("leadership_test", kinds)
         self.assertFalse(self.defender.routing)
-        strike = self.battle.events[1]
-        self.assertEqual(strike.data["attacker"], "att")
+        strike = next(e for e in events if e.kind == "melee_strike" and e.data["attacker"] == "att")
         # Only the models that hold a cell next to an enemy model fight, not the whole front rank.
         self.assertGreater(strike.data["fighting"], 0)
         self.assertLessEqual(strike.data["fighting"], self.attacker.models)
-        self.assertEqual(self.defender.models, 10 - strike.data["kills"])
+        self.assertLess(self.defender.models, 10)
 
     def test_given_a_joining_unit_when_its_models_have_walked_in_then_it_strikes_back(self):
         # The joining unit's models start outside their cells and must walk in before they may fight.
@@ -1195,6 +1199,7 @@ class ScriptedSameSideFightTests(unittest.TestCase):
 
     def test_strikes_are_tallied_per_camp_so_the_duel_has_a_loser(self):
         assassin, otto, battle = self._pair()
+        assassin.speed_per_tick = otto.speed_per_tick = 1.5  # to walk into their cells and fight
         events = _run(battle, combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN * 2)
         strikes = [e for e in events if e.kind == "melee_strike"]
         self.assertTrue(strikes)

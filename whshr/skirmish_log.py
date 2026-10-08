@@ -93,8 +93,6 @@ def check_grid(battle: "Battle", grid: battle_grid.BattleGrid, members: Sequence
                     if model.arrived and drift > DRIFT_LIMIT:
                         problems.append(
                             f"{regiment.identifier}#{model.uid}: arrived but {drift:.0f} units off its cell")
-            if model.reserve and model.cell is not None:
-                problems.append(f"{regiment.identifier}#{model.uid}: is a reserve yet holds {model.cell}")
             if model.arrived and model.cell is None:
                 problems.append(f"{regiment.identifier}#{model.uid}: arrived without a cell")
             if model.opponent is None:

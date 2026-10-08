@@ -152,7 +152,7 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
         regiment.shooting_mode = regiment.shooting_target = None
         regiment.volley_countdown = None
     grid = _grid_of(battle, regiment)
-    dead_uids: set[int] = set()
+    dead_opponents: dict[int, tuple[str, int] | None] = {}
     for index in victims:
         model = regiment.melee_models[index]
         if clear_credit:
@@ -168,7 +168,7 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
         else:
             animation.step(model, animation.DEAD, battle.rng, regiment.animation_family)
             regiment.corpses.append((*positions[index], battle.rng.randrange(animation.FULL_TURN)))
-        dead_uids.add(model.uid)
+        dead_opponents[model.uid] = model.opponent
         if grid is not None and model.cell is not None:
             grid.clear(model.cell)
         del regiment.positions[index]
@@ -181,7 +181,7 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
     regiment.models -= len(victims)
     if leader_killed:
         battle.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x17), route="self")
-    _unpair_dead(battle, regiment, dead_uids)
+    _unpair_dead(battle, regiment, dead_opponents)
     sprite = (regiment.sprite or "").casefold()
     if death_kind not in (animation.DEATH_FIRE, animation.DEATH_WARPFIRE):
         if "warpfire" in sprite:
@@ -199,15 +199,17 @@ def _grid_of(battle: "Battle", regiment: "Regiment") -> battle_grid.BattleGrid |
     return fight.get("grid") if fight else None
 
 
-def _unpair_dead(battle: "Battle", regiment: "Regiment", dead_uids: set[int]) -> None:
-    """Release every enemy model that was fighting one of the models just killed."""
+def _unpair_dead(battle: "Battle", regiment: "Regiment", dead_opponents: dict[int, tuple[str, int] | None]) -> None:
+    """Release every enemy model that was fighting one of the models just killed (`dead_opponents`: dead model uid ->
+    that model's own opponent). A survivor the dead model was fighting back is woken; a ganging attacker stays at
+    rest (notes/grid_gap_closing.md 2.4)."""
     for other in battle.regiments.values():
         for model in other.melee_models:
             if model.opponent is None or model.opponent[0] != regiment.identifier:
                 continue
-            if model.opponent[1] in dead_uids:
-                model.opponent = None
-                model.arrived = False
+            if model.opponent[1] in dead_opponents:
+                mutual = dead_opponents[model.opponent[1]] == (other.identifier, model.uid)
+                battle_grid.unpair_survivor(model, was_its_opponent=mutual)
 
 
 def _rank_bonus(attacker: "Regiment") -> int:
@@ -643,6 +645,7 @@ def _strike_with_models(attacker: "Regiment", group_id: str, fight: Fight, turn:
         defender_model = defender.melee_models[defender_index]
         # game_rules.md 5.2: the defender's designated opponent fights at its own WS; every further
         # attacker on that same model gets the ganging-up +1 WS.
+        battle_grid.grab(attacker, model, defender_model)  # an unpaired victim is grabbed (grid_gap_closing.md 4)
         gang_bonus = 0 if defender_model.opponent == (attacker.identifier, model.uid) else 1
         charge_bonus = 1 if attacker.charge_counter > 0 else 0
         if attacker.charge_counter > 0:

@@ -2099,8 +2099,14 @@ class Battle:
                     model.at_rest = True
                 else:
                     still_moving = True
-            if cell is not None:
-                model.arrived = math.hypot(tx - new_position[0], ty - new_position[1]) <= battle_grid.ARRIVAL_DISTANCE
+            if cell is not None and model.freeze_ticks <= 0:
+                # notes/grid_gap_closing.md 0: arrival is an event for awake models only (at-rest models in a melee
+                # are skipped above and never re-tested).
+                if math.hypot(tx - new_position[0], ty - new_position[1]) <= battle_grid.ARRIVAL_DISTANCE:
+                    if not model.arrived:
+                        battle_grid.on_arrival(self, regiment, model)
+                else:
+                    model.arrived = False
             updated.append(new_position)
         regiment.positions = updated
         return still_moving
