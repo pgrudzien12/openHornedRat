@@ -2,11 +2,14 @@
 
 **Open Horned Rat** is an open-source engine that runs *Warhammer: Shadow of the Horned Rat* (Mindscape, 1995) on modern systems, Linux included, without emulation and without the original program's crashes and sound problems.
 
-Questions, playtest reports, or just want to talk about the game? Join the community in [GitHub Discussions](https://github.com/pgrudzien12/openHornedRat/discussions).
 
 **What it is not:** it is not a game, and it is not a standalone or replacement copy of one. It contains no original game content, and it does nothing without your own legally owned copy of the original, from which it reads every asset at runtime. It is also not the original executable, and it does not run that executable.
 
 > **Early playtest builds are available, but there is no stable release yet.** The installers have passed automated builds but have not been tested on players' machines. The first stable packaged release is targeted for **the end of October 2026**.
+
+## Join the discussion
+
+Questions, playtest reports, or just want to talk about the game? Join the community in [GitHub Discussions](https://github.com/pgrudzien12/openHornedRat/discussions).
 
 ## Help us test
 
