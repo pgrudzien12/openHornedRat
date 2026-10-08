@@ -3,6 +3,7 @@ takes the target and starts the approach walk (an ordinary follow-unit move, not
 the charge-reach test passes, and the charge itself is a straight run. Synthetic scripts in the report's shape."""
 
 import unittest
+from unittest import mock
 
 from whshr import behaviour
 from whshr.engine import Battle, Regiment
@@ -70,6 +71,81 @@ class AttackOrderFlowTests(unittest.TestCase):
             self.battle.tick()
             steered = steered or self.player.avoid_target is not None
         self.assertTrue(steered)
+
+
+class AttackOrderGateAndHandOverTests(unittest.TestCase):
+    """notes/attack_order_flow.md 1 and 3: the order gate, the hand-over to the straight run, and the snap heading."""
+
+    def run_order(self, battle, player):
+        """Order the attack and run to the first movement update; return the identifiers of the facing-changing snaps."""
+        snaps = []
+        original = Battle._snap_order_turn
+
+        def spy(regiment, goal):
+            before = regiment.direction
+            original(regiment, goal)
+            if regiment.direction != before:
+                snaps.append(regiment.identifier)
+
+        with mock.patch.object(Battle, "_snap_order_turn", staticmethod(spy)):
+            battle.order_attack("player", "enemy")
+            for _ in range(5):
+                battle.tick()
+                if player.turn_order_key is not None:
+                    break
+        return snaps
+
+    def battle(self, *regiments):
+        battle = Battle(1000, 1000, list(regiments), seed=1995, script_dll=FakeDll(SCRIPTS),
+                        script_ids={r.identifier: MAIN for r in regiments})
+        battle.event_bus.unit_states["player"].interrupt_script = HANDLER
+        return battle
+
+    def test_given_a_straight_ahead_charge_or_melee_then_an_attack_click_is_dropped(self):
+        for state in ("free_charging", "in_melee"):
+            with self.subTest(state=state):
+                player = unit("player", 100, 500, Side.PLAYER)
+                battle = self.battle(player, unit("enemy", 400, 500, Side.ENEMY, direction=384))
+                setattr(player, state, True)
+                battle.order_attack("player", "enemy")
+                self.assertEqual(len(battle.event_bus.unit_states["player"].event_queue), 0)
+
+    def test_given_the_charge_takes_over_then_no_approach_route_is_left(self):
+        player = unit("player", 100, 500, Side.PLAYER)
+        battle = self.battle(player, unit("enemy", 400, 500, Side.ENEMY, direction=384))
+        battle.order_attack("player", "enemy")
+        for _ in range(200):
+            battle.tick()
+            if player.attack_target is not None:
+                break
+        self.assertEqual(player.attack_target, "enemy")
+        self.assertIsNone(player.target_x)
+        self.assertEqual(player.waypoints, [])
+        self.assertIsNone(player.avoid_target)
+
+    def test_given_a_steering_first_plan_then_the_move_start_snap_uses_the_steer_heading(self):
+        # Facing 0, target at bearing about 94: a turn under 97 alone would not snap. A friend just left of that line
+        # (bearing about 80) makes the first plan steer right to about 134, a turn of 97-192, so the unit snaps 90
+        # degrees to 128.
+        player = unit("player", 500, 500, Side.PLAYER, direction=0)
+        enemy = unit("enemy", 722, 612, Side.ENEMY, direction=384)
+        friend = unit("friend", 566, 544, Side.PLAYER, direction=0)
+        snaps = self.run_order(self.battle(player, enemy, friend), player)
+        self.assertIsNotNone(player.avoid_target)
+        self.assertEqual(snaps, ["player"])  # exactly once
+        self.assertTrue(120 <= player.direction <= 140, player.direction)  # snapped to 128, then wheeling on
+
+    def test_given_a_raw_bearing_that_would_snap_but_a_steer_heading_that_does_not_then_there_is_no_snap(self):
+        # Target at bearing about 100 (a turn that would snap 90 degrees); a friend just right of the line (bearing
+        # about 110) makes the first plan steer left (about 20-60), so the unit must not snap at all, not even a snap
+        # toward the raw bearing that the first update then snaps back.
+        player = unit("player", 500, 500, Side.PLAYER, direction=0)
+        enemy = unit("enemy", 735, 584, Side.ENEMY, direction=384)
+        friend = unit("friend", 578, 518, Side.PLAYER, direction=0)
+        snaps = self.run_order(self.battle(player, enemy, friend), player)
+        self.assertIsNotNone(player.avoid_target)
+        self.assertEqual(snaps, [])
+        self.assertLess(player.direction, 90)
 
 
 class ApproachObstacleTests(unittest.TestCase):
