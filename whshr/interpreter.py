@@ -651,6 +651,7 @@ class ScriptInterpreter:
         if switch is not None:
             state.script_id = switch
             state.pc = 0
+            state.interrupt_return = None  # the switch abandons the handler, as in op_ReturnInterrupt
             state.outer_returns.clear()
 
         if state.pending_reform_ranks is not None:

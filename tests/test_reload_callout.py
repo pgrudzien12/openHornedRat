@@ -151,5 +151,20 @@ class EventsDuringTheWaitTests(unittest.TestCase):
         self.assertEqual(self.state.outer_returns, [])
 
 
+class EndOfTickSwitchTests(unittest.TestCase):
+    def test_a_handler_that_switches_and_yields_leaves_no_handler_to_return_into(self):
+        cannon = unit("cannon")
+        dll = FakeDll({1: [word("Yield")], 2: [word("SwitchScript"), 162, word("Yield")], 162: [word("Yield")]})
+        battle = Battle(2000, 2000, [cannon], seed=1995, script_dll=dll, script_ids={"cannon": 2})
+        state = battle.event_bus.unit_states["cannon"]
+        state.interrupt_script = 2
+        state.interrupt_return = (1, 0)
+        state.outer_returns.append((1, 5))
+        battle.tick()
+        self.assertEqual(state.script_id, 162)
+        self.assertIsNone(state.interrupt_return)
+        self.assertEqual(state.outer_returns, [])
+
+
 if __name__ == "__main__":
     unittest.main()
