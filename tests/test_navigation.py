@@ -428,11 +428,12 @@ class BattleNavigationTests(unittest.TestCase):
         self.assertTrue(unit.fled)
 
     def test_a_routed_unit_leaves_the_table_and_broadcasts_its_departure(self):
-        # notes/movement_boundaries_route_finding.md, flight: on the departure check every other unit drops the
-        # fugitive as a target and gets event 0x0E (source = the fugitive); the unit is removed from play later.
+        # notes/movement_boundaries_route_finding.md, flight: on the departure check every other unit (either side,
+        # but not the fugitive itself) drops it as a target and gets event 0x0E (source = the fugitive); the unit is
+        # removed from play later.
         unit = Regiment("u", "U", 290, 200, 128, Side.PLAYER, models=1, ranks=1, speed_per_tick=20)
         chaser = Regiment("c", "C", 100, 100, 0, Side.ENEMY, models=1, ranks=1, speed_per_tick=0)
-        bystander = Regiment("b", "B", 100, 400, 0, Side.ENEMY, models=1, ranks=1, speed_per_tick=0)
+        bystander = Regiment("b", "B", 100, 400, 0, Side.PLAYER, models=1, ranks=1, speed_per_tick=0)  # same side
         chaser.attack_target = "u"
         battle = Battle(500, 500, [unit, chaser, bystander], boundaries=[square("bnd_BATTLEEDGE")])
         battle.event_bus.unit_states["c"].current_target = ("u", 0)
@@ -448,6 +449,7 @@ class BattleNavigationTests(unittest.TestCase):
         for identifier in ("c", "b"):
             self.assertEqual([(e.code, e.source) for e in battle.event_bus.unit_states[identifier].event_queue
                               if e.code == 0x0E], [(0x0E, "u")])
+        self.assertEqual([e.code for e in battle.event_bus.unit_states["u"].event_queue if e.code == 0x0E], [])
         self.assertEqual([e.data["regiment"] for e in battle.events if e.kind == "fled"], ["u"])
 
     def test_routing_without_battle_edge_completes_at_first_edge_check(self):
