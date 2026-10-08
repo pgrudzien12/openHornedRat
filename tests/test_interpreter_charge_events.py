@@ -53,8 +53,8 @@ class ReturnInterruptTests(unittest.TestCase):
     def test_applies_a_pending_switch_instead_of_returning_if_one_was_requested(self):
         # The interrupt handler itself decided to switch scripts (e.g. SwitchScript to a "brace"
         # script) -- that takes priority over resuming the interrupted point.
-        state = interpreter.UnitScriptState(script_id=161, pc=5, interrupt_return=(0, 11),
-                                             pending_switch=162)
+        state = interpreter.UnitScriptState(script_id=161, pc=5, interrupt_return=(0, 11))
+        self.interp.op_SwitchScript(state, 162, [], "t", 0, None)
         result = self.interp.op_ReturnInterrupt(state, None, [], "t", 0, None)
 
         self.assertEqual(state.script_id, 162)

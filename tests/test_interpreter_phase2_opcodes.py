@@ -220,10 +220,33 @@ class SwitchScriptPriorityTests(unittest.TestCase):
 
     def test_if_switch_script_only_fills_an_empty_pending_slot(self):
         state = interpreter.UnitScriptState()
+        state.cond_flags = True
         self.interp.op_IfSwitchScript(state, 200, [], "t", 0, None)
         self.assertEqual(state.pending_switch, 200)
         self.interp.op_IfSwitchScript(state, 201, [], "t", 0, None)
         self.assertEqual(state.pending_switch, 200)  # unchanged: slot already filled
+
+    def test_if_switch_script_with_a_false_condition_requests_nothing(self):
+        # notes/unit_script_control.md 6: "0x0E also needs the condition".
+        state = interpreter.UnitScriptState()
+        self.interp.op_IfSwitchScript(state, 200, [], "t", 0, None)
+        self.assertIsNone(state.pending_switch)
+
+    def test_a_switch_is_refused_while_switches_are_blocked(self):
+        state = interpreter.UnitScriptState()
+        state.cond_bits |= interpreter.SWITCH_REFUSED
+        self.interp.op_SwitchScript(state, 200, [], "t", 0, None)
+        self.assertIsNone(state.pending_switch)
+
+    def test_a_pending_switch_cleared_by_the_script_is_not_applied(self):
+        # notes/unit_script_control.md 1: bit 8 marks a pending switch; ClearCondFlags 8 cancels it.
+        state = interpreter.UnitScriptState(script_id=7)
+        self.interp.op_SwitchScript(state, 200, [], "t", 0, None)
+        self.assertTrue(state.cond_bits & interpreter.SWITCH_PENDING)
+        state.cond_bits &= ~interpreter.SWITCH_PENDING
+
+        self.assertIsNone(self.interp._take_pending_switch(state))
+        self.assertEqual(state.script_id, 7)
 
     def test_if_switch_script_high_always_overrides(self):
         state = interpreter.UnitScriptState()

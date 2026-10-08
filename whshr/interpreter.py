@@ -58,6 +58,8 @@ SHOOTING_SEQUENCE_FLAG2 = 4
 
 REPEAT_ENTRY = 0  # tag of a RepeatStart entry on the script stack: (body start, count, tag)
 COND_TRUE = 4  # the bit of the condition word that holds the true/false result
+SWITCH_PENDING = 8  # condition-word bit: a deferred script switch is pending (notes/unit_script_control.md 1)
+SWITCH_REFUSED = 0x20  # condition-word bit: script switches are refused
 
 
 def _trunc_sin(angle: int) -> int:
@@ -599,9 +601,9 @@ class ScriptInterpreter:
                 break
 
         # After main loop: apply pending script switch
-        if state.pending_switch is not None:
-            state.script_id = state.pending_switch
-            state.pending_switch = None
+        switch = self._take_pending_switch(state)
+        if switch is not None:
+            state.script_id = switch
             state.pc = 0
 
         if state.pending_reform_ranks is not None:
@@ -760,22 +762,40 @@ class ScriptInterpreter:
             state.pc = 0
         return 0
 
+    @staticmethod
+    def _request_switch(state: UnitScriptState, script: int, override: bool) -> None:
+        """Record a deferred switch (notes/unit_script_control.md 1 and 6: the SwitchScript family sets the pending
+        bit 8 of the condition word and is refused while bit 0x20 is set). `override` replaces a switch already
+        pending; otherwise the first request of the tick stands."""
+        if state.cond_bits & SWITCH_REFUSED:
+            return
+        if override or state.pending_switch is None:
+            state.pending_switch = script
+        state.cond_bits |= SWITCH_PENDING
+
+    @staticmethod
+    def _take_pending_switch(state: UnitScriptState) -> int | None:
+        """The switch to apply now (end of tick or ReturnInterrupt), if still pending: a script that cleared bit 8
+        (`ClearCondFlags 8`) has cancelled it."""
+        switch = state.pending_switch if state.cond_bits & SWITCH_PENDING else None
+        state.pending_switch = None
+        state.cond_bits &= ~SWITCH_PENDING
+        return switch
+
     def op_SwitchScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """SwitchScript N: switch to script N after this tick completes."""
         if operand is not None:
-            state.pending_switch = operand
+            self._request_switch(state, operand, override=True)
         return state.pc + 1
 
     def op_IfSwitchScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """IfSwitchScript N: request switching to script N at end of tick, but only if nothing
-        else has already requested a switch this tick (normal priority; game_rules.md documents
-        opcodes 0x0D-0x10 together as "switch script at end of tick", 0x0F called out as
-        "high priority" -- the priority ordering among 0x0D/0x0E is inferred from that framing,
-        not independently confirmed)."""
-        if operand is not None and state.pending_switch is None:
-            state.pending_switch = operand
+        """IfSwitchScript N: when the condition is true, request switching to script N at the end of the tick
+        (notes/unit_script_control.md 6: "0x0E also needs the condition"). Normal priority: it does not replace a
+        switch already pending (PROVISIONAL ordering, inferred from 0x0F being the "high priority" variant)."""
+        if operand is not None and state.cond_flags:
+            self._request_switch(state, operand, override=False)
         return state.pc + 1
 
     def op_IfSwitchScriptHigh(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -783,7 +803,7 @@ class ScriptInterpreter:
         """IfSwitchScriptHigh N: request switching to script N at end of tick, overriding any
         other pending switch this tick (the "high priority" variant per game_rules.md)."""
         if operand is not None:
-            state.pending_switch = operand
+            self._request_switch(state, operand, override=True)
         return state.pc + 1
 
     def op_IfNotSwitchScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -793,8 +813,8 @@ class ScriptInterpreter:
         pending switch), matching IfSwitchScript -- the exact precedence versus IfSwitchScript is
         not independently confirmed in the public notes, only that all four opcodes (0x0D-0x10)
         share the same "switch at end of tick" mechanism."""
-        if operand is not None and operand != state.script_id and state.pending_switch is None:
-            state.pending_switch = operand
+        if operand is not None and operand != state.script_id:
+            self._request_switch(state, operand, override=False)
         return state.pc + 1
 
     def op_GosubScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -2767,9 +2787,9 @@ class ScriptInterpreter:
         interrupted script or apply a pending switch"). Falls through if neither applies (e.g. this
         opcode reached without ever going through CallInterruptScript).
         """
-        if state.pending_switch is not None:
-            state.script_id = state.pending_switch
-            state.pending_switch = None
+        switch = self._take_pending_switch(state)
+        if switch is not None:
+            state.script_id = switch
             state.interrupt_return = None
             return 0
         if state.interrupt_return is not None:
