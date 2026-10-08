@@ -324,6 +324,7 @@ class BattleSceneTests(unittest.TestCase):
         scene.battle.result = "defeat"
 
         machine.handle(("win_battle",))
+        machine.update(BATTLE_TICK_SECONDS)
 
         self.assertEqual(scene.battle.result, "defeat")
         self.assertFalse(scene.no_battle)
