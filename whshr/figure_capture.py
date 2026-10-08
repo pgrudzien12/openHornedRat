@@ -58,7 +58,7 @@ def figure_goals(battle: "Battle", regiment: "Regiment") -> list[tuple[Point, st
     """
     count = len(regiment.positions)
     if regiment.reforming and len(regiment.reform_slots) == count:
-        slots = formation.place(regiment.x, regiment.y, regiment.direction, regiment.reform_slots)
+        slots = formation.place(regiment.x, regiment.y, regiment.reform_facing, regiment.reform_slots)
         return [(point, "reform") for point in slots]
     slots = formation.place(regiment.x, regiment.y, regiment.direction,
                             formation.block_slots(regiment.models, regiment.ranks))

@@ -243,6 +243,9 @@ class Regiment:
     # speed not halved, arrival keeps the figure's heading) instead of the shuffle mover; it lasts until the
     # re-form ends, through any new layout given meanwhile (12, treated as persisting).
     reform_walk_back: bool = False
+    # The facing the re-form layout was made at. Re-form slots stay at it while the re-form runs: only a pursuit
+    # turns then, and it does not rotate the slots (notes/reform_while_moving.md 5).
+    reform_facing: float = 0.0
     # notes/reform_while_moving.md 4: a player Move, Face point, Charge or Attack order given while re-forming is
     # held here as (Battle method name, *args) and applied on the first tick after the re-form ends.
     pending_order: tuple[Any, ...] | None = None
@@ -1491,6 +1494,7 @@ class Battle:
             regiment.reform_slots = list(raster)
         regiment.reforming = bool(regiment.reform_slots)
         regiment.reform_walk_back = walk_back and regiment.reforming
+        regiment.reform_facing = regiment.direction
         for model in regiment.melee_models:
             model.at_rest = False
             model.reform_step = None
@@ -1709,8 +1713,10 @@ class Battle:
                     regiment.waypoints.pop(0)
             elif regiment.turn_order_key is not None and regiment.turn_order_key[0] == "turn":
                 # Standalone turn order (game_rules.md "Turning, wheeling and reversing"): speed zero,
-                # shift 8; pivot about the inner front corner like all other gradual turns.
-                self._step_turn(regiment, scale)
+                # shift 8; pivot about the inner front corner like all other gradual turns. Suspended
+                # while re-forming: the tick is skipped (notes/reform_while_moving.md 5).
+                if not regiment.reforming:
+                    self._step_turn(regiment, scale)
                 if regiment.turn_mode is None:
                     regiment.turn_order_key = None
             else:
@@ -1800,7 +1806,8 @@ class Battle:
 
     @staticmethod
     def _step_turn(regiment: Regiment, scale: float) -> str | None:
-        """Advance one active gradual turn, shifting the anchor around the inner corner."""
+        """Advance one active gradual turn, shifting the anchor around the inner corner (not while re-forming:
+        only a pursuit turns then, without the pivot shift, notes/reform_while_moving.md 5)."""
         if regiment.turn_mode is None:
             return None
         frontage = regiment.frontage
@@ -1813,7 +1820,7 @@ class Battle:
         old_direction = regiment.direction
         amount = min(step, regiment.turn_remaining)
         new_direction = (old_direction + regiment.turn_sign * amount) % 512
-        if not regiment.turns_on_the_spot:
+        if not regiment.turns_on_the_spot and not regiment.reforming:
             shift_x, shift_y = formation.turn_corner_shift(old_direction, new_direction,
                                                            frontage, regiment.turn_sign)
             regiment.x += shift_x
@@ -1863,12 +1870,18 @@ class Battle:
             self._plan_turn(regiment, goal, charge=True)
         elif regiment.turn_mode is None and order_key[0] != "charge":
             self._plan_turn(regiment, goal, charge=order_key[0] == "charge")
-        mode = self._step_turn(regiment, scale)
-        if regiment.turns_on_the_spot:
-            pass  # no speed penalty: translates at full speed while turning
+        if regiment.reforming and not regiment.pursuing:
+            # notes/reform_while_moving.md 5: turning is suspended while re-forming (except in a pursuit). A wheel or
+            # a charge keeps translating along the current facing (at the re-form's halved speed); a halted turn
+            # does not translate at all. The planned turn resumes once the re-form ends.
+            mode = regiment.turn_mode
+            if mode == "halted" and order_key[0] != "charge":
+                step = 0
+        elif (mode := self._step_turn(regiment, scale)) is None or regiment.turns_on_the_spot:
+            pass  # no turn this tick, or no speed penalty: translates at full speed while turning
         elif mode == "wheel":
             step /= 2
-        elif mode is not None and mode != "charge_reaim":
+        elif mode != "charge_reaim":
             step = 0  # a charge re-aim keeps full anchor speed (game_rules.md, model_movement.md)
         if step <= 0:
             regiment.route_speed = 0.0
@@ -2120,7 +2133,7 @@ class Battle:
             if not still_moving and all(model.at_rest for model in regiment.melee_models):
                 return self._finish_reform(regiment)
             return True
-        targets = list(formation.place(regiment.x, regiment.y, regiment.direction, regiment.reform_slots))
+        targets = list(formation.place(regiment.x, regiment.y, regiment.reform_facing, regiment.reform_slots))
         facing_angle = regiment.direction * math.tau / formation.FULL_TURN
         facing_x, facing_y = math.sin(facing_angle), math.cos(facing_angle)
         s_rlmv = regiment.speed_per_tick * 16 / MOVING_FREELY_K

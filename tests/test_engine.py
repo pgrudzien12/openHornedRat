@@ -1182,14 +1182,37 @@ class FormationTurnExceptionTests(unittest.TestCase):
         self.assertAlmostEqual(regiment.direction, s_rlmv * (144 - 1.5 ** 2) / 256)
         self.assertAlmostEqual(math.hypot(regiment.x - 100, regiment.y - 100), regiment.speed_per_tick)
 
-    def test_given_a_reforming_block_when_ordered_east_then_it_neither_snaps_nor_shifts_its_anchor(self):
+    def test_given_a_reforming_block_when_ordered_east_then_it_neither_snaps_nor_turns_nor_moves(self):
+        # notes/reform_while_moving.md 10: re-forming, owing a halted turn -> no turn, no translation.
         battle, regiment = self._battle(models=20, ranks=4)
         regiment.reforming = True
 
         battle._advance_toward(regiment, (500, 100), regiment.speed_per_tick, True, ("move", 500, 100), 1.0)
 
-        self.assertLess(regiment.direction, 128)
-        self.assertAlmostEqual(math.hypot(regiment.x - 100, regiment.y - 100), regiment.speed_per_tick)
+        self.assertEqual(regiment.direction, 0)
+        self.assertEqual((regiment.x, regiment.y), (100, 100))
+
+    def test_given_a_reforming_block_owing_a_wheel_when_moving_then_it_keeps_its_facing_and_translates(self):
+        # notes/reform_while_moving.md 10: re-forming, needs a 30 degree wheel -> no turn; translates along its facing.
+        battle, regiment = self._battle(models=20, ranks=4)
+        regiment.reforming = True
+        target = (100 + 400 * math.sin(math.radians(30)), 100 + 400 * math.cos(math.radians(30)))
+
+        battle._advance_toward(regiment, target, regiment.speed_per_tick, True, ("move", *target), 1.0)
+
+        self.assertEqual(regiment.direction, 0)
+        self.assertAlmostEqual(regiment.x, 100)
+        self.assertAlmostEqual(regiment.y, 100 + regiment.speed_per_tick)
+
+    def test_given_a_reforming_pursuer_when_it_turns_then_its_anchor_is_not_pivot_shifted(self):
+        battle, regiment = self._battle(models=20, ranks=4)
+        regiment.reforming = regiment.pursuing = True
+        regiment.turn_mode, regiment.turn_shift, regiment.turn_sign, regiment.turn_remaining = "wheel", 7, 1, 60
+
+        Battle._step_turn(regiment, 1.0)
+
+        self.assertGreater(regiment.direction, 0)
+        self.assertEqual((regiment.x, regiment.y), (100, 100))
 
     def test_given_a_wagon_when_the_camera_moves_then_facing_snaps_to_the_camera_relative_grid(self):
         battle, regiment = self._battle(models=2, ranks=1)
