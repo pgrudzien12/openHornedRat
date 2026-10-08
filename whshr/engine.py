@@ -1010,11 +1010,23 @@ class Battle:
     def route_effective_speed(self, regiment: Regiment) -> float:
         """The speed the route filter compares (notes/obstacle_steering.md section 6): the unit's travel speed while
         it is not pausing and has a move, flight, pursuit or charge under way; 0 otherwise. PROVISIONAL: the
-        travel speed is the free-move speed, the charge speed while charging and the flight speed while broken."""
-        if regiment.route_pause_ticks > 0:
-            return 0.0
+        travel speed is the free-move speed, the charge speed while charging and the flight speed while broken.
+
+        A unit in melee or braced is 0: engagement and bracing end its movement and its charge, and the attack
+        target it keeps does not count (notes/convoy_jam_and_melee_obstacles.md B.1). So a friendly unit fighting
+        in melee is an ordinary obstacle that a mover detours round, never a reason for the 54-update pause. A broken
+        unit flees at flight speed even if it was still braced, or in a route pause, when it broke."""
         if regiment.routing:
             return regiment.speed_for_mode(FLEEING_K)
+        if regiment.route_pause_ticks > 0 or regiment.in_melee or regiment.braced:
+            return 0.0
+        if regiment.pursuing:
+            # The pursuit step (game_rules.md "Unit speed", R39): min(flight speed, 10 x distance / 256).
+            target = self.regiments.get(regiment.attack_target) if regiment.attack_target is not None else None
+            speed = regiment.speed_for_mode(FLEEING_K)
+            if target is None:
+                return speed
+            return min(speed, 10 * math.hypot(target.x - regiment.x, target.y - regiment.y) / 256)
         if regiment.attack_target is not None or regiment.free_charging and regiment.moving:
             return regiment.speed_for_mode(CHARGING_K)
         if regiment.moving or regiment.waypoints:
