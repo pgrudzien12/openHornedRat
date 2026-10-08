@@ -213,6 +213,33 @@ class Objectives:
             if check is not None and check(self, battle, record):
                 record.met = True
 
+    # ------------------------------------------------------------------ testing aid (--debug F10)
+
+    def complete(self, battle: Battle, entries: Iterable[Sequence[Any]] | None = None) -> None:
+        """Testing aid: finish the battle through its objectives and mark them completed.
+
+        The segment check runs once (so an eliminated enemy decides A, F and the like through their own
+        evaluators); if no battle-ending letter decided, the first one that can end the battle without being a
+        defeat is met by fiat and decides. The final pass then runs. Every other letter that is not a defeat or
+        information letter is marked met; each value the battle left at zero takes the flawless value of its
+        `.BTS` line (payments.flawless_results), measured values are kept."""
+        from .payments import DEFEAT_LETTERS, NEVER_MET_LETTERS, flawless_results
+
+        self.segment(battle)
+        if self.decided is None:
+            winning = next((r for r in self.records if r.flags & ENDS_BATTLE and r.letter not in DEFEAT_LETTERS), None)
+            if winning is not None:
+                winning.met = True
+                self._decide(battle, winning.letter)
+        self.finish(battle)
+        full = flawless_results(entries)
+        for record in self.records:
+            if record.letter in DEFEAT_LETTERS or record.letter in NEVER_MET_LETTERS:
+                continue
+            record.met = True
+            if record.letter in full:  # a value the battle left at zero takes the completed value
+                record.values = [value or filled for value, filled in zip(record.values, full[record.letter][1])]
+
     # ------------------------------------------------------------------ book button (section 8)
 
     def book_text_ids(self) -> list[int]:
