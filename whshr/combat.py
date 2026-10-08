@@ -960,7 +960,7 @@ def contact_attack(battle: "Battle", attacker: "Regiment", target: "Regiment") -
         return 0
     killed = kill_models(target, victims, battle=battle, killer=attacker.identifier)
     battle.events.append(BattleEvent(
-        f"{attacker.name} cuts down {killed} fleeing {target.name}."
+        f"{attacker.name} cuts down {killed} {'fleeing ' if target.routing else ''}{target.name}."
         if killed else f"{attacker.name} reaches {target.name} but draws no blood.",
         "contact_attack",
         attacker=attacker.identifier, target=target.identifier, kills=killed,
