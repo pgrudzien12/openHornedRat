@@ -185,9 +185,11 @@ Music named by glue scripts, window records and cutscene data is loaded by name.
 of where every other track plays is not required. The engine also uses its own campaign save format;
 importing or exporting the original game's `savegame.N` files is out of scope.
 
-The active exception is [cutscene event playback](https://github.com/pgrudzien12/openHornedRat/issues/41):
-subtitles, speakers and fades from the shipped `.SI` event records are needed for a generic player.
-Other implementation gaps remain in their focused issues and epics.
+The active exceptions are [cutscene event playback](https://github.com/pgrudzien12/openHornedRat/issues/41),
+where subtitles, speakers and fades from the shipped `.SI` event records are needed for a generic
+player, and the open game-rules and script-semantics questions tracked in
+[issue #44](https://github.com/pgrudzien12/openHornedRat/issues/44). Other implementation gaps remain
+in their focused issues and epics.
 
 ## Risks and rules
 
