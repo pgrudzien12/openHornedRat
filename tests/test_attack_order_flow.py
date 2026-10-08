@@ -123,6 +123,27 @@ class AttackOrderGateAndHandOverTests(unittest.TestCase):
         self.assertIsNone(player.pending_order)
         self.assertEqual(reacts, [("player", 13)])
 
+    def test_given_a_charge_or_melee_then_an_attack_click_on_a_building_is_dropped_too(self):
+        for state in ("free_charging", "in_melee", "attack_target"):
+            with self.subTest(state=state):
+                player = unit("player", 100, 500, Side.PLAYER)
+                battle = self.battle(player)
+                battle.buildings = buildings.from_scenery([{"name": "Farm", "x": 300, "y": 500}])
+                battle.building_index = {b.identifier: b for b in battle.buildings}
+                setattr(player, state, "enemy" if state == "attack_target" else True)
+                battle.order_attack_building("player", battle.buildings[0].identifier)
+                self.assertEqual(len(battle.event_bus.unit_states["player"].event_queue), 0)
+
+    def test_given_a_straight_ahead_charge_when_a_targeted_charge_takes_over_then_it_is_no_longer_free(self):
+        player = unit("player", 100, 500, Side.PLAYER)
+        battle = self.battle(player, unit("enemy", 300, 500, Side.ENEMY, direction=384))
+        state = battle.event_bus.unit_states["player"]
+        state.current_target = ("enemy", 0)
+        player.free_charging, player.target_x, player.target_y = True, 250, 500
+        battle.interpreter.op_ChargeTarget(state, None, [], "player", 0, battle.rng)
+        self.assertEqual(player.attack_target, "enemy")
+        self.assertFalse(player.free_charging)
+
     def test_given_the_charge_takes_over_then_no_approach_route_is_left(self):
         player = unit("player", 100, 500, Side.PLAYER)
         battle = self.battle(player, unit("enemy", 400, 500, Side.ENEMY, direction=384))

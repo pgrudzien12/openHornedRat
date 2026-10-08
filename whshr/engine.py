@@ -1380,19 +1380,7 @@ class Battle:
         if not target.active:
             raise ValueError(f"{target_id} is no longer on the field")
         if self.interpreter is not None:
-            # notes/attack_order_flow.md 1: the order is event 0x04 to the unit; its handler takes the target and
-            # runs the approach walk (an ordinary follow-unit move), and the charge starts only once the charge-reach
-            # test passes. The order is dropped while the unit is charging (at a target or straight ahead) or in
-            # melee (3). Without scripts the order charges directly. During a re-form it is accepted at once with a
-            # React 13 reply, replacing any held order; the approach itself waits for the re-form
-            # (notes/reform_while_moving.md 4).
-            if regiment.attack_target is not None or regiment.free_charging or regiment.in_melee:
-                return
-            if self.phase == "battle" and regiment.reforming:
-                self.react(regiment.identifier, 13)
-            regiment.pending_order = None
-            regiment.clear_shooting()
-            self.event_bus.queue_event(identifier, interpreter.Event(code=0x04, source=target_id))
+            self._queue_scripted_attack(regiment, target_id)
             return
         if self._hold_while_reforming(regiment, ("order_attack", target_id)):
             return
@@ -1404,6 +1392,20 @@ class Battle:
         regiment.free_charging = False
         regiment.route_follows_unit = False
         regiment.turn_order_key = None
+
+    def _queue_scripted_attack(self, regiment: Regiment, target_id: str) -> None:
+        """A player Attack on a regiment or building with scripts running (notes/attack_order_flow.md 1, 3): event 0x04
+        to the unit, whose handler takes the target and runs the approach walk; the charge starts only once the
+        charge-reach test passes. The order is dropped while the unit is charging (at a target or straight ahead) or
+        in melee. During a re-form it is accepted at once with a React 13 reply, replacing any held order; the
+        approach itself waits for the re-form (notes/reform_while_moving.md 4)."""
+        if regiment.attack_target is not None or regiment.free_charging or regiment.in_melee:
+            return
+        if self.phase == "battle" and regiment.reforming:
+            self.react(regiment.identifier, 13)
+        regiment.pending_order = None
+        regiment.clear_shooting()
+        self.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x04, source=target_id))
 
     def order_charge_forward(self, identifier: str) -> None:
         """Begin the selected regiment's straight-ahead Charge command."""
@@ -3164,15 +3166,15 @@ class Battle:
         if (regiment.routing or regiment.pursuing or regiment.held or regiment.braced or regiment.anchored
                 or regiment.assaulting_building is not None):
             raise ValueError(f"{identifier} cannot be ordered to attack")
+        if self.interpreter is not None:
+            self._queue_scripted_attack(regiment, building_id)
+            return
         if self._hold_while_reforming(regiment, ("order_attack", building_id)):
             return
         regiment.target_x = regiment.target_y = None
         regiment.clear_shooting()
         regiment.free_charging = False
         regiment.turn_order_key = None
-        if self.interpreter is not None:
-            self.event_bus.queue_event(identifier, interpreter.Event(code=0x04, source=building_id))
-            return
         regiment.attack_target = building_id
         regiment.charge_started_target = None
 

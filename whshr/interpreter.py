@@ -2478,6 +2478,7 @@ class ScriptInterpreter:
         """The straight run replaces the approach walk: no route pause, and no point route or steering left for
         other units' route filters to read (notes/attack_order_flow.md 1)."""
         regiment.route_pause_ticks = 0
+        regiment.free_charging = False
         regiment.target_x = regiment.target_y = None
         regiment.waypoints.clear()
         regiment.avoid_target = None
