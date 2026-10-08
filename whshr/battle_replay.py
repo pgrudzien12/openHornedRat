@@ -102,6 +102,9 @@ def replay(installation: Installation | PathArg, log_path: PathArg, until: int |
     battle_id = AssetId.parse(header["battle_asset"])
     if context is None:
         context = scene_context(installation)
+    # Only orders accepted live are recorded (the F10 win is refused and unrecorded without --debug), so a replay
+    # accepts them all.
+    context.debug = True
     scene = BattleScene(battle_id, log_dir=None, seed=header["seed"], player_army=header.get("player_army"))
     scene.enter(context)
 

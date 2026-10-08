@@ -24,6 +24,13 @@ class GlueCliTests(unittest.TestCase):
 
         self.assertIs(run.call_args.args[-1], True)
 
+    def test_engine_debug_option_reaches_the_frontend_runner(self):
+        with patch("whshr.frontend.app.run", return_value={"frames": 1, "ticks": 1, "scene": "GlueScene", "quit": None}) as run:
+            __main__.main(["engine", "/tmp", "--hidden", "--frames", "1", "--debug"])
+            __main__.main(["engine", "/tmp", "--hidden", "--frames", "1"])
+
+        self.assertEqual([call.kwargs.get("debug") for call in run.call_args_list], [True, False])
+
 
 if __name__ == "__main__":
     unittest.main()

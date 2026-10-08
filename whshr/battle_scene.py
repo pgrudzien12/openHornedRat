@@ -52,6 +52,7 @@ class BattleScene(Scene):
         self.glue_scene = glue_scene
         self.request_id = request_id
         self.no_battle = False
+        self.win_requested = False  # the debug win key was pressed; settled at the next tick
 
     def enter(self, context: SceneAssets) -> None:
         if self.player_army is None and self.glue_scene is not None and self.glue_scene.campaign is not None:
@@ -128,9 +129,11 @@ class BattleScene(Scene):
 
     def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         """Player intent from the view: select, move, attack, halt or deselect."""
+        kind, *args = event
+        if kind == "win_battle" and not getattr(context, "debug", False):
+            return None  # a testing aid of --debug runs only; not recorded, so a replay never sees a refused order
         if self.logger is not None and self.logger.enabled:
             self.logger.write_order(self.battle.update_count, event)
-        kind, *args = event
         if kind == "start_battle":
             self.battle.start_battle()
         elif kind == "capture":
@@ -142,6 +145,12 @@ class BattleScene(Scene):
             elif self.log_dir is not None and unit_id is not None:
                 self.captures.append(figure_capture.FigureCapture(self.log_dir, self.battle_id.name,
                                                                   self.battle, unit_id))
+        elif kind == "win_battle":
+            # Testing aid (F10, --debug runs only): finish this battle as an instant, lossless win, settled and paid
+            # like no-battle mode, so a battle can be skipped in the middle of a playthrough. Only requested here; the
+            # settlement happens at the start of the next simulation tick (`update`), so a live run and its replay
+            # reach the same terminal tick and final snapshot.
+            self.win_requested = True
         elif kind == "pause":
             if self.battle.phase == "battle" and not self.battle.can_leave:
                 self.battle.paused = not self.battle.paused
@@ -311,6 +320,12 @@ class BattleScene(Scene):
     def update(self, seconds: float, context: SceneAssets) -> Transition | Quit | None:
         super().update(seconds, context)
         for _ in range(self.clock.advance(seconds)):
+            if self.win_requested:
+                self.win_requested = False
+                if self.battle.result is None:  # a battle already over stays as it is
+                    self.no_battle = True
+                    self.battle.start_battle()
+                    self.battle.resolve_no_battle()
             tick_number = self.battle.update_count
             self.battle.tick(BATTLE_TICK_SECONDS)
             if self.logger is not None and self.logger.enabled:

@@ -121,6 +121,45 @@ class RecordAndReplayTests(SyntheticInstallation):
         self.assertEqual(replayed.battle.tick_count, scene.battle.tick_count)
         self.assertEqual(replayed.battle.regiments["Player_Cav"].x, scene.battle.regiments["Player_Cav"].x)
 
+    def test_given_the_debug_win_key_when_replayed_then_the_terminal_tick_and_result_match(self):
+        context = self._context()
+        context.debug = True
+        scene = BattleScene(log_dir=self.log_dir, seed=7)
+        machine = SceneMachine(scene, context)
+        for _ in range(5):
+            machine.update(BATTLE_TICK_SECONDS)
+        scene.handle(("win_battle",), context)
+        machine.update(BATTLE_TICK_SECONDS)
+        machine.update(BATTLE_TICK_SECONDS)  # the battle has resolved; the scene has moved on
+        machine.active.exit(context) if machine.active is scene else scene.exit(context)
+
+        records = [json.loads(line) for line in scene.logger.path.read_text().splitlines()]
+        self.assertIn(["win_battle"], [record.get("event") for record in records if record.get("type") == "order"])
+        replayed, _header, divergence, _timeline = battle_replay.replay(self.root, scene.logger.path,
+                                                                        context=self._context())
+
+        self.assertIsNone(divergence)
+        self.assertEqual(replayed.battle.result, "victory")
+        self.assertEqual(replayed.battle.tick_count, scene.battle.tick_count)  # the terminal tick was simulated too
+
+    def test_given_the_win_key_without_debug_then_it_is_neither_obeyed_nor_recorded(self):
+        context = self._context()
+        scene = BattleScene(log_dir=self.log_dir, seed=7)
+        machine = SceneMachine(scene, context)
+        for _ in range(5):
+            machine.update(BATTLE_TICK_SECONDS)
+        scene.handle(("win_battle",), context)
+        for _ in range(5):
+            machine.update(BATTLE_TICK_SECONDS)
+        scene.exit(context)
+
+        records = [json.loads(line) for line in scene.logger.path.read_text().splitlines()]
+        self.assertNotIn(["win_battle"], [record.get("event") for record in records if record.get("type") == "order"])
+        self.assertIsNone(scene.battle.result)
+        _replayed, _header, divergence, _timeline = battle_replay.replay(self.root, scene.logger.path,
+                                                                        context=self._context())
+        self.assertIsNone(divergence)
+
     def test_given_an_order_on_a_snapshot_tick_when_replayed_then_it_is_still_identical(self):
         # A live snapshot is written at the end of the update that produced its tick, before that tick's orders.
         context = self._context()

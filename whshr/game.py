@@ -18,13 +18,15 @@ from .si import process_si
 
 
 def scene_context(installation: Installation | str | PathLike[str], loaders: dict[str, Loader] | None = None,
-                  save_dir: str | PathLike[str] | None = None, no_battle: bool = False) -> SceneAssets:
+                  save_dir: str | PathLike[str] | None = None, no_battle: bool = False,
+                  debug: bool = False) -> SceneAssets:
     """Validate an installation and return the lazy asset access shared by all scenes.
 
     ``save_dir`` is the engine's own save directory (never the original installation's SAVE/,
     notes/glue_engine_integration.md GEI7e). ``no_battle`` turns on the campaign-progression
     shortcut (every `BattleScene` it reaches settles as an immediate, lossless win instead of
-    being simulated; whshr.engine.Battle.resolve_no_battle).
+    being simulated; whshr.engine.Battle.resolve_no_battle). ``debug`` enables the testing keys (F10 wins the
+    current battle).
     """
     locator = AssetLocator(installation)
     locator.validate()
@@ -53,7 +55,7 @@ def scene_context(installation: Installation | str | PathLike[str], loaders: dic
             "glue-content": load_glue,
         }
     context = SceneAssets(locator, build(locator.installation), AssetCache(), loaders, glue=glue, save_dir=save_dir,
-                          no_battle=no_battle)
+                          no_battle=no_battle, debug=debug)
     if default_loaders:
         context.battle_loader = lambda _record, path, army: load_battlefield(locator.installation, path, player_army=army)
     return context
