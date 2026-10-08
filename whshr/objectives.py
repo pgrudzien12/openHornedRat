@@ -267,9 +267,8 @@ def in_node(battle: Battle, regiment: Regiment, index: int) -> bool:
 
 
 def building_count(battle: Battle) -> int:
-    """Building pseudo-units with models (section 12.1). Nothing damages a building in this engine yet, so every
-    building-type furniture piece keeps its models: C stays at 100%."""
-    return sum(1 for name in battle.scenery_names if name in BUILDING_TYPES)
+    """Building pseudo-units still standing (section 12.1): a destroyed building no longer counts for C."""
+    return sum(1 for building in battle.buildings if building.standing)
 
 
 def standing_trees(battle: Battle) -> int:

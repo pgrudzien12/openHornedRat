@@ -4,7 +4,7 @@
 import unittest
 
 from tests.script_helpers import FakeDll, word
-from whshr import behaviour, interpreter
+from whshr import behaviour, buildings, interpreter
 from whshr.engine import Battle, Regiment
 from whshr.nodes import ScriptNode
 from whshr.rules import Side
@@ -119,3 +119,25 @@ class IfSideUnitInNodeAreaTests(NodeAreaTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BuildingSideCodeTests(NodeAreaTestCase):
+    """Side code 32 matches a standing building pseudo-unit whose centre is in the area (part C 4.3)."""
+
+    def add_building(self, x, y):
+        self.battle.buildings = buildings.from_scenery([{"name": "Farm", "x": x, "y": y}])
+
+    def test_a_building_inside_the_area_matches_side_32(self):
+        self.add_building(100, 105)
+        self.assertTrue(self.cond("IfSideUnitInNodeArea", 32, 5, 0))
+
+    def test_a_building_outside_the_area_or_destroyed_does_not_match(self):
+        self.add_building(100, 200)
+        self.assertFalse(self.cond("IfSideUnitInNodeArea", 32, 5, 0))
+        self.add_building(100, 105)
+        self.battle.buildings[0].destroyed = True
+        self.assertFalse(self.cond("IfSideUnitInNodeArea", 32, 5, 0))
+
+    def test_a_regiment_in_the_area_does_not_match_side_32(self):
+        self.place(self.runner, 100, 100)
+        self.assertFalse(self.cond("IfSideUnitInNodeArea", 32, 5, 0))

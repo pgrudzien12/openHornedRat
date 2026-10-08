@@ -20,7 +20,7 @@ import random
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from . import animation, behaviour, combat, magic, nodes, spell_effects, visibility
+from . import animation, behaviour, buildings, combat, magic, nodes, spell_effects, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import Side, side_of_code
@@ -1631,10 +1631,20 @@ class ScriptInterpreter:
 
     def op_AttackUnitAtNode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
-        """AttackUnitAtNode N: attack the building at node N (part A 5). Not modelled: buildings are not
-        units in this engine, so the search never finds one and the condition is false; anchored or
-        held units fail first as in the report."""
+        """AttackUnitAtNode N: attack the building at node N (part A 5). Anchored or held units fail; otherwise the
+        nearest standing building pseudo-unit within max(footprint radius, 48) of the node's point is found
+        (regiments at the node are ignored) and event 0x04 with the building as source is queued to the unit
+        itself; the condition is true when a building was found. A missing node finds nothing."""
         state.cond_flags = False
+        unit = self.battle.regiments.get(unit_id)
+        table = self.battle.script_nodes
+        index = operand or 0
+        if unit is None or unit.anchored or unit.held or not 0 <= index < len(table):
+            return state.pc + 2
+        building = buildings.nearest_to_point(self.battle.buildings, table[index].x, table[index].y)
+        if building is not None:
+            self.event_bus.queue_event(unit_id, Event(code=0x04, source=building.identifier))
+            state.cond_flags = True
         return state.pc + 2
 
     def op_ReactToThreat(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
@@ -2204,6 +2214,18 @@ class ScriptInterpreter:
         state.pending_spell = event.parameter if event.parameter > 0 else None
         unit = self.battle.regiments.get(unit_id)
         source = self.battle.regiments.get(event.source) if event.source is not None else None
+        building = self.battle.building_index.get(event.source) if event.source is not None else None
+        if building is not None and unit is not None:
+            # A building pseudo-unit never breaks; the taker is refused while busy and otherwise aims at its
+            # centre (PROVISIONAL: no melee against building footprints yet, the unit only approaches).
+            if unit.attack_target is not None or unit.in_melee or unit.routing or building.destroyed:
+                state.cond_flags = False
+                return state.pc + 1
+            unit.braced, unit.braced_target = False, None
+            state.current_target = None
+            state.approach_point = state.target_point = (building.x, building.y)
+            state.cond_flags = True
+            return state.pc + 1
         if source is not None and unit is not None:
             refuses_broken = behaviour.opcode_of(script_words[state.pc]) == 0x3A if state.pc < len(script_words) else True
             if (unit.attack_target is not None or unit.in_melee or unit.routing
@@ -3483,13 +3505,19 @@ class ScriptInterpreter:
         """IfSideUnitInNodeArea SIDE N EXCLUDE: condition := a unit of the absolute side code SIDE (low
         byte: 0 player, 64 allied, 128 enemy; low five bits set never match) that shows none of the
         EXCLUDE unit-flag states (as TestUnitFlags reads them) is in node N's area
-        (notes/threat_events_nodes.md, part C 4.3). Not modelled: building pseudo-units (side 32), which
-        are not regiments here."""
+        (notes/threat_events_nodes.md, part C 4.3). Side 32 matches a standing building pseudo-unit whose
+        centre is in the area (no unit-flag state is ever set on one)."""
         side_code = (operand or 0) & 0xFF
         node = script_words[state.pc + 2] if state.pc + 2 < len(script_words) else -1
         exclude = script_words[state.pc + 3] if state.pc + 3 < len(script_words) else 0
         wanted = side_of_code(side_code) if side_code in (0, 0x40, 0x80) else None
         found = False
+        if side_code == buildings.SIDE_CODE and 0 <= node < len(self.battle.script_nodes):
+            area = self.battle.script_nodes[node]
+            found = any(not b.destroyed and (b.x - area.x) ** 2 + (b.y - area.y) ** 2 <= area.radius ** 2
+                        for b in self.battle.buildings)
+            state.cond_flags = found
+            return state.pc + 4
         for other_id, regiment in self._units_in_battle():
             if regiment.side != wanted or not self._in_node_area(regiment, node):
                 continue
