@@ -394,23 +394,34 @@ class ScriptInterpreter:
                     or regiment.turn_order_key is not None or regiment.routing or regiment.in_melee)
 
     def raise_contacts(self, contacts: list[tuple["Regiment", "Regiment"]]) -> None:
-        """The collision pass with scripts running (notes/script_behaviours.md 2.2): for each touching pair, a unit
-        that moved or charged this tick (PROVISIONAL stand-in for the collision re-check state) runs the
-        fear-on-contact test and, unless latched, gets event 0x0B (checked) with the other unit as its contact
-        record; a troops regiment touched gets the reciprocal 0x0B. Marked units are not touched at all. A latched
-        unit that touches nothing any more is released; a latched unit's movement is rolled back by the engine (Battle._resolve_latched_step);
-        wagon event 0x27 is raise_wagon_collisions. Not modelled: push-apart (the engine's own), contact attacks on routers."""
+        """The collision pass with scripts running (notes/script_behaviours.md 2.1-2.2). Units are visited in unit
+        order and only those whose collision re-check state is on take part; the state is cleared at the start of
+        the unit's pass (so a unit later in the order that an earlier unit switched on is visited in the same
+        update). For each footprint a unit touches: the fear-on-contact test; the touched unit's re-check state
+        goes on unless the pass-taker is in melee; unless latched, the pass-taker gets event 0x0B (checked) with
+        the other unit as its contact record and its re-check state off; a troops regiment touched gets the same
+        (the reciprocal). Marked units are not touched at all. A latched unit that touches nothing any more is
+        released; a latched unit's movement is rolled back by the engine (Battle._resolve_latched_step); wagon event
+        0x27 is raise_wagon_collisions. Not modelled: push-apart (the engine's own), contact attacks on routers,
+        fanatic footprints."""
         touching: set[str] = set()
+        neighbours: dict[str, list["Regiment"]] = {}
         for first, second in contacts:
             if self._leaving(first) or self._leaving(second):
                 continue
             touching.update((first.identifier, second.identifier))
             if first.melee_group is not None and first.melee_group == second.melee_group:
                 continue
-            for mover, other in ((first, second), (second, first)):
-                if not self._rechecks(mover):
-                    continue
+            neighbours.setdefault(first.identifier, []).append(second)
+            neighbours.setdefault(second.identifier, []).append(first)
+        for mover in list(self.battle.regiments.values()):
+            if not mover.collision_recheck:
+                continue
+            mover.collision_recheck = False
+            for other in neighbours.get(mover.identifier, ()):
                 self._contact_fear(mover, other)
+                if not mover.in_melee:
+                    other.collision_recheck = True
                 self._record_contact(mover, other)
                 if not (other.is_wagon or other.hud_class in ("art", "mon")):
                     self._record_contact(other, mover)
@@ -423,17 +434,12 @@ class ScriptInterpreter:
         kind (any side, any unit type) within +-45 degrees of its facing is sent 0x27 (checked, no source), once per
         tick. Units leaving the battle are not touched. Not modelled: building footprints, which are not units."""
         for wagon in regiments:
-            if not wagon.is_wagon or self._leaving(wagon) or not self._rechecks(wagon):
+            if not wagon.is_wagon or self._leaving(wagon) or not wagon.collision_recheck:
                 continue
             if any(other is not wagon and not other.hidden and not self._leaving(other)
                    and formation.penetrates(wagon.block(), other.block()) and self._in_arc(wagon, other)
                    for other in regiments):
                 self.event_bus.queue_event(wagon.identifier, Event(code=0x27), checked=True)
-
-    @staticmethod
-    def _rechecks(unit: "Regiment") -> bool:
-        """PROVISIONAL collision re-check state: the unit moved, charged or pursued this tick."""
-        return unit.moving or bool(unit.waypoints) or unit.attack_target is not None
 
     def _contact_fear(self, mover: "Regiment", other: "Regiment") -> None:
         state = self.event_bus.unit_states.get(mover.identifier)
@@ -447,6 +453,7 @@ class ScriptInterpreter:
         state = self.event_bus.unit_states.get(unit.identifier)
         if state is None or state.contact_latch:
             return
+        unit.collision_recheck = False
         state.contact_record = other.identifier
         self.event_bus.queue_event(unit.identifier, Event(code=0x0B), checked=True)
 
@@ -1756,6 +1763,7 @@ class ScriptInterpreter:
         if unit is None:
             return state.pc + 1
         unit.routing = False
+        unit.collision_recheck = True  # notes/script_behaviours.md 2.1: Rally switches the re-check state on
         unit.rally_attempt = False  # notes/pursuit_restraint.md 5 step 2
         unit.flee_x = unit.flee_y = None
         unit.attack_target = None
@@ -3219,7 +3227,7 @@ class ScriptInterpreter:
                 self._redirect(state, unit, other, current)
             return False
         if not self._hostile(unit, other) and other.identifier != current:
-            state.contact_latch = False
+            self._release_latch(state, unit)
             return False
         if unit.attack_target is not None:  # charging or pursuing
             if other.identifier != current:
@@ -3230,16 +3238,23 @@ class ScriptInterpreter:
             if not unit.routing:
                 state.current_target = (other.identifier, 0)
                 self.event_bus.queue_event(other.identifier, Event(code=0x07, source=unit.identifier), checked=True)
-            state.contact_latch = False
+            self._release_latch(state, unit)
         elif other.identifier != current:
             self.event_bus.queue_event(current, Event(code=0x1A, source=unit.identifier), checked=True)
             if not self._engage_new(unit, other):
                 self.event_bus.queue_event(other.identifier, Event(code=0x0C, source=unit.identifier), checked=True)
             state.current_target = (other.identifier, 0)
-            state.contact_latch = False
+            self._release_latch(state, unit)
         elif not self._engage_new(other, unit):
             self.event_bus.queue_event(unit.identifier, Event(code=0x0C, source=unit.identifier), checked=True)
         return False
+
+    @staticmethod
+    def _release_latch(state: UnitScriptState, unit: "Regiment") -> None:
+        """The contact handler's "clear the latch" branches also switch the unit's collision re-check on
+        (notes/script_behaviours.md 2.1)."""
+        state.contact_latch = False
+        unit.collision_recheck = True
 
     def _redirect(self, state: UnitScriptState, unit: "Regiment", other: "Regiment", current: str | None) -> None:
         """REDIRECT: the unit charges the contacted unit instead (0x1A to the old target, 0x07 to the new one)."""
@@ -3250,7 +3265,7 @@ class ScriptInterpreter:
         if not unit.anchored:
             unit.attack_target = other.identifier
         self.event_bus.queue_event(other.identifier, Event(code=0x07, source=unit.identifier), checked=True)
-        state.contact_latch = False
+        self._release_latch(state, unit)
 
     def _engage_new(self, first: "Regiment", second: "Regiment") -> bool:
         """ENGAGE_NEW(x, y): x joins y's fight when y already fights, else y joins x."""

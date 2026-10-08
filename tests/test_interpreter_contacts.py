@@ -103,10 +103,36 @@ class CollisionPassTests(ContactTestCase):
     def test_moving_unit_gets_0x0b_and_a_touched_regiment_the_reciprocal(self):
         a, u = regiment("A", 0, 0, Side.PLAYER), regiment("U", 0, 30, Side.ENEMY)
         self.make(a, u)
-        a.target_x, a.target_y = 0.0, 100.0
+        a.collision_recheck = True
         self.interp.raise_contacts([(a, u)])
         self.assertEqual((self.codes("A"), self.codes("U")), ([(0x0B, None)], [(0x0B, None)]))
         self.assertEqual(self.bus.unit_states["A"].contact_record, "U")
+
+    def test_the_pass_clears_the_re_check_state_and_the_touched_unit_gets_its_own_pass_in_the_same_update(self):
+        a, u = regiment("A", 0, 0, Side.PLAYER), regiment("U", 0, 30, Side.ENEMY)
+        self.make(a, u)  # A is earlier in unit order than U
+        a.collision_recheck = True
+        self.interp.raise_contacts([(a, u)])
+        # A's pass switched U on, U's later pass in the same update recorded and cleared it; both got 0x0B once.
+        self.assertEqual((a.collision_recheck, u.collision_recheck), (False, False))
+        self.assertEqual((self.codes("A"), self.codes("U")), ([(0x0B, None)], [(0x0B, None)]))
+
+    def test_a_touched_unit_earlier_in_unit_order_keeps_its_re_check_for_the_next_update(self):
+        a, u = regiment("A", 0, 0, Side.PLAYER), regiment("U", 0, 30, Side.ENEMY)
+        self.make(a, u)
+        u.collision_recheck = True  # U is later in the order; A (earlier) is touched by it
+        self.interp.raise_contacts([(a, u)])
+        self.assertEqual(self.codes("A"), [(0x0B, None)])  # the reciprocal
+        self.assertFalse(a.collision_recheck)
+
+    def test_latched_pass_taker_gets_no_event_and_its_re_check_state_is_cleared(self):
+        a, u = regiment("A", 0, 0, Side.PLAYER), regiment("U", 0, 30, Side.ENEMY)
+        self.make(a, u)
+        a.collision_recheck = True
+        self.bus.unit_states["A"].contact_latch = True
+        self.interp.raise_contacts([(a, u)])
+        self.assertEqual(self.codes("A"), [])
+        self.assertFalse(a.collision_recheck)
 
     def test_stationary_touching_units_raise_nothing(self):
         a, u = regiment("A", 0, 0, Side.PLAYER), regiment("U", 0, 30, Side.ENEMY)
@@ -117,7 +143,7 @@ class CollisionPassTests(ContactTestCase):
     def test_latched_units_get_no_contact_event_and_are_released_when_clear(self):
         a, u = regiment("A", 0, 0, Side.PLAYER), regiment("U", 0, 30, Side.ENEMY)
         self.make(a, u)
-        a.target_x, a.target_y = 0.0, 100.0
+        a.collision_recheck = True
         self.bus.unit_states["A"].contact_latch = True
         self.interp.raise_contacts([(a, u)])
         self.assertEqual(self.codes("A"), [])
@@ -127,7 +153,7 @@ class CollisionPassTests(ContactTestCase):
     def test_marked_units_are_not_touched(self):
         a, u = regiment("A", 0, 0, Side.ENEMY), regiment("P", 0, 30, Side.NEUTRAL)
         self.make(a, u)
-        a.target_x, a.target_y = 0.0, 100.0
+        a.collision_recheck = True
         self.bus.unit_states["P"].unit_flags |= interpreter.LEAVING_BATTLE_FLAG
         self.interp.raise_contacts([(a, u)])
         self.assertEqual(self.codes("A"), [])

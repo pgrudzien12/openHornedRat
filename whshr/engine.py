@@ -154,6 +154,10 @@ class Regiment:
     walking: bool = False  # true while the anchor or any model is still travelling
     independent: bool = False
     hidden: bool = False
+    # The collision pass runs for a unit only while this is on (notes/script_behaviours.md 2.1): set by its own
+    # position step, a boundary repel, another unit's pass touching or pushing it, the contact handler's
+    # latch-release branches and Rally; cleared when its pass runs. Not set by turning in place or re-forming.
+    collision_recheck: bool = False
     screen_mark: bool = False  # inside the camera's view rectangle at the end of the last tick (Battle.on_screen)
     airborne: bool = False
     waypoints: list[Point] = field(default_factory=list[Point])
@@ -1822,6 +1826,8 @@ class Battle:
             else:
                 models_catching_up = self._advance_models(regiment, scale)
             regiment.walking = moved or models_catching_up
+            if moved:
+                regiment.collision_recheck = True
             self._step_animations(regiment)
 
     def _latch_snapshot(self, regiment: Regiment, state: interpreter.UnitScriptState | None
@@ -2718,6 +2724,7 @@ class Battle:
                     self._translate_regiment(first, -ux * share, -uy * share)
                 if second_yields:
                     self._translate_regiment(second, ux * share, uy * share)
+                first.collision_recheck = second.collision_recheck = True
 
     def _update_pursuits(self) -> None:
         """The once-per-segment pursuit update (notes/pursuit_map_edge.md 2): a pursuit stops when the target is no
@@ -2811,6 +2818,7 @@ class Battle:
             dx = math.trunc((nearest[0] - centre[0]) / 2)
             dy = math.trunc((nearest[1] - centre[1]) / 2)
             self._translate_regiment(regiment, dx, dy)
+            regiment.collision_recheck = True
             if not regiment.pursuing:  # notes/pursuit_map_edge.md 3: the correction only pushes a pursuer
                 self._end_charge_on_obstruction(regiment, "a movement boundary")
 
