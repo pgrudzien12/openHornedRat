@@ -1214,6 +1214,30 @@ class FormationTurnExceptionTests(unittest.TestCase):
         self.assertGreater(regiment.direction, 0)
         self.assertEqual((regiment.x, regiment.y), (100, 100))
 
+    def test_given_a_running_move_when_its_destination_is_re_aimed_behind_then_it_does_not_snap(self):
+        # game_rules.md "Real time and movement": the snap happens only when a move order is issued. A script
+        # re-aim (IfTargetInChargeReach moves the destination) under a running move only re-plans the turn.
+        battle, regiment = self._battle(models=12, ranks=3)
+        battle.order_move("r", 100, 600)
+        battle.tick()
+        self.assertEqual(regiment.direction, 0)
+
+        regiment.target_x, regiment.target_y = 100.0, -400.0  # now straight behind
+        battle.tick()
+
+        self.assertNotEqual(regiment.direction, 256)
+        self.assertEqual(regiment.turn_mode, "halted")
+
+    def test_given_a_new_move_order_behind_when_issued_then_it_snaps_180(self):
+        battle, regiment = self._battle(models=12, ranks=3)
+        battle.order_move("r", 100, 600)
+        battle.tick()
+
+        battle.order_move("r", 100, 10)
+        battle.tick()
+
+        self.assertEqual(regiment.direction, 256)
+
     def test_given_a_wagon_when_the_camera_moves_then_facing_snaps_to_the_camera_relative_grid(self):
         battle, regiment = self._battle(models=2, ranks=1)
         regiment.unit_class = 7

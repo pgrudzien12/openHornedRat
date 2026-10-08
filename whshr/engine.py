@@ -1866,8 +1866,12 @@ class Battle:
         goal = round(math.atan2(dx, dy) * 512 / math.tau) % 512
         new_order = order_key != regiment.turn_order_key
         if new_order:
+            # game_rules.md "Real time and movement": the 90/180 snap happens only at the moment a move order is
+            # issued (every order clears `turn_order_key`). A destination changed under a running move -- the next
+            # waypoint, or a script re-aim such as IfTargetInChargeReach -- only re-plans the turn.
+            issued = regiment.turn_order_key is None
             regiment.turn_order_key = order_key
-            if order_key[0] in ("move", "charge"):
+            if issued and order_key[0] in ("move", "charge"):
                 self._snap_order_turn(regiment, goal)
             self._plan_turn(regiment, goal, charge=order_key[0] == "charge")
         elif order_key[0] == "charge" and self.tick_count % combat.SEGMENT_TICKS == 0:
