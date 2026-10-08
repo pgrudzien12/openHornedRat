@@ -22,6 +22,8 @@ Campaign games take hours, so early feedback is incredibly valuable. Please try 
 - what happened immediately before a crash, freeze, or broken screen; and
 - the battle log from `logs/` if one was created.
 
+Please [open an issue](https://github.com/pgrudzien12/openHornedRat/issues) for a problem you found, we apprechiate it!
+
 ## What you can play today
 
 With your own copy of the game, you can watch or skip the opening movies, start a campaign, use the caravan and mission screens, and enter battles. You can deploy regiments and give movement, attack, and firing orders. Battles produce results and return to the campaign flow. A campaign can currently reach Nuln, about halfway through the game. This is still a development prototype: expect some rough edges in battles and later campaign missions, and a full campaign has not been played through to the end.
