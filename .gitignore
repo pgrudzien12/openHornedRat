@@ -27,6 +27,9 @@ saves/
 .claude/worktrees/
 .claude/commands/
 
+# Private Codex workflows used from this workspace.
+.local-codex/
+
 # Native build output.
 build/
 dist/
