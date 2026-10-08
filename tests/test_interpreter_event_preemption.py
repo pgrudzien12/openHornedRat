@@ -63,18 +63,28 @@ class PreemptForPendingEventTests(unittest.TestCase):
         self.assertEqual(state.script_id, 100)
         self.assertIsNone(state.interrupt_return)
 
-    def test_already_inside_an_interrupt_is_not_re_entered(self):
-        # One-level gosub only (op_CallInterruptScript's own design): a second pending event while
-        # already running the interrupt script must not stomp the saved return point.
+    def test_already_inside_a_handler_with_a_queued_event_nests_a_second_entry(self):
+        # notes/unit_script_control.md 1, "Event handlers can nest": the interrupted point of the outer handler is
+        # kept and resumed when the nested one returns.
         state = interpreter.UnitScriptState(script_id=101, pc=5, interrupt_script=101,
                                              interrupt_return=(100, 43))
         state.event_queue.append(interpreter.Event(code=0x39, source="rally"))
 
         self.interp._preempt_for_pending_event(state)
 
-        self.assertEqual(state.script_id, 101)
-        self.assertEqual(state.pc, 5)
-        self.assertEqual(state.interrupt_return, (100, 43))
+        self.assertEqual((state.script_id, state.pc), (101, 0))
+        self.assertEqual(state.interrupt_return, (101, 5))
+        self.assertEqual(state.outer_returns, [(100, 43)])
+
+    def test_already_inside_a_handler_with_nothing_queued_is_not_re_entered(self):
+        state = interpreter.UnitScriptState(script_id=101, pc=5, interrupt_script=101,
+                                             interrupt_return=(100, 43))
+        state.current_event = interpreter.Event(code=0x39, source="rally")  # taken by GetEvent already
+
+        self.interp._preempt_for_pending_event(state)
+
+        self.assertEqual((state.script_id, state.pc, state.interrupt_return), (101, 5, (100, 43)))
+        self.assertEqual(state.outer_returns, [])
 
     def test_an_already_popped_current_event_also_forces_entry(self):
         # GetEvent (or run()'s own auto-pop) may have already moved the event out of the queue and

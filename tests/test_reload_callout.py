@@ -111,5 +111,61 @@ class ReloadCalloutTests(unittest.TestCase):
         self.assertEqual(battle.portrait_popup.unit_id, "a")
 
 
+class EventsDuringTheWaitTests(unittest.TestCase):
+    """notes/unit_script_control.md 1: a queued event is handled in a nested handler while the shot handler waits."""
+
+    LABEL = 0x1ABC
+    MAIN = [word("Yield"), word("Loop")]
+    HANDLER = [word("GetEvent"),
+               word("CaseEvent"), 0x1C, word("React"), 11, word("Break"), LABEL,
+               word("CaseEvent"), 0x0C, word("SwitchScript"), 162, word("Break"), LABEL,
+               LABEL & ~0x1000, word("ConsumeEvent"), word("ReturnInterrupt")]
+
+    def setUp(self):
+        self.cannon = unit("cannon")
+        dll = FakeDll({1: self.MAIN, 2: self.HANDLER, 111: TAIL, 162: [word("Yield")]})
+        self.battle = Battle(2000, 2000, [self.cannon], seed=1995, script_dll=dll, script_ids={"cannon": 111})
+        self.battle.text_resources = {**TEXTS, 34109: "Enemy!"}
+        self.state = self.battle.event_bus.unit_states["cannon"]
+        # The unit is inside its event handler (111 ran from the shot event) with the interrupt script registered.
+        self.state.interrupt_script = 2
+        self.state.interrupt_return = (1, 0)
+        self.state.current_event = Event(code=34, source="cannon", model=3)
+
+    def reacts(self, ticks, queue_at=None, code=None):
+        said = []
+        for tick in range(ticks):
+            if tick == queue_at:
+                self.battle.event_bus.queue_event("cannon", Event(code=code, source="cannon"))
+            self.battle.tick()
+            said.extend(e.data["code"] for e in self.battle.events if e.kind == "react")
+        return said
+
+    def test_an_unrelated_event_is_handled_and_reload_still_comes_on_time(self):
+        said = self.reacts(14, queue_at=4, code=0x1C)
+        self.assertEqual(said, [11, 12])  # the nested handler's reaction, then "Reload!"
+
+    def test_a_script_switch_in_the_nested_handler_cancels_reload(self):
+        said = self.reacts(14, queue_at=4, code=0x0C)
+        self.assertEqual(said, [])
+        self.assertEqual(self.state.script_id, 162)
+        self.assertEqual(self.state.outer_returns, [])
+
+
+class EndOfTickSwitchTests(unittest.TestCase):
+    def test_a_handler_that_switches_and_yields_leaves_no_handler_to_return_into(self):
+        cannon = unit("cannon")
+        dll = FakeDll({1: [word("Yield")], 2: [word("SwitchScript"), 162, word("Yield")], 162: [word("Yield")]})
+        battle = Battle(2000, 2000, [cannon], seed=1995, script_dll=dll, script_ids={"cannon": 2})
+        state = battle.event_bus.unit_states["cannon"]
+        state.interrupt_script = 2
+        state.interrupt_return = (1, 0)
+        state.outer_returns.append((1, 5))
+        battle.tick()
+        self.assertEqual(state.script_id, 162)
+        self.assertIsNone(state.interrupt_return)
+        self.assertEqual(state.outer_returns, [])
+
+
 if __name__ == "__main__":
     unittest.main()

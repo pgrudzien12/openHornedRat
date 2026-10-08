@@ -175,6 +175,8 @@ class UnitScriptState:
     # Interrupt handling (SetInterruptScript/CallInterruptScript/ReturnInterrupt)
     interrupt_return: tuple[int, int] | None = None  # (script_id, pc) to resume after ReturnInterrupt, set by
     # CallInterruptScript; None when not currently inside an interrupt call
+    outer_returns: list[tuple[int, int]] = field(default_factory=lambda: list[tuple[int, int]]())  # interrupted points of the handlers a nested
+    # handler is running inside (innermost last); notes/unit_script_control.md 1, "Event handlers can nest"
     last_attack_target: str | None = None  # this unit's own attack_target as of the last tick, used
     # by ScriptInterpreter.raise_charge_events to detect a *fresh* charge (event 0x07) rather than
     # re-raising it every tick the same charge continues
@@ -529,17 +531,26 @@ class ScriptInterpreter:
         tick, without its own code polling for them, matching real play (a charged unit braces
         immediately, not only once its current Wait happens to finish).
 
-        Mirrors `op_CallInterruptScript`'s own mechanics (one-level gosub via `interrupt_return`), but
-        triggered by the interpreter itself rather than requiring the main script to execute opcode
-        0x12 -- no library or mission script anywhere in the corpus ever does, so relying on an
-        explicit call left this dormant. A no-op once already inside an interrupt (`interrupt_return`
-        set): the interrupt script itself is expected to `ConsumeEvent`/`ReturnInterrupt`, not to be
-        re-entered on top of itself for the same or a further event within one tick.
+        Mirrors `op_CallInterruptScript`'s own mechanics (a gosub via `interrupt_return`), but triggered by the
+        interpreter itself rather than requiring the main script to execute opcode 0x12 -- no library or mission
+        script anywhere in the corpus ever does, so relying on an explicit call left this dormant.
+
+        Handlers nest (notes/unit_script_control.md 1, "Event handlers can nest"): a unit already inside its handler
+        is entered again at the handler's start when events are queued that `GetEvent` has not taken, e.g. while the
+        artillery shot handler waits 10 ticks. The interrupted point is resumed when the nested handler returns;
+        the current-event slot and the wait timer are shared, and a script switch requested by the nested handler
+        abandons the outer ones (`op_ReturnInterrupt`).
         """
-        if state.interrupt_script is None or state.interrupt_return is not None:
+        if state.interrupt_script is None:
             return
-        if not state.event_queue and not state.current_event.code:
+        current = state.interrupt_return
+        if current is not None:
+            if not state.event_queue:
+                return
+        elif not state.event_queue and not state.current_event.code:
             return
+        if current is not None:
+            state.outer_returns.append(current)
         state.interrupt_return = (state.script_id, state.pc)
         state.script_id = state.interrupt_script
         state.pc = 0
@@ -640,6 +651,8 @@ class ScriptInterpreter:
         if switch is not None:
             state.script_id = switch
             state.pc = 0
+            state.interrupt_return = None  # the switch abandons the handler, as in op_ReturnInterrupt
+            state.outer_returns.clear()
 
         if state.pending_reform_ranks is not None:
             unit = self.battle.regiments.get(unit_id)
@@ -2899,10 +2912,11 @@ class ScriptInterpreter:
         if switch is not None:
             state.script_id = switch
             state.interrupt_return = None
+            state.outer_returns.clear()  # a switch from a nested handler abandons the outer handlers
             return 0
         if state.interrupt_return is not None:
             script_id, pc = state.interrupt_return
-            state.interrupt_return = None
+            state.interrupt_return = state.outer_returns.pop() if state.outer_returns else None
             state.script_id = script_id
             return pc
         return state.pc + 1
