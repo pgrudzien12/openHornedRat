@@ -2026,14 +2026,14 @@ class ScriptInterpreter:
 
     def op_IfTargetInChargeReach(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
-        """IfTargetInChargeReach: true when the charge aim point is within 12 x s_rlmv of the target's
-        bounding circle and nothing prevents a charge now. Side effect, even when false: the unit's
-        destination becomes the aim point (not while charging, so a running charge is not hijacked).
-
-        Not modelled: route obstruction, friendly units in the way and blocked ground (no route planner).
-        For a building target the aim point is its centre and the reach is measured from its radius
-        (notes/building_units.md 6).
-        """
+        """IfTargetInChargeReach (notes/target_queries.md 5): false while re-forming (before any side effect). Then,
+        even when the result is false, the aim point replaces the unit's final waypoint (the only waypoint when none
+        is queued) unless the unit is in melee. True only when the unit faces the aim point within 22.5 degrees,
+        the line to it is not obstructed by a blocking object or unit (a friendly unit in the way included), the
+        target is not charging, the unit is not charging, in melee, latched or about to re-form, it has exactly one
+        waypoint, the aim point is within 12 x s_rlmv of the target's bounding circle and the unit does not stand in
+        a blocking boundary region. For a building target the aim point is its centre and the reach is measured from
+        its radius (notes/building_units.md 6); the building case does not yet apply the other tests."""
         building = self._target_building(state)
         if building is not None:
             return self._building_charge_reach(state, unit_id, building)
@@ -2046,14 +2046,21 @@ class ScriptInterpreter:
             return state.pc + 1
         aim = self._charge_aim_point(unit, target)
         charging = unit.attack_target is not None
-        if not charging and not unit.in_melee:
-            unit.target_x, unit.target_y = float(aim[0]), float(aim[1])
-        heading = self._bearing_from_to((unit.x, unit.y), aim)
+        if not unit.in_melee:
+            if unit.waypoints:
+                unit.waypoints[-1] = (float(aim[0]), float(aim[1]))
+            else:
+                unit.target_x, unit.target_y = float(aim[0]), float(aim[1])
+        leg = unit.waypoints[0] if unit.waypoints else (float(aim[0]), float(aim[1]))
+        heading = self._bearing_from_to((unit.x, unit.y), leg)
+        waypoint_count = len(unit.waypoints) + (0 if unit.waypoints or unit.target_x is None else 1)
         if (self._fold(heading - unit.direction) >= 32 or charging or unit.in_melee
-                or target.attack_target is not None):
+                or target.attack_target is not None or state.contact_latch
+                or state.pending_reform_ranks is not None or waypoint_count != 1
+                or self.battle.path_obstructed(unit, leg, ignore=target.identifier)):
             return state.pc + 1
         reach = int(math.hypot(aim[0] - unit.x, aim[1] - unit.y)) - int(target.bounding_radius())
-        state.cond_flags = reach < 12 * self._s_rlmv(unit)
+        state.cond_flags = reach < 12 * self._s_rlmv(unit) and not self.battle.on_blocked_ground(unit)
         return state.pc + 1
 
     def _target_building(self, state: UnitScriptState) -> "buildings.Building | None":
@@ -3085,13 +3092,13 @@ class ScriptInterpreter:
         """ChargeForward: a charge with no target to the point 12 x s_rlmv straight ahead
         (notes/movement_formation.md 3.6): no fear test and no event 0x07; success clears fear-passed and
         reveals the unit (true); an anchored unit halts and re-forms (false) (notes/script_grid_events.md 3).
-        The engine tracks this as a free charge until it reaches the point or makes contact. Not modelled:
-        the refusal inside a blocking boundary region."""
+        The engine tracks this as a free charge until it reaches the point or makes contact. A unit standing in a
+        blocking boundary region halts and re-forms (false) instead."""
         unit = self.battle.regiments.get(unit_id)
         if unit is None:
             state.cond_flags = False
             return state.pc + 1
-        if unit.anchored or unit.held:
+        if unit.anchored or unit.held or self.battle.on_blocked_ground(unit):
             self.battle.reform_to_ranks(unit, unit.ranks)
             state.cond_flags = False
             return state.pc + 1

@@ -7,7 +7,7 @@ import unittest
 import unittest.mock
 
 from tests.script_helpers import FakeDll, word
-from whshr import behaviour, interpreter
+from whshr import behaviour, interpreter, navigation
 from whshr.engine import MOVING_FREELY_K, Battle, Regiment
 from whshr.rules import Side
 
@@ -233,11 +233,56 @@ class ChargeReachTests(MovementTestCase):
         self.unit.direction = 192
         self.assertFalse(self.op("IfTargetInChargeReach"))
 
-    def test_charging_unit_fails_and_keeps_its_charge(self):
+    def test_charging_unit_fails_yet_its_final_destination_becomes_the_aim_point(self):
         self.monster((130, 0))
         self.unit.attack_target = "x"
         self.assertFalse(self.op("IfTargetInChargeReach"))
-        self.assertIsNone(self.unit.target_x)
+        self.assertEqual((self.unit.target_x, self.unit.target_y), (130, 0))
+
+    def test_three_queued_waypoints_have_the_last_replaced_and_fail(self):
+        self.monster((130, 0))
+        self.unit.target_x, self.unit.target_y = 10, 0
+        self.unit.waypoints = [(20, 0), (30, 0)]
+        self.assertFalse(self.op("IfTargetInChargeReach"))
+        self.assertEqual(self.unit.waypoints[-1], (130, 0))
+        self.assertEqual(len(self.unit.waypoints), 2)
+
+    def test_obstacle_on_the_line_fails_even_in_reach(self):
+        self.monster((130, 0))
+        self.battle.objects.append({"name": "Rock", "x": 65, "y": 0, "radius": 20,
+                                    "status": ["os_active", "os_solid"]})
+        self.assertFalse(self.op("IfTargetInChargeReach"))
+        self.assertEqual((self.unit.target_x, self.unit.target_y), (130, 0))  # side effect persists
+
+    def test_obstacle_off_the_line_does_not_block(self):
+        self.monster((130, 0))
+        self.battle.objects.append({"name": "Rock", "x": 65, "y": 200, "radius": 20,
+                                    "status": ["os_active", "os_solid"]})
+        self.assertTrue(self.op("IfTargetInChargeReach"))
+
+    def test_unit_in_the_way_blocks_but_the_target_itself_does_not(self):
+        self.monster((130, 0))
+        blocker = Regiment("blocker", "blocker", 65, 0, 0, Side.ENEMY, models=10, ranks=2)
+        self.battle.regiments["blocker"] = blocker
+        self.battle.event_bus.unit_states["blocker"] = interpreter.UnitScriptState(script_id=0)
+        self.assertFalse(self.op("IfTargetInChargeReach"))
+
+    def test_contact_latch_fails(self):
+        self.monster((130, 0))
+        self.state.contact_latch = True
+        self.assertFalse(self.op("IfTargetInChargeReach"))
+
+    def test_queued_reform_fails(self):
+        self.monster((130, 0))
+        self.state.pending_reform_ranks = 2
+        self.assertFalse(self.op("IfTargetInChargeReach"))
+
+    def test_standing_in_a_blocking_region_fails(self):
+        self.monster((130, 0))
+        self.battle.navigation_boundaries = navigation.boundaries_from_views([
+            {"status": ["bnd_ACTIVE", "bnd_SOLID"], "lines": [[500, 500, 600, 500], [600, 500, 600, 600],
+                                                              [600, 600, 500, 600], [500, 600, 500, 500]]}])
+        self.assertFalse(self.op("IfTargetInChargeReach"))
 
     def test_reforming_unit_fails_with_no_side_effect(self):
         self.monster((130, 0))
