@@ -89,3 +89,28 @@ class AssaultTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SteeringTests(unittest.TestCase):
+    def route_footprints(self, battle, unit, order_key):
+        footprints, _ = battle._route_footprints(unit, order_key)
+        return [f.key for f in footprints]
+
+    def test_a_building_is_a_route_obstacle_unless_it_is_the_charge_target(self):
+        unit = regiment()
+        battle = battle_with(unit)
+        self.assertIn("building:0", self.route_footprints(battle, unit, ("move", 1000.0, 2000.0)))
+        self.assertNotIn("building:0", self.route_footprints(battle, unit, ("charge", "building:0")))
+
+    def test_a_destroyed_building_still_blocks_routes(self):
+        unit = regiment()
+        battle = battle_with(unit)
+        battle.destroy_building(battle.buildings[0])
+        self.assertIn("building:0", self.route_footprints(battle, unit, ("move", 1000.0, 2000.0)))
+
+    def test_a_walking_regiment_steers_round_a_building_instead_of_sliding_along_it(self):
+        unit = regiment(y=1000)
+        battle = battle_with(unit)
+        unit.target_x, unit.target_y = 1000, 1700
+        run(battle, 1200)
+        self.assertGreater(unit.y, 1500)  # got past the hut to the far side

@@ -2163,8 +2163,8 @@ class Battle:
 
     def _route_footprints(self, regiment: Regiment, order_key: TurnKey
                           ) -> tuple[list[steering.Footprint], dict[str, Regiment]]:
-        """Live footprints in collision-object order (solid scenery, then the other regiments by their collision
-        centre), and the regiments behind the unit footprints. A charge's own target and routing regiments are
+        """Live footprints in collision-object order (solid scenery, buildings, then the other regiments by their
+        collision centre), and the regiments behind the unit footprints. A charge's own target and routing regiments are
         not obstacles (notes/obstacle_steering.md section 3); flight steers round units too
         (notes/flight_solid_obstacles.md 3)."""
         footprints: list[steering.Footprint] = []
@@ -2173,6 +2173,10 @@ class Battle:
             if {"os_active", "os_solid"}.issubset(flags):
                 footprints.append(steering.Footprint(f"object:{index}", float(obj.get("x") or 0),
                                                      float(obj.get("y") or 0), float(int(obj.get("radius") or 0))))
+        for building in self.buildings:  # notes/obstacle_steering.md 3: a building blocks unless it is the target
+            if order_key[0] == "charge" and order_key[1] == building.identifier:
+                continue
+            footprints.append(steering.Footprint(building.identifier, building.x, building.y, float(building.radius)))
         units: dict[str, Regiment] = {}
         for other in self.regiments.values():
             if (other is regiment or not other.active or other.routing
