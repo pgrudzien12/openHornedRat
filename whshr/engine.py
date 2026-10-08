@@ -2796,6 +2796,29 @@ class Battle:
             f"{regiment.name}'s charge ends at {description}.", "charge_end",
             regiment=regiment.identifier))
 
+    def path_obstructed(self, regiment: Regiment, goal: Point, ignore: str | None = None) -> bool:
+        """Whether the straight line from the regiment's front-rank reference point to `goal` meets a blocking map
+        object or unit footprint, so that the unit would steer round it (notes/target_queries.md 5.2 steps 3 and 5;
+        notes/obstacle_steering.md). `ignore` names a regiment that is not an obstacle (the charge's own target)."""
+        start = self.route_reference_point(regiment)
+        if math.dist(start, goal) < 1e-9:
+            return False
+        footprints, units = self._route_footprints(regiment, ("charge", ignore or ""))
+
+        def blocks(footprint: steering.Footprint) -> bool:
+            other = units.get(footprint.key)
+            return other is None or self.route_unit_relation(regiment, other, False) == "block"
+
+        return steering.scan(start, goal, footprints, float(int(regiment.bounding_radius())), blocks) is not None
+
+    def on_blocked_ground(self, regiment: Regiment) -> bool:
+        """Whether the regiment's position (its front-rank reference point) lies in a blocking region: outside a
+        solid area, inside an inverse-solid one or outside the battle edge (notes/movement_formation.md 3.6,
+        notes/target_queries.md 5.2 check 11)."""
+        point = self.route_reference_point(regiment)
+        return any(boundary.forbidden(point) for boundary in self.navigation_boundaries
+                   if boundary.solid or boundary.inverse or boundary.battle_edge)
+
     def _correct_boundaries(self, regiment: Regiment) -> None:
         if regiment.routing:
             return  # notes/flight_solid_obstacles.md 4: routing units get no boundary correction of any kind
