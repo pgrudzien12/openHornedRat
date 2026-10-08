@@ -409,8 +409,8 @@ class Regiment:
         return self.hud_class == "art" and not self.anchor_cleared
 
     def clear_anchor(self) -> None:
-        """Hook for an artillery misfire explosion, the only thing that frees an anchored war machine.
-        The engine has no misfire mechanic yet, so nothing calls this."""
+        """An artillery misfire explosion (`ranged._destroy_machine`) frees the anchored war machine; it is the
+        only thing that does."""
         self.anchor_cleared = True
 
     def clear_shooting(self) -> None:
