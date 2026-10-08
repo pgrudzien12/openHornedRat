@@ -158,6 +158,7 @@ class Regiment:
     # position step, a boundary repel, another unit's pass touching or pushing it, the contact handler's
     # latch-release branches and Rally; cleared when its pass runs. Not set by turning in place or re-forming.
     collision_recheck: bool = False
+    update_counter: int = 0  # counts the unit's updates; starts at its slot so units are staggered (see collision_recheck)
     screen_mark: bool = False  # inside the camera's view rectangle at the end of the last tick (Battle.on_screen)
     airborne: bool = False
     waypoints: list[Point] = field(default_factory=list[Point])
@@ -657,8 +658,9 @@ class Battle:
         if len(self.regiments) != len(regiments):
             raise ValueError("regiment identifiers must be unique")
         self.stagger_counter = StaggerCounter()
-        for regiment in regiments:
+        for slot, regiment in enumerate(regiments):
             regiment.stagger_counter = self.stagger_counter
+            regiment.update_counter = slot
         self.tick_count = 0
         self.update_count = 0  # monotonic input/replay time, including deployment
         self.phase: Literal["deployment", "battle"] = "deployment" if deploy else "battle"
@@ -1564,6 +1566,7 @@ class Battle:
             regiment.melee_models = [regiment.melee_models[i] for i in order]
             regiment.reform_slots = []
             regiment.reforming = regiment.reform_walk_back = False
+            regiment.collision_recheck = True  # every formation re-layout, wagons and war machines included
             return
         walk_back = walk_back or (regiment.reforming and regiment.reform_walk_back)
         regiment.reform_slots = _slot_offsets(formation.reform_assignment(
@@ -1578,6 +1581,7 @@ class Battle:
             regiment.reform_slots = list(raster)
         regiment.reforming = bool(regiment.reform_slots)
         regiment.reform_walk_back = walk_back and regiment.reforming
+        regiment.collision_recheck = True  # notes/fanatic_collisions.md 5: every formation re-layout switches it on
         regiment.reform_facing = regiment.direction
         for model in regiment.melee_models:
             model.at_rest = False
@@ -1718,6 +1722,7 @@ class Battle:
             if not regiment.active:
                 regiment.walking = False
                 continue
+            regiment.update_counter += 1  # every update of a live unit, whatever it does (the throttle phase)
             regiment.model_positions()  # seed positions at the current anchor/facing before it moves
             anchor_before = regiment.x, regiment.y
             state = self.event_bus.unit_states.get(regiment.identifier)
@@ -1835,7 +1840,10 @@ class Battle:
             else:
                 models_catching_up = self._advance_models(regiment, scale)
             regiment.walking = moved or models_catching_up
-            if moved:
+            # notes/fanatic_collisions.md 5: a position step switches the re-check state on only on every 4th update
+            # of the unit (staggered by slot); gradual turn steps do so every time. PROVISIONAL: a turn step is read
+            # as "a turn is in progress while the unit moved".
+            if moved and (regiment.turn_mode is not None or regiment.update_counter % 4 == 0):
                 regiment.collision_recheck = True
             self._step_animations(regiment)
 

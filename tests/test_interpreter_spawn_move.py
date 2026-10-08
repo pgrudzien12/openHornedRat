@@ -109,6 +109,12 @@ class SpawnUnitTests(MoveTestCase):
         self.call("p", "SpawnUnit", 0xABC0, 28, 1, 0)
         self.assertEqual((len(self.battle.regiments), bool(self.bus.unit_states["p"].cond_flags)), (before, False))
 
+    def test_the_copy_takes_the_next_slot_as_its_collision_throttle_phase(self):
+        self.template.update_counter = 99
+        slot = len(self.battle.regiments)
+        copy = self.spawn(0, 0)
+        self.assertEqual(copy.update_counter, slot)
+
     def test_the_copy_runs_from_the_next_tick(self):
         self.spawn(0, 0)
         self.battle.tick()  # iterating the script states must survive a unit added mid-tick
