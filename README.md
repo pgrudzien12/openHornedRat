@@ -2,6 +2,8 @@
 
 **Open Horned Rat** is an open-source engine that runs *Warhammer: Shadow of the Horned Rat* (Mindscape, 1995) on modern systems, Linux included, without emulation and without the original program's crashes and sound problems.
 
+Questions, playtest reports, or just want to talk about the game? Join the community in [GitHub Discussions](https://github.com/pgrudzien12/openHornedRat/discussions).
+
 **What it is not:** it is not a game, and it is not a standalone or replacement copy of one. It contains no original game content, and it does nothing without your own legally owned copy of the original, from which it reads every asset at runtime. It is also not the original executable, and it does not run that executable.
 
 > **Early playtest builds are available, but there is no stable release yet.** The installers have passed automated builds but have not been tested on players' machines. The first stable packaged release is targeted for **the end of October 2026**.
@@ -15,7 +17,7 @@ Campaign games take hours, so early feedback is incredibly valuable. Please try 
 - what happened immediately before a crash, freeze, or broken screen; and
 - the battle log from `logs/` if one was created.
 
-Once the repository is public, please [open an issue](../../issues) for a reproducible problem. Screenshots and short screen recordings are welcome, but do not upload or distribute original game assets. If you would like to help with code, research, documentation, or compatibility testing, start with an issue or Discussion so we can coordinate work.
+Please [open an issue](https://github.com/pgrudzien12/openHornedRat/issues) for a reproducible problem. Screenshots and short screen recordings are welcome, but do not upload or distribute original game assets. If you would like to help with code, research, documentation, or compatibility testing, start with an issue or a [Discussion](https://github.com/pgrudzien12/openHornedRat/discussions) so we can coordinate work.
 
 ## What you can play today
 
@@ -31,10 +33,6 @@ With your own copy of the game, you can watch or skip the opening movies, start 
 | 🟡 Campaign progress | You can reach Nuln, about halfway through the campaign; the remainder has not been verified. |
 | ✅ Audio and presentation | Opening movies, speech, music, and effects are mostly done. The Options screen saves separate volume levels for music, dialogue, and effects; minor gaps may remain. |
 | 🟡 Packaged downloads | Windows, Debian, RPM, AppImage, and Apple Silicon macOS installers are built and available as prereleases. Installation and play have not yet been tested on players' machines; there is no stable release. |
-
-## Chat
-
-Questions, playtest reports, or just want to talk about the game? Join us on [Discord](https://discord.gg/CPHBNFmwJ).
 
 ## Install a playtest package
 
