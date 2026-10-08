@@ -118,6 +118,10 @@ class RouteUnitRelationTests(unittest.TestCase):
         self.ally.braced = True
         self.assertEqual(self.rel(self.ally), "block")
 
+    def test_a_friend_that_broke_while_braced_moves_at_flight_speed(self):
+        self.ally.braced, self.ally.routing = True, True
+        self.assertGreater(self.battle.route_effective_speed(self.ally), 0.0)
+
     def test_a_friend_still_charging_across_the_path_pauses_the_mover(self):
         self.ally.direction = 128
         self._move(self.mover)
