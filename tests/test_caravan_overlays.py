@@ -30,6 +30,8 @@ RESOURCES = {
     "CARAVANSELECTMISSION": caravan("PopContext"),
     "CARAVANCONTINUEMISSION": caravan("PopContextCheckResume"),
     "STARTCARAVAN": "[WINDOW]\n[END]",
+    "TALKING": "[RUN]\n[START]\nopenwindow:res=MAPWINDOW\nplaytext:1\nwaitforresume:\nendgame:\n[END]",
+    "SCRIPTED": "[RUN]\n[START]\ngocaravan:selectmission\nendgame:\n[END]",
 }
 
 
@@ -121,6 +123,52 @@ class MissionCaravanButtonTests(unittest.TestCase):
         scene.handle(GlueInput("panel-action", "open_caravan_continue"), scene.context)
 
         self.assertEqual(len(scene.runtime.state.context_stack), depth)
+
+
+class ReviewFindingTests(unittest.TestCase):
+    def test_a_script_cannot_name_a_panel_only_caravan(self):
+        from whshr.glue_runtime import EndGame
+        scene = GlueScene("SCRIPTED")
+        scene.enter(_Context(GlueContent.from_data(resources=RESOURCES)))
+        effects = scene.take_effects()
+
+        self.assertIsNone(scene.runtime.state.pending)  # not suspended: an unknown name resumes at once
+        self.assertIn(EndGame(), effects)
+
+    def test_a_repeated_map_caravan_press_while_it_is_open_is_a_no_op(self):
+        scene = scene_for("FLOW")
+        scene.handle(GlueInput("panel-action", "return_to_caravan"), scene.context)
+        depth = len(scene.runtime.state.context_stack)
+        scene.runtime.state.paused = True  # a pause the fall-through path would have cleared
+
+        scene.handle(GlueInput("panel-action", "return_to_caravan"), scene.context)
+
+        self.assertEqual(len(scene.runtime.state.context_stack), depth)
+        self.assertTrue(scene.runtime.state.paused)
+        self.assertEqual(windows(scene), ["CARAVANSELECTMISSION"])
+
+    def test_panel_9_caravan_press_during_dialogue_opens_the_caravan_at_once(self):
+        scene = scene_for("TALKING")
+        self.assertEqual(scene.runtime.state.pending.kind, "dialogue")
+
+        scene.handle(GlueInput("panel-action", "open_caravan_continue"), scene.context)
+
+        self.assertEqual(windows(scene), ["CARAVANCONTINUEMISSION"])
+        self.assertIsNone(scene.runtime.state.pending.underlying)  # drained, not kept
+
+    def test_when_paused_the_dialogue_is_kept_under_the_caravan_and_comes_back(self):
+        scene = scene_for("TALKING")
+        scene.handle(GlueInput("panel-action", "toggle_pause"), scene.context)
+        typed = scene.runtime.state.dialogue_typed
+
+        scene.handle(GlueInput("panel-action", "open_caravan_continue"), scene.context)
+        self.assertEqual(scene.runtime.state.pending.underlying.kind, "dialogue")
+        scene.handle(GlueInput("hotspot-release", "PopContextCheckResume"), scene.context)
+
+        self.assertEqual(scene.runtime.state.pending.kind, "dialogue")
+        self.assertEqual(scene.runtime.state.dialogue_typed, typed)
+        self.assertTrue(scene.runtime.state.paused)
+        self.assertEqual(windows(scene), ["MAPWINDOW"])
 
 
 if __name__ == "__main__":

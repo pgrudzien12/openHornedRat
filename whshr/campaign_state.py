@@ -40,8 +40,11 @@ CARAVAN_MODE_WINDOWS: dict[str, str] = {
     "resume": "CARAVANAFTERENCOUNTER",
     "recruit": "CARAVANRECRUITANDRESUME",
     "recruitnospeech": "CARAVANRECRUITNOSPEECHANDRESUME",
-    # Not names a script gives to ``gocaravan:`` but the two caravans the panel buttons open over a running screen
-    # (notes/mission_selection.md 4.2): the map's Caravan button and panel 9's Caravan button.
+}
+
+# The two caravans the panel buttons open over a running screen (notes/mission_selection.md 4.2): the map's Caravan
+# button and panel 9's Caravan button. Not modes a script can name: ``gocaravan:selectmission`` stays an unknown name.
+PANEL_CARAVAN_WINDOWS: dict[str, str] = {
     "selectmission": "CARAVANSELECTMISSION",
     "continuemission": "CARAVANCONTINUEMISSION",
 }

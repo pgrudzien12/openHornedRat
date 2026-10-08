@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .campaign_runtime import CampaignRuntime
-from .campaign_state import caravan_window
+from .campaign_state import PANEL_CARAVAN_WINDOWS, caravan_window
 from .debrief_rules import STATUS_BIT_VICTORY_WITHOUT_C, STATUS_BIT_VICTORY_WITH_C, Evaluation, evaluate
 from .glue_animation import GlueBitmapAnimator
 from .glue import AnimRecord, BitmapRecord, GlueInstruction, MissionRecord, MissionRef
@@ -201,6 +201,7 @@ class PendingRequest:
     kind: str
     restore_context: bool = False
     mode: str = ""  # the caravan mode a caravan request was made for
+    underlying: "PendingRequest | None" = None  # a paused dialogue kept under a caravan opened over it (panel 9)
 
 
 @dataclass
@@ -680,11 +681,29 @@ class GlueRuntime:
             return tuple(effects)
         return self.step_until_blocked()
 
-    def open_caravan(self, mode: str) -> tuple[GlueEffect, ...]:
+    def open_caravan(self, mode: str, overlay: bool = False) -> tuple[GlueEffect, ...]:
         """Park the finished script again and open the caravan window of ``mode`` on top of it
-        (notes/activity_results.md section 6.2); empty when the request could not be made."""
+        (notes/activity_results.md section 6.2); empty when the request could not be made.
+
+        ``overlay`` is a panel button opening one of the ``PANEL_CARAVAN_WINDOWS`` over a running screen. A dialogue
+        that is typing then is drained first unless the game is paused, when it is kept under the caravan and
+        restored when it closes (notes/mission_selection.md 4.2)."""
         effects: list[GlueEffect] = []
-        self._request("caravan", effects, restore_context=True, mode=mode)
+        underlying = self.state.pending if overlay else None
+        if underlying is not None:
+            if underlying.kind != "dialogue":
+                return ()
+            self.state.pending = None
+            if not self.state.paused:
+                self.state.dialogue_typed = len(self.state.dialogue_text)
+                self.state.dialogue_ms = 0
+                underlying = None
+        self._request("caravan", effects, restore_context=True, mode=mode, overlay=overlay)
+        if underlying is not None:
+            if self.state.pending is None:  # the request could not be made: nothing changed
+                self.state.pending = underlying
+            else:
+                self.state.pending.underlying = underlying
         return tuple(effects)
 
     def close_caravan_overlay(self) -> tuple[GlueEffect, ...]:
@@ -695,9 +714,10 @@ class GlueRuntime:
         pending = self.state.pending
         if pending is None or pending.kind != "caravan" or not pending.restore_context:
             return ()
-        self.state.pending = None
+        self.state.pending = pending.underlying  # a dialogue that was paused under the caravan comes back
         self.pop_context()
-        if self.state.paused or self.state.current is None or self.state.current.parked:
+        if (self.state.paused or self.state.pending is not None or self.state.current is None
+                or self.state.current.parked):
             return ()
         return self.step_until_blocked()
 
@@ -1149,11 +1169,17 @@ class GlueRuntime:
             if callable(merge):
                 merge()  # the caravan picks up the regiments ``addunit`` flagged (notes/campaign.md §2.4)
             recruitable = bool(getattr(self.campaign, "recruitable", lambda: False)())
-            window = (caravan_window(details["mode"], recruitable) or "") if restore_context else ""
+            if details.get("overlay"):
+                window = PANEL_CARAVAN_WINDOWS.get(details["mode"], "")
+            else:
+                window = (caravan_window(details["mode"], recruitable) or "") if restore_context else ""
             try:
                 self.content.window(window)
             except (KeyError, TypeError):
-                window = (caravan_window(details["mode"]) or "") if window else ""  # no WithRecruit variant: the plain one
+                # no WithRecruit variant: the plain one (a panel overlay has no variant)
+                window = (caravan_window(details["mode"]) or "") if window and not details.get("overlay") else ""
+                if not window and details.get("overlay"):
+                    effects.append(Diagnostic("caravan", f"the installation lacks the {details['mode']} caravan"))
                 try:
                     self.content.window(window)
                 except (KeyError, TypeError):

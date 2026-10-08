@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from .campaign_log import GlueWatcher
-from .campaign_state import caravan_window
+from .campaign_state import PANEL_CARAVAN_WINDOWS
 from .glue import MissionRef
 from .glue_runtime import (ActivityResult, Autosave, Diagnostic, EnterCaravan, GlueEffect, GlueInput, GlueRuntime, GlueRuntimeState,
                            MissionSelectRequested, StartBattle, StartDebrief, StartMovie)
@@ -299,17 +299,22 @@ class GlueScene(Scene):
     def _open_caravan_over(self, mode: str) -> bool:
         """Open the caravan a panel button names over the running screen (notes/mission_selection.md 4.2): the
         speech is cut off unless the game is paused, the screen is pushed and the caravan's window opens on top.
-        False (nothing done) when a request is already pending or the installation lacks the window."""
+        A press while that caravan is already open is consumed and does nothing. False (the old behaviour applies)
+        when another activity is pending or the installation lacks the window."""
         runtime = self.require_runtime()
-        window = caravan_window(mode)
-        if window is None or runtime.state.pending is not None:
+        window = PANEL_CARAVAN_WINDOWS.get(mode)
+        pending = runtime.state.pending
+        if window is None:
             return False
+        if pending is not None and pending.kind == "caravan" and pending.mode == mode:
+            return True
         try:
             runtime.content.window(window)
         except (KeyError, TypeError):
             return False
-        effects = runtime.open_caravan(mode)
-        if runtime.state.pending is None:
+        effects = runtime.open_caravan(mode, overlay=True)
+        pending = runtime.state.pending
+        if pending is None or pending.kind != "caravan" or pending.mode != mode:
             return False
         if not runtime.state.paused:
             self._queue(runtime.stop_speech())
