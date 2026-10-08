@@ -8,6 +8,7 @@ from whshr.campaign_log import CampaignLogger
 from whshr.glue_content import GlueContent
 from whshr.glue_runtime import GlueInput
 from whshr.glue_scene import GlueScene
+from whshr.savegame import SaveStore
 from whshr.scenes import SceneMachine
 
 CARAVAN = "[WINDOW]\n[POSITION]\nset:x=0\nset:y=0\nset:vx=640\nset:vy=480\nset:palindex=3\n[END]\n" \
@@ -59,6 +60,29 @@ class PostMissionCaravanTests(DirectMissionRouteTests):
                 self.assertIs(machine.active, map_scene)
                 self.assertEqual(campaign.completed, {601})
                 self.assertEqual(self._names(map_scene)[-1], "MISSIONBWINDOW")
+
+    def test_given_a_saved_after_mission_caravan_when_loaded_then_resume_offers_the_next_mission(self):
+        machine, _, campaign = self._play(("missionawindow.0",), False)
+        mission = campaign.selected_mission
+        self.assertIsNotNone(mission)
+        campaign.taken_missions.add(mission)
+        store = SaveStore(self.root / "saves")
+        store.write(0, "After mission", campaign, machine.active)
+        loaded = self._campaign()
+
+        store.load_into(0, loaded)
+        restored = store.load_scene(0, loaded, self.content)
+
+        self.assertEqual(loaded.mission_window, "MISSIONAWINDOW")
+        self.assertIsNotNone(restored)
+        resumed = SceneMachine(restored, self.context)
+        resumed.handle(GlueInput("hotspot-release", "UnwindMission"))
+        self.assertEqual(loaded.mission_window, "MISSIONBWINDOW")
+        self.assertEqual(self._names(resumed.active)[-1], "MISSIONBWINDOW")
+        self.assertIsNotNone(resumed.active.runtime.state.selected_mission)
+        resumed.handle(GlueInput("panel-action", "open_troop_select"))
+        from whshr.campaign_scenes import TroopSelectionScene
+        self.assertIsInstance(resumed.active, TroopSelectionScene)
 
     def test_given_the_caravan_when_options_closes_then_it_stays_open(self):
         from whshr.options_scene import OptionsScene

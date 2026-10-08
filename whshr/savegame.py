@@ -98,7 +98,7 @@ def campaign_to_dict(campaign: "CampaignState") -> dict[str, Any]:
     }
 
 
-def restore_campaign(campaign: "CampaignState", data: Mapping[str, Any]) -> None:
+def restore_campaign(campaign: "CampaignState", data: Mapping[str, Any], *, repair_stalled: bool = True) -> None:
     """Overwrite ``campaign`` (a fresh one for the same installation) with saved ``data``."""
     rows = {regiment.whoami: regiment.row for regiment in (*campaign.master, *campaign.company)}
     try:
@@ -140,7 +140,8 @@ def restore_campaign(campaign: "CampaignState", data: Mapping[str, Any]) -> None
     for name, value in values.items():  # nothing is touched unless the whole save parsed
         setattr(campaign, name, value)
     company = values["company"]
-    campaign.repair_stalled_flow()  # saves made before releases were recorded (see repair_stalled_flow)
+    if repair_stalled:
+        campaign.repair_stalled_flow()  # older saves without a scene chain cannot release through their parked map
     campaign.refresh_speaker([regiment for regiment in company if regiment.whoami in campaign.march_units])
 
 
@@ -192,7 +193,10 @@ class SaveStore:
             raise SaveError(f"cannot write slot {slot}: {error}") from error
 
     def load_into(self, slot: int, campaign: "CampaignState") -> None:
-        restore_campaign(campaign, self._read(slot)["campaign"])
+        saved = self._read(slot)
+        # A restored caravan and its parked map still own the mission release. Advancing the campaign here
+        # would leave that map on the old list when the player exits the caravan.
+        restore_campaign(campaign, saved["campaign"], repair_stalled=saved.get("scenes") is None)
 
     def load_scene(self, slot: int, campaign: "CampaignState", content: "GlueContent") -> "GlueScene | None":
         """The scene the slot was saved in, rebuilt on ``campaign``; None for a save with no scene chain (an
