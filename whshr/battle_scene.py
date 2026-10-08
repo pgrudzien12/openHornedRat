@@ -106,6 +106,10 @@ class BattleScene(Scene):
         self.close_log("scene left")
         context.cache.release(self.battle_id)
 
+    def running_capture(self, unit_id: str | None) -> figure_capture.FigureCapture | None:
+        """The F2 capture still recording `unit_id`, if any (a second F2 extends it)."""
+        return next((capture for capture in self.captures if capture.unit_id == unit_id and capture.running), None)
+
     def close_log(self, reason: str) -> None:
         """Write the `end` record and close the log file; idempotent, so both a normal transition and
         an early frontend shutdown (the player closing the window mid-battle) can safely call it."""
@@ -128,7 +132,10 @@ class BattleScene(Scene):
         elif kind == "capture":
             # Debugging aid only; a replay (no log directory) re-handles the logged request as a no-op.
             unit_id = figure_capture.capture_unit(self.battle, args[0] if args else self.selected_id)
-            if self.log_dir is not None and unit_id is not None:
+            running = self.running_capture(unit_id)
+            if running is not None:
+                running.extend(self.battle)
+            elif self.log_dir is not None and unit_id is not None:
                 self.captures.append(figure_capture.FigureCapture(self.log_dir, self.battle_id.name,
                                                                   self.battle, unit_id))
         elif kind == "pause":

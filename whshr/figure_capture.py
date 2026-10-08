@@ -2,7 +2,7 @@
 
 Pressing the capture key in the battle view (F2) buffers in memory the next `CAPTURE_TICKS` battle ticks (5 s of
 battle time; paused time does not count) of one regiment -- the selected one, else `DEFAULT_UNIT` -- and
-then writes it in one go to `<log_dir>/capture-YYYYmmdd-HHMMSS-<battle>-<unit>-t<tick>.log`. Each tick lists the regiment's order
+then writes it in one go (pressing F2 again while it runs extends it by another 5 s) to `<log_dir>/capture-YYYYmmdd-HHMMSS-<battle>-<unit>-t<tick>.log`. Each tick lists the regiment's order
 and movement state, then one line per figure: position, how far it moved this tick, the goal it walks
 to (formation slot, re-form slot, scatter point or battle-grid cell) and its distance from it, speed,
 facings, animation and close-combat state, plus the battle events that mention the regiment.
@@ -111,8 +111,10 @@ class FigureCapture:
         regiment = battle.regiments[unit_id]
         self._write(f"figure capture of {regiment.name} ({unit_id}) in battle {battle_asset}")
         self._write(f"build: {build_stamp()}")
-        self._write(f"ticks {self.start_tick}..{self.start_tick + ticks - 1} (battle update count; "
-                    f"100 ms each), side {regiment.side.value}, speed/tick {regiment.speed_per_tick:.2f}")
+        self.last_tick = self.start_tick
+        self._range_line = len(self.lines)  # filled in by `close`, once extensions are known
+        self._write("")
+        self._write(f"side {regiment.side.value}, speed/tick {regiment.speed_per_tick:.2f}")
         self._write("figure columns: #index uid  pos x,y  moved  goal(kind) x,y  dist  speed budget  "
                     "facing drawn  action(pc)  cell opponent  flags")
         self._write("")
@@ -121,6 +123,17 @@ class FigureCapture:
     @property
     def done(self) -> bool:
         return self.remaining <= 0
+
+    @property
+    def running(self) -> bool:
+        return not self.done
+
+    def extend(self, battle: "Battle", ticks: int = CAPTURE_TICKS) -> None:
+        """Pressing the capture key again on a running capture lengthens it by another `ticks`."""
+        if self.done:
+            return
+        self.remaining += ticks
+        self._write(f"-- capture extended at tick {battle.update_count} by {ticks} ticks")
 
     def _write(self, text: str) -> None:
         self.lines.append(text)
@@ -145,6 +158,7 @@ class FigureCapture:
         return regiment is not None and regiment.name in str(event)
 
     def _write_tick(self, battle: "Battle", events: list[str]) -> None:
+        self.last_tick = battle.update_count
         regiment = battle.regiments.get(self.unit_id)
         if regiment is None:
             self._write(f"tick {battle.update_count}: regiment gone")
@@ -193,6 +207,8 @@ class FigureCapture:
         if self.written:
             return
         self.written = True
+        self.lines[self._range_line] = (f"ticks {self.start_tick}..{self.last_tick} "
+                                        "(battle update count; 100 ms each)")
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text("\n".join(self.lines) + "\n", encoding="utf-8")

@@ -307,8 +307,10 @@ class BattleView(SceneView[BattleScene]):
             battle = self.scene.battle
             unit_id = figure_capture.capture_unit(battle, self.scene.selected_id)
             if unit_id is not None and self.scene.log_dir is not None:
-                self.battle_log.append(("", f"Capturing {battle.regiments[unit_id].name} figures "
-                                            f"from tick {battle.update_count} for 5 s"))
+                name = battle.regiments[unit_id].name
+                self.battle_log.append(("", f"Extending the {name} figure capture by 5 s"
+                                            if self.scene.running_capture(unit_id) is not None else
+                                            f"Capturing {name} figures from tick {battle.update_count} for 5 s"))
                 self.log_scroll = 0
                 return (("capture", unit_id),)
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -628,7 +630,9 @@ class BattleView(SceneView[BattleScene]):
             f"camera yaw {camera.yaw:.0f} pitch {camera.pitch:.0f} distance {camera.distance:.0f}",
             f"target {camera.target_x:.0f}, {camera.target_y:.0f}",
             f"selected {selected}",
-        )
+        ) + tuple(f"F2 capture: saving {scene.battle.regiments[capture.unit_id].name} figure state, "
+                  f"{capture.remaining} ticks left" for capture in scene.captures if capture.running
+                  and capture.unit_id in scene.battle.regiments)
         return lines + tuple(self.event_log)
 
     def _effect_vertices(self) -> array[float]:

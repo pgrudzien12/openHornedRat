@@ -83,6 +83,33 @@ class CaptureFileTests(_Fixture):
         self.assertIn("walk(", text)
         self.assertIn("target 300.0,300.0", text)
 
+    def test_given_a_running_capture_when_extended_then_it_records_for_longer(self):
+        capture = self._capture("Infantry", ticks=3)
+        self.battle.tick()
+        capture.observe(self.battle)
+
+        capture.extend(self.battle, ticks=3)
+        ticks = 1
+        while not capture.done:
+            self.battle.tick()
+            capture.observe(self.battle)
+            ticks += 1
+
+        self.assertEqual(ticks, 6)
+        text = self._files()[0].read_text(encoding="utf-8")
+        self.assertIn("capture extended at tick 1 by 3 ticks", text)
+        self.assertIn("ticks 0..6 ", text)
+
+    def test_given_a_finished_capture_when_extended_then_nothing_changes(self):
+        capture = self._capture("Infantry", ticks=1)
+        self.battle.tick()
+        capture.observe(self.battle)
+
+        capture.extend(self.battle)
+
+        self.assertTrue(capture.done)
+        self.assertNotIn("extended", self._files()[0].read_text(encoding="utf-8"))
+
     def test_given_a_capture_cut_short_when_closed_then_the_partial_capture_is_written_once(self):
         capture = self._capture("Infantry")
         self.battle.tick()
