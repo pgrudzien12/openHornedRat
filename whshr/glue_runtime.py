@@ -904,7 +904,12 @@ class GlueRuntime:
             effects.append(Diagnostic("gosub", "script-frame stack overflow"))
             return
         target = self._resource_argument(argument)
-        self._clear_pending_requests()
+        try:
+            self.content.program(target.upper())
+        except (KeyError, TypeError):
+            pass  # a target that cannot be opened changes nothing (the frame then reports the missing resource)
+        else:
+            self._clear_pending_requests()
         if self.state.current is not None:
             self.state.call_stack.append(deepcopy(self.state.current))
         self.state.current = ScriptFrame(target.upper())

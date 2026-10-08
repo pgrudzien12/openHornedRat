@@ -42,6 +42,12 @@ class DeferredGotoTests(unittest.TestCase):
 
         self.assertNotIn(EndGame(), effects)
 
+    def test_a_gosub_to_a_missing_script_does_not_clear_the_pending_goto(self):
+        _, effects = run("[RUN]\n[START]\ngoto:TARGET\ngosub:NOWHERE\n[END]")
+
+        self.assertTrue(any(isinstance(effect, Diagnostic) for effect in effects))
+        self.assertIn(EndGame(), effects)
+
     def test_a_load_that_fails_changes_nothing(self):
         _, effects = run("[RUN]\n[START]\ngoto:TARGET\nopenwindow:res=MISSING\n[END]")
 
