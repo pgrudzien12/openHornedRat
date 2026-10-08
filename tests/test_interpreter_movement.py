@@ -86,9 +86,12 @@ class MoveToTargetTests(MovementTestCase):
         self.assertTrue(self.op("MoveToTarget"))
         self.assertEqual((self.unit.target_x, self.unit.target_y), (300, 0))
 
-    def test_unit_at_rest_snaps_a_right_angle_towards_the_target(self):
+    def test_unit_at_rest_snaps_a_right_angle_towards_the_target_at_its_first_movement_update(self):
+        # notes/attack_order_flow.md 3: the snap uses the first plan's heading, so it comes with the first update.
         self.build(facing=0, unit_models=4, unit_ranks=2)
         self.assertTrue(self.op("MoveToTarget"))
+        self.assertEqual(self.unit.direction, 0)
+        self.battle.tick()
         self.assertEqual(self.unit.direction, 128)
 
     def test_refused_while_reforming_or_without_a_target(self):

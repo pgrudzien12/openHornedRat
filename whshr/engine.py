@@ -164,6 +164,9 @@ class Regiment:
     airborne: bool = False
     waypoints: list[Point] = field(default_factory=list[Point])
     route_follows_unit: bool = False
+    # The current point move was ordered while the unit was already moving: it gets no move-start snap
+    # (notes/close_point_move.md 2, notes/attack_order_flow.md 3).
+    ordered_while_moving: bool = False
 
     # Combat profile (game_rules.md section 3, section 5-8), decoded from the script's setstats lines.
     ws: int = DEFAULT_PROFILE["WS"]
@@ -1344,6 +1347,7 @@ class Battle:
         self.set_point_route(regiment, (float(x), float(y)))
 
     def set_point_route(self, regiment: Regiment, goal: Point) -> None:
+        regiment.ordered_while_moving = regiment.moving
         points = navigation.point_route((regiment.x, regiment.y), goal, self.navigation_boundaries)
         regiment.target_x, regiment.target_y = points[0]
         regiment.waypoints = points[1:]
@@ -1375,6 +1379,9 @@ class Battle:
             raise ValueError("attack target is hidden")
         if not target.active:
             raise ValueError(f"{target_id} is no longer on the field")
+        if self.interpreter is not None:
+            self._queue_scripted_attack(regiment, target_id)
+            return
         if self._hold_while_reforming(regiment, ("order_attack", target_id)):
             return
         regiment.target_x = regiment.target_y = None
@@ -1385,6 +1392,20 @@ class Battle:
         regiment.free_charging = False
         regiment.route_follows_unit = False
         regiment.turn_order_key = None
+
+    def _queue_scripted_attack(self, regiment: Regiment, target_id: str) -> None:
+        """A player Attack on a regiment or building with scripts running (notes/attack_order_flow.md 1, 3): event 0x04
+        to the unit, whose handler takes the target and runs the approach walk; the charge starts only once the
+        charge-reach test passes. The order is dropped while the unit is charging (at a target or straight ahead) or
+        in melee. During a re-form it is accepted at once with a React 13 reply, replacing any held order; the
+        approach itself waits for the re-form (notes/reform_while_moving.md 4)."""
+        if regiment.attack_target is not None or regiment.free_charging or regiment.in_melee:
+            return
+        if self.phase == "battle" and regiment.reforming:
+            self.react(regiment.identifier, 13)
+        regiment.pending_order = None
+        regiment.clear_shooting()
+        self.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x04, source=target_id))
 
     def order_charge_forward(self, identifier: str) -> None:
         """Begin the selected regiment's straight-ahead Charge command."""
@@ -1405,6 +1426,12 @@ class Battle:
         regiment.waypoints.clear()
         regiment.attack_target = regiment.charge_started_target = None
         regiment.free_charging = True
+        # A charge is a straight run (notes/attack_order_flow.md 1): no route pause, and no steering or route plan
+        # left from an earlier move for other units' route filters to read.
+        regiment.route_pause_ticks = 0
+        regiment.avoid_target = None
+        regiment.route_side, regiment.route_planned_for = 0, None
+        regiment.route_follows_unit = False
         regiment.hidden = False
 
     def order_halt(self, identifier: str) -> None:
@@ -2146,8 +2173,13 @@ class Battle:
         original "moving freely" order completion. With `arrive=False` (a charge chase or a rout) the
         regiment keeps closing on a moving point every tick and never "arrives" on its own; contact
         detection (`combat.resolve_contacts`) or leaving the field ends the movement instead.
+
+        A charge (not a pursuit) is a straight run: no route plan, steering or route pause
+        (notes/attack_order_flow.md 1, notes/convoy_jam_and_melee_obstacles.md B.1); what it meets is the collision
+        pass's business.
         """
-        steering_target = self._steering_target(regiment, target, order_key)
+        straight = order_key[0] == "charge" and not regiment.pursuing
+        steering_target = target if straight else self._steering_target(regiment, target, order_key)
         if steering_target is None:
             regiment.route_speed = 0.0
             regiment.target_x = regiment.target_y = None
@@ -2235,9 +2267,11 @@ class Battle:
         goal = round(math.atan2(dx, dy) * 512 / math.tau) % 512 if distance > 1e-9 else regiment.direction
         if order_key != regiment.turn_order_key:
             # game_rules.md "Real time and movement": the 90/180 snap only when a move order is issued (every order
-            # clears `turn_order_key`); a new waypoint or a script re-aim only brings the next plan forward.
-            if regiment.turn_order_key is None:
+            # clears `turn_order_key`); a new waypoint or a script re-aim only brings the next plan forward. The snap is
+            # only for a move started from rest (notes/close_point_move.md 2): a unit already moving wheels or turns.
+            if regiment.turn_order_key is None and not regiment.ordered_while_moving:
                 self._snap_order_turn(regiment, goal)
+            regiment.ordered_while_moving = False
             regiment.turn_order_key = order_key
             regiment.move_plan_countdown = -1.0
         suspended = regiment.reforming and not regiment.pursuing
@@ -2392,14 +2426,17 @@ class Battle:
             if {"os_active", "os_solid"}.issubset(flags):
                 footprints.append(steering.Footprint(f"object:{index}", float(obj.get("x") or 0),
                                                      float(obj.get("y") or 0), float(int(obj.get("radius") or 0))))
+        target_id = self._route_target_id(regiment, order_key)
         for building in self.buildings:  # notes/obstacle_steering.md 3: a building blocks unless it is the target
-            if order_key[0] == "charge" and order_key[1] == building.identifier:
+            if building.identifier == target_id:
                 continue
             footprints.append(steering.Footprint(building.identifier, building.x, building.y, float(building.radius)))
         units: dict[str, Regiment] = {}
+        target = self.regiments.get(target_id) if target_id is not None else None
         for other in self.regiments.values():
-            if (other is regiment or not other.active or other.routing
-                    or (order_key[0] == "charge" and order_key[1] == other.identifier)):
+            if (other is regiment or not other.active or other.routing or other is target
+                    or (target is not None and target.melee_group is not None
+                        and other.melee_group == target.melee_group)):
                 continue
             key = f"unit:{other.identifier}"
             centre = self.formation_centre(other)
@@ -2407,6 +2444,19 @@ class Battle:
                                                  troops=not (other.is_wagon or other.hud_class in ("art", "mon"))))
             units[key] = other
         return footprints, units
+
+    def _route_target_id(self, regiment: Regiment, order_key: TurnKey) -> str | None:
+        """The unit or building a route heads for: a charge's target, or the current script target of a follow-a-unit
+        approach (notes/attack_order_flow.md 2, notes/building_units.md 6). It is not an obstacle to that route, and
+        for a regiment neither is any unit fighting on its combat grid, of either side."""
+        if order_key[0] == "charge":
+            return str(order_key[1])
+        if not regiment.route_follows_unit:
+            return None
+        state = self.event_bus.unit_states.get(regiment.identifier)
+        if state is None or state.current_target is None:
+            return None
+        return state.current_target[0]
 
     def _warn_blocked_route(self, regiment: Regiment, order_key: TurnKey, start: Point, target: Point,
                             footprints: Sequence[steering.Footprint], own_radius: float, plan: steering.Plan) -> None:
@@ -3122,15 +3172,15 @@ class Battle:
         if (regiment.routing or regiment.pursuing or regiment.held or regiment.braced or regiment.anchored
                 or regiment.assaulting_building is not None):
             raise ValueError(f"{identifier} cannot be ordered to attack")
+        if self.interpreter is not None:
+            self._queue_scripted_attack(regiment, building_id)
+            return
         if self._hold_while_reforming(regiment, ("order_attack", building_id)):
             return
         regiment.target_x = regiment.target_y = None
         regiment.clear_shooting()
         regiment.free_charging = False
         regiment.turn_order_key = None
-        if self.interpreter is not None:
-            self.event_bus.queue_event(identifier, interpreter.Event(code=0x04, source=building_id))
-            return
         regiment.attack_target = building_id
         regiment.charge_started_target = None
 
