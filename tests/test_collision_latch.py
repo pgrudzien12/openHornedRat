@@ -3,6 +3,7 @@ notes/script_behaviours.md 2.5)."""
 
 import unittest
 
+from whshr import interpreter
 from whshr.engine import Battle, Regiment
 from whshr.rules import Side
 
@@ -90,6 +91,61 @@ class LatchMovementTests(unittest.TestCase):
         a.target_x, a.target_y = 500, 540
         battle.tick()
         self.assertNotEqual((a.x, a.y), (500, 500))
+
+
+class WagonCollisionEventTests(unittest.TestCase):
+    """Event 0x27: a wagon overlapping any footprint within +-45 degrees of its facing (script_behaviours.md 2.2)."""
+
+    def make(self, other_y, other_side=Side.PLAYER, wagon_moving=True):
+        wagon = Regiment("W", "W", 500, 500, 0, Side.PLAYER, models=2, ranks=1, points=10, unit_class=7)
+        other = unit("O", 500, other_y, facing=256, side=other_side)
+        battle = Battle(2000, 2000, [wagon, other], seed=1995)
+        battle.interpreter = battle.interpreter or interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        if wagon_moving:
+            wagon.target_x, wagon.target_y = 500, 900
+        return battle, wagon
+
+    def raise_once(self, battle):
+        battle.interpreter.raise_wagon_collisions([r for r in battle.regiments.values() if r.active])
+
+    def test_wagon_touching_a_friendly_unit_ahead_gets_0x27(self):
+        battle, wagon = self.make(506)
+        self.assertTrue(wagon.is_wagon)
+        self.raise_once(battle)
+        self.assertEqual(codes(battle, "W"), [0x27])
+
+    def test_enemy_ahead_counts_too_and_the_event_has_no_source(self):
+        battle, wagon = self.make(506, Side.ENEMY)
+        self.raise_once(battle)
+        event = battle.event_bus.unit_states["W"].event_queue[0]
+        self.assertEqual((event.code, event.source), (0x27, None))
+
+    def test_unit_behind_the_wagon_does_not_raise_it(self):
+        battle, wagon = self.make(494)
+        self.raise_once(battle)
+        self.assertEqual(codes(battle, "W"), [])
+
+    def test_no_overlap_no_event(self):
+        battle, wagon = self.make(700)
+        self.raise_once(battle)
+        self.assertEqual(codes(battle, "W"), [])
+
+    def test_stationary_wagon_runs_no_pass(self):
+        battle, wagon = self.make(506, wagon_moving=False)
+        self.raise_once(battle)
+        self.assertEqual(codes(battle, "W"), [])
+
+    def test_non_wagon_never_gets_it(self):
+        battle, wagon = self.make(506)
+        wagon.unit_class = None
+        self.raise_once(battle)
+        self.assertEqual(codes(battle, "W"), [])
+
+    def test_event_is_refused_during_deployment(self):
+        battle, wagon = self.make(506)
+        battle.phase = "deployment"
+        self.raise_once(battle)
+        self.assertEqual(codes(battle, "W"), [])
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ import random
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from . import animation, behaviour, buildings, combat, magic, nodes, spell_effects, visibility
+from . import animation, behaviour, buildings, combat, formation, magic, nodes, spell_effects, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import Side, side_of_code
@@ -398,9 +398,8 @@ class ScriptInterpreter:
         that moved or charged this tick (PROVISIONAL stand-in for the collision re-check state) runs the
         fear-on-contact test and, unless latched, gets event 0x0B (checked) with the other unit as its contact
         record; a troops regiment touched gets the reciprocal 0x0B. Marked units are not touched at all. A latched
-        unit that touches nothing any more is released; a latched unit's movement is rolled back by the engine
-        (Battle._resolve_latched_step). Not modelled: push-apart (the engine's own), contact attacks on routers
-        and wagon event 0x27."""
+        unit that touches nothing any more is released; a latched unit's movement is rolled back by the engine (Battle._resolve_latched_step);
+        wagon event 0x27 is raise_wagon_collisions. Not modelled: push-apart (the engine's own), contact attacks on routers."""
         touching: set[str] = set()
         for first, second in contacts:
             if self._leaving(first) or self._leaving(second):
@@ -418,6 +417,18 @@ class ScriptInterpreter:
         for unit_id, state in self.event_bus.unit_states.items():
             if state.contact_latch and unit_id not in touching:
                 state.contact_latch = False
+
+    def raise_wagon_collisions(self, regiments: list["Regiment"]) -> None:
+        """Event 0x27 (notes/script_behaviours.md 2.2): a wagon that moved this tick and overlaps a footprint of any
+        kind (any side, any unit type) within +-45 degrees of its facing is sent 0x27 (checked, no source), once per
+        tick. Units leaving the battle are not touched. Not modelled: building footprints, which are not units."""
+        for wagon in regiments:
+            if not wagon.is_wagon or self._leaving(wagon) or not self._rechecks(wagon):
+                continue
+            if any(other is not wagon and not other.hidden and not self._leaving(other)
+                   and formation.penetrates(wagon.block(), other.block()) and self._in_arc(wagon, other)
+                   for other in regiments):
+                self.event_bus.queue_event(wagon.identifier, Event(code=0x27), checked=True)
 
     @staticmethod
     def _rechecks(unit: "Regiment") -> bool:
