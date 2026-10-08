@@ -11,6 +11,8 @@
 
 Questions, playtest reports, or just want to talk about the game? Join the community in [GitHub Discussions](https://github.com/pgrudzien12/openHornedRat/discussions).
 
+Please [open an issue](https://github.com/pgrudzien12/openHornedRat/issues) for a reproducible problem. Screenshots and short screen recordings are welcome, but do not upload or distribute original game assets. If you would like to help with code, research, documentation, or compatibility testing, start with an issue or a [Discussion](https://github.com/pgrudzien12/openHornedRat/discussions) so we can coordinate work.
+
 ## Help us test
 
 Campaign games take hours, so early feedback is incredibly valuable. Please try the build if you own the original game and tell us:
@@ -19,8 +21,6 @@ Campaign games take hours, so early feedback is incredibly valuable. Please try 
 - where the campaign flow, controls, visuals, audio, or battle rules feel wrong;
 - what happened immediately before a crash, freeze, or broken screen; and
 - the battle log from `logs/` if one was created.
-
-Please [open an issue](https://github.com/pgrudzien12/openHornedRat/issues) for a reproducible problem. Screenshots and short screen recordings are welcome, but do not upload or distribute original game assets. If you would like to help with code, research, documentation, or compatibility testing, start with an issue or a [Discussion](https://github.com/pgrudzien12/openHornedRat/discussions) so we can coordinate work.
 
 ## What you can play today
 
