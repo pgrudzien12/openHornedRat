@@ -934,7 +934,8 @@ def resolve_contact_attacks(battle: "Battle") -> None:
     turned -- is **hit automatically**: only the to-wound roll and the armour save are made, with no
     to-hit roll (game_rules.md 5.2).
 
-    A unit that is not charging or pursuing also makes them on a broken enemy whose footprint overlaps its own.
+    A unit that is not charging or pursuing makes them on a broken enemy it overlaps too, but that is checked every
+    tick (`resolve_router_contact_attacks`), not only here.
 
     Simplifications: the reach is the infantry 12 (the engine has no unit class for the cavalry 18 and
     monster 24), and contact hits still ignore the rout pause's timed "turning" state, in which a model
@@ -945,31 +946,48 @@ def resolve_contact_attacks(battle: "Battle") -> None:
             continue
         target = battle.regiments.get(attacker.attack_target) if attacker.attack_target else None
         if target is None or not target.active or not target.routing:
-            target = _router_underfoot(battle, attacker)
-        if target is None:
             continue  # contact attacks only matter against a unit that cannot fight back
-        victims, rolls = _contact_attack_rolls(attacker, target, battle.rng)
-        if not rolls:
+        _strike_router(battle, attacker, target)
+
+
+def _strike_router(battle: "Battle", attacker: "Regiment", target: "Regiment") -> None:
+    victims, rolls = _contact_attack_rolls(attacker, target, battle.rng)
+    if not rolls:
+        return
+    killed = kill_models(target, victims, battle=battle, killer=attacker.identifier)
+    battle.events.append(BattleEvent(
+        f"{attacker.name} cuts down {killed} fleeing {target.name}."
+        if killed else f"{attacker.name} reaches {target.name} but draws no blood.",
+        "contact_attack",
+        attacker=attacker.identifier, target=target.identifier, kills=killed,
+        reach=CONTACT_REACH, rolls=rolls))
+
+
+def _marked(battle: "Battle", unit: "Regiment") -> bool:
+    state = battle.event_bus.unit_states.get(unit.identifier)
+    return state is not None and bool(state.unit_flags & interpreter.LEAVING_BATTLE_FLAG)
+
+
+def resolve_router_contact_attacks(battle: "Battle") -> None:
+    """Every tick: a unit that is not in melee makes contact attacks on a broken enemy whose footprint it overlaps
+    although it is not charging or pursuing (notes/script_behaviours.md 2.2, "U need not be charging"), at most
+    once per segment (game_rules.md 7.7). The first such router by identifier. Nothing happens for a marked
+    (leaving) attacker or router, or against a router with CantMelee (notes/game_rules.md, psychology table).
+    PROVISIONAL: the original runs this inside the router's own collision pass; here the router's re-check state is
+    not required (a fleeing unit moves every update anyway)."""
+    segment = battle.tick_count // SEGMENT_TICKS
+    ordered = sorted(battle.regiments.values(), key=lambda r: r.identifier)
+    for attacker in ordered:
+        if (not attacker.active or attacker.routing or attacker.in_melee or attacker.contact_attack_segment == segment
+                or _marked(battle, attacker)):
             continue
-        killed = kill_models(target, victims, battle=battle, killer=attacker.identifier)
-        battle.events.append(BattleEvent(
-            f"{attacker.name} cuts down {killed} fleeing {target.name}."
-            if killed else f"{attacker.name} reaches {target.name} but draws no blood.",
-            "contact_attack",
-            attacker=attacker.identifier, target=target.identifier, kills=killed,
-            reach=CONTACT_REACH, rolls=rolls))
-
-
-def _router_underfoot(battle: "Battle", unit: "Regiment") -> "Regiment | None":
-    """A broken enemy whose footprint overlaps the unit's: the unit makes contact attacks on it although it is not
-    charging or pursuing (notes/script_behaviours.md 2.2: "U need not be charging"). The first such router by
-    identifier. PROVISIONAL: the original runs this inside the router's own collision pass; here the router's
-    re-check state is not required (a fleeing unit moves every update anyway)."""
-    for other in sorted(battle.regiments.values(), key=lambda r: r.identifier):
-        if (other is not unit and other.active and other.routing and not other.hidden and may_engage(unit, other)
-                and formation.penetrates(unit.block(), other.block())):
-            return other
-    return None
+        for router in ordered:
+            if (router is not attacker and router.active and router.routing and not router.hidden
+                    and "CantMelee" not in router.psychology and not _marked(battle, router)
+                    and may_engage(attacker, router) and formation.penetrates(attacker.block(), router.block())):
+                attacker.contact_attack_segment = segment
+                _strike_router(battle, attacker, router)
+                break
 
 
 def resolve_building_assaults(battle: "Battle") -> None:

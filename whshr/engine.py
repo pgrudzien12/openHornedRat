@@ -158,6 +158,7 @@ class Regiment:
     # position step, a boundary repel, another unit's pass touching or pushing it, the contact handler's
     # latch-release branches and Rally; cleared when its pass runs. Not set by turning in place or re-forming.
     collision_recheck: bool = False
+    contact_attack_segment: int = -1  # the segment in which this unit last made contact attacks on a router underfoot
     update_counter: int = 0  # counts the unit's updates; starts at its slot so units are staggered (see collision_recheck)
     screen_mark: bool = False  # inside the camera's view rectangle at the end of the last tick (Battle.on_screen)
     airborne: bool = False
@@ -1708,6 +1709,7 @@ class Battle:
             if self.tick_count > 0:
                 for regiment in self.regiments.values():
                     regiment.fight_harder = False
+        combat.resolve_router_contact_attacks(self)
         combat.resolve_shooting(self)
         spell_effects.tick(self)  # after units and ordinary missiles (notes/spell_effects.md 1.7)
         if self.objectives is None:
