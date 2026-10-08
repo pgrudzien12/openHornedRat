@@ -7,7 +7,8 @@ frame of the installation's ICONS sheet (225 frames); nothing here is procedural
 invented by the engine.
 
 Order dispatch: `whshr.engine.Battle` implements move, attack, Fire, halt, ranks, facing,
-Independent, Fight harder and activated items. Other panel orders remain disabled until their engine paths exist.
+Independent, Fight harder, Rally and activated items. Not modelled: whether the Rally button shows the
+rally-attempt state as pressed (notes/pursuit_restraint.md 3, untraced), so it does not. Other panel orders remain disabled until their engine paths exist.
 Buttons for orders without engine support still render at their documented position and icon (so
 the panel looks and navigates correctly) but are disabled; panel-state *navigation* (which
 sub-panel is shown) is implemented in full, since that is pure UI state independent of which
@@ -82,7 +83,7 @@ COMMAND_FRAMES: dict[str, tuple[int, int]] = {
 # Commands whshr.engine.Battle can actually carry out today; everything else in COMMAND_FRAMES
 # renders (and, where it is a set-entry button, still navigates the panel) but is disabled.
 ORDER_SUPPORTED: set[str] = {"move", "attack", "charge", "fire", "halt", "ranks_up", "ranks_down",
-                   "turn_left", "turn_right", "about_face", "face_point", "independent", "fight_harder", "items"}
+                   "turn_left", "turn_right", "about_face", "face_point", "independent", "fight_harder", "items", "rally"}
 # Buttons that only change which sub-panel is shown (pure HUD state, always clickable when present).
 SET_ENTRY: dict[str, str] = {"move": "move", "attack": "attack", "ranks_subset": "ranks", "facing_subset": "facing",
             "back": "idle"}

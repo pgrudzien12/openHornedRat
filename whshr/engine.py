@@ -312,7 +312,12 @@ class Regiment:
     # enemy identifier this regiment was recorded fighting, kept across leaving and re-joining a fight,
     # so a fresh charge counter is granted only against a genuinely new opponent.
     last_fought_opponent: str | None = None
-    rally_next_segment: int | None = None  # absolute segment index of the next scheduled rally attempt (7.4)
+    # notes/pursuit_restraint.md 2: the rally-attempt state (player Rally order, or Independent at the rout) and the
+    # scheduled segment number (10..1, counting down) of the next rally attempt / restraint test. The schedule is
+    # shared by the flight rally attempts and the pursuit-restraint test; each rout or pursuit start overwrites it.
+    rally_attempt: bool = False
+    rally_segment: int | None = None
+    rally_schedule_tick: int = -1  # the tick the schedule was set: no check on that same boundary tick
 
     def __post_init__(self) -> None:
         if self.original_models < 0:
@@ -1029,6 +1034,16 @@ class Battle:
         if self.phase == "deployment" and regiment.hud_class not in {"inf", "arch", "wiz", "mon", "art"}:
             raise ValueError("this class has no deployment Independent control")
         regiment.independent = not regiment.independent
+
+    def order_rally(self, identifier: str) -> None:
+        """The player's Rally order (notes/pursuit_restraint.md 3): flip the rally-attempt state of a player
+        regiment that is pursuing or broken. Nothing else changes (no shout, halt, re-form or reschedule); a
+        second press switches it off again. Any other regiment refuses the order."""
+        self._require_battle_order()
+        regiment = self.regiments[identifier]
+        if regiment.side != Side.PLAYER or not regiment.active or not (regiment.pursuing or regiment.routing):
+            raise ValueError("rally requires an active player regiment that is pursuing or broken")
+        regiment.rally_attempt = not regiment.rally_attempt
 
     def order_fight_harder(self, identifier: str) -> None:
         """Apply the melee command to the focused player unit for one segment (game_rules.md, Player orders)."""
@@ -2612,11 +2627,15 @@ class Battle:
         """The once-per-segment pursuit update (notes/pursuit_map_edge.md 2): a pursuit stops when the target is no
         longer a live routing unit, when the chase budget runs out (not with AlwaysPursue; first min(2 x distance,
         120), then + previous distance - distance - 4), or when the probe one collision radius ahead of the front
-        rank along the facing lies inside no BattleEdge area (or the battle has none). Not modelled: the restraint
-        test of the rally-attempt state (there is no Rally order yet)."""
+        rank along the facing lies inside no BattleEdge area (or the battle has none). First of all, on the pursuer's
+        scheduled segment with its rally-attempt state on, the restraint test (notes/pursuit_restraint.md 4): a pass
+        stops the pursuit the same way; one stop is enough, so the rest of the update is skipped then."""
         edges = [boundary for boundary in self.navigation_boundaries if boundary.battle_edge]
         for regiment in self.regiments.values():
             if not regiment.pursuing or not regiment.active or regiment.routing:
+                continue
+            if combat.rally_check_due(regiment, self) and combat.pursuit_restraint_test(self, regiment):
+                self._stop_pursuit(regiment)
                 continue
             target = self.regiments.get(regiment.attack_target) if regiment.attack_target is not None else None
             if target is None or not target.active or not target.routing:
@@ -2653,6 +2672,7 @@ class Battle:
             self.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x10))
             return
         regiment.pursuing = False
+        regiment.rally_attempt = False  # as the Rally opcode (notes/pursuit_restraint.md 5)
         regiment.pursuit_budget = regiment.pursuit_point = None
         regiment.attack_target = regiment.charge_started_target = None
         regiment.target_x = regiment.target_y = None
@@ -2804,4 +2824,4 @@ class Battle:
             if not any(edge.contains(trailing) for edge in edges):
                 regiment.flight_complete = True
                 regiment.flight_complete_tick = self.tick_count
-                regiment.rally_next_segment = None
+                regiment.rally_segment = None

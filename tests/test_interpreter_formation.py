@@ -108,12 +108,13 @@ class RallyTests(FormationTestCase):
     def test_rally_vector(self):
         self.build(models=16, ranks=4, script_ranks=4)
         self.unit.routing = True
-        self.unit.rally_next_segment = 5
+        self.unit.rally_attempt = True
         self.unit.target_x, self.unit.target_y = 90.0, 90.0
         self.unit.braced = True
         self.state.cond_flags = True
         self.assertEqual(self.op("Rally"), 1)
         self.assertFalse(self.unit.routing)
+        self.assertFalse(self.unit.rally_attempt)
         self.assertFalse(self.unit.braced)
         self.assertIsNone(self.unit.target_x)
         self.assertEqual((self.unit.ranks, self.unit.frontage), (4, 4))

@@ -1726,14 +1726,15 @@ class ScriptInterpreter:
 
     def op_Rally(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
-        """Rally: stop being broken, charging, pursuing or braced; halt and re-form to the script's rank
+        """Rally: stop being broken, charging, pursuing or braced, switch the rally-attempt state off
+        (notes/pursuit_restraint.md 5); halt and re-form to the script's rank
         count around the unit's current position and facing, in walk-back mode. While the unit is held the opcode yields without advancing and tries again next tick.
         Does not leave the grid, change the target or facing, or write the condition."""
         unit = self.battle.regiments.get(unit_id)
         if unit is None:
             return state.pc + 1
         unit.routing = False
-        unit.rally_next_segment = None
+        unit.rally_attempt = False  # notes/pursuit_restraint.md 5 step 2
         unit.flee_x = unit.flee_y = None
         unit.attack_target = None
         unit.charge_started_target = None

@@ -354,12 +354,12 @@ class PressAndOrderTests(unittest.TestCase):
 
         self.assertEqual(order, "halt")
 
-    def test_charge_is_an_order_while_unimplemented_commands_issue_none(self):
+    def test_charge_and_rally_are_orders_while_unimplemented_commands_issue_none(self):
         hud = _hud()
 
         self.assertEqual(hud.press("charge"), "charge")
         self.assertIsNone(hud.press("withdraw"))
-        self.assertIsNone(hud.press("rally"))
+        self.assertEqual(hud.press("rally"), "rally")
 
     def test_given_order_completed_then_pending_order_clears_and_navigation_returns_to_idle(self):
         hud = _hud()
