@@ -1885,9 +1885,12 @@ class Battle:
         return False
 
     def _overlaps_anything(self, regiment: Regiment) -> bool:
+        centre = self.formation_centre(regiment)
+        radius = regiment.bounding_radius()
         return any(other is not regiment and other.active and not other.hidden and not other.routing
                    and may_engage(regiment, other) and formation.penetrates(regiment.block(), other.block())
-                   for other in self.regiments.values())
+                   for other in self.regiments.values()) or any(
+            building.penetration(centre[0], centre[1], radius) is not None for building in self.buildings)
 
     @staticmethod
     def turn_to(regiment: Regiment, direction: float) -> None:
@@ -2985,34 +2988,52 @@ class Battle:
                 regiment.attack_target = regiment.charge_started_target = None
 
     def _correct_buildings(self, regiment: Regiment) -> None:
-        """Building footprints against a regiment (notes/building_units.md 5): a charge that reaches its own target
-        building starts the assault (no charge counter); a charge that touches another building ends there, with
-        event 0x09 to its target; every other overlap pushes the regiment clear. A destroyed building keeps its
-        footprint. PROVISIONAL: the original's contact latch (an ordinary move undone while the overlap lasts) is
-        not modelled, and the regiment is pushed by the circle of its bounding radius against the rectangle."""
+        """Building footprints against a regiment (notes/building_units.md 5; notes/script_behaviours.md 2.2). A
+        regiment that is not charging or fighting is pushed clear. With behaviour scripts running, a charging
+        regiment overlapping a building is not pushed: its pass records the contact and raises 0x0B, and the contact
+        handler decides (assault on its own target, charge ends on any other); the pass runs only while the unit's
+        collision re-check state is on. Without scripts the engine decides at once. A destroyed building keeps its
+        footprint. PROVISIONAL: the regiment is pushed by the circle of its bounding radius against the rectangle."""
         if regiment.routing:
             return
         centre = self.formation_centre(regiment)
         radius = regiment.bounding_radius()
+        state = self.event_bus.unit_states.get(regiment.identifier) if self.interpreter is not None else None
         for building in self.buildings:
             if regiment.assaulting_building == building.identifier:
                 continue
             push = building.penetration(centre[0], centre[1], radius)
             if push is None:
                 continue
-            charging = regiment.charge_started_target is not None and regiment.charge_started_target == regiment.attack_target
-            if charging and regiment.attack_target == building.identifier and not building.destroyed:
-                regiment.assaulting_building = building.identifier
-                regiment.attack_target = regiment.charge_started_target = None
-                regiment.target_x = regiment.target_y = None
-                regiment.waypoints.clear()
-                self.events.append(BattleEvent(f"{regiment.name} storms the {building.name}!", "building_assault",
-                                               regiment=regiment.identifier, building=building.identifier))
+            charging = regiment.attack_target is not None
+            if state is not None and charging:
+                if regiment.collision_recheck and not state.contact_latch:
+                    regiment.collision_recheck = False
+                    state.contact_record = building.identifier
+                    self.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x0B), checked=True)
                 continue
-            if charging and regiment.attack_target != building.identifier:
+            if state is None and charging and regiment.attack_target == building.identifier \
+                    and regiment.charge_started_target == building.identifier and not building.destroyed:
+                self.begin_building_assault(regiment, building)
+                continue
+            if state is None and charging and regiment.charge_started_target == regiment.attack_target:
                 self._end_charge_on_obstruction(regiment, f"the {building.name}")
             self._translate_regiment(regiment, push[0], push[1])
             centre = centre[0] + push[0], centre[1] + push[1]
+
+    def begin_building_assault(self, regiment: Regiment, building: buildings.Building) -> None:
+        """The regiment starts fighting the building: it halts at the footprint, its charge is over and it strikes
+        in its own Initiative segment until the building falls (notes/building_units.md 4)."""
+        regiment.assaulting_building = building.identifier
+        regiment.attack_target = regiment.charge_started_target = None
+        regiment.target_x = regiment.target_y = None
+        regiment.waypoints.clear()
+        self.events.append(BattleEvent(f"{regiment.name} storms the {building.name}!", "building_assault",
+                                       regiment=regiment.identifier, building=building.identifier))
+
+    def end_charge_at_building(self, regiment: Regiment, building: buildings.Building) -> None:
+        """A charge that touched a building other than its target ends there, with event 0x09 to its target."""
+        self._end_charge_on_obstruction(regiment, f"the {building.name}")
 
     def _correct_solid_objects(self, regiment: Regiment) -> None:
         centre = self.formation_centre(regiment)

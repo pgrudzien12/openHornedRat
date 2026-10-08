@@ -169,6 +169,72 @@ class CollisionPassTests(ContactTestCase):
         self.assertEqual((a.melee_group, a.charge_counter), (u.melee_group, 7))
 
 
+class BuildingContactTests(ContactTestCase):
+    """notes/script_behaviours.md 2.9: contact with a building, from a charging unit; building_units.md 4-5."""
+
+    def setUp(self):
+        self.a = regiment("A", 1000, 1000, Side.PLAYER)
+        self.enemy = regiment("E", 1000, 1800, Side.ENEMY)
+        self.battle = Battle(3000, 3000, [self.a, self.enemy], seed=1995, script_dll=FakeDll(IDLE),
+                             scenery=[{"name": "WoodShack", "x": 1000, "y": 1030}, {"name": "Farm", "x": 2000, "y": 2000}])
+        self.battle.phase = "battle"
+        self.bus = self.battle.event_bus
+        self.interp = interpreter.ScriptInterpreter(self.battle, self.bus, None)
+        self.state = self.bus.unit_states["A"]
+
+    def charge(self, target_id):
+        self.a.attack_target = self.a.charge_started_target = target_id
+        self.state.current_target = (target_id, 0)
+
+    def test_a_charge_touching_a_building_raises_the_contact_event_and_does_not_push(self):
+        self.charge("building:0")
+        self.a.collision_recheck = True
+        before = (self.a.x, self.a.y)
+        self.battle._correct_buildings(self.a)
+        self.assertEqual((self.codes("A"), self.state.contact_record), ([(0x0B, None)], "building:0"))
+        self.assertEqual((self.a.x, self.a.y), before)
+
+    def test_without_the_re_check_state_the_pass_does_not_run(self):
+        self.charge("building:0")
+        self.a.collision_recheck = False
+        self.battle._correct_buildings(self.a)
+        self.assertEqual(self.codes("A"), [])
+
+    def test_a_walking_unit_is_pushed_clear_and_gets_no_contact(self):
+        self.a.collision_recheck = True
+        self.battle._correct_buildings(self.a)
+        self.assertEqual(self.codes("A"), [])
+        self.assertIsNone(self.battle.buildings[0].penetration(*self.battle.formation_centre(self.a),
+                                                               self.a.bounding_radius() - 1))
+
+    def test_contact_with_the_target_building_starts_the_assault_without_a_charge_counter(self):
+        self.charge("building:0")
+        self.state.contact_record = "building:0"
+        self.interp.op_Query(self.state, 8, [word("Query"), 8], "A", 0, self.battle.rng)
+        self.assertEqual((self.a.assaulting_building, self.a.attack_target, self.state.contact_latch),
+                         ("building:0", None, True))
+        self.assertEqual(self.codes("A"), [(0x0A, None)])
+        self.assertEqual(self.battle.engage_requests, [])
+
+    def test_contact_with_another_building_ends_the_charge_and_keeps_the_latch(self):
+        self.charge("E")
+        self.state.contact_record = "building:0"
+        self.interp.op_Query(self.state, 8, [word("Query"), 8], "A", 0, self.battle.rng)
+        self.assertIsNone(self.a.attack_target)
+        self.assertIsNone(self.a.assaulting_building)
+        self.assertTrue(self.state.contact_latch)
+        self.assertIn((0x09, "A"), self.codes("E"))
+
+    def test_a_latched_unit_stepping_into_a_building_is_rolled_back(self):
+        self.state.contact_latch = True
+        self.a.y = 1000
+        snapshot = self.battle._latch_snapshot(self.a, self.state)
+        self.a.y = 1010  # the step overlaps the shack
+        self.assertTrue(self.battle._overlaps_anything(self.a))
+        self.assertFalse(self.battle._resolve_latched_step(self.a, self.state, snapshot))
+        self.assertEqual(self.a.y, 1000)
+
+
 class WorkedExampleTests(ContactTestCase):
     """notes/script_behaviours.md 2.8: two hostile regiments marching into each other, tick by tick. Events are
     handled last in, first out; the standard handlers are reduced to what the example names (0x0B runs the contact
