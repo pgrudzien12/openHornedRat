@@ -530,8 +530,8 @@ def resolve_contacts(battle: "Battle") -> None:
                 touching[second.identifier].add(first.identifier)
     pending_counter: dict[str, int] = {}
     if battle.interpreter is not None:
+        battle.interpreter.raise_wagon_collisions(active)  # before the pass clears the re-check states
         battle.interpreter.raise_contacts(contacts)
-        battle.interpreter.raise_wagon_collisions(active)
         for joiner_id, owner_id, counter in battle.engage_requests:
             if joiner_id in by_id and owner_id in by_id:
                 touching[joiner_id].add(owner_id)

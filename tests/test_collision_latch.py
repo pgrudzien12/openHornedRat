@@ -101,8 +101,7 @@ class WagonCollisionEventTests(unittest.TestCase):
         other = unit("O", 500, other_y, facing=256, side=other_side)
         battle = Battle(2000, 2000, [wagon, other], seed=1995)
         battle.interpreter = battle.interpreter or interpreter.ScriptInterpreter(battle, battle.event_bus, None)
-        if wagon_moving:
-            wagon.target_x, wagon.target_y = 500, 900
+        wagon.collision_recheck = wagon_moving
         return battle, wagon
 
     def raise_once(self, battle):
@@ -146,6 +145,44 @@ class WagonCollisionEventTests(unittest.TestCase):
         battle.phase = "deployment"
         self.raise_once(battle)
         self.assertEqual(codes(battle, "W"), [])
+
+
+class CollisionRecheckStateTests(unittest.TestCase):
+    """The collision pass runs only for units whose re-check state is on (notes/script_behaviours.md 2.1, 2.6)."""
+
+    def make(self):
+        a = unit("A", 500, 500, facing=0)
+        b = unit("B", 1200, 1200, facing=0, side=Side.ENEMY)
+        battle = Battle(2000, 2000, [a, b], seed=1995)
+        battle.interpreter = battle.interpreter or interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        return battle, a, b
+
+    def test_two_enemies_that_overlap_but_never_move_do_not_engage_or_get_events(self):
+        a = unit("A", 500, 500, facing=0)
+        b = unit("B", 500, 506, facing=256, side=Side.ENEMY)
+        battle = Battle(2000, 2000, [a, b], seed=1995)
+        battle.interpreter = battle.interpreter or interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        for _ in range(3):
+            battle.tick()
+        self.assertEqual((codes(battle, "A"), codes(battle, "B")), ([], []))
+
+    def test_a_mover_touching_a_stationary_enemy_raises_both_contacts(self):
+        a = unit("A", 500, 500, facing=0)
+        b = unit("B", 500, 506, facing=256, side=Side.ENEMY)
+        battle = Battle(2000, 2000, [a, b], seed=1995)
+        battle.interpreter = battle.interpreter or interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        a.target_x, a.target_y = 500, 900
+        for _ in range(60):
+            battle.tick()
+            if codes(battle, "A"):
+                break
+        self.assertIn(0x0B, codes(battle, "A"))
+        self.assertIn(0x0B, codes(battle, "B"))
+
+    def test_rally_switches_it_on(self):
+        battle, a, b = self.make()
+        battle.interpreter.op_Rally(battle.event_bus.unit_states["A"], None, [], "A", 0, None)
+        self.assertTrue(a.collision_recheck)
 
 
 if __name__ == "__main__":
