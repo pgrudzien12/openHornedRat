@@ -56,7 +56,7 @@ class SquigLandingTests(unittest.TestCase):
                 self.assertEqual(bool(state.cond_flags), expected)
         self.assertEqual(battle.event_bus.unit_states["H"].hop_counter, 255)  # 0 wrapped to 255
 
-    def test_given_a_failed_wound_roll_or_a_saved_wound_then_the_landing_is_a_miss(self):
+    def test_given_a_failed_wound_roll_then_the_landing_is_a_miss(self):
         battle, interp = battle_of(self.hopper, self.victim)
         with mock.patch.object(combat, "_d6", return_value=1):
             state = self.release(battle, interp, 1)
@@ -181,6 +181,14 @@ class ThreatInReachTests(unittest.TestCase):
         texts = [str(event) for event in self.battle.events if event.kind == "contact_attack"]
         self.assertTrue(texts)
         self.assertTrue(all("fleeing" not in text for text in texts))
+
+    def test_given_a_routing_victim_then_the_battle_log_keeps_the_fleeing_wording(self):
+        self.peasant.routing = True
+        with mock.patch.object(combat, "_d6", return_value=6):
+            combat.contact_attack(self.battle, self.charger, self.peasant)
+        texts = [str(event) for event in self.battle.events if event.kind == "contact_attack"]
+        self.assertTrue(texts)
+        self.assertTrue(all("fleeing" in text for text in texts))
 
     def test_given_spent_contact_attacks_then_the_segment_pass_skips_that_attacker(self):
         routing = regiment("R", 1000, 1010, Side.PLAYER)
