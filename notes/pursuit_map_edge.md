@@ -25,8 +25,9 @@ speed": the pursuit step). Everything else below happens **only on the segment-b
 break tests and melee resolve, once every 19 ticks:
 
 1. **Restraint test.** If this is the pursuer's scheduled segment and its rally-attempt state is on (player Rally
-   order 0x14, or the Independent toggle), it is rescheduled 3 segments later and, unless it has `AlwaysPursue`,
-   rolls the pursuit-restraint test. A pass sends event 0x10 to itself. (`game_rules.md` "Pursuit", "Rally".)
+   order 0x14 only), it is rescheduled 3 segments later and, unless it has `AlwaysPursue`,
+   rolls the pursuit-restraint test. A pass sends event 0x10 to itself. Full specification:
+   `pursuit_restraint.md`.
 2. **Target check.** If it has no target, or the target is no longer a live broken (routing) unit (dead,
    removed, left the table or rallied), it sends event 0x10 to itself and stops here.
 3. **Re-aim.** It sets its route to the fugitive's footprint and steers there with the ordinary live steering of
@@ -90,9 +91,8 @@ further in. This is harmless:
   (`game_rules.md` "Player orders and the command panel").
   - **Rally (0x14)** toggles the rally-attempt state. The restraint test then runs at the pursuer's scheduled
     segments; a pass stops the pursuit.
-  - **Independent (0x1A)**, per `game_rules.md` "Player orders", also lets the regiment test pursuit restraint
-    without the Rally order. 🟡 The pursuit update itself only looks at the rally-attempt state, so the
-    Independent toggle must work by setting that state elsewhere; this was not traced.
+  - **Independent (0x1A)** does **not** make a pursuer test restraint: it switches the rally-attempt state on only
+    when the regiment routs, and pursuit start resets that state (`pursuit_restraint.md`).
   - **Halt (0x19)** has **no effect** on a pursuing (or broken) regiment apart from the "Hold!" shout. The halt
     and re-form is refused for those states, so the pursuit continues.
 - **After the pursuit**, the regiment is an ordinary halted regiment and accepts every order.

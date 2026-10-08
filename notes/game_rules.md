@@ -1209,7 +1209,8 @@ pursuing.
 - **Fight harder** (bit 30): +1 S on all close combat attacks and return blows, and −1 on every Leadership test
   modifier (break, panic, fear, rally, flank/rear), i.e. **+1 Ld**. `BattleTick` clears it at every segment boundary
   after the unit's step, so one click covers one segment; no cost or limit; never set by AI or scripts.
-- **Independent** (bit 27, 🟡 name): the unit rallies and tests pursuit restraint without the Rally order, reacts to
+- **Independent** (bit 27, 🟡 name): the unit makes flight rally attempts without the Rally order (the attempts are
+  switched on when it routs; it does **not** make a pursuer test pursuit restraint, `notes/pursuit_restraint.md`), reacts to
   any enemy within its threat distance (not only one engaging it), keeps choosing new targets when shooting or
   casting, and checks for friends on the line of fire. Off at the start; AI units never have it.
 - **Braced** flag `0x100000` ✅: set by `AIQuery` case 7 (library script 161, after event 0x07 and a passed fear test):
