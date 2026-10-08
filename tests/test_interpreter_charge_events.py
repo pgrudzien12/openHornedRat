@@ -143,11 +143,14 @@ class RaiseChargeEventsTests(unittest.TestCase):
         ], seed=1995, script_dll=object())  # truthy script_dll: constructs a real interpreter
         battle.regiments["attacker"].attack_target = "target"
 
-        battle.tick()
-
         target_state = battle.event_bus.unit_states["target"]
+        battle.tick()
+        self.assertEqual([event.code for event in target_state.event_queue], [0x07])
         # The blocks overlap, so the contact pass also sends the reciprocal contact event 0x0B
-        # (notes/script_behaviours.md 2.2); the charge event is raised once.
+        # (notes/script_behaviours.md 2.2) once the attacker's own position step switches its collision re-check
+        # state on: the throttle allows that on every 4th update of the unit (notes/fanatic_collisions.md 5).
+        for _ in range(3):
+            battle.tick()
         self.assertEqual(sorted(event.code for event in target_state.event_queue), [0x07, 0x0B])
 
     def test_far_away_attack_target_does_not_yet_raise_the_event(self):

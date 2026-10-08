@@ -20,7 +20,7 @@ import random
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from . import animation, behaviour, buildings, combat, formation, magic, nodes, spell_effects, visibility
+from . import animation, behaviour, buildings, combat, magic, nodes, spell_effects, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import Side, side_of_code
@@ -430,16 +430,32 @@ class ScriptInterpreter:
                 state.contact_latch = False
 
     def raise_wagon_collisions(self, regiments: list["Regiment"]) -> None:
-        """Event 0x27 (notes/script_behaviours.md 2.2): a wagon that moved this tick and overlaps a footprint of any
-        kind (any side, any unit type) within +-45 degrees of its facing is sent 0x27 (checked, no source), once per
-        tick. Units leaving the battle are not touched. Not modelled: building footprints, which are not units."""
+        """Event 0x27 (notes/fanatic_collisions.md 4): raised inside the wagon's own collision pass, so only while
+        its re-check state is on. For every other active footprint whose circle overlaps the wagon's (no corner
+        test) and whose centre lies strictly within 45 degrees of the wagon's facing, the wagon is sent 0x27
+        (checked, no source), once per such footprint: regiments, standing buildings and active placed objects
+        (scenery). Units leaving the battle are not touched."""
         for wagon in regiments:
             if not wagon.is_wagon or self._leaving(wagon) or not wagon.collision_recheck:
                 continue
-            if any(other is not wagon and not other.hidden and not self._leaving(other)
-                   and formation.penetrates(wagon.block(), other.block()) and self._in_arc(wagon, other)
-                   for other in regiments):
-                self.event_bus.queue_event(wagon.identifier, Event(code=0x27), checked=True)
+            footprints: list[tuple[float, float, float]] = [
+                (other.x, other.y, other.bounding_radius()) for other in regiments
+                if other is not wagon and not other.hidden and not self._leaving(other)]
+            footprints.extend((b.x, b.y, b.radius) for b in self.battle.buildings if not b.destroyed)
+            footprints.extend(
+                (float(obj.get("x") or 0), float(obj.get("y") or 0), float(obj.get("radius") or 0))
+                for obj in self.battle.objects
+                if "os_active" in {str(flag).casefold() for flag in obj.get("status") or ()})
+            for x, y, radius in footprints:
+                if math.hypot(wagon.x - x, wagon.y - y) < wagon.bounding_radius() + radius and self._point_in_arc(wagon, x, y):
+                    self.event_bus.queue_event(wagon.identifier, Event(code=0x27), checked=True)
+
+    @staticmethod
+    def _point_in_arc(unit: "Regiment", x: float, y: float) -> bool:
+        """The circular difference between the unit's facing and the bearing to (x, y) is strictly below 64/512."""
+        bearing = int(256 - 256 * math.atan2(x - unit.x, -(y - unit.y)) / math.pi) % 512
+        difference = abs(int(unit.direction) - bearing) % 512
+        return min(difference, 512 - difference) < 64
 
     def _contact_fear(self, mover: "Regiment", other: "Regiment") -> None:
         state = self.event_bus.unit_states.get(mover.identifier)
@@ -4237,6 +4253,7 @@ class ScriptInterpreter:
             state.cond_flags = False
             return state.pc + 5
         copy = self._copy_unit(template)
+        copy.update_counter = len(self.battle.regiments)  # its slot: the collision throttle phase
         self.battle.regiments[copy.identifier] = copy
         self.event_bus.unit_states[copy.identifier] = UnitScriptState(
             script_id=script, script_dll=state.script_dll, parent_id=unit_id)
