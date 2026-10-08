@@ -1018,12 +1018,10 @@ class Battle:
         A unit in melee or braced is 0: engagement and bracing end its movement and its charge, and the attack
         target it keeps does not count (notes/convoy_jam_and_melee_obstacles.md B.1). So a friendly unit fighting
         in melee is an ordinary obstacle that a mover detours round, never a reason for the 54-update pause. A broken
-        unit flees at flight speed even if it was still braced when it broke."""
-        if regiment.route_pause_ticks > 0:
-            return 0.0
+        unit flees at flight speed even if it was still braced, or in a route pause, when it broke."""
         if regiment.routing:
             return regiment.speed_for_mode(FLEEING_K)
-        if regiment.in_melee or regiment.braced:
+        if regiment.route_pause_ticks > 0 or regiment.in_melee or regiment.braced:
             return 0.0
         if regiment.attack_target is not None or regiment.free_charging and regiment.moving:
             return regiment.speed_for_mode(CHARGING_K)
