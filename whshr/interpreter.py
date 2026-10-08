@@ -4093,17 +4093,13 @@ class ScriptInterpreter:
                                     and magic.in_range(self._distance(unit, target), state.pending_spell, rng)))
         return state.pc + 1
 
-    def op_IfEventSource(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
-            rng: random.Random) -> int | None:
-        """IfEventSource: test if current event came from a specific source.
-
-        Known limitation: the operand is a numeric source id from the bytecode, but
-        Event.source in this engine holds a regiment identifier string (see the fix in
-        SendEventSelf/etc.) -- there is no numeric-id-to-regiment mapping in this engine, so this
-        comparison never matches today. Left as a documented gap rather than a guessed mapping.
-        """
-        state.cond_flags = 0
-        return state.pc + 1
+    def op_IfEventSource(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """IfEventSource N (2 words): condition := the current event's source index equals the signed operand. A
+        shot event posted by a model carries that model's index; one with no model carries -1 (notes/script_shooting.md
+        1.3 and 5, library 111/112: "the event came from a model"). Events posted by other means carry -1 too."""
+        state.cond_flags = operand is not None and state.current_event.model == _signed_word(operand)
+        return state.pc + 2
 
     def op_IfGameMode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
