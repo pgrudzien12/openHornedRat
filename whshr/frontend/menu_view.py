@@ -88,9 +88,12 @@ class MainMenuView(NativeScreenView[MainMenuScene]):
                 return (action,)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.pressed = self._button_at(event.pos)
+            if self.pressed is not None:
+                self._click_cue(self.hotspots[self.pressed].downsfx or 0)
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             index, self.pressed = self.pressed, None
             if index is not None and index == self._button_at(event.pos):
+                self._click_cue(self.hotspots[index].upsfx or 0)
                 action = self.TARGET_ACTIONS.get((self.hotspots[index].target or "").lower())
                 return (action,) if action else ()
         return ()

@@ -353,6 +353,7 @@ class TroopSelectionView(NativeScreenView[TroopSelectionScene]):
                 return (f"scroll:{direction}",)
             self.pressed_button = next((action for rect, action in self.buttons if rect.collidepoint(point)), None)
             if self.pressed_button is not None:
+                self._click_cue(4)
                 self.refresh()
                 return ()
             if self.scene.phase == "march_order" and not pygame.key.get_mods() & pygame.KMOD_CTRL:
@@ -373,6 +374,7 @@ class TroopSelectionView(NativeScreenView[TroopSelectionScene]):
         if pressed_button is not None:
             self.refresh()
             if any(rect.collidepoint(point) and action == pressed_button for rect, action in self.buttons):
+                self._click_cue(3)
                 return (pressed_button,)
             return ()
         for rect, action in self.buttons:

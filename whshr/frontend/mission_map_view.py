@@ -160,6 +160,8 @@ class MissionMapView(NativeScreenView[MissionMapScene]):
             self.hovered = self._button_at(event.pos)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.pressed = self._button_at(event.pos)
+            if self.pressed is not None and self._button_enabled(self.pressed):
+                self._click_cue(4)
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             index = self._mission_at(event.pos)
             if index is not None:
@@ -167,6 +169,7 @@ class MissionMapView(NativeScreenView[MissionMapScene]):
             pressed, self.pressed = self.pressed, None
             button = self._button_at(event.pos)
             if pressed == button and button is not None and self._button_enabled(button):
+                self._click_cue(3)
                 return (self.panel.actions[self.button_slots[button]],)
         return ()
 

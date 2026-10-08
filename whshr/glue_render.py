@@ -62,6 +62,8 @@ class RenderHotspot:
     click_count: int = 0  # number of consecutive speech lines (``clickrescnt`` + 1)
     alt_cursor: str | None = None  # cursor shown while the hotspot is pressed (``altcursor``, notes/glue_keywords.md §3.5)
     speech_variant: str | None = None  # the ``res:`` name when it routes to click speech (notes/native-windows.md §14.3.1)
+    downsfx: int | None = None
+    upsfx: int | None = None
 
 
 @dataclass(frozen=True)
@@ -197,7 +199,8 @@ def build_render_model(content: GlueContent, window: WindowInstance,
                                           _integer(values.get("vx")), _integer(values.get("vy")), hint,
                                           target, values.get("cursor") or None, up_bitmap, down_bitmap,
                                           click_text, click_count, values.get("altcursor") or None,
-                                          speech_variant))
+                                          speech_variant, _integer(values["downsfx"]) if "downsfx" in values else None,
+                                          _integer(values["upsfx"]) if "upsfx" in values else None))
         elif isinstance(record, AnimRecord):
             animations.append(RenderAnimation(values.get("name") or None, _integer(values.get("x")),
                                               _integer(values.get("y")),
