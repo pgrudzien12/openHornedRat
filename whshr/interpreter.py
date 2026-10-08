@@ -2708,7 +2708,8 @@ class ScriptInterpreter:
         speech cue. Nothing without text. An enemy-army unit's reaction is dropped when marked "not for enemy
         units", else shown only when marked "also off screen" or the unit is on screen. Shown = the message
         (loaded from the installation's GMTXT by id), the leader portrait expression and the speech cue,
-        non-positional. PROVISIONAL: "on screen" is read as "visible to the player and not hidden"."""
+        non-positional. "On screen" is Battle.on_screen (notes/react_portrait.md 5); the portrait pop-up is offered
+        to Battle.portrait_popup and skipped while one is already up (notes/react_portrait.md 3)."""
         self.react(unit_id, operand or 0)
         return state.pc + 2
 
@@ -2719,13 +2720,14 @@ class ScriptInterpreter:
         if unit is None or entry is None:
             return
         text_id, packet, effect, marker = entry
-        if unit.side == Side.ENEMY and (marker == "P" or (marker != "E" and (unit.hidden or not unit.visible_to_player))):
+        if unit.side == Side.ENEMY and (marker == "P" or (marker != "E" and not self.battle.on_screen(unit))):
             return
         resources: dict[int, str] = getattr(self.battle, "text_resources", {}) or {}
         message = resources.get(text_id, f"GMTXT {text_id}")
         self.battle.events.append(BattleEvent(
             f"{unit.name}: {message}", "react", regiment=unit_id, code=code, sender=unit.name, message=message,
             text_id=text_id, expression=_REACT_EXPRESSIONS[code % len(_REACT_EXPRESSIONS)]))
+        self.battle.portrait_popup.offer(unit_id, _REACT_EXPRESSIONS[code % len(_REACT_EXPRESSIONS)])
         if packet:
             self._sound(unit_id, "play", packet, effect, positional=False)
 

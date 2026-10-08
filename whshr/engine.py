@@ -11,6 +11,7 @@ from . import magic, objectives as objective_table, spell_effects, steering
 from . import nodes as node_table
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
+from .portrait_popup import PortraitPopup
 from .rules import (EXPECTED_ARMOUR_SAVE, EXPECTED_WEAPON_BONUS, MISSILE_RANGES, MOUNT_PROFILES, Side, can_fight, may_engage, side_of_code,
                     stat_fields, stat_int)
 from .script import StrPath, View, load_battle, resource_name
@@ -153,6 +154,7 @@ class Regiment:
     walking: bool = False  # true while the anchor or any model is still travelling
     independent: bool = False
     hidden: bool = False
+    screen_mark: bool = False  # inside the camera's view rectangle at the end of the last tick (Battle.on_screen)
     airborne: bool = False
     waypoints: list[Point] = field(default_factory=list[Point])
     route_follows_unit: bool = False
@@ -678,6 +680,10 @@ class Battle:
             for item in scenery]
         # Camera rotation in 1/512 turns, set by the frontend; wagons snap to it (see set_view_angle).
         self.view_angle: float | None = None
+        # Map-aligned (min x, min y, max x, max y) around what the camera shows, set by the frontend
+        # (notes/react_portrait.md section 5); None = no camera (headless), then "on screen" = visible to the player.
+        self.view_rect: tuple[float, float, float, float] | None = None
+        self.portrait_popup = PortraitPopup()  # leader portrait shown for reactions (notes/react_portrait.md 3)
         self._snapped_view_angle: float | None = None
         self.rng = random.Random(seed)
         self.script_logger = script_logger
@@ -848,6 +854,28 @@ class Battle:
             self.end_deployment_drag()
             self.phase = "battle"
             self.refresh_visibility()
+
+    def set_view_rect(self, rect: tuple[float, float, float, float] | None) -> None:
+        """Frontend hook: the ground rectangle (with margin) the camera currently shows, in world units."""
+        self.view_rect = rect
+
+    def on_screen(self, regiment: Regiment) -> bool:
+        """Whether a regiment counts as "currently drawn" for enemy reactions (notes/react_portrait.md section 5):
+        its front-rank position was inside the view rectangle at the end of the last tick, and it is not a hidden
+        enemy. Without a camera (headless battles) this falls back to `visible_to_player`."""
+        if self.view_rect is None:
+            return regiment.visible_to_player
+        return regiment.screen_mark and not (regiment.side == Side.ENEMY and regiment.hidden)
+
+    def refresh_screen_marks(self) -> None:
+        """End-of-tick refresh of every regiment's drawn mark; scripts read the previous tick's value."""
+        rect = self.view_rect
+        for regiment in self.regiments.values():
+            if rect is None or not regiment.active:
+                regiment.screen_mark = False
+                continue
+            x, y = self.route_reference_point(regiment)
+            regiment.screen_mark = rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]
 
     def refresh_visibility(self) -> None:
         """Reveal individually hidden regiments permanently when another army spots them."""
@@ -1593,6 +1621,7 @@ class Battle:
         self.update_count += 1
         if self.paused:
             return
+        self.portrait_popup.tick()
         if self.result is not None:
             # Remaining missiles and death poses continue after the victory condition is met.
             for regiment in self.regiments.values():
@@ -1649,6 +1678,7 @@ class Battle:
         spell_effects.tick(self)  # after units and ordinary missiles (notes/spell_effects.md 1.7)
         if self.objectives is None:
             self._update_result()
+        self.refresh_screen_marks()
         self.tick_count += 1
 
     def _advance_regiments(self, scale: float, seconds: float) -> None:

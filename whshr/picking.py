@@ -82,3 +82,20 @@ def pick_ground(projection: "Projection", pixel_x: float, pixel_y: float, height
     """Ground point (mesh-space x, z) under a screen pixel, or None if the ray never meets the field."""
     origin, direction = screen_ray(projection, pixel_x, pixel_y)
     return intersect_ground(origin, direction, height_at, max_distance, step)
+
+
+VIEW_MARGIN = 10.0  # mesh units added on every side of the view rectangle (notes/react_portrait.md section 5)
+
+
+def view_rect(projection: "Projection", width: int, height: int, camera_ground: tuple[float, float],
+              height_at: HeightAt, margin: float = VIEW_MARGIN) -> tuple[float, float, float, float]:
+    """Map-aligned (min x, min z, max x, max z) box around the camera's ground position and the ground under the
+    far (top) screen corners, enlarged by `margin` (notes/react_portrait.md section 5). A corner whose ray never
+    meets the ground is skipped. Mesh-space in and out."""
+    xs, zs = [camera_ground[0]], [camera_ground[1]]
+    for pixel_x in (0.0, float(width)):
+        ground = pick_ground(projection, pixel_x, 0.0, height_at)
+        if ground is not None:
+            xs.append(ground[0])
+            zs.append(ground[1])
+    return min(xs) - margin, min(zs) - margin, max(xs) + margin, max(zs) + margin
