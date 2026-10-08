@@ -687,6 +687,20 @@ class GlueRuntime:
         self._request("caravan", effects, restore_context=True, mode=mode)
         return tuple(effects)
 
+    def close_caravan_overlay(self) -> tuple[GlueEffect, ...]:
+        """PopContext / PopContextCheckResume (notes/activity_results.md section 6): close the caravan opened over a
+        running screen and restore what was under it, releasing nothing. The parked script is resumed only when the
+        game is not paused and the restored frame is not parked (a script parked in ``waitforrelease`` or
+        ``waitforresume`` stays parked)."""
+        pending = self.state.pending
+        if pending is None or pending.kind != "caravan" or not pending.restore_context:
+            return ()
+        self.state.pending = None
+        self.pop_context()
+        if self.state.paused or self.state.current is None or self.state.current.parked:
+            return ()
+        return self.step_until_blocked()
+
     def snapshot(self) -> GlueRuntimeState:
         return deepcopy(self.state)
 

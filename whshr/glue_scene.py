@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from .campaign_log import GlueWatcher
+from .campaign_state import caravan_window
 from .glue import MissionRef
 from .glue_runtime import (ActivityResult, Autosave, Diagnostic, EnterCaravan, GlueEffect, GlueInput, GlueRuntime, GlueRuntimeState,
                            MissionSelectRequested, StartBattle, StartDebrief, StartMovie)
@@ -273,6 +274,10 @@ class GlueScene(Scene):
             elif event.kind == "panel-action" and event.target in ("abort_briefing", "return_to_caravan") and self.return_scene:
                 self._queue(self.runtime.handle(GlueInput("panel-action", "abort_briefing")))
                 return Transition(self.return_scene, "generic briefing dismissed")
+            elif event.kind == "panel-action" and event.target == "return_to_caravan" and self._open_caravan_over("selectmission"):
+                return None  # the map's Caravan button (panel 2): CaravanSelectMission, closed by PopContext
+            elif event.kind == "panel-action" and event.target == "open_caravan_continue" and self._open_caravan_over("continuemission"):
+                return None  # panel 9's Caravan button: CaravanContinueMission, closed by PopContextCheckResume
             elif (event.kind == "panel-action" and event.target == "return_to_caravan"
                   and self._reopen_caravan() and self.caravan_return is not None):
                 scene = self.caravan_return[0]
@@ -290,6 +295,26 @@ class GlueScene(Scene):
         elif isinstance(event, ActivityResult):
             self._queue(self.runtime.resume(event))
         return None
+
+    def _open_caravan_over(self, mode: str) -> bool:
+        """Open the caravan a panel button names over the running screen (notes/mission_selection.md 4.2): the
+        speech is cut off unless the game is paused, the screen is pushed and the caravan's window opens on top.
+        False (nothing done) when a request is already pending or the installation lacks the window."""
+        runtime = self.require_runtime()
+        window = caravan_window(mode)
+        if window is None or runtime.state.pending is not None:
+            return False
+        try:
+            runtime.content.window(window)
+        except (KeyError, TypeError):
+            return False
+        effects = runtime.open_caravan(mode)
+        if runtime.state.pending is None:
+            return False
+        if not runtime.state.paused:
+            self._queue(runtime.stop_speech())
+        self._queue(effects)
+        return True
 
     def _reopen_caravan(self) -> bool:
         """The map's Caravan button pops back to the caravan that led here (notes/activity_results.md
@@ -330,6 +355,11 @@ class GlueScene(Scene):
             return self._open_save_dialog()
         if name == "abortgame":
             return self._confirm_abort_game()
+        if name in ("popcontext", "popcontextcheckresume"):
+            # Back to the screen the caravan was opened over; nothing is released (notes/activity_results.md section 6).
+            self._queue(self.require_runtime().stop_speech())
+            self._queue(self.require_runtime().close_caravan_overlay())
+            return None
         if name not in ("unwindmission", "popandresume"):
             self._queue((Diagnostic("caravan", f"hotspot {target!r} is not yet implemented"),))
             return None
