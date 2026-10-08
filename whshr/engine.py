@@ -4,9 +4,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import math
 import random
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, cast
 
-from . import animation, battle_grid, behaviour, buildings, combat, deployment, formation, interpreter, navigation, ranged, visibility
+from . import animation, battle_grid, behaviour, buildings, combat, deployment, formation, interpreter, navigation, npc_merge, ranged, visibility
 from . import magic, objectives as objective_table, spell_effects, steering
 from . import nodes as node_table
 from .battle_events import BattleEvent
@@ -656,6 +656,9 @@ class Battle:
             raise ValueError("battle dimensions must be positive")
         self.width = width
         self.height = height
+        # Allied NPC regiments (identifier -> whoami) the campaign gets back after the battle: only in battles that
+        # define objective G or I (notes/allied_npc_merge.md section 5). Filled by `from_script`.
+        self.npc_regiments: dict[str, int] = {}
         self.regiments: dict[str, Regiment] = {regiment.identifier: regiment for regiment in regiments}
         self._recheck_carry: set[str] = set()  # re-check states set by the push-apart pass (see _carry_recheck)
         if len(self.regiments) != len(regiments):
@@ -764,8 +767,12 @@ class Battle:
 
     @classmethod
     def from_script(cls, source: View, seed: int = DEFAULT_SEED, script_dll: behaviour.ScriptDll | None = None,
-                    script_logger: BattleLogger | None = None) -> "Battle":
+                    script_logger: BattleLogger | None = None,
+                    company: Mapping[int, View] | None = None) -> "Battle":
         """Build the battle from a loaded BTS/MRC script; repeated unit ids get ``#2``, ``#3``... suffixes.
+
+        ``company`` (script unit views by whoami, the campaign's `ARMY.MRC`) feeds objective G's army merge of allied
+        NPC regiments; objective I's artillery swap needs no company (notes/allied_npc_merge.md).
 
         ``script_dll``, when given, is threaded through to `Battle.__init__` (issue #3/#46) so its
         interpreter drives every regiment; without it, no regiment gets automatic orders. Each unit's own
@@ -802,15 +809,34 @@ class Battle:
                                   if {"ns_active", "ns_startpos"}.issubset(
                                       str(flag).casefold() for flag in node.get("status") or ())]
         reserved_slots: set[int] = set()
+        objectives = cast("Sequence[Sequence[Any]] | None", cast("View", source.get("mission") or {}).get("objectives"))
+        army_merge = bool(npc_merge.objective_value(objectives, "G"))
+        artillery_swap = bool(npc_merge.objective_value(objectives, "I"))
+        marching = {int(unit["set"].get("whoami") or 0) & 0xFF for army in merc.get("armies", [])
+                    for unit in army["units"]}
+        swapped: list[str] = []
+        written_npcs: dict[str, int] = {}
+        npc_write_back = npc_merge.objective_value(objectives, "G") is not None \
+            or npc_merge.objective_value(objectives, "I") is not None
         for army, forced_side in armies:
             declared_count = int(army.get("count", len(army["units"])))
             skip_slots = len(start_nodes) - declared_count
             for unit in army["units"]:
+                if forced_side is None and army_merge and npc_merge.npc_regiment(unit) is not None:
+                    merged = npc_merge.merge_npc(unit, marching, company or {})
+                    if merged is None:
+                        continue
+                    unit = merged
                 position = unit["set"]
                 identifier, suffix = unit["id"], 2
                 while identifier in used:
                     identifier, suffix = f"{unit['id']}#{suffix}", suffix + 1
                 used.add(identifier)
+                if forced_side is None and npc_merge.npc_regiment(unit) is not None:
+                    if artillery_swap:
+                        swapped.append(identifier)
+                    if npc_write_back:
+                        written_npcs[identifier] = int(npc_merge.npc_regiment(unit) or 0)
                 models, ranks = formation.unit_size(unit)
                 leader: View = unit.get("leader") or {}
                 if forced_side is not None:
@@ -849,12 +875,27 @@ class Battle:
                     script_ids[identifier] = behaviour.PLAYER_SCRIPT
                 elif isinstance(script_value, (int, float)):
                     script_ids[identifier] = int(script_value)
+        for identifier in swapped:
+            # Objective I (notes/allied_npc_merge.md 3.2): the NPC takes the deployment spot of the player's own
+            # regiment with the same whoami, which is removed; an NPC without one is deleted.
+            npc = next((r for r in regiments if r.identifier == identifier), None)
+            if npc is None:
+                continue
+            partner = next((r for r in regiments if r.side == Side.PLAYER and r.whoami == npc.whoami), None)
+            if partner is None:
+                regiments.remove(npc)
+                continue
+            npc.x, npc.y, npc.direction = partner.x, partner.y, partner.direction
+            regiments.remove(partner)
+            script_ids.pop(partner.identifier, None)
         mission: View = source.get("mission") or {}
         battle = cls(field_data["width"], field_data["height"], regiments, seed=seed,
                    script_dll=script_dll, script_ids=script_ids, script_logger=script_logger, nodes=nodes,
                    script_nodes=script_nodes,
                    deploy=bool(mission.get("deploy_troops")), boundaries=source.get("boundaries") or (),
                    objects=source.get("objects") or (), scenery=source.get("scenery") or ())
+        battle.npc_regiments = {identifier: whoami for identifier, whoami in written_npcs.items()
+                                if identifier in battle.regiments}
         battle.objective_letters = frozenset(str(entry[0]).upper() for entry in mission.get("objectives") or ()
                                              if entry)
         # Battle load, before deployment: every letter takes its counts (notes/battle_end_objectives.md 3.1). Every
