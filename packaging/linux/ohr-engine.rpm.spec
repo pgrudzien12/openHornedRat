@@ -31,6 +31,8 @@ install -m 644 "%{repository_root}/LEGAL.md" "%{buildroot}%{_datadir}/doc/ohr-en
 install -m 644 "%{repository_root}/packaging/THIRD_PARTY_NOTICES.md" "%{buildroot}%{_datadir}/doc/ohr-engine/THIRD_PARTY_NOTICES.md"
 install -m 644 "%{repository_root}/packaging/licenses/LGPL-2.1.txt" "%{buildroot}%{_datadir}/doc/ohr-engine/LGPL-2.1.txt"
 install -m 644 "%{repository_root}/packaging/licenses/Apache-2.0.txt" "%{buildroot}%{_datadir}/doc/ohr-engine/Apache-2.0.txt"
+install -d "%{buildroot}%{_datadir}/doc/ohr-engine/third-party-licenses"
+install -m 644 "%{repository_root}"/packaging/licenses/third-party/* "%{buildroot}%{_datadir}/doc/ohr-engine/third-party-licenses/"
 
 %files
 /opt/ohr-engine
@@ -43,3 +45,4 @@ install -m 644 "%{repository_root}/packaging/licenses/Apache-2.0.txt" "%{buildro
 %{_datadir}/doc/ohr-engine/THIRD_PARTY_NOTICES.md
 %{_datadir}/doc/ohr-engine/LGPL-2.1.txt
 %{_datadir}/doc/ohr-engine/Apache-2.0.txt
+%{_datadir}/doc/ohr-engine/third-party-licenses

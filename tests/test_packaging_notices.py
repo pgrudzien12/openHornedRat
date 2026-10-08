@@ -28,6 +28,14 @@ def library_name(filename: str) -> str:
     return "zlib" if stem == "z" else stem
 
 
+def documented_libraries() -> set[str]:
+    """The library identifiers named (in backticks) in the notices' native-library tables."""
+    start = NOTICES.index("## Bundled native libraries")
+    section = NOTICES[start:NOTICES.index("## Python, Tcl/Tk and PyInstaller")]
+    names = re.findall(r"`([^`]+)`", section)
+    return {library_name(name) for name in names if not name.startswith("LICENSE.")}
+
+
 def bundled_libraries() -> list[str]:
     spec = importlib.util.find_spec("pygame")
     if spec is None or spec.origin is None:
@@ -46,8 +54,8 @@ class ThirdPartyNoticesTests(unittest.TestCase):
         libraries = bundled_libraries()
         if not libraries:
             self.skipTest("pygame-ce is not installed here, or its wheel bundles no native libraries")
-        lowered = NOTICES.lower()
-        missing = sorted({library_name(name) for name in libraries if library_name(name) not in lowered})
+        documented = documented_libraries()
+        missing = sorted({library_name(name) for name in libraries if library_name(name) not in documented})
         self.assertEqual(missing, [], "native libraries missing from packaging/THIRD_PARTY_NOTICES.md")
 
     def test_given_the_pinned_requirements_then_the_notices_name_the_audited_pygame_ce_version(self):
@@ -69,6 +77,24 @@ class ThirdPartyNoticesTests(unittest.TestCase):
             with self.subTest(license=name):
                 self.assertGreater((PACKAGING / "licenses" / name).stat().st_size, 5000)
         self.assertIn("Apache License", (PACKAGING / "licenses" / "Apache-2.0.txt").read_text()[:200])
+
+    def test_given_an_undocumented_library_whose_name_is_part_of_a_documented_one_then_it_is_still_missing(self):
+        documented = documented_libraries()
+        self.assertIn("webp", documented)
+        self.assertNotIn(library_name("libweb.so.1"), documented)
+        self.assertNotIn(library_name("liblicense.so"), documented)
+
+    def test_given_the_permissive_libraries_then_their_notice_texts_ship_and_every_package_installs_them(self):
+        texts = sorted((PACKAGING / "licenses" / "third-party").glob("LICENSE.*.txt"))
+        self.assertGreaterEqual(len(texts), 15)
+        for text in texts:
+            with self.subTest(text=text.name):
+                self.assertGreater(text.stat().st_size, 500)
+                self.assertIn(text.name, NOTICES)
+        for recipe in INSTALL_STEPS:
+            with self.subTest(recipe=recipe.name):
+                content = recipe.read_text(encoding="utf-8")
+                self.assertTrue("third-party" in content or (recipe.suffix == ".iss" and "recursesubdirs" in content))
 
     def test_given_portmidi_then_the_notices_say_apache_not_mit(self):
         row = next(line for line in NOTICES.splitlines() if "portmidi.dll" in line)

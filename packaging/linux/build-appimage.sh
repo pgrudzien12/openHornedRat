@@ -44,6 +44,8 @@ install -m 644 LEGAL.md "$appdir/usr/share/doc/ohr-engine/LEGAL.md"
 install -m 644 packaging/THIRD_PARTY_NOTICES.md "$appdir/usr/share/doc/ohr-engine/THIRD_PARTY_NOTICES.md"
 install -m 644 packaging/licenses/LGPL-2.1.txt "$appdir/usr/share/doc/ohr-engine/LGPL-2.1.txt"
 install -m 644 packaging/licenses/Apache-2.0.txt "$appdir/usr/share/doc/ohr-engine/Apache-2.0.txt"
+install -d "$appdir/usr/share/doc/ohr-engine/third-party-licenses"
+install -m 644 packaging/licenses/third-party/* "$appdir/usr/share/doc/ohr-engine/third-party-licenses/"
 
 ARCH=x86_64 VERSION="$version" APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGETOOL" \
     --runtime-file "$APPIMAGE_RUNTIME_FILE" "$appdir" "dist/appimage/ohr-engine-${version}-x86_64.AppImage"

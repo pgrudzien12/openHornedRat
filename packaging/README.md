@@ -102,7 +102,7 @@ permissive-licensed, apart from the LGPL 2.1 FluidSynth, mpg123, libsndfile and 
 Linux and macOS wheels) as separate shared-library files loaded dynamically at runtime rather
 than statically merged into the frozen executable, which satisfies LGPL 2.1 §6(b)'s
 shared-library exception. `THIRD_PARTY_NOTICES.md`, `licenses/LGPL-2.1.txt` and
-`licenses/Apache-2.0.txt` (PortMidi) are installed alongside the app by every package
+`licenses/Apache-2.0.txt` (PortMidi) and the permissive libraries' texts in `licenses/third-party/` are installed alongside the app by every package
 (see `installer.iss`'s `[Files]` section and the `build-*.sh` / rpm spec install steps).
 The notices list the native libraries per platform; `tests/test_packaging_notices.py` fails
 when the installed pygame-ce ships a library the notices do not name.
