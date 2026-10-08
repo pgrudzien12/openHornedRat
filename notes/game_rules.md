@@ -1309,7 +1309,9 @@ TL / TR / BR / BL / C, `–` = empty.
 | Melee, non-caster | Wiz | – | Withdraw | – | Magic | Fight harder |
 | Charging | all | none | | | | |
 
-**Selected-unit readout** (🟡 parts marked): the window has **no stat text**. It draws, in order: the battle's own
+**Portrait pop-up** (corrected October 2026, `notes/react_portrait.md`): this rectangle shows the compass by default and
+switches to a **reacting** unit's leader portrait for 25 ticks when a battle reaction is shown; it is not tied to the
+selection. The description below is how the portrait is drawn (🟡 parts marked): the window has **no stat text**. It draws, in order: the battle's own
 `portrait_bg` sprite set frame 0 at (4, 12) (no fallback: a missing portrait is simply not drawn); the unit's animated
 portrait (loaded by the unit type's portrait id) at (4, 12); and an ornamental frame of eight `ICONS` pieces (frames
 181–188 for the default look, 189–196 for enemy units, 197–204 for wizards/monsters — 🟡 which class bits pick the last

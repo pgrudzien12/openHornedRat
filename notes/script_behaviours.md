@@ -517,8 +517,8 @@ enemy units", **E** = "also for enemy units off screen"). One per-code **portrai
 **When it shows.** Nothing at all if the entry has no text. An **enemy-army** unit's reaction is suppressed if the
 entry is marked P; otherwise it is shown only if the entry is marked E **or** the enemy unit is **currently drawn on
 screen** (inside the camera view and not hidden). Player-army and allied units always show it. When shown: the text
-goes to the battle message window (as other battle messages), the unit's leader portrait takes the code's
-expression, and the speech cue (if any) plays **non-positionally, not restarted if already playing**
+goes to the battle message window (as other battle messages), the unit's leader portrait pops up with the code's
+expression (a talking animation, one pop-up at a time for 25 ticks; `react_portrait.md`), and the speech cue (if any) plays **non-positionally, not restarted if already playing**
 (`script_animation_sound.md` §4, `PlaySound`). The text and the speech are never split: no text → no speech either.
 
 Portrait expression per code (0–20): `0 2 0 1 4 2 2 1 2 2 0 2 2 2 2 3 2 1 3 1 2`.
