@@ -934,6 +934,8 @@ def resolve_contact_attacks(battle: "Battle") -> None:
     turned -- is **hit automatically**: only the to-wound roll and the armour save are made, with no
     to-hit roll (game_rules.md 5.2).
 
+    A unit that is not charging or pursuing also makes them on a broken enemy whose footprint overlaps its own.
+
     Simplifications: the reach is the infantry 12 (the engine has no unit class for the cavalry 18 and
     monster 24), and contact hits still ignore the rout pause's timed "turning" state, in which a model
     would get a to-hit roll -- every target model here is taken to be running.
@@ -943,6 +945,8 @@ def resolve_contact_attacks(battle: "Battle") -> None:
             continue
         target = battle.regiments.get(attacker.attack_target) if attacker.attack_target else None
         if target is None or not target.active or not target.routing:
+            target = _router_underfoot(battle, attacker)
+        if target is None:
             continue  # contact attacks only matter against a unit that cannot fight back
         victims, rolls = _contact_attack_rolls(attacker, target, battle.rng)
         if not rolls:
@@ -954,6 +958,18 @@ def resolve_contact_attacks(battle: "Battle") -> None:
             "contact_attack",
             attacker=attacker.identifier, target=target.identifier, kills=killed,
             reach=CONTACT_REACH, rolls=rolls))
+
+
+def _router_underfoot(battle: "Battle", unit: "Regiment") -> "Regiment | None":
+    """A broken enemy whose footprint overlaps the unit's: the unit makes contact attacks on it although it is not
+    charging or pursuing (notes/script_behaviours.md 2.2: "U need not be charging"). The first such router by
+    identifier. PROVISIONAL: the original runs this inside the router's own collision pass; here the router's
+    re-check state is not required (a fleeing unit moves every update anyway)."""
+    for other in sorted(battle.regiments.values(), key=lambda r: r.identifier):
+        if (other is not unit and other.active and other.routing and not other.hidden and may_engage(unit, other)
+                and formation.penetrates(unit.block(), other.block())):
+            return other
+    return None
 
 
 def _contact_attack_rolls(attacker: "Regiment", target: "Regiment", rng: random.Random) -> tuple[set[int], list[Roll]]:

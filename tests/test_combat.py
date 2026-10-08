@@ -479,6 +479,49 @@ class ContactAttackTests(unittest.TestCase):
 
         self.assertEqual([e for e in battle.events if e.kind == "contact_attack"], [])
 
+    def test_given_a_standing_unit_overlapping_a_fleeing_enemy_then_it_makes_contact_attacks(self):
+        # notes/script_behaviours.md 2.2: the attacker need not be charging.
+        guard = _regiment("g", 0, 0, Side.PLAYER, strength=6, attacks=2, speed_per_tick=0.0)
+        fleeing = _regiment("f", 0, 6, Side.ENEMY, toughness=2, armour=0, speed_per_tick=0.0)
+        fleeing.routing = True
+        battle = Battle(1000, 1000, [guard, fleeing], seed=1)
+        self.assertTrue(formation.penetrates(guard.block(), fleeing.block()))
+
+        combat.resolve_contact_attacks(battle)
+
+        events = [e for e in battle.events if e.kind == "contact_attack"]
+        self.assertEqual([(e.data["attacker"], e.data["target"]) for e in events], [("g", "f")])
+
+    def test_given_a_fleeing_friend_underfoot_then_no_contact_attacks_are_made(self):
+        guard = _regiment("g", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        friend = _regiment("f", 0, 6, Side.PLAYER, speed_per_tick=0.0)
+        friend.routing = True
+        battle = Battle(1000, 1000, [guard, friend], seed=1)
+
+        combat.resolve_contact_attacks(battle)
+
+        self.assertEqual([e for e in battle.events if e.kind == "contact_attack"], [])
+
+    def test_given_a_fleeing_enemy_that_only_comes_near_then_no_contact_attacks_are_made(self):
+        guard = _regiment("g", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        fleeing = _regiment("f", 0, 60, Side.ENEMY, speed_per_tick=0.0)
+        fleeing.routing = True
+        battle = Battle(1000, 1000, [guard, fleeing], seed=1)
+
+        combat.resolve_contact_attacks(battle)
+
+        self.assertEqual([e for e in battle.events if e.kind == "contact_attack"], [])
+
+    def test_given_a_unit_in_melee_then_it_makes_no_contact_attacks_on_an_overlapping_router(self):
+        guard = _regiment("g", 0, 0, Side.PLAYER, speed_per_tick=0.0)
+        fleeing = _regiment("f", 0, 6, Side.ENEMY, speed_per_tick=0.0)
+        fleeing.routing = guard.in_melee = True
+        battle = Battle(1000, 1000, [guard, fleeing], seed=1)
+
+        combat.resolve_contact_attacks(battle)
+
+        self.assertEqual([e for e in battle.events if e.kind == "contact_attack"], [])
+
 
 class EngagementGeometryTests(unittest.TestCase):
     """game_rules.md, "What triggers engagement": real footprint overlap, not proximity."""
