@@ -3,6 +3,7 @@
 import copy
 from pathlib import Path
 import tempfile
+import math
 import unittest
 
 from whshr.engine import Battle
@@ -169,6 +170,31 @@ class DeploymentPlacementTests(unittest.TestCase):
         self.assertAlmostEqual(cy, 100)
         self.assertGreater(cx, 220)
         self.assertGreaterEqual(cx - tree["x"], tree["radius"] + regiment.bounding_radius() - 0.1)
+
+    def test_given_solid_circle_on_the_drag_path_then_the_centre_does_not_end_inside_it(self):
+        battle = self.battle()
+        regiment = battle.regiments["player0"]
+        circle = {"name": "Rock", "x": 250, "y": 100, "radius": 40, "status": ["os_active", "os_solid"]}
+        battle.objects.append(circle)
+        battle.begin_deployment_drag("player0", 100, 100)
+        battle.update_deployment_drag(200, 100)
+        battle.tick()
+        cx, cy = self.centre(regiment)
+        self.assertGreater(math.hypot(cx - circle["x"], cy - circle["y"]), 0)
+        self.assertGreaterEqual(math.hypot(cx - circle["x"], cy - circle["y"]),
+                                circle["radius"] / 2)  # half-overlap correction leaves it out of the centre
+
+    def test_given_no_entry_boundary_around_the_drop_point_then_the_centre_is_pushed_out_of_it(self):
+        # A closed no-entry (inverse solid) area, not a deployment zone, over where the drag lands; correction follows the clipping.
+        area = {"name": "Cliff", "status": ["bnd_ACTIVE", "bnd_INVSOLID"],
+                "lines": [[180, 60, 260, 60], [260, 60, 260, 140], [260, 140, 180, 140], [180, 140, 180, 60]]}
+        battle = self.battle([region(), area])
+        regiment = battle.regiments["player0"]
+        battle.begin_deployment_drag("player0", 100, 100)
+        battle.update_deployment_drag(160, 100)  # first-zone acquisition proposes (190, 100), inside the area
+        battle.tick()
+        centre = self.centre(regiment)
+        self.assertLess(centre[0], 190)  # halfway toward the nearest edge, not a full clamp
 
     def test_given_non_solid_tree_then_deployment_drag_keeps_the_proposed_centre(self):
         for status in (["os_active"], ["os_solid"]):
