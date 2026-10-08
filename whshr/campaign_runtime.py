@@ -1,15 +1,20 @@
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Campaign operations used by the glue runtime."""
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 ObjectiveResult = tuple[bool, tuple[int, ...]]  # (met, (v1, v2, v3, v4)); notes/debrief_evaluation.md 2.1
 
 from .glue import MissionRef
 
+if TYPE_CHECKING:
+    from .payments import CashTerms
+
 
 class CampaignRuntime(Protocol):
     def add_cash(self, amount: int) -> None: ...
+
+    def set_mission_cash(self, terms: "CashTerms | None") -> None: ...
 
     def is_unit_in_army(self, unit_id: int) -> bool: ...
 

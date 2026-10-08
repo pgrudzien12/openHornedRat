@@ -211,6 +211,11 @@ class CampaignState:
     def add_cash(self, amount: int) -> None:
         self.coffers += int(amount)
 
+    def set_mission_cash(self, terms: "CashTerms | None") -> None:
+        """A running script's ``cash:`` line: store the payment program on the mission in progress
+        (notes/glue_interpreter.md section 6; it replaces the terms the mission record gave)."""
+        self.mission_cash = terms
+
     def begin_mission(self, terms: "CashTerms | None") -> None:
         """A new mission starts: remember its payment terms, forget the previous battle result."""
         self.mission_cash = terms

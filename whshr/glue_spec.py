@@ -106,7 +106,7 @@ COMMAND_SPEC: dict[str, CommandSpec] = {
     "addunit": _spec(DELEGATED, "§9", "roster flag pending join", "notes/campaign.md §3.2"),
     "unitjoinmission": _spec(DELEGATED, "§9", "regiment joins the mission force", "notes/campaign.md §3.2"),
     "unitleavemission": _spec(DELEGATED, "§9", "regiment leaves the mission force", "notes/campaign.md §3.2"),
-    "cash": _spec(DELEGATED, "§9", "store the payment program on the current mission", "notes/campaign.md §2.5"),
+    "cash": _spec(DELEGATED, "§9", "store the payment program on the mission in progress (replaces the record's own terms)", "notes/campaign.md §2.5"),
     "setbattlescript": _spec(SPECIFIED, "§5, §9", "current battle file name used by panel buttons and troop selection"),
     "bonusinit": _spec(DELEGATED, "§9", "campaign bonus counters", "notes/campaign.md §2.5"),
     "bonusadd": _spec(DELEGATED, "§9", "campaign bonus counters", "notes/campaign.md §2.5"),
