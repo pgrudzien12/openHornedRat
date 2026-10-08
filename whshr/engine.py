@@ -656,9 +656,11 @@ class Battle:
             raise ValueError("battle dimensions must be positive")
         self.width = width
         self.height = height
-        # Allied NPC regiments (identifier -> whoami) the campaign gets back after the battle: only in battles that
-        # define objective G or I (notes/allied_npc_merge.md section 5). Filled by `from_script`.
+        # Script units carrying a roster number (identifier -> whoami), in battles that define objective G or I
+        # (notes/allied_npc_merge.md section 5): the campaign gets back those that are allied NPCs at the battle's
+        # end. Filled by `from_script`.
         self.npc_regiments: dict[str, int] = {}
+        self.swapped_regiments: set[int] = set()  # marching regiments objective I replaced by their NPC copy
         self.regiments: dict[str, Regiment] = {regiment.identifier: regiment for regiment in regiments}
         self._recheck_carry: set[str] = set()  # re-check states set by the push-apart pass (see _carry_recheck)
         if len(self.regiments) != len(regiments):
@@ -810,11 +812,12 @@ class Battle:
                                       str(flag).casefold() for flag in node.get("status") or ())]
         reserved_slots: set[int] = set()
         objectives = cast("Sequence[Sequence[Any]] | None", cast("View", source.get("mission") or {}).get("objectives"))
-        army_merge = bool(npc_merge.objective_value(objectives, "G"))
+        army_merge = bool(npc_merge.objective_value(objectives, "G")) and company is not None
         artillery_swap = bool(npc_merge.objective_value(objectives, "I"))
         marching = {int(unit["set"].get("whoami") or 0) & 0xFF for army in merc.get("armies", [])
                     for unit in army["units"]}
         swapped: list[str] = []
+        swapped_whoamis: set[int] = set()
         written_npcs: dict[str, int] = {}
         npc_write_back = npc_merge.objective_value(objectives, "G") is not None \
             or npc_merge.objective_value(objectives, "I") is not None
@@ -832,11 +835,10 @@ class Battle:
                 while identifier in used:
                     identifier, suffix = f"{unit['id']}#{suffix}", suffix + 1
                 used.add(identifier)
-                if forced_side is None and npc_merge.npc_regiment(unit) is not None:
-                    if artillery_swap:
-                        swapped.append(identifier)
-                    if npc_write_back:
-                        written_npcs[identifier] = int(npc_merge.npc_regiment(unit) or 0)
+                if forced_side is None and artillery_swap and npc_merge.npc_regiment(unit) is not None:
+                    swapped.append(identifier)
+                if forced_side is None and npc_write_back and npc_merge.numbered_regiment(unit) is not None:
+                    written_npcs[identifier] = int(npc_merge.numbered_regiment(unit) or 0)
                 models, ranks = formation.unit_size(unit)
                 leader: View = unit.get("leader") or {}
                 if forced_side is not None:
@@ -887,6 +889,7 @@ class Battle:
                 continue
             npc.x, npc.y, npc.direction = partner.x, partner.y, partner.direction
             regiments.remove(partner)
+            swapped_whoamis.add(partner.whoami)
             script_ids.pop(partner.identifier, None)
         mission: View = source.get("mission") or {}
         battle = cls(field_data["width"], field_data["height"], regiments, seed=seed,
@@ -894,6 +897,7 @@ class Battle:
                    script_nodes=script_nodes,
                    deploy=bool(mission.get("deploy_troops")), boundaries=source.get("boundaries") or (),
                    objects=source.get("objects") or (), scenery=source.get("scenery") or ())
+        battle.swapped_regiments = swapped_whoamis
         battle.npc_regiments = {identifier: whoami for identifier, whoami in written_npcs.items()
                                 if identifier in battle.regiments}
         battle.objective_letters = frozenset(str(entry[0]).upper() for entry in mission.get("objectives") or ()

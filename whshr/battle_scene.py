@@ -397,6 +397,7 @@ class BattleScene(Scene):
         battle_items = {regiment.whoami: regiment.items for _, regiment in player if regiment.whoami in marching}
         campaign.company = tuple(roster.with_items(record, battle_items[record.whoami])
                                  if record.whoami in battle_items else record for record in campaign.company)
+        marching = [whoami for whoami in marching if whoami not in self.battle.swapped_regiments]  # objective I
         if len(player) != len(marching):
             campaign.battle_outcome = {}
             casualties.after_battle(campaign)
@@ -414,12 +415,14 @@ class BattleScene(Scene):
             casualties.after_battle(campaign)  # wounded bookkeeping before the debrief screen
 
     def _npc_outcomes(self) -> dict[int, UnitOutcome]:
-        """What the allied NPC regiments of a G or I battle came out with, written like player regiments
+        """What the allied NPC regiments (side at the battle's end) of a G or I battle came out with, written like player regiments
         (notes/allied_npc_merge.md section 5). One that left the field (destroyed or fled) has its casualties
         reset to 0; its routed models and kills are written unchanged."""
         outcomes: dict[int, UnitOutcome] = {}
         for identifier, whoami in self.battle.npc_regiments.items():
             regiment = self.battle.regiments[identifier]
+            if regiment.side != Side.NEUTRAL:  # the writer reads the side at the battle's end (report Q8)
+                continue
             fled = regiment.fled
             left = fled or regiment.models == 0
             routed = regiment.models if fled else 0

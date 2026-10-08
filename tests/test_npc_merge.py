@@ -78,6 +78,25 @@ class ArmyMergeTests(unittest.TestCase):
         self.assertEqual(battle.regiments["NPC_Stray"].models, 6)
 
 
+class StandaloneAndPsychologyTests(unittest.TestCase):
+    def test_given_no_company_context_then_script_npcs_are_kept(self):
+        npc = unit("NPC_Avengers", 4, 28, NPC_SIDE)
+        battle = Battle.from_script(source([["G", 1, 4]], [npc]))  # a standalone battle: no campaign, no company
+
+        self.assertEqual(battle.regiments["NPC_Avengers"].models, 28)
+
+    def test_given_a_company_regiment_then_its_psychology_replaces_the_scripts(self):
+        npc = unit("NPC_Avengers", 4, 28, NPC_SIDE)
+        npc["set"]["psy_status"] = "CantRally"
+        for company_set, expected in (({"psy_status": "CantBreak"}, {"CantBreak"}), ({}, set())):
+            with self.subTest(company=company_set):
+                member = company_unit(4, 20, "Black Avengers", 150)
+                member["set"] = {**member["set"], **company_set}
+                battle = Battle.from_script(source([["G", 1, 4]], [dict(npc, set=dict(npc["set"]))]), company={4: member})
+
+                self.assertEqual(set(battle.regiments["NPC_Avengers"].psychology), expected)
+
+
 class ArtillerySwapTests(unittest.TestCase):
     """Objective I (BF029): vectors 5 and 6."""
 
@@ -137,6 +156,37 @@ class WriteBackTests(unittest.TestCase):
         self.assertEqual(list(scene.battle.npc_regiments.values()), [4])
         self.assertEqual(scene.initial_models["NPC_Avengers"], 28)  # script strength, no merge
         self.assertEqual(outcomes[4].casualties, 8)
+
+
+class OutcomeMappingTests(unittest.TestCase):
+    def scene(self, objectives, npcs, player, company=None):
+        scene = BattleScene()
+        scene.battle = Battle.from_script(source(objectives, npcs, player), company=company or {})
+        scene.initial_models = {key: regiment.models for key, regiment in scene.battle.regiments.items()}
+        return scene
+
+    def test_given_a_swapped_player_regiment_then_the_player_outcomes_still_map_and_the_npc_is_written(self):
+        from unittest.mock import patch
+
+        scene = self.scene([["I", 1, 4]], [unit("NPC_Cannon", 15, 2, NPC_SIDE)],
+                           [unit("Cannon_Crew", 15, 4), unit("Infantry", 3, 16)])
+        scene.battle.regiments["NPC_Cannon"].models = 1
+        campaign = SimpleNamespace(company=(), ordered_march_units=(15, 3), mission_cash=None)
+        scene.glue_scene = SimpleNamespace(campaign=campaign)
+
+        with patch("whshr.battle_scene.casualties.after_battle"):
+            scene._store_played_results()
+
+        self.assertEqual(sorted(campaign.battle_outcome), [3, 15])  # not cleared by a length mismatch
+        self.assertEqual((campaign.battle_outcome[15].models, campaign.battle_outcome[15].casualties), (1, 1))
+
+    def test_given_a_side_change_during_the_battle_then_the_final_side_decides_who_is_written(self):
+        scene = self.scene([["G", 1, 4]], [unit("NPC_Avengers", 4, 28, NPC_SIDE), unit("Rebel", 5, 10, 0x80)], [],
+                           company={4: company_unit(4, 20, "Black Avengers", 150)})
+        scene.battle.regiments["NPC_Avengers"].side = Side.ENEMY
+        scene.battle.regiments["Rebel"].side = Side.NEUTRAL  # e.g. a script's SetSide 64
+
+        self.assertEqual(sorted(scene._npc_outcomes()), [5])
 
 
 class HelperTests(unittest.TestCase):
