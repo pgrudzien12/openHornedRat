@@ -189,9 +189,23 @@ class ChargeStartCleanupTests(unittest.TestCase):
         player = unit("player", 100, 500, Side.PLAYER)
         battle = Battle(1000, 1000, [player], seed=1995)  # no scripts: the order charges directly
         player.route_pause_ticks = 40
+        player.avoid_target, player.route_side, player.route_follows_unit = (150, 540), 1, True
         battle.order_charge_forward("player")
         self.assertTrue(player.free_charging)
         self.assertEqual(player.route_pause_ticks, 0)
+        self.assertEqual((player.avoid_target, player.route_side, player.route_follows_unit), (None, 0, False))
+        self.assertIsNotNone(player.target_x)  # the charge's own destination stays
+
+    def test_given_an_approach_when_a_scripted_straight_ahead_charge_starts_then_no_steering_is_left(self):
+        player = unit("player", 100, 500, Side.PLAYER)
+        battle = Battle(1000, 1000, [player], seed=1995, script_dll=FakeDll(SCRIPTS), script_ids={"player": MAIN})
+        state = battle.event_bus.unit_states["player"]
+        player.avoid_target, player.route_side, player.route_follows_unit = (150, 540), 1, True
+        player.route_pause_ticks = 20
+        battle.interpreter.op_ChargeForward(state, None, [], "player", 0, battle.rng)
+        self.assertTrue(player.free_charging)
+        self.assertEqual((player.avoid_target, player.route_side, player.route_follows_unit,
+                          player.route_pause_ticks), (None, 0, False, 0))
 
     def test_given_a_building_target_when_the_charge_starts_then_no_approach_route_or_pause_is_left(self):
         player = unit("player", 100, 500, Side.PLAYER)
@@ -246,6 +260,24 @@ class ApproachObstacleTests(unittest.TestCase):
         battle.event_bus.unit_states["player"].current_target = ("enemy", 0)
         _, units = battle._route_footprints(player, ("move", (enemy.x, enemy.y)))
         self.assertEqual(sorted(other.identifier for other in units.values()), ["bystander"])
+
+
+class BuildingApproachObstacleTests(unittest.TestCase):
+    """notes/building_units.md 6: a building is not an obstacle to a route heading for it."""
+
+    def test_given_a_scripted_approach_to_a_building_then_that_building_is_not_a_route_obstacle(self):
+        player = unit("player", 100, 500, Side.PLAYER)
+        battle = Battle(1000, 1000, [player], seed=1995)
+        battle.buildings = buildings.from_scenery([{"name": "Farm", "x": 300, "y": 500},
+                                                   {"name": "Farm", "x": 300, "y": 800}])
+        battle.building_index = {b.identifier: b for b in battle.buildings}
+        target, other = battle.buildings
+        player.route_follows_unit = True
+        battle.event_bus.unit_states["player"].current_target = (target.identifier, 0)
+        footprints, _ = battle._route_footprints(player, ("move", (target.x, target.y)))
+        keys = {footprint.key for footprint in footprints}
+        self.assertNotIn(target.identifier, keys)
+        self.assertIn(other.identifier, keys)
 
 
 class StraightChargeRunTests(unittest.TestCase):

@@ -1426,7 +1426,12 @@ class Battle:
         regiment.waypoints.clear()
         regiment.attack_target = regiment.charge_started_target = None
         regiment.free_charging = True
-        regiment.route_pause_ticks = 0  # a charge is a straight run with no route pause (notes/attack_order_flow.md 1)
+        # A charge is a straight run (notes/attack_order_flow.md 1): no route pause, and no steering or route plan
+        # left from an earlier move for other units' route filters to read.
+        regiment.route_pause_ticks = 0
+        regiment.avoid_target = None
+        regiment.route_side, regiment.route_planned_for = 0, None
+        regiment.route_follows_unit = False
         regiment.hidden = False
 
     def order_halt(self, identifier: str) -> None:
@@ -2421,12 +2426,13 @@ class Battle:
             if {"os_active", "os_solid"}.issubset(flags):
                 footprints.append(steering.Footprint(f"object:{index}", float(obj.get("x") or 0),
                                                      float(obj.get("y") or 0), float(int(obj.get("radius") or 0))))
+        target_id = self._route_target_id(regiment, order_key)
         for building in self.buildings:  # notes/obstacle_steering.md 3: a building blocks unless it is the target
-            if order_key[0] == "charge" and order_key[1] == building.identifier:
+            if building.identifier == target_id:
                 continue
             footprints.append(steering.Footprint(building.identifier, building.x, building.y, float(building.radius)))
         units: dict[str, Regiment] = {}
-        target = self._route_target(regiment, order_key)
+        target = self.regiments.get(target_id) if target_id is not None else None
         for other in self.regiments.values():
             if (other is regiment or not other.active or other.routing or other is target
                     or (target is not None and target.melee_group is not None
@@ -2439,18 +2445,18 @@ class Battle:
             units[key] = other
         return footprints, units
 
-    def _route_target(self, regiment: Regiment, order_key: TurnKey) -> Regiment | None:
-        """The unit a route heads for: a charge's target, or the current script target of a follow-a-unit approach
-        (notes/attack_order_flow.md 2). It and every unit fighting on its combat grid, of either side, are not
-        obstacles to that route."""
+    def _route_target_id(self, regiment: Regiment, order_key: TurnKey) -> str | None:
+        """The unit or building a route heads for: a charge's target, or the current script target of a follow-a-unit
+        approach (notes/attack_order_flow.md 2, notes/building_units.md 6). It is not an obstacle to that route, and
+        for a regiment neither is any unit fighting on its combat grid, of either side."""
         if order_key[0] == "charge":
-            return self.regiments.get(str(order_key[1]))
+            return str(order_key[1])
         if not regiment.route_follows_unit:
             return None
         state = self.event_bus.unit_states.get(regiment.identifier)
         if state is None or state.current_target is None:
             return None
-        return self.regiments.get(state.current_target[0])
+        return state.current_target[0]
 
     def _warn_blocked_route(self, regiment: Regiment, order_key: TurnKey, start: Point, target: Point,
                             footprints: Sequence[steering.Footprint], own_radius: float, plan: steering.Plan) -> None:

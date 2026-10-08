@@ -3202,7 +3202,12 @@ class ScriptInterpreter:
         unit.waypoints = []
         unit.attack_target = unit.charge_started_target = None
         unit.free_charging = True
-        unit.route_pause_ticks = 0  # a charge is a straight run with no route pause (notes/attack_order_flow.md 1)
+        # A charge is a straight run (notes/attack_order_flow.md 1): no route pause, and no steering or route plan
+        # left from an earlier move for other units' route filters to read.
+        unit.route_pause_ticks = 0
+        unit.avoid_target = None
+        unit.route_side, unit.route_planned_for = 0, None
+        unit.route_follows_unit = False
         unit.hidden = False
         state.fear_passed = False
         state.cond_flags = True
