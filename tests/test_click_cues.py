@@ -82,3 +82,19 @@ class ClickCueTests(unittest.TestCase):
         self.assertEqual(GlueView.events(view, down), (GlueInput("panel-press"),))
         self.assertEqual(GlueView.events(view, up),
                          (GlueInput("panel-release-cue"), GlueInput("panel-action", "accept")))
+
+    def test_main_menu_release_cue_uses_hovered_hotspot_after_press_elsewhere(self):
+        import pygame
+        from whshr.frontend.menu_view import MainMenuView
+        from whshr.glue_render import RenderHotspot
+        cues: list[int] = []
+        hotspot = RenderHotspot(0, 0, 10, 10, None, "newgame", None, None, None,
+                                downsfx=4, upsfx=3)
+        view = SimpleNamespace(pressed=None, hotspots=(hotspot,), _click_cue=cues.append,
+                               _button_at=lambda pos: 0 if pos[0] < 10 else None)
+        down = pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=(20, 5))
+        up = pygame.event.Event(pygame.MOUSEBUTTONUP, button=1, pos=(5, 5))
+
+        self.assertEqual(MainMenuView.events(view, down), ())
+        self.assertEqual(MainMenuView.events(view, up), ())
+        self.assertEqual(cues, [3])
