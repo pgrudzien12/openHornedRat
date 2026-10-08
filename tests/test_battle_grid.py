@@ -148,7 +148,10 @@ class RepairingTests(unittest.TestCase):
 
         self.assertIsNotNone(model.opponent)
         enemy_id, enemy_uid = model.opponent
-        enemy_model = self.battle.regiments[enemy_id].melee_models[self.battle.regiments[enemy_id].index_of(enemy_uid)]
+        enemy = self.battle.regiments[enemy_id]
+        enemy_index = enemy.index_of(enemy_uid)
+        assert enemy_index is not None
+        enemy_model = enemy.melee_models[enemy_index]
         (row, col), (enemy_row, enemy_col) = model.cell, enemy_model.cell
         self.assertEqual(abs(row - enemy_row) + abs(col - enemy_col), 1)
 
