@@ -1255,5 +1255,6 @@ class ScriptedSameSideFightTests(unittest.TestCase):
         assassin, otto, battle = self._pair()
         bystander = _regiment("bystander", 0, 3, Side.ENEMY, models=1, ranks=1, speed_per_tick=0.0)
         battle.regiments["bystander"] = bystander
+        assassin.collision_recheck = True  # the charge step switches its collision pass on
         battle.tick()
         self.assertFalse(bystander.in_melee)

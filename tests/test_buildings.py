@@ -41,6 +41,42 @@ class CreationTests(unittest.TestCase):
         self.assertEqual(objectives.building_count(b), 2)
 
 
+class FootprintTests(unittest.TestCase):
+    """Vectors from notes/building_units.md section 2 and 8."""
+
+    def test_footprint_rectangle_radius_and_toughness_follow_the_type_table(self):
+        for name, half, radius, toughness in (("Tudor2Stry", (36, 24), 31, 5), ("Farm", (72, 72), 89, 5),
+                                              ("Well2", (18, 18), 13, 2), ("SmithyHut", (54, 60), 68, 4),
+                                              ("SkavBase20FaL", (90, 90), 115, 5), ("WoodShack", (42, 24), 36, 3)):
+            with self.subTest(name=name):
+                building = buildings.from_scenery([{"name": name, "x": 500, "y": 500}])[0]
+                self.assertEqual(((building.half_x, building.half_y), building.radius, building.toughness),
+                                 (half, radius, toughness))
+
+    def test_a_circle_is_pushed_clear_of_a_turned_rectangle(self):
+        farm = buildings.from_scenery([{"name": "Tudor2Stry", "x": 0, "y": 0, "dir": 128}])[0]  # turned 90 degrees
+        self.assertIsNone(farm.penetration(60, 0, 10))  # long side (36) now points along y, short (24) along x
+        push = farm.penetration(30, 0, 10)
+        self.assertAlmostEqual(push[0], 4.0, places=6)
+        self.assertAlmostEqual(push[1], 0.0, places=6)
+        self.assertIsNone(farm.penetration(0, 40, 2))  # beyond the long half-extent of 36 along y
+        self.assertIsNotNone(farm.penetration(0, 30, 10))
+
+    def test_a_centre_inside_the_rectangle_is_pushed_out_along_the_nearest_side(self):
+        farm = buildings.from_scenery([{"name": "Tudor2Stry", "x": 0, "y": 0}])[0]
+        push = farm.penetration(0, 20, 5)
+        self.assertEqual(push[0], 0.0)
+        self.assertGreater(push[1], 0)
+
+    def test_missile_toughness_is_zero_and_strength_eight_wounds_automatically(self):
+        b = battle()
+        tent = b.buildings[2]
+        for _ in range(20):  # strength 10 never needs a roll: every hit wounds at least once
+            tent.wounds_taken, tent.destroyed = 0, False
+            ranged._damage_buildings(b, cannonball(tent.x, tent.y, strength=10, wounds=1), flight=False)
+            self.assertTrue(tent.destroyed)
+
+
 class DamageTests(unittest.TestCase):
     def test_wounds_accumulate_until_the_building_is_destroyed(self):
         farm = battle().buildings[0]
@@ -59,7 +95,7 @@ class DamageTests(unittest.TestCase):
         queue = b.event_bus.unit_states["S"].event_queue
         self.assertIn((0x18, "building:3"), [(e.code, e.source) for e in queue])
         solid = [o for o in b.shooting_objects if o.get("building") == "building:3"]
-        self.assertEqual(solid[0]["status"], [])
+        self.assertEqual(solid[0]["status"], ["os_solid"])  # the ruin keeps blocking
 
     def test_a_missile_without_building_strength_does_no_damage(self):
         b = battle()
@@ -89,6 +125,41 @@ class DamageTests(unittest.TestCase):
         before = len(b.events)
         ranged._damage_buildings(b, cannonball(tent.x, tent.y), flight=False)
         self.assertEqual(len(b.events), before)
+
+
+class KillCreditTests(unittest.TestCase):
+    """notes/casualty_bookkeeping.md 2.1: +1 kill per piece, no experience; lethal-only sources are credited only
+    by the destroying wound, melee by any wound."""
+
+    def test_the_destroyer_gains_a_kill_per_piece_and_no_experience(self):
+        b = battle()
+        farm = b.buildings[0]  # three pieces
+        farm.take_wounds(6, "S", lethal_only=True)
+        b.destroy_building(farm)
+        self.assertEqual((b.regiments["S"].kills, b.regiments["S"].experience_gained), (3, 0))
+
+    def test_a_single_piece_building_is_worth_one_kill(self):
+        b = battle()
+        tent = b.buildings[2]
+        tent.take_wounds(1, "S", lethal_only=True)
+        b.destroy_building(tent)
+        self.assertEqual(b.regiments["S"].kills, 1)
+
+    def test_a_non_lethal_missile_wound_leaves_the_credit_and_a_melee_wound_takes_it(self):
+        farm = battle().buildings[0]
+        farm.take_wounds(1, "M", lethal_only=True)
+        self.assertIsNone(farm.credit)
+        farm.take_wounds(1, "M")
+        self.assertEqual(farm.credit, "M")
+        farm.take_wounds(1, "S", lethal_only=True)
+        self.assertEqual(farm.credit, "M")
+        farm.take_wounds(5, "S", lethal_only=True)
+        self.assertEqual(farm.credit, "S")
+
+    def test_a_building_destroyed_with_no_credit_pays_nothing(self):
+        b = battle()
+        b.destroy_building(b.buildings[0])
+        self.assertEqual(b.regiments["S"].kills, 0)
 
 
 class OrderTests(unittest.TestCase):

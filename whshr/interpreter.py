@@ -394,23 +394,34 @@ class ScriptInterpreter:
                     or regiment.turn_order_key is not None or regiment.routing or regiment.in_melee)
 
     def raise_contacts(self, contacts: list[tuple["Regiment", "Regiment"]]) -> None:
-        """The collision pass with scripts running (notes/script_behaviours.md 2.2): for each touching pair, a unit
-        that moved or charged this tick (PROVISIONAL stand-in for the collision re-check state) runs the
-        fear-on-contact test and, unless latched, gets event 0x0B (checked) with the other unit as its contact
-        record; a troops regiment touched gets the reciprocal 0x0B. Marked units are not touched at all. A latched
-        unit that touches nothing any more is released; a latched unit's movement is rolled back by the engine (Battle._resolve_latched_step);
-        wagon event 0x27 is raise_wagon_collisions. Not modelled: push-apart (the engine's own), contact attacks on routers."""
+        """The collision pass with scripts running (notes/script_behaviours.md 2.1-2.2). Units are visited in unit
+        order and only those whose collision re-check state is on take part; the state is cleared at the start of
+        the unit's pass (so a unit later in the order that an earlier unit switched on is visited in the same
+        update). For each footprint a unit touches: the fear-on-contact test; the touched unit's re-check state
+        goes on unless the pass-taker is in melee; unless latched, the pass-taker gets event 0x0B (checked) with
+        the other unit as its contact record and its re-check state off; a troops regiment touched gets the same
+        (the reciprocal). Marked units are not touched at all. A latched unit that touches nothing any more is
+        released; a latched unit's movement is rolled back by the engine (Battle._resolve_latched_step); wagon event
+        0x27 is raise_wagon_collisions. Not modelled: push-apart (the engine's own), contact attacks on routers,
+        fanatic footprints."""
         touching: set[str] = set()
+        neighbours: dict[str, list["Regiment"]] = {}
         for first, second in contacts:
             if self._leaving(first) or self._leaving(second):
                 continue
             touching.update((first.identifier, second.identifier))
             if first.melee_group is not None and first.melee_group == second.melee_group:
                 continue
-            for mover, other in ((first, second), (second, first)):
-                if not self._rechecks(mover):
-                    continue
+            neighbours.setdefault(first.identifier, []).append(second)
+            neighbours.setdefault(second.identifier, []).append(first)
+        for mover in list(self.battle.regiments.values()):
+            if not mover.collision_recheck:
+                continue
+            mover.collision_recheck = False
+            for other in neighbours.get(mover.identifier, ()):
                 self._contact_fear(mover, other)
+                if not mover.in_melee:
+                    other.collision_recheck = True
                 self._record_contact(mover, other)
                 if not (other.is_wagon or other.hud_class in ("art", "mon")):
                     self._record_contact(other, mover)
@@ -423,17 +434,12 @@ class ScriptInterpreter:
         kind (any side, any unit type) within +-45 degrees of its facing is sent 0x27 (checked, no source), once per
         tick. Units leaving the battle are not touched. Not modelled: building footprints, which are not units."""
         for wagon in regiments:
-            if not wagon.is_wagon or self._leaving(wagon) or not self._rechecks(wagon):
+            if not wagon.is_wagon or self._leaving(wagon) or not wagon.collision_recheck:
                 continue
             if any(other is not wagon and not other.hidden and not self._leaving(other)
                    and formation.penetrates(wagon.block(), other.block()) and self._in_arc(wagon, other)
                    for other in regiments):
                 self.event_bus.queue_event(wagon.identifier, Event(code=0x27), checked=True)
-
-    @staticmethod
-    def _rechecks(unit: "Regiment") -> bool:
-        """PROVISIONAL collision re-check state: the unit moved, charged or pursued this tick."""
-        return unit.moving or bool(unit.waypoints) or unit.attack_target is not None
 
     def _contact_fear(self, mover: "Regiment", other: "Regiment") -> None:
         state = self.event_bus.unit_states.get(mover.identifier)
@@ -447,6 +453,7 @@ class ScriptInterpreter:
         state = self.event_bus.unit_states.get(unit.identifier)
         if state is None or state.contact_latch:
             return
+        unit.collision_recheck = False
         state.contact_record = other.identifier
         self.event_bus.queue_event(unit.identifier, Event(code=0x0B), checked=True)
 
@@ -1756,6 +1763,7 @@ class ScriptInterpreter:
         if unit is None:
             return state.pc + 1
         unit.routing = False
+        unit.collision_recheck = True  # notes/script_behaviours.md 2.1: Rally switches the re-check state on
         unit.rally_attempt = False  # notes/pursuit_restraint.md 5 step 2
         unit.flee_x = unit.flee_y = None
         unit.attack_target = None
@@ -1859,6 +1867,15 @@ class ScriptInterpreter:
         notes/script_spawn_move.md 6). The destination is fixed until re-issued or re-aimed by
         IfTargetInChargeReach/ApproachTargetInReach. PROVISIONAL: the original follows the unit and never
         ends this move by distance; this engine's ordinary arrival rule still applies (the re-form that follows posts 0x34)."""
+        building = self._target_building(state)
+        if building is not None:
+            unit = self.battle.regiments.get(unit_id)
+            state.cond_flags = False
+            if unit is None or unit.reforming or unit.anchored or unit.held or unit.routing or building.destroyed:
+                return state.pc + 1
+            self._start_point_move(unit, (building.x, building.y), follows_unit=True)
+            state.cond_flags = True
+            return state.pc + 1
         pair = self._query_pair(state, unit_id)
         unit = pair[0] if pair else None
         state.cond_flags = False
@@ -2017,12 +2034,17 @@ class ScriptInterpreter:
 
     def op_IfTargetInChargeReach(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
-        """IfTargetInChargeReach: true when the charge aim point is within 12 x s_rlmv of the target's
-        bounding circle and nothing prevents a charge now. Side effect, even when false: the unit's
-        destination becomes the aim point (not while charging, so a running charge is not hijacked).
-
-        Not modelled: route obstruction, friendly units in the way and blocked ground (no route planner).
-        """
+        """IfTargetInChargeReach (notes/target_queries.md 5): false while re-forming (before any side effect). Then,
+        even when the result is false, the aim point replaces the unit's final waypoint (the only waypoint when none
+        is queued) unless the unit is in melee. True only when the unit faces the aim point within 22.5 degrees,
+        the line to it is not obstructed by a blocking object or unit (a friendly unit in the way included), the
+        target is not charging, the unit is not charging, in melee, latched or about to re-form, it has exactly one
+        waypoint, the aim point is within 12 x s_rlmv of the target's bounding circle and the unit does not stand in
+        a blocking boundary region. For a building target the aim point is its centre and the reach is measured from
+        its radius (notes/building_units.md 6); the building case does not yet apply the other tests."""
+        building = self._target_building(state)
+        if building is not None:
+            return self._building_charge_reach(state, unit_id, building)
         pair = self._query_pair(state, unit_id)
         state.cond_flags = False
         if pair is None:
@@ -2032,13 +2054,42 @@ class ScriptInterpreter:
             return state.pc + 1
         aim = self._charge_aim_point(unit, target)
         charging = unit.attack_target is not None
+        if not unit.in_melee:
+            if unit.waypoints:
+                unit.waypoints[-1] = (float(aim[0]), float(aim[1]))
+            else:
+                unit.target_x, unit.target_y = float(aim[0]), float(aim[1])
+        leg = unit.waypoints[0] if unit.waypoints else (float(aim[0]), float(aim[1]))
+        heading = self._bearing_from_to((unit.x, unit.y), leg)
+        waypoint_count = len(unit.waypoints) + (0 if unit.waypoints or unit.target_x is None else 1)
+        if (self._fold(heading - unit.direction) >= 32 or charging or unit.in_melee
+                or target.attack_target is not None or state.contact_latch
+                or state.pending_reform_ranks is not None or waypoint_count != 1
+                or self.battle.path_obstructed(unit, leg, ignore=target.identifier)):
+            return state.pc + 1
+        reach = int(math.hypot(aim[0] - unit.x, aim[1] - unit.y)) - int(target.bounding_radius())
+        state.cond_flags = reach < 12 * self._s_rlmv(unit) and not self.battle.on_blocked_ground(unit)
+        return state.pc + 1
+
+    def _target_building(self, state: UnitScriptState) -> "buildings.Building | None":
+        """The building the unit's current target names, or None."""
+        if state.current_target is None:
+            return None
+        return self.battle.building_index.get(state.current_target[0])
+
+    def _building_charge_reach(self, state: UnitScriptState, unit_id: str, building: "buildings.Building") -> int:
+        unit = self.battle.regiments.get(unit_id)
+        state.cond_flags = False
+        if unit is None or unit.reforming or building.destroyed:
+            return state.pc + 1
+        aim = (building.x, building.y)
+        charging = unit.attack_target is not None or unit.assaulting_building is not None
         if not charging and not unit.in_melee:
             unit.target_x, unit.target_y = float(aim[0]), float(aim[1])
         heading = self._bearing_from_to((unit.x, unit.y), aim)
-        if (self._fold(heading - unit.direction) >= 32 or charging or unit.in_melee
-                or target.attack_target is not None):
+        if self._fold(heading - unit.direction) >= 32 or charging or unit.in_melee:
             return state.pc + 1
-        reach = int(math.hypot(aim[0] - unit.x, aim[1] - unit.y)) - int(target.bounding_radius())
+        reach = int(math.hypot(aim[0] - unit.x, aim[1] - unit.y)) - int(building.radius)
         state.cond_flags = reach < 12 * self._s_rlmv(unit)
         return state.pc + 1
 
@@ -2234,7 +2285,7 @@ class ScriptInterpreter:
                 state.cond_flags = False
                 return state.pc + 1
             unit.braced, unit.braced_target = False, None
-            state.current_target = None
+            state.current_target = (building.identifier, 0)
             state.approach_point = state.target_point = (building.x, building.y)
             state.cond_flags = True
             return state.pc + 1
@@ -2371,6 +2422,10 @@ class ScriptInterpreter:
             return state.pc + 1
         if regiment and state.current_target:
             target_id = state.current_target[0]
+            building = self.battle.building_index.get(target_id)
+            if building is not None and not building.destroyed:
+                regiment.attack_target = target_id
+                regiment.charge_started_target = None
             if target_id in self.battle.regiments:
                 regiment.attack_target = target_id
                 state.fear_passed = False  # a new charge clears it (notes/script_grid_events.md 0)
@@ -3045,13 +3100,13 @@ class ScriptInterpreter:
         """ChargeForward: a charge with no target to the point 12 x s_rlmv straight ahead
         (notes/movement_formation.md 3.6): no fear test and no event 0x07; success clears fear-passed and
         reveals the unit (true); an anchored unit halts and re-forms (false) (notes/script_grid_events.md 3).
-        The engine tracks this as a free charge until it reaches the point or makes contact. Not modelled:
-        the refusal inside a blocking boundary region."""
+        The engine tracks this as a free charge until it reaches the point or makes contact. A unit standing in a
+        blocking boundary region halts and re-forms (false) instead."""
         unit = self.battle.regiments.get(unit_id)
         if unit is None:
             state.cond_flags = False
             return state.pc + 1
-        if unit.anchored or unit.held:
+        if unit.anchored or unit.held or self.battle.on_blocked_ground(unit):
             self.battle.reform_to_ranks(unit, unit.ranks)
             state.cond_flags = False
             return state.pc + 1
@@ -3219,7 +3274,7 @@ class ScriptInterpreter:
                 self._redirect(state, unit, other, current)
             return False
         if not self._hostile(unit, other) and other.identifier != current:
-            state.contact_latch = False
+            self._release_latch(state, unit)
             return False
         if unit.attack_target is not None:  # charging or pursuing
             if other.identifier != current:
@@ -3230,16 +3285,23 @@ class ScriptInterpreter:
             if not unit.routing:
                 state.current_target = (other.identifier, 0)
                 self.event_bus.queue_event(other.identifier, Event(code=0x07, source=unit.identifier), checked=True)
-            state.contact_latch = False
+            self._release_latch(state, unit)
         elif other.identifier != current:
             self.event_bus.queue_event(current, Event(code=0x1A, source=unit.identifier), checked=True)
             if not self._engage_new(unit, other):
                 self.event_bus.queue_event(other.identifier, Event(code=0x0C, source=unit.identifier), checked=True)
             state.current_target = (other.identifier, 0)
-            state.contact_latch = False
+            self._release_latch(state, unit)
         elif not self._engage_new(other, unit):
             self.event_bus.queue_event(unit.identifier, Event(code=0x0C, source=unit.identifier), checked=True)
         return False
+
+    @staticmethod
+    def _release_latch(state: UnitScriptState, unit: "Regiment") -> None:
+        """The contact handler's "clear the latch" branches also switch the unit's collision re-check on
+        (notes/script_behaviours.md 2.1)."""
+        state.contact_latch = False
+        unit.collision_recheck = True
 
     def _redirect(self, state: UnitScriptState, unit: "Regiment", other: "Regiment", current: str | None) -> None:
         """REDIRECT: the unit charges the contacted unit instead (0x1A to the old target, 0x07 to the new one)."""
@@ -3250,7 +3312,7 @@ class ScriptInterpreter:
         if not unit.anchored:
             unit.attack_target = other.identifier
         self.event_bus.queue_event(other.identifier, Event(code=0x07, source=unit.identifier), checked=True)
-        state.contact_latch = False
+        self._release_latch(state, unit)
 
     def _engage_new(self, first: "Regiment", second: "Regiment") -> bool:
         """ENGAGE_NEW(x, y): x joins y's fight when y already fights, else y joins x."""

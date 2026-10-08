@@ -233,7 +233,10 @@ class BattleScene(Scene):
             (target_id,) = args
             if self.selected_id is not None:
                 try:
-                    self.battle.order_attack(self.selected_id, target_id)
+                    if target_id in self.battle.building_index:
+                        self.battle.order_attack_building(self.selected_id, target_id)
+                    else:
+                        self.battle.order_attack(self.selected_id, target_id)
                 except ValueError:
                     pass  # not an enemy regiment, the selection is routing, or the target is gone
         elif kind == "fire":
