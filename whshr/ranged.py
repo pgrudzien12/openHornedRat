@@ -90,9 +90,18 @@ def _message(battle: Battle, unit: Regiment, text_id: int) -> None:
                                      regiment=unit.identifier, text_id=text_id))
 
 
-def reload_time(unit: Regiment) -> float:
+def reload_time(unit: Regiment, leader_block: bool = False) -> float:
+    """The reload time of game_rules.md "Reload time". Volley shooting reads the unit's own block; the innate
+    weapons on a reload clock (codes 26 and 27) read the leader block's Initiative and missile code instead
+    (script_behaviours.md 1.10), each falling back to the unit's own when the leader block has none."""
     code = unit.shooting_code or unit.missile_code
-    base = (10 - min(unit.initiative, 10)) * 18
+    initiative = unit.initiative
+    if leader_block:
+        if unit.leader_missile_code is not None:
+            code = unit.leader_missile_code
+        if unit.leader_initiative is not None:
+            initiative = unit.leader_initiative
+    base = (10 - min(initiative, 10)) * 18
     if code in RELOAD_REDUCTION:
         return max(18, base - RELOAD_REDUCTION[code])
     if code in ARTILLERY:
