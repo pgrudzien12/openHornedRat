@@ -109,7 +109,8 @@ the previous plan has finished). At a plan:
 - otherwise (`d ≤ 32`): advance to the next waypoint if there is one; with none left, **halt and re-form** →
   `unit_flags 0x10`.
 
-So a point move stops **within 32 units of the point**, at whatever distance the last plan found (a straight 100-unit
+Because the turn test comes first, a destination close to the unit and more than 45° off its facing can keep
+producing halted turns that never reach the 32-unit stop (`close_point_move.md`). So a point move stops **within 32 units of the point**, at whatever distance the last plan found (a straight 100-unit
 move by an `s_rlmv` 11 unit at k = 1.8 halts after ≈ 57 ticks about 29 units short; 🟡 simulated from the rules above,
 not observed). A unit following a unit (after `MoveToTarget`) has no distance arrival at all: it keeps walking at its
 waypoint until contact, a script change, or a re-issue.
