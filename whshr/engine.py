@@ -2617,6 +2617,8 @@ class Battle:
                 self._correct_boundaries(regiment)
                 self._correct_solid_objects(regiment)
         else:
+            # notes/deployment.md 2: collision correction follows the zone clipping, with no final zone clamp.
+            self._correct_boundaries(self.regiments[deployment_id])
             self._correct_solid_objects(self.regiments[deployment_id])
         for i, first in enumerate(regiments):
             for second in regiments[i + 1:]:
