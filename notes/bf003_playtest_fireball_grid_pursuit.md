@@ -250,9 +250,9 @@ Beam vector (Lightning: L = 4, A = 4; flat ground 0 at start and destination; st
 - **Head on the launch tick: yes.** The effect's first update runs later in the launch tick (`spell_effects.md`
   §1.6, §1.7). It places the head at the start point and draws frame 125. The frame advances by one after each
   update: 126 on the next tick, and so on.
-- **Trail.** The first puff appears on the launch tick at the start point. After that a puff is left each tick the
-  head moved, at the head's previous position and height, including on the final tick if it moved. A new puff is
-  drawn at frame 125 on the tick it appears.
+- **Trail.** See §8.4 for the exact rule. In short: the first puff appears on the launch tick at the start point.
+  After that a puff is left at the head's previous position only when that position differs from the newest puff's
+  position. A new puff is drawn at frame 125 on the tick it appears.
 - **End tick.** On the tick the flight ends (the tick of the final in-flight test), the head is **no longer drawn**
   and the explosion **starts that same tick**, showing frame 177. It sits on the ground under the last tested
   position and shows frames 177–185 on that tick and the 8 following ones.
@@ -265,3 +265,32 @@ Beam vector (Lightning: L = 4, A = 4; flat ground 0 at start and destination; st
   rather than a hard-coded centre.
 - **Other spells.** Not traced. Each spell has its own first frame in `SPELLS` and its own particle use (beams use
   a flash particle, not a head). Request a separate batch when they are implemented.
+
+### 8.4 Trail spawn rule, tick by tick
+
+Each tick, after the head has been placed:
+- With no puff yet (the launch tick), a puff is left at the head's **previous position**. On the launch tick that is
+  the start point, the same as the head.
+- Otherwise a puff is left at the head's previous position **only if** the distance from there to the **newest puff**
+  is greater than 0.
+
+The test compares against the newest puff, not "did the head move this tick". So on tick 2 the previous position is the
+start point, where the launch-tick puff already is, and **no second puff** is left there. Exactly one puff is ever
+at the start point. On the final tick a puff is left at the previous position as usual, because it differs from
+the newest puff.
+
+Each puff's height is the previous tick's launch-height-plus-arc term plus the current tick's launch line. This is
+within a fraction of a unit of the head's previous height, and an engine may simply use the head's previous height.
+
+Example: Fireball from (100, 100) to (100, 280), N = 18, flat ground. The head positions are r = 18 (100, 100),
+r = 17 (100, 110), r = 16 (100, 120), r = 15 (100, 130).
+
+| Tick | Head (frame, position) | Puffs after the tick (frame, position), newest last |
+|---|---|---|
+| 1 (launch, r = 18) | 125, (100, 100) | P1 125 (100, 100) |
+| 2 (r = 17) | 126, (100, 110) | P1 126 (100, 100). No new puff: previous position (100, 100) is P1's |
+| 3 (r = 16) | 127, (100, 120) | P1 127 (100, 100); P2 125 (100, 110) |
+| 4 (r = 15) | 128, (100, 130) | P1 128; P2 126; P3 125 (100, 120) |
+
+So the trail lags the head by two positions from tick 3 on, and there is a one-tick gap after the first puff. Each puff
+plays 125 → 144 and is gone after its 20th tick (P1's last frame, 144, is on tick 20).
