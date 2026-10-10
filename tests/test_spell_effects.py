@@ -349,6 +349,15 @@ class BeamTests(EffectTestCase):
         self.assertEqual([event for event in self.battle.events if event.kind == "spell_bolt_launch"], [])
 
 
+    def test_bolt_ground_heights_round_half_up(self):
+        """bf003_playtest 8.5: 40.6 -> 41, 41.4 -> 41, 41.6 -> 42, n + 0.5 -> n + 1."""
+        self.make()
+        cases = {40.6: 41, 41.4: 41, 41.6: 42, 9.5: 10, 9.9: 10}
+        for ground, whole in cases.items():
+            self.battle.ground_height = lambda x, y, g=ground: g
+            self.assertEqual(spell_effects._whole_ground(self.battle, 0, 0), whole)
+
+
 class MagicalHitTests(EffectTestCase):
     def setUp(self):
         self.make(unit("E", 0, 400, toughness=3, wounds=5, psychology=frozenset({"MagicResistent"})))
