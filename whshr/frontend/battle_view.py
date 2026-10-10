@@ -498,6 +498,8 @@ class BattleView(SceneView[BattleScene]):
         if (self.order_mode.startswith("item:") and repeat_item
                 and self.scene.battle.event_bus.power.player >= 1):
             return (("item_target", self.order_mode[5:], *target_point),)
+        if self.order_mode == "move" and ground_point is None:
+            return ()
         mode, self.order_mode = self.order_mode, None
         self._set_cursor("default")
         self.hud.order_completed()
@@ -560,8 +562,10 @@ class BattleView(SceneView[BattleScene]):
             if scene_depth is not None:
                 hits = {identifier: hit for identifier, hit in hits.items()
                         if hit[2] - SPRITE_DEPTH_BIAS < scene_depth}
-        return [(regiment, point) for regiment, point, _depth in sorted(
-            hits.values(), key=lambda hit: hit[2], reverse=True)]
+        # Equal-depth sprites use a strict depth test: the first emitted regiment owns
+        # the pixel. Return hits bottom-to-top, with that regiment last in a tie.
+        return [(regiment, point) for _order, (regiment, point, _depth) in sorted(
+            enumerate(hits.values()), key=lambda ordered: (-ordered[1][2], -ordered[0]))]
 
     def _select_figure_hit(self, hits: list[tuple[Regiment, tuple[float, float]]]) -> str | None:
         """Apply the minimap's promotion and cycling rule to a visible figure stack."""

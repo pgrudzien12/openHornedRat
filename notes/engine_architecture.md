@@ -303,7 +303,9 @@ constant, and models walk to their own formation slot rather than teleporting wi
   in the formation are no longer hit areas. A click on a figure can still select or target it when
   the ground ray misses. If multiple regiments' figures overlap, plain selection uses the same
   cycling rule as minimap markers (the selected unit is promoted in the selection stack), while
-  an order targets the nearest visible figure in the stack. Point-targeted items use the hit
+  an order targets the topmost visible figure in the stack (the first emitted sprite wins an
+  equal-depth tie). A Move click needs a ground point even when it hits a figure, and keeps
+  the order armed if the ground ray misses. Point-targeted items use the hit
   figure's world position. Click-time depth checks against opaque terrain, scenery and active
   effect meshes use the same sprite depth bias as rendering; hidden figures are excluded before
   cycling, while overlapping figures remain available.

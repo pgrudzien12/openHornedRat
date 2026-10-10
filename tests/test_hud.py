@@ -1322,16 +1322,26 @@ class FigurePickTests(unittest.TestCase):
         pixel = self._pixel(view, *regiments[0].positions[0])
         projection = view.camera.projection(640, 480, 1000, 800, 0.0)
         self.assertEqual([r.identifier for r, _ in view._figure_hits(pixel, projection)],
-                         ["first", "second", "third"])
+                         ["third", "second", "first"])
         with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
             selected = []
             for _ in range(3):
                 identifier = view._ground_click(pixel)[0][1]
                 selected.append(identifier)
                 view.scene.selected_id = identifier
-            self.assertEqual(selected, ["third", "first", "second"])
+            self.assertEqual(selected, ["first", "third", "second"])
             view.order_mode = "attack"
-            self.assertEqual(view._ground_click(pixel), (("attack", "third"),))
+            self.assertEqual(view._ground_click(pixel), (("attack", "first"),))
+
+    def test_move_click_on_a_figure_without_ground_keeps_the_order_armed(self):
+        regiment = Regiment("target", "Target", 500, 400, 0, Side.PLAYER, models=1)
+        view = self._view([regiment])
+        view.order_mode = "move"
+        pixel = self._pixel(view, *regiment.positions[0])
+        with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
+            self.assertEqual(view._ground_click(pixel), ())
+        self.assertEqual(view.order_mode, "move")
+        view.hud.order_completed.assert_not_called()
 
     def test_spell_point_uses_the_hit_figures_world_position(self):
         regiment = Regiment("target", "Target", 500, 400, 0, Side.ENEMY, models=1)
