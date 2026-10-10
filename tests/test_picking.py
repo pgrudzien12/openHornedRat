@@ -56,6 +56,21 @@ class MeshDepthTests(unittest.TestCase):
         assert depth is not None
         self.assertAlmostEqual(depth, expected, places=4)
         self.assertIsNone(mesh_depth_at(projection, *pixel, vertices, transparent, (1, 1)))
+        self.assertIsNone(mesh_depth_at(projection, *pixel, vertices, opaque, (1, 1), far=expected - 1))
+
+    def test_mesh_in_front_of_renderer_near_plane_does_not_occlude(self):
+        projection = _looking_down()
+        pixel = (320.0, 240.0)
+        origin, direction = screen_ray(projection, *pixel)
+        centre = tuple(origin[i] + 0.2 * direction[i] for i in range(3))
+        vertices = array("f")
+        for sx, sy in ((-1, -1), (1, -1), (0, 1)):
+            vertices.extend((*(centre[i] + sx * projection.right[i] + sy * projection.up[i]
+                               for i in range(3)), 0.25, 0.25, 0.0, 1.0))
+        opaque = [bytes((100, 100, 100, 255))]
+
+        self.assertIsNotNone(mesh_depth_at(projection, *pixel, vertices, opaque, (1, 1)))
+        self.assertIsNone(mesh_depth_at(projection, *pixel, vertices, opaque, (1, 1), near=0.5))
 
 
 class PickGroundTests(unittest.TestCase):

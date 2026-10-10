@@ -1333,6 +1333,17 @@ class FigurePickTests(unittest.TestCase):
             view.order_mode = "attack"
             self.assertEqual(view._ground_click(pixel), (("attack", "first"),))
 
+    def test_selection_elsewhere_in_an_overlap_does_not_replace_the_top_figure(self):
+        regiments = [Regiment(name, name, 500, 400, 0, Side.PLAYER, models=1)
+                     for name in ("first", "second", "third")]
+        view = self._view(regiments)
+        view.scene.selected_id = "second"  # selected through the minimap or keyboard
+        pixel = self._pixel(view, *regiments[0].positions[0])
+        with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
+            self.assertEqual(view._ground_click(pixel), (("select", "first"),))
+            view.scene.selected_id = "first"
+            self.assertEqual(view._ground_click(pixel), (("select", "third"),))
+
     def test_move_click_on_a_figure_without_ground_keeps_the_order_armed(self):
         regiment = Regiment("target", "Target", 500, 400, 0, Side.PLAYER, models=1)
         view = self._view([regiment])

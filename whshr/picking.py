@@ -86,12 +86,14 @@ def pick_ground(projection: "Projection", pixel_x: float, pixel_y: float, height
 
 def mesh_depth_at(projection: "Projection", pixel_x: float, pixel_y: float,
                   vertices: Sequence[float], texture_layers: Sequence[bytes],
-                  texture_size: tuple[int, int]) -> float | None:
+                  texture_size: tuple[int, int], near: float = 0.0,
+                  far: float = math.inf) -> float | None:
     """Nearest opaque terrain/scenery fragment at a screen pixel, in view-space depth.
 
     The vertex stream and RGBA layers are the ones used by the mesh pipeline. Test texture
     opacity at the ray/triangle crossing, so a hole in scenery does not mask figures behind it.
-    ``pixel_x`` and ``pixel_y`` name a screen pixel, as in ``screen_ray``.
+    ``pixel_x`` and ``pixel_y`` name a screen pixel, as in ``screen_ray``. The
+    clip distances must match the mesh pipeline when comparing against visible sprites.
     """
     origin, direction = screen_ray(projection, pixel_x, pixel_y)
     width, height = texture_size
@@ -121,7 +123,7 @@ def mesh_depth_at(projection: "Projection", pixel_x: float, pixel_y: float,
         if distance <= 0.0:
             continue
         depth = projection.view(ox + distance * dx, oy + distance * dy, oz + distance * dz)[2]
-        if depth <= projection.near or (nearest is not None and depth >= nearest):
+        if depth < near or depth > far or (nearest is not None and depth >= nearest):
             continue
         layer = int(vertices[start + 5])
         if not 0 <= layer < len(texture_layers):

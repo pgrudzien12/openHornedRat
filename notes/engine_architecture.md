@@ -307,7 +307,7 @@ constant, and models walk to their own formation slot rather than teleporting wi
   equal-depth tie). A Move click needs a ground point even when it hits a figure, and keeps
   the order armed if the ground ray misses. Point-targeted items use the hit
   figure's world position. Click-time depth checks against opaque terrain, scenery and active
-  effect meshes use the same sprite depth bias as rendering; hidden figures are excluded before
+  effect meshes use the renderer's near and far clip planes and sprite depth bias; hidden figures are excluded before
   cycling, while overlapping figures remain available.
 - **Collisions**: `Battle._resolve_collisions`, run once per tick after movement, is a simplified,
   deterministic push-apart rule (game_rules.md, "Routes, collisions and visibility"): when the bounding circles

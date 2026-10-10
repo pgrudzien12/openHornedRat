@@ -540,7 +540,7 @@ class BattleView(SceneView[BattleScene]):
                 frame = sheet.frames[sheet.frame_index(action, phase, sprite_direction(yaw, facing))]
                 foot = projection.view(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH)
                 depth = foot[2]
-                if depth <= projection.near:
+                if depth < NEAR or depth > FAR:
                     continue
                 foot_x, foot_y, _ = projection.project(foot)
                 scale = SPRITE_PIXEL_WORLD_UNITS / WORLD_PER_MESH * projection.focal_length / depth
@@ -553,10 +553,10 @@ class BattleView(SceneView[BattleScene]):
                         hits[regiment.identifier] = (regiment, (x, y), depth)
         if hits:
             scene_depth = picking.mesh_depth_at(projection, pixel[0], pixel[1], field.vertices,
-                                                field.texture_layers, field.texture_size)
+                                                field.texture_layers, field.texture_size, NEAR, FAR)
             if field.effect_meshes:
                 effects_depth = picking.mesh_depth_at(projection, pixel[0], pixel[1], self._effect_vertices(),
-                                                      field.texture_layers, field.texture_size)
+                                                      field.texture_layers, field.texture_size, NEAR, FAR)
                 if effects_depth is not None:
                     scene_depth = min(scene_depth, effects_depth) if scene_depth is not None else effects_depth
             if scene_depth is not None:
@@ -573,14 +573,15 @@ class BattleView(SceneView[BattleScene]):
         order[:] = [identifier for identifier in order if identifier in self.scene.battle.regiments]
         order.extend(regiment.identifier for regiment, _point in hits if regiment.identifier not in order)
         selected = self.scene.selected_id
-        if selected in order:
-            order.remove(selected)
-            order.append(selected)
         self._figure_order = order
         rank = {identifier: index for index, identifier in enumerate(order)}
         selection_hits = sorted((regiment for regiment, _point in hits),
                                 key=lambda regiment: rank[regiment.identifier])
-        return select_regiment_hit(selection_hits, selected)
+        choice = select_regiment_hit(selection_hits, selected)
+        if choice is not None:
+            order.remove(choice)
+            order.append(choice)
+        return choice
 
     def _minimap_click(self, pixel: Sequence[float], append: bool = False,
                        repeat_item: bool = False) -> Sequence[SceneEvent]:
