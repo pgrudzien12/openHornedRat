@@ -127,7 +127,7 @@ from phases 1–3.
 - **Original mission DLLs**: never execute `SCRIPT/BFxxx.DLL` as native code. Read their bytecode tables
   as data and implement the original interpreter for vanilla compatibility. New mission content will use
   a readable normalized mission format once the opcode/event model is established.
-- Audio in the engine: MIDI through the user's GM soundfont + the converted SBK in bank 1 (GM file
+- Planned audio in the engine: MIDI through the user's GM soundfont + the converted SBK in bank 1 (GM file
   preferred, FM name rule `name[:6] + 'FM'`); SFX = PCM resampled to `pitch`, volume/pan, loop/list/random,
   priority channels.
 
@@ -181,8 +181,10 @@ features. Its broad GitHub research tickets have been retired. The source notes 
 unknown original-game details; investigate one only when a shipped feature or reproducible defect
 needs the answer. Unused fields and resources do not require research solely to complete a table.
 
-Music named by glue scripts, window records and cutscene data is loaded by name. A manual catalogue
-of where every other track plays is not required. The engine also uses its own campaign save format;
+Music playback should select tunes by the names in glue scripts, window records and cutscene data.
+The current frontend loads installed `.MID` files for glue `playmidi` commands; window-record and
+cutscene music playback are not yet wired. A manual catalogue of where every other track plays is
+not required. The engine also uses its own campaign save format;
 importing or exporting the original game's `savegame.N` files is out of scope.
 
 The active exceptions are [cutscene event playback](https://github.com/pgrudzien12/openHornedRat/issues/41),

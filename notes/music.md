@@ -13,7 +13,7 @@ GOG installation; nothing from the game is in the repo (`extracted/music/` is gi
 | All 40 `.MID` files | ✅ parsed, 0 structural errors (SMF format 1, tempo, lengths, channels, programs) |
 | Which presets come from the SBK and which from the AWE32 ROM | ✅ bank MSB 1 = SBK (every bank-1 program exists in the SBK); everything else = 1 MB GM ROM |
 | GM vs FM variants (`XXXXXXFM.MID`) | ✅ naming rule verified on all files; selection by `MIDI.DLL` (strings) |
-| Playback selection | ✅ Glue scripts and cutscene data name the music they use; the engine loads those names directly. Locating every other track is not required. |
+| Playback selection | ✅ Tune names in glue scripts, window records and cutscene data are documented; the runtime currently plays only glue `playmidi` names. Locating every other track is not required. |
 | Full audio render with original sound | ✅ all 21 GM tracks rendered with FluidSynth (FluidR3_GM + the converted SBK in bank 1) at one uniform gain, no clipped samples; the project owner listened to and confirmed both the SBK stems and the full renders |
 
 ## Summary (ready to paste into `FORMATS.md`)
@@ -228,8 +228,10 @@ steps once the tools exist.
 
 ## Research boundary
 
-Issue #39 is closed. The engine uses tune names supplied by glue scripts, window records and
-cutscene data; `win`, `lose` and `tactical` are documented in `notes/native-windows.md` §9.
+Issue #39 is closed. Glue scripts, window records and cutscene data supply tune names for
+data-driven playback; `win`, `lose` and `tactical` are documented in `notes/native-windows.md` §9.
+The current frontend plays glue `playmidi` effects; it does not yet use window-record music or
+schedule cutscene MIDI.
 The locations of unreferenced tracks and the original AWE32's exact filter, envelope and drum-kit
 choices are not prerequisites for playback. Investigate a music discrepancy when a shipped scene
 actually plays the wrong tune or sounds wrong with the supported renderer.
@@ -238,6 +240,7 @@ actually plays the wrong tune or sounds wrong with the supported renderer.
 
 Item 1.2 is ✅: the MIDI and SBK formats, bank mapping, FluidSynth renders of all 21 GM tracks,
 and listening review are complete. Cutscene music references and glue music commands are documented
-above and in their respective topic notes. The engine uses tune names from the shipped data and the
-user's GM soundfont with the converted SBK in bank 1; unresolved SF1 filter and envelope units are
-outside the current playback scope.
+above and in their respective topic notes. Offline FluidSynth verification used a GM soundfont
+with the converted SBK in bank 1. That combination is the intended runtime design; currently the
+frontend passes installed `.MID` files to `pygame.mixer.music` without configuring those banks.
+Unresolved SF1 filter and envelope units are outside the current playback scope.
