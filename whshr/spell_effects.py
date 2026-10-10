@@ -797,6 +797,8 @@ def _height_above_ground(battle: Battle, effect: Effect, bolt: Bolt, x: float, y
     start_level = math.trunc(battle.ground_height(*effect.start)) + bolt.launch_height
     end_level = math.trunc(battle.ground_height(*effect.dest)) + math.trunc(effect.aim_height)
     # bf003_playtest 8.2: line(r) = trunc((startLevel - endLevel) r / N) + endLevel, whole numbers throughout.
+    # PROVISIONAL: 8.2 says the original's ground heights are whole numbers but not how a fractional terrain sample
+    # becomes one; this engine truncates toward zero (asked of the researcher).
     line = math.trunc((start_level - end_level) * effect.remaining / effect.steps) + end_level if effect.steps \
         else end_level
     return bolt.launch_height + line - math.trunc(battle.ground_height(x, y))

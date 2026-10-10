@@ -424,7 +424,8 @@ class SpearAndFireballTests(EffectTestCase):
         self.assertEqual(self.messages(2004), [])
 
     def test_fireball_is_not_removed_on_its_first_tick_when_ground_under_the_start_rises_a_fraction(self):
-        """bf003_playtest 3.2 vector 2: height 1 - 0.0001 with the arc included, so the bolt flies on and tests."""
+        """bf003_playtest 3.2 vector 2: the ground under the start rises a fraction above the launch line's ground;
+        with whole ground heights (8.2) and the arc included, the bolt flies on and tests."""
         self.radii = {"E": 10}
         self.make(unit("E", 0, 300))
         self.battle.ground_height = lambda x, y: 16.0001 if (x, y) == (0, 0) else 16.0
