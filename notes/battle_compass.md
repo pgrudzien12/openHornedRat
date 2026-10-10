@@ -59,6 +59,15 @@ comes back after a portrait pop-up. Nothing is drawn while a portrait occupies t
 | 270 | 3π/2 | 191 | 18 | 63 | **E** (64) |
 | 359 | 6.266 | 254 | 81 | 126 | S (−2 px) |
 
+**Playtest check (original game).** North is up on the minimap. With the camera looking from the bottom of the minimap
+towards the top (towards its look-at mark), the compass shows **N** in the middle. That is θ = π (yaw 180°): the
+camera looks along +Y, which is facing 0 in the game's unit facings (`battle_viewer.md`: `H = θ·512/(2π) + 256` → 0).
+At that heading `src_x = 210`, and window column j shows tape x `(210 + j) mod 256`. So **N (tape x 0/256) is
+centred at window column 46**, compass-local x 17 + 46 = **63** (panel x 135). The window is 91 px wide, so its
+exact middle is column 45: N sits **1 px right of centre**, because of the 255/256 truncation. Columns 0–45 show
+NW…N's left half (tape 210–255) and columns 46–90 show N's right half…NE (tape 0–44). Turning the camera clockwise
+(seen from above) moves the tape so that E comes to the middle at yaw 270°.
+
 With θ outside 0…2π the same formula applies. A negative θ truncates toward zero before the modulo.
 
 ## 2. Wind strip (`ICONS` 106, 256 × 18: sky with clouds)
