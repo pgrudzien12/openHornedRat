@@ -22,6 +22,25 @@ class FireballVisualsTest(unittest.TestCase):
         sprites = _fly(FireballVisuals(), 1)[0]
         self.assertEqual([(s.frame, s.x, s.height) for s in sprites], [(125, 0.0, 0.0), (125, 0.0, 0.0)])
 
+    def test_trail_follows_the_report_table_for_a_bolt_flying_along_y(self):
+        visuals = FireballVisuals()
+        shown = []
+        for tick in range(4):
+            visuals.advance([Flight(1, 100.0, 100.0 + 10 * tick, 0.0)])
+            shown.append(sorted((s.frame, s.y) for s in visuals.sprites()))
+        self.assertEqual(shown[0], [(125, 100.0), (125, 100.0)])
+        self.assertEqual(shown[1], [(126, 100.0), (126, 110.0)])
+        self.assertEqual(shown[2], [(125, 110.0), (127, 100.0), (127, 120.0)])
+        self.assertEqual(shown[3], [(125, 120.0), (126, 110.0), (128, 100.0), (128, 130.0)])
+
+    def test_first_puff_shows_its_last_frame_on_the_20th_tick(self):
+        visuals = FireballVisuals()
+        for tick in range(20):
+            visuals.advance([Flight(1, 0.0, 10.0 * tick, 0.0)])
+        self.assertIn(144, [s.frame for s in visuals.sprites()])
+        visuals.advance([Flight(1, 0.0, 200.0, 0.0)])
+        self.assertNotIn(144, [s.frame for s in visuals.sprites()])
+
     def test_head_frame_cycles_125_to_128_one_per_update(self):
         visuals = FireballVisuals()
         heads = [max(s.frame for s in sprites if s.x == 10.0 * i) for i, sprites in enumerate(_fly(visuals, 9))]
@@ -34,7 +53,7 @@ class FireballVisualsTest(unittest.TestCase):
     def test_a_puff_is_left_at_the_previous_position_each_tick_moved(self):
         sprites = _fly(FireballVisuals(), 3)[-1]
         puffs = sorted((s.x, s.height) for s in sprites if s.x != 20.0)
-        self.assertEqual(puffs, [(0.0, 0.0), (0.0, 0.0), (10.0, 1.0)])  # launch puff, then one per move
+        self.assertEqual(puffs, [(0.0, 0.0), (10.0, 1.0)])  # launch puff, then one per move
 
     def test_no_new_puff_when_the_bolt_did_not_move(self):
         visuals = FireballVisuals()

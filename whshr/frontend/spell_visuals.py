@@ -46,6 +46,7 @@ class _Bolt:
     flights: int = 0
     last: tuple[float, float, float] | None = None
     flying: bool = True
+    newest: tuple[float, float] | None = None  # position of the newest puff left, even after it expired
     puffs: list[list[float]] = field(default_factory=list[list[float]])  # x, y, height, age
     explosion: list[float] | None = None  # x, y, age
 
@@ -57,7 +58,7 @@ class FireballVisuals:
     def advance(self, flights: Iterable[Flight]) -> None:
         """Step all bolt presentation state by one battle tick, given the bolts updated this tick (bf003_playtest
         8.3): the launch tick shows the head and the first puff at the start point; later ticks leave a puff at the
-        previous position when the head moved; the ending tick has no head and starts the explosion."""
+        previous position when it differs from the newest puff's; the ending tick has no head and starts the explosion."""
         for bolt in self.bolts.values():
             for puff in bolt.puffs:
                 puff[3] += 1
@@ -67,13 +68,12 @@ class FireballVisuals:
                 if bolt.explosion[2] >= EXPLOSION_FRAMES:
                     bolt.explosion = None
         for flight in flights:
-            new = flight.serial not in self.bolts
             bolt = self.bolts.setdefault(flight.serial, _Bolt())
             here = (flight.x, flight.y, flight.height)
-            if new:
-                bolt.puffs.append([*here, 0])
-            elif bolt.last is not None and bolt.last != here:
-                bolt.puffs.append([*bolt.last, 0])
+            previous = here if bolt.last is None else bolt.last  # on the launch tick the previous position is the start
+            if bolt.newest is None or previous[:2] != bolt.newest:
+                bolt.puffs.append([*previous, 0])  # bf003_playtest 8.4: compared with the newest puff, not "moved"
+                bolt.newest = (previous[0], previous[1])
             if flight.ending:
                 bolt.flying = False
                 bolt.explosion = [flight.x, flight.y, 0]
