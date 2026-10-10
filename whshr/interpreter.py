@@ -20,7 +20,7 @@ import random
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from . import animation, behaviour, buildings, combat, magic, nodes, spell_effects, visibility
+from . import animation, behaviour, buildings, combat, magic, map_objects, nodes, spell_effects, visibility
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
 from .rules import Side, side_of_code
@@ -451,7 +451,7 @@ class ScriptInterpreter:
             footprints.extend(
                 (float(obj.get("x") or 0), float(obj.get("y") or 0), float(obj.get("radius") or 0))
                 for obj in self.battle.objects
-                if "os_active" in {str(flag).casefold() for flag in obj.get("status") or ()})
+                if map_objects.steers_routes(obj))
             for x, y, radius in footprints:
                 if math.hypot(wagon.x - x, wagon.y - y) < wagon.bounding_radius() + radius and self._point_in_arc(wagon, x, y):
                     self.event_bus.queue_event(wagon.identifier, Event(code=0x27), checked=True)

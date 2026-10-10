@@ -29,7 +29,7 @@ import random
 from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from . import animation, battle_grid, formation, interpreter
+from . import animation, battle_grid, formation, interpreter, map_objects
 from .battle_events import BattleEvent
 from .rules import EXPECTED_ARMOUR_SAVE, Side, may_engage, wfb_to_hit, wfb_to_wound
 
@@ -1038,7 +1038,7 @@ def squig_landing(battle: "Battle", hopper: "Regiment") -> bool:
     point_hit = any(math.hypot(b.x - lx, b.y - ly) < b.radius for b in battle.buildings if not b.destroyed)
     point_hit = point_hit or any(
         math.hypot(float(obj.get("x") or 0) - lx, float(obj.get("y") or 0) - ly) < float(obj.get("radius") or 0)
-        for obj in battle.objects if "os_active" in {str(flag).casefold() for flag in obj.get("status") or ()})
+        for obj in battle.objects if map_objects.exists(obj))
     return engaged or point_hit
 
 

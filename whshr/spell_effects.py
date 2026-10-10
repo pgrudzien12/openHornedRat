@@ -24,7 +24,7 @@ import random
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from . import animation, combat, magic
+from . import animation, combat, magic, map_objects
 from .battle_events import BattleEvent
 from .rules import Side, wfb_to_wound
 
@@ -547,16 +547,9 @@ def _units_at(battle: Battle, x: float, y: float, height: float, excluded: str |
 
 
 def _solid_at(battle: Battle, x: float, y: float, height: float) -> bool:
-    """A solid map object containing the point at a height it reaches (A 2.3): scenery uses the unit height, area
-    objects their own (C1 0)."""
-    for obj in battle.shooting_objects:
-        status = {str(value).casefold() for value in obj.get("status") or ()}
-        if "os_solid" not in status:
-            continue
-        ox, oy = float(obj.get("x") or 0), float(obj.get("y") or 0)
-        if _d(ox, oy, x, y) < float(obj.get("radius") or 8) and height <= float(obj.get("height") or UNIT_HEIGHT):
-            return True
-    return False
+    """A map object containing the point at a height it reaches (A 2.3, notes/map_objects_and_projectiles.md 2):
+    collision objects use their `z` (80 when absent), area objects their own height."""
+    return any(map_objects.stops_projectile(obj, x, y, height) for obj in battle.shooting_objects)
 
 
 def _wound_roll(battle: Battle, unit: Regiment, strength: int, save: bool, fire: bool,

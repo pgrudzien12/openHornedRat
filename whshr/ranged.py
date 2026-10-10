@@ -9,7 +9,7 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from . import animation
+from . import animation, map_objects
 from .battle_events import BattleEvent
 from .rules import hostile_sides, wfb_to_wound
 
@@ -147,8 +147,8 @@ def _circle_entry(a: tuple[float, float], b: tuple[float, float],
 
 def _scenery_between(battle: Battle, unit: Regiment, point: tuple[float, float]) -> bool:
     for obj in battle.shooting_objects:
-        status = {str(v).casefold() for v in obj.get("status") or ()}
-        if "os_solid" not in status:
+        # PROVISIONAL (notes/map_objects_and_projectiles.md 6): the aim-line scatter uses the sight filter.
+        if not map_objects.blocks_sight(obj):
             continue
         center = (float(obj.get("x") or 0), float(obj.get("y") or 0))
         radius = float(obj.get("radius") or 8)
@@ -598,8 +598,7 @@ def _step_projectiles(battle: Battle) -> None:
                     if base <= height <= base+24:
                         hits.append((entry, unit.identifier))
             for obj in battle.shooting_objects:
-                status = {str(v).casefold() for v in obj.get("status") or ()}
-                if "os_solid" not in status:
+                if not map_objects.exists(obj):  # notes/map_objects_and_projectiles.md 2: solid not required
                     continue
                 center = (float(obj.get("x") or 0), float(obj.get("y") or 0))
                 radius = float(obj.get("radius") or 8)
@@ -608,7 +607,7 @@ def _step_projectiles(battle: Battle) -> None:
                 entry = _circle_entry(start, end, center, radius)
                 if entry is not None:
                     hx, hy = old_x+(p.x-old_x)*entry, old_y+(p.y-old_y)*entry
-                    if old_z+(p.z-old_z)*entry <= battle.ground_height(hx, hy)+24:
+                    if old_z+(p.z-old_z)*entry <= battle.ground_height(hx, hy)+map_objects.height(obj):
                         hits.append((entry, None))
         if terrain_hit is not None and (not hits or terrain_hit <= min(item[0] for item in hits)):
             continue

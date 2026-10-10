@@ -6,7 +6,7 @@ import math
 import random
 from typing import Any, Callable, Literal, cast
 
-from . import animation, battle_grid, behaviour, buildings, combat, deployment, formation, interpreter, navigation, npc_merge, ranged, visibility
+from . import animation, battle_grid, behaviour, buildings, combat, deployment, formation, interpreter, map_objects, navigation, npc_merge, ranged, visibility
 from . import magic, objectives as objective_table, spell_effects, steering
 from . import nodes as node_table
 from .battle_events import BattleEvent
@@ -759,20 +759,18 @@ class Battle:
         self.boundaries = list(boundaries)
         self.navigation_boundaries = navigation.boundaries_from_views(boundaries)
         self.objects = list(objects)
-        # Radius is a replaceable engine choice for placed furniture without a parsed footprint.
         self.scenery_names = [str(item.get("name", "")) for item in scenery]  # furniture types, in file order
-        self.shooting_objects = list(objects) + [
-            {"x": item.get("x"), "y": item.get("y"),
-             "radius": buildings.footprint_radius(str(item.get("name", ""))),
-             "status": ["os_solid"], "name": item.get("name")}
-            for item in scenery]
         # Building pseudo-units (issue #173): the building-type furniture, addressable by `building:N`.
         self.buildings: list[buildings.Building] = buildings.from_scenery(scenery)
         self.building_index: dict[str, buildings.Building] = {b.identifier: b for b in self.buildings}
-        offset = len(objects)
-        for building in self.buildings:
-            self.shooting_objects[offset + int(building.identifier[len(buildings.PREFIX):])]["building"] = (
-                building.identifier)
+        # Projectile and missile-target obstacles: the [OBJECTS] collision circles, then one entry per building.
+        # Other placed furniture (roads, trees, fences) is no map object (notes/map_objects_and_projectiles.md 1).
+        # A building entry keeps the engine's unit object height (spell_effects.UNIT_HEIGHT, 24; the original's per-type
+        # unit object height is open, ibid. 6).
+        self.shooting_objects = list(objects) + [
+            {"x": building.x, "y": building.y, "radius": buildings.footprint_radius(building.name), "height": 24.0,
+             "status": ["os_active", "os_solid"], "name": building.name, "building": building.identifier}
+            for building in self.buildings]
         # Camera rotation in 1/512 turns, set by the frontend; wagons snap to it (see set_view_angle).
         self.view_angle: float | None = None
         # Map-aligned (min x, min y, max x, max y) around what the camera shows, set by the frontend
@@ -2461,8 +2459,7 @@ class Battle:
         (notes/flight_solid_obstacles.md 3)."""
         footprints: list[steering.Footprint] = []
         for index, obj in enumerate(self.objects):
-            flags = {str(flag).casefold() for flag in obj.get("status") or ()}
-            if {"os_active", "os_solid"}.issubset(flags):
+            if map_objects.steers_routes(obj):  # notes/map_objects_and_projectiles.md 2: being solid is not required
                 footprints.append(steering.Footprint(f"object:{index}", float(obj.get("x") or 0),
                                                      float(obj.get("y") or 0), float(int(obj.get("radius") or 0))))
         target_id = self._route_target_id(regiment, order_key)
@@ -3306,8 +3303,7 @@ class Battle:
     def _correct_solid_objects(self, regiment: Regiment) -> None:
         centre = self.formation_centre(regiment)
         for obj in self.objects:
-            flags = {str(flag).casefold() for flag in obj.get("status") or ()}
-            if not {"os_active", "os_solid"}.issubset(flags):
+            if not map_objects.pushes_units(obj):
                 continue
             ox, oy = float(obj.get("x") or 0), float(obj.get("y") or 0)
             radius = float(obj.get("radius") or 0) + regiment.bounding_radius()
