@@ -214,6 +214,7 @@ LIST_AREA = (200, 64)
 LIST_ROW_X, LIST_ROW_Y, LIST_ROW_STEP, LIST_ROW_SIZE = 205, 72, 19, (232, 18)
 SPELL_NAME_WIDTH, SPELL_COST_WIDTH = 190, 20
 ROW_FRAMES = (207, 206)  # usable, unusable or held down
+SPELL_TEXT_COLOR = (0, 0, 0)  # black on the light row frame (playtest: light text was barely readable)
 # Status marks, drawn at the row's left and stepped further left as more apply. PROVISIONAL: the step is the mark's
 # own width.
 MARK_ACTIVE, MARK_SELECTED, MARK_CAST_ORDERED = 210, 209, 208
@@ -1009,8 +1010,10 @@ class Hud:
         for index, code in enumerate(regiment.spells[:5]):
             while len(self._spell_labels) <= index:
                 self._spell_labels.append(
-                    (self.gpu.text((SPELL_NAME_WIDTH, 18), self.gpu.battle_log_font, background=None, padding=0),
-                     self.gpu.text((SPELL_COST_WIDTH, 18), self.gpu.battle_log_font, background=None, padding=0)))
+                    (self.gpu.text((SPELL_NAME_WIDTH, 18), self.gpu.battle_log_font, color=SPELL_TEXT_COLOR,
+                                   background=None, padding=0),
+                     self.gpu.text((SPELL_COST_WIDTH, 18), self.gpu.battle_log_font, color=SPELL_TEXT_COLOR,
+                                   background=None, padding=0)))
             name_label, cost_label = self._spell_labels[index]
             text_height = name_label.set_lines((self._spell_name(code),))[1]
             cost_label.set_lines((str(magic.cost(code)),))
@@ -1018,7 +1021,7 @@ class Hud:
             pressed = self.pressed == f"spell:{code}"
             rect = self._list_row_rect(index)
             self._draw_panel(self._icon(ROW_FRAMES[0] if usable and not pressed else ROW_FRAMES[1]), rect.x, rect.y)
-            tint = (1, 1, 1, 1) if usable else (0.45, 0.45, 0.45, 0.85)
+            tint = (1, 1, 1, 1) if usable else (1, 1, 1, 0.5)  # black text cannot be darkened: fade it instead
             # The text is centred vertically inside the row frame's border, and follows a held row down by 1 px.
             text_y = rect.y + (rect.height - text_height) // 2 + int(pressed and usable)
             text_x = rect.x + 5 + int(pressed and usable)
