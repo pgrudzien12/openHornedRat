@@ -37,9 +37,8 @@ this project".
   - **FluidSynth** and **mpg123**, both **LGPL 2.1**, on Linux and macOS -- covered by the
     same §6(b) dynamic-linking argument as pygame-ce itself;
   - **libsndfile** (Linux and macOS) and **ALSA** `libasound` (Linux only), which are
-    LGPL-2.1-or-later upstream. pygame-ce's source distribution carries no license text for
-    these two, so this rests on the upstream projects' published licenses and is listed
-    under "Open items" for re-checking against their release tarballs;
+    LGPL-2.1-or-later upstream. Their release license texts and copyright notices are
+    included below;
   - **FreeType**, which pygame-ce's build uses under its permissive **FreeType License
     (FTL)** rather than the alternative GPLv2 option.
 - **PortMidi** is licensed under the **Apache License 2.0** (pygame-ce's `LICENSE.portmidi.txt`).
@@ -82,8 +81,8 @@ Shared by both platforms (Linux ships them as `lib<name>-<hash>.so.*` in `pygame
 | `libportmidi` | Apache License 2.0 | text in `packaging/licenses/Apache-2.0.txt` |
 | `libfluidsynth` | **LGPL 2.1** | verified from pygame-ce's `LICENSE.fluidsynth.txt` |
 | `libmpg123` | **LGPL 2.1** | verified from pygame-ce's `LICENSE.mpg123.txt` |
-| `libsndfile` | **LGPL-2.1-or-later** (upstream) | not verified against a shipped license text; see Open items |
-| `libasound` (Linux only) | **LGPL-2.1-or-later** (upstream ALSA) | not verified against a shipped license text; see Open items |
+| `libsndfile` | **LGPL-2.1-or-later** | Release source grants version 2.1 or later; notice and full text below |
+| `libasound` (Linux only) | **LGPL-2.1-or-later** | Release source grants version 2.1 or later; notice and full text below |
 | `libz` (macOS only, zlib-ng build) | zlib License | |
 
 The license texts pygame-ce 2.5.8 ships for these libraries (`docs/licenses/` in its source
@@ -97,36 +96,57 @@ distribution) are included unchanged in `packaging/licenses/third-party/` and in
 | `LICENSE.png.txt`, `LICENSE.jpeg.txt`, `LICENSE.tiff.txt`, `LICENSE.webp.txt` | libpng, libjpeg(-turbo), libtiff, libwebp (and libsharpyuv) |
 | `LICENSE.ogg-vorbis.txt`, `LICENSE.opus.txt`, `LICENSE.opusfile.txt`, `LICENSE.FLAC.txt` | Ogg, Vorbis, Opus, opusfile, FLAC |
 | `LICENSE.fluidsynth.txt`, `LICENSE.mpg123.txt` | FluidSynth, mpg123 (LGPL 2.1) |
+| `LICENSE.sdl2_ttf.txt` | SDL2_ttf |
+| `LICENSE.harfbuzz.txt` | HarfBuzz |
+| `LICENSE.brotli.txt` | brotli |
+| `LICENSE.wavpack.txt` | WavPack |
+| `LICENSE.libxmp.txt` | libxmp |
+| `LICENSE.libsndfile.txt`, `LICENSE.alsa.txt` | libsndfile and ALSA `libasound` (LGPL 2.1 text) |
 
-PortMidi's text is `packaging/licenses/Apache-2.0.txt`. pygame-ce ships no text for **SDL2_ttf,
-HarfBuzz, brotli, WavPack, libxmp, libsndfile and ALSA**; those are listed under "Open items".
+PortMidi's text is `packaging/licenses/Apache-2.0.txt`. The additional texts above are from
+these upstream releases (the release identifies the source of the notice text, not necessarily
+the version of a native binary in a pygame-ce wheel):
+
+| Text | Upstream release file |
+|---|---|
+| `LICENSE.sdl2_ttf.txt` | [SDL_ttf 2.24.0 `LICENSE.txt`](https://raw.githubusercontent.com/libsdl-org/SDL_ttf/release-2.24.0/LICENSE.txt) |
+| `LICENSE.harfbuzz.txt` | [HarfBuzz 10.4.0 `COPYING`](https://raw.githubusercontent.com/harfbuzz/harfbuzz/10.4.0/COPYING) |
+| `LICENSE.brotli.txt` | [brotli 1.1.0 `LICENSE`](https://raw.githubusercontent.com/google/brotli/v1.1.0/LICENSE) |
+| `LICENSE.wavpack.txt` | [WavPack 5.8.1 `COPYING`](https://raw.githubusercontent.com/dbry/WavPack/5.8.1/COPYING) |
+| `LICENSE.libxmp.txt` | [libxmp 4.6.3 `docs/COPYING`](https://raw.githubusercontent.com/libxmp/libxmp/libxmp-4.6.3/docs/COPYING) |
+| `LICENSE.libsndfile.txt` | [libsndfile 1.2.2 `COPYING`](https://raw.githubusercontent.com/libsndfile/libsndfile/1.2.2/COPYING) |
+| `LICENSE.alsa.txt` | [alsa-lib 1.2.13 `COPYING`](https://raw.githubusercontent.com/alsa-project/alsa-lib/v1.2.13/COPYING) |
+
+The libsndfile 1.2.2 source header credits Erik de Castro Lopo (1999–2018) and permits
+LGPL version 2.1 or any later version. The alsa-lib 1.2.13 PCM source header credits Jaroslav
+Kysela (1998) and Abramo Bagnara (2000) and grants the same version choice. Their `COPYING`
+files supply the complete LGPL 2.1 text; this is why both libraries remain classified as
+LGPL-2.1-or-later rather than LGPL-2.1-only.
 
 ## Python, Tcl/Tk and PyInstaller
 
 - **CPython** (interpreter, standard library) is licensed under the **PSF License
   Agreement** (https://docs.python.org/3/license.html), a permissive license compatible with
-  GPLv3. It is bundled in every package.
+  GPLv3. Its complete license and copyright notices are in
+  `packaging/licenses/third-party/LICENSE.python.txt`
+  ([CPython 3.12.12 `LICENSE`](https://raw.githubusercontent.com/python/cpython/v3.12.12/LICENSE)).
 - **Tcl/Tk** (`_tkinter`'s libraries, used by the launcher window) is under the **Tcl/Tk
   License**, a BSD-style permissive license (https://www.tcl-lang.org/software/tcltk/license.html).
+  Linux's uv Python bundle uses Tcl/Tk 9.0; `LICENSE.tcl-9.0.txt` and `LICENSE.tk-9.0.txt`
+  contain their separate notices from [Tcl 9.0.2](https://raw.githubusercontent.com/tcltk/tcl/core-9-0-2/license.terms)
+  and [Tk 9.0.2](https://raw.githubusercontent.com/tcltk/tk/core-9-0-2/license.terms). Windows and
+  macOS use Tcl/Tk 8.6; `LICENSE.tcl-8.6.txt` and `LICENSE.tk-8.6.txt` contain the corresponding
+  notices from [Tcl 8.6.15](https://raw.githubusercontent.com/tcltk/tcl/core-8-6-15/license.terms)
+  and [Tk 8.6.15](https://raw.githubusercontent.com/tcltk/tk/core-8-6-15/license.terms). The Tcl
+  and Tk texts retain their distinct copyright notices.
 - **PyInstaller** (the freezing tool) is GPL-2.0-or-later with an exception that explicitly
   allows the executables it produces, including its bootloader, to be distributed under any
   license, so it places no obligation on the packages.
 
-## Open items
-
-These are known gaps in the audit. Items 1 and 2 must be closed before the first public release
-(the permissive licenses require their notice text to accompany binary redistributions):
-
-1. Obtain and ship the license texts of the libraries pygame-ce ships none for -- **SDL2_ttf,
-   HarfBuzz, brotli, WavPack, libxmp, libsndfile** and **ALSA** `libasound` -- from their upstream
-   release tarballs, and at the same time re-check the licenses recorded above for **libsndfile**
-   and **ALSA** (listed as LGPL-2.1-or-later from the projects' published licenses, not from a
-   shipped text).
-2. The PSF license and the Tcl/Tk license each require their copyright notice and license
-   text to accompany binary redistributions. They are only referenced by link here; the texts
-   should be shipped with the packages (taken from the exact interpreter the build uses).
-3. When `requirements-engine.txt` changes, re-run the check in `tests/test_packaging_notices.py`
-   and update the tables above.
+The license files are installed with every package alongside this notice: Windows via
+`installer.iss`, and Linux/macOS via their respective package recipes. When
+`requirements-engine.txt` changes, re-run `tests/test_packaging_notices.py` and update the
+tables above.
 
 ## pygame-ce (LGPL 2.1)
 
