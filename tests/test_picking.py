@@ -2,7 +2,7 @@ import unittest
 from array import array
 
 from whshr.battle3d import Projection
-from whshr.picking import intersect_ground, mesh_depth_at, pick_ground, screen_ray
+from whshr.picking import convex_hull, inside_convex, intersect_ground, mesh_depth_at, pick_ground, screen_ray
 
 
 def _flat(height):
@@ -99,6 +99,18 @@ class PickGroundTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             pick_ground(projection, 320, 240, _flat(0.0))
+
+
+class ConvexOutlineTests(unittest.TestCase):
+    def test_the_hull_keeps_the_outer_corners_and_contains_the_gap_between_them(self):
+        hull = convex_hull([(0, 0), (4, 0), (0, 4), (4, 4), (2, 2), (2, 0)])
+        self.assertEqual(sorted(hull), [(0, 0), (0, 4), (4, 0), (4, 4)])
+        self.assertTrue(inside_convex((2, 1), hull))
+        self.assertTrue(inside_convex((4, 2), hull))  # on the edge
+        self.assertFalse(inside_convex((5, 2), hull))
+
+    def test_fewer_than_three_corners_contain_nothing(self):
+        self.assertFalse(inside_convex((1, 0), convex_hull([(0, 0), (2, 0), (1, 0)])))
 
 
 if __name__ == "__main__":

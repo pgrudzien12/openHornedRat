@@ -1258,6 +1258,48 @@ class FigurePickTests(unittest.TestCase):
                    return_value=(500 / WORLD_PER_MESH, 400 / WORLD_PER_MESH)):
             self.assertEqual(view._ground_click(pixel), (("select", "player"),))
 
+    def test_a_click_between_the_figures_of_a_unit_selects_it(self):
+        regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=2)
+        view = self._view([regiment])
+        regiment.positions[:] = [(480, 400), (520, 400)]
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+        between = self._pixel(view, 500, 400)
+
+        self.assertEqual([(r.identifier, point) for r, point in view._figure_hits(between, projection)],
+                         [("player", (480, 400))])
+        with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
+            self.assertEqual(view._ground_click(between), (("select", "player"),))
+
+    def test_a_click_outside_the_outline_of_the_figures_does_not_select(self):
+        regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=2)
+        view = self._view([regiment])
+        regiment.positions[:] = [(480, 400), (520, 400)]
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+
+        self.assertEqual(view._figure_hits(self._pixel(view, 560, 400), projection), [])
+        self.assertEqual(view._figure_hits(self._pixel(view, 500, 400, row=-4), projection), [])
+
+    def test_a_figure_of_another_unit_beats_the_outline_around_it(self):
+        outer = Regiment("outer", "Outer", 500, 400, 0, Side.PLAYER, models=2)
+        inner = Regiment("inner", "Inner", 500, 400, 0, Side.PLAYER, models=1)
+        view = self._view([outer, inner])
+        outer.positions[:] = [(460, 400), (540, 400)]
+        inner.positions[:] = [(500, 400)]
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+
+        hits = view._figure_hits(self._pixel(view, 500, 400), projection)
+
+        self.assertEqual([r.identifier for r, _point in hits], ["outer", "inner"])
+        with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
+            self.assertEqual(view._ground_click(self._pixel(view, 500, 400)), (("select", "inner"),))
+
+    def test_a_single_figure_stays_pixel_exact(self):
+        regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=1)
+        view = self._view([regiment], pixels=bytes([1, 1, 1, 1, 0, 1, 1, 1, 1]))
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+
+        self.assertEqual(view._figure_hits(self._pixel(view, 500, 400), projection), [])
+
     def test_empty_footprint_and_transparent_sprite_pixel_do_not_select(self):
         regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=1)
         view = self._view([regiment], pixels=bytes([1, 1, 1, 1, 0, 1, 1, 1, 1]))

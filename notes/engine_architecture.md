@@ -280,7 +280,9 @@ constant, and models walk to their own formation slot rather than teleporting wi
   be selected for inspection. The view reads the battle's figure positions and state for hit
   testing, then sends scene events without changing battle state itself. `Battle.regiment_at(x, y)`
   remains a ground-footprint query for other callers, not the battlefield figure picker.
-- **Controls** (`frontend/battle_view.py`): left-click hit-tests the visible figures under the cursor;
+- **Controls** (`frontend/battle_view.py`): left-click hit-tests the visible figures under the cursor (an opaque
+  sprite pixel, or, for a unit of two or more figures, anywhere inside the screen outline of its figures' sprites so
+  that a click between them counts; a figure under the cursor beats another unit's outline);
   the picked regiment (player or enemy) is selected (a player regiment tints yellow in the sprite
   shader, a per-instance `selected` flag blended into the palette colour; an enemy regiment shows
   only its HUD readout/banner/minimap highlight, never orders - `notes/game_rules.md`'s "Player
