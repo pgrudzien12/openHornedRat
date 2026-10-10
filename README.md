@@ -153,6 +153,39 @@ The **Options** button opens audio levels for Music, Dialogue, and Sound Effects
 
 Battle sessions create a JSON Lines log in `logs/` by default. Attach the relevant log to a bug report when possible; it helps us reproduce deterministic battle behaviour. You can begin directly in the first battle for a quick test with `--battle BF001`.
 
+### Automated battle captures
+
+`battle-auto` keeps one hidden battle open and accepts one JSON command per line on stdin. It returns
+one JSON response per command on stdout. It uses the same battle scene and GPU view as the normal
+engine and advances one 100 ms simulation update per requested tick. For example:
+
+```sh
+.venv/bin/python -m whshr battle-auto /path/to/WARFB --battle BF001
+{"op":"state"}
+{"op":"capture","path":"samples/bf001-start.png"}
+{"op":"order","event":["start_battle"]}
+{"op":"order","event":["select","Grudgebringer<Infantry"]}
+{"op":"order","event":["attack","Clanrat_Warriors"]}
+{"op":"step","ticks":20}
+{"op":"capture","path":"samples/bf001-20.png"}
+```
+
+The `state` response lists each regiment's side, position, figures, ranks, and orders. `camera`
+accepts `{"op":"camera","values":[225,45,120]}` (yaw, pitch, distance); `target` accepts
+`{"op":"target","point":[500,500]}` in battlefield coordinates. Closing stdin ends the session.
+The automated camera is for captures; battle rules use the same camera-independent state as
+`battle-replay`, so camera changes do not alter the recorded simulation. Captures and battle logs
+contain derived game data and belong in ignored local directories.
+
+For a repeatable example pilot, run `.venv/bin/python -m scripts.auto_play_battle --ticks 200`. It reads
+the launcher-configured installation, orders active player regiments toward their nearest visible enemy,
+and writes frames, a battle log, and final state under ignored `samples/auto-play/`.
+
+Direct `--battle` entry reads the battle's own `loadmerc` `.MRC` file. It supplies the player
+units in file order and their initial figures and ranks. A battle reached through a running campaign
+instead receives the selected campaign marching army, preserving its current roster and marching order.
+The `state.player_army` field identifies which source the automated session used.
+
 ## Original game required
 
 This repository contains no original game files and never will. *Warhammer* and *Shadow of the Horned Rat* are trademarks of their respective owners. Open Horned Rat is a non-commercial fan project and is not affiliated with Games Workshop, Mindscape, GOG, or SNEG. See [LEGAL.md](LEGAL.md) for details.
