@@ -8,7 +8,7 @@ Behavioural report on the four shooting opcodes and on how a volley becomes proj
 "Figure animation" (fire tick 2…5, volley countdown), `script_animation_sound.md` §0.3 and §2 (animation request,
 `PlayUnitAnimation`/`PlayLeaderAnimation`/`IfAnimationDone`, the 113 → 121 → 116 → 115 walk-through),
 `target_queries.md` (arc, range, `TargetValid`, target point), `threat_events_nodes.md` §2 and §6 (`FindTarget`
-family, `ReactToThreat`), `script_magic.md` §0 and §4 (target point, aim-at-point, `TakeEventTarget`),
+family, `ReactToThreat`), `script_magic.md` §0 and §4 (target point, aim-at-point, `TakeSpellEventTarget`),
 `script_queries.md` (Query cases, `IfMachineDestroyed`, `TargetValid`) and `unit_script_control.md` (one condition
 word, `ClearEvent`). Those facts are cited, not repeated.
 
@@ -17,7 +17,7 @@ word, `ClearEvent`). Those facts are cited, not repeated.
 | state | meaning here |
 |---|---|
 | **current target** | the unit slot shared with melee and magic. Aimed at by `FireAtTarget` unless aim-at-point is on. |
-| **target point** | (x, y), "unset" while either coordinate is negative. Written by `TakeEventTarget` for a ground-point event (fire order on the ground, `FireAtNode`), by `SetCastPointNode` and by the spell chooser (`script_magic.md`). **No shooting or magic opcode ever resets it to unset**: once written it stays until overwritten. 🟡 its value at unit creation is assumed unset. |
+| **target point** | (x, y), "unset" while either coordinate is negative. Written by `TakeRangedEventTarget` for a ground-point fire event (fire order on the ground, `FireAtNode`), by `TakeSpellEventTarget` for a ground-point cast order, and by `SetCastPointNode` and the spell chooser (`script_magic.md`). **No shooting or magic opcode ever resets it to unset**: once written it stays until overwritten. 🟡 its value at unit creation is assumed unset. |
 | **aim at point** | `script_magic.md` §0. `FireAtTarget` reads it and **always clears it**. |
 | **forget target after shot** | a unit state set/cleared by scripts with `SetUnitFlags 0x4000000` / `ClearUnitFlags 0x4000000` (operand bit 0x4000000 = this state only). `FireAtTarget` clears the current target at its end when it is on. Library 154/156 clear it on every player fire order (events 30, 31, 32, 36, 37); library 155 sets it before casts (`script_magic.md`); BF017 script 2 (a mission war machine) sets it, so that machine re-selects its target before every shot. |
 | **current event** | the event being handled (`unit_script_control.md`). Its **source** field is what `FireAtTarget`/`FireAt90PercentRange` use as the **launching model**. |
@@ -161,7 +161,7 @@ full). Nothing else: no reload, range or arc test here, no target change yet.
 
 **What happens next** (library 154/156, case 33; the unit's interrupt script must reach 154 or 156 — mission
 shooters' handlers do): at the unit's next event dispatch (the start of its next tick, `game_rules.md` "Event
-dispatch is pre-emptive"): `TakeEventTarget` → current target := none, target point := the node (cond true);
+dispatch is pre-emptive"): `TakeRangedEventTarget` → current target := none, target point := the node (cond true);
 `GosubScript 110` → `ReadyToFire 1`, `InArcAndRange 1` (on the point), then the volley script 115 (or `React 14`
 when not ready / not in arc and range); then **`Restart`** — the unit's main script restarts at its restart point.
 BF014 script 7 places a `SetRestartPoint` right after each `FireAtNode` block for exactly this reason: each
@@ -261,7 +261,7 @@ Order of work inside a tick (per unit): event dispatch → script → formation 
 
 | tick | what happens |
 |---|---|
-| 0 | dispatch: event 36 → `TakeEventTarget`, `ClearUnitFlags 0x4000000`, switch to 113: `SetUnitFlags2 4` (shooting sequence busy), `React 13`, `ClearAnimationRequest`, `PushPC; Yield`. |
+| 0 | dispatch: event 36 → `TakeRangedEventTarget`, `ClearUnitFlags 0x4000000`, switch to 113: `SetUnitFlags2 4` (shooting sequence busy), `React 13`, `ClearAnimationRequest`, `PushPC; Yield`. |
 | 1 | 113 → 121 → 118 (no threat) → `ReadyToFire 0` true → `IfAnimationDone 7` true (no request) → `FindTarget` = E → `InArcAndRange 0` true → 116: `TargetValid` true → 115: **`StampReload`** (T₁), not special, `React 10`, class Archers → `PlayUnitAnimation 7 34 4`: request (34, 4, 10). Model update: all 10 models enter the shoot pose with their random skip. |
 | 2 | 121: `ReadyToFire` false (reload) → nothing. Model update: models whose fire tick is 2 reach the fire step. Say models 0 and 4: countdown 10 → 9 → **8** → event 34 (source 4) posted. |
 | 3 | dispatch: event 34 (source 4) → 111 → **`FireAtTarget`: arrow 1 from model 4 at E's centre; reload re-stamped (T₃)**; hidden state cleared. Model update: model 7 reaches its step (8 → 7). |
@@ -332,5 +332,5 @@ still happen.
 - The machine's shoot-program timing (fire step tick) for war-machine families.
 - Whether events are dispatched while the 111/112 handler waits 10 ticks.
 - Initial value of the target point (assumed unset).
-- `TakeEventTarget` also copies the event's parameter into the pending-spell slot for fire-order events
+- `TakeRangedEventTarget` also copies the event's parameter into the pending-spell slot for fire-order events
   (`script_magic.md` §4 mechanism); for shooting units this appears harmless.

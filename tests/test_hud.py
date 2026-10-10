@@ -10,6 +10,7 @@ import sys
 import types
 import unittest
 from array import array
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -42,6 +43,7 @@ except ModuleNotFoundError:
     sys.modules["zengl"] = types.ModuleType("zengl")
 
 from whshr.battle_scene import BattleScene
+from whshr.battle_events import BattleEvent
 from whshr.battlefield import WORLD_PER_MESH
 from whshr.engine import Battle, Regiment
 from whshr.frontend.battle_view import BattleView
@@ -130,6 +132,37 @@ class PanelStateTests(unittest.TestCase):
         hud.press("items")
         self.assertTrue(hud.item_list_open)
         self.assertIsNone(hud.hit_test(_panel_pos(hud, 210, 75)))
+
+    def test_used_item_has_a_check_on_the_right_until_rearmed(self):
+        from whshr import spell_effects
+
+        bearer = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf",
+                          items=("ItemPotionOfStrength", "ItemGrudgeBringer", "ItemSwordOfMight"),
+                          has_leader=True)
+        hud = _hud(regiments=[bearer])
+        hud.press("attack")
+        hud.press("items")
+        hud._item_labels = [Mock() for _ in bearer.items]
+        hud._icon = Mock(return_value=object())
+        check = object()
+        hud._used_item_check_quad = Mock(return_value=check)
+        draws = []
+        hud._draw_panel = lambda quad, *args, **kwargs: draws.append((quad, args))
+
+        hud._draw_item_list(bearer)
+        self.assertEqual([args for quad, args in draws if quad is check], [])
+
+        hud.battle.arm_item("player", "ItemPotionOfStrength")
+        hud.battle.arm_item("player", "ItemGrudgeBringer")
+        draws.clear()
+        hud._draw_item_list(bearer)
+        self.assertEqual([args for quad, args in draws if quad is check], [(420, 74), (420, 93)])
+
+        hud.battle.tick_count = spell_effects.WIND_TICKS
+        hud.battle.tick()
+        draws.clear()
+        hud._draw_item_list(bearer)
+        self.assertEqual([args for quad, args in draws if quad is check], [(420, 74)])
 
     def test_item_menu_requires_a_living_leader(self):
         bearer = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf",
@@ -1519,3 +1552,34 @@ class ItemMarkerTests(unittest.TestCase):
 
     def test_no_marker_once_picked_up(self):
         self.assertEqual(self._view({})._item_markers(), b"")
+
+
+class BattleViewEventConsumptionTests(unittest.TestCase):
+    def test_a_reaction_is_shown_once_across_rendered_frames_and_again_on_a_new_tick(self):
+        view = BattleView.__new__(BattleView)
+        reaction = BattleEvent("Grudgebringers: Engage!", "react", sender="Grudgebringers", message="Engage!")
+        battle = SimpleNamespace(events=[reaction], text_resources={})
+        view.scene = SimpleNamespace(battle=battle)
+        view.battle_log = deque(maxlen=100)
+        view.event_log = deque(maxlen=100)
+        view.log_scroll = 0
+        view._event_batch = None
+        view._event_index = 0
+        view.battle_sounds = Mock()
+
+        for _ in range(4):
+            view._consume_events()
+        self.assertEqual(list(view.battle_log), [("Grudgebringers:", "Engage!")])
+        self.assertEqual(list(view.event_log), [str(reaction)])
+        view.battle_sounds.handle.assert_called_once_with([reaction])
+
+        battle.events.append(BattleEvent("message 1005", "message", text_id=1005))
+        battle.text_resources[1005] = "Mission complete!"
+        view._consume_events()
+        self.assertEqual(list(view.battle_log)[-1], ("", "Mission complete!"))
+        self.assertEqual(len(view.battle_log), 2)
+
+        battle.events = [BattleEvent("Grudgebringers: Engage!", "react",
+                                     sender="Grudgebringers", message="Engage!")]
+        view._consume_events()
+        self.assertEqual(len(view.battle_log), 3)

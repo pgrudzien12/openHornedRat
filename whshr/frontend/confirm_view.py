@@ -69,10 +69,13 @@ class ConfirmView(DialogView[ConfirmScene]):
                     pygame.K_n: ("no",), pygame.K_ESCAPE: ("no",)}.get(event.key, ())
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.pressed = self._action_at(event.pos)
+            if self.pressed is not None:
+                self._click_cue(4)
             self.refresh()
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             action, self.pressed = self.pressed, None
             self.refresh()
             if action and action == self._action_at(event.pos):
+                self._click_cue(3)
                 return (action,)
         return ()

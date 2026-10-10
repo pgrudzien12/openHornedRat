@@ -64,11 +64,14 @@ class OptionsView(DialogView[OptionsScene]):
                 return ("options:ok",)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.pressed = self._action_at(event.pos)
+            if self.pressed is not None:
+                self._click_cue(4)
             self.refresh()
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             pressed, self.pressed = self.pressed, None
             self.refresh()
             if pressed is not None and pressed == self._action_at(event.pos):
+                self._click_cue(3)
                 return (("options:cycle", pressed),) if pressed in CHANNELS else (pressed,)
         return ()
 

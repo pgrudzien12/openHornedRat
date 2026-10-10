@@ -24,6 +24,7 @@ import zengl
 
 from .. import animation, figure_capture, picking
 from ..battle3d import SPRITE_DEPTH_BIAS
+from ..battle_events import BattleEvent
 from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, bake_mesh, sprite_direction, view_angle
 from ..camera import BattleCamera
 from ..engine import Regiment
@@ -207,6 +208,8 @@ class BattleView(SceneView[BattleScene]):
         self._figure_order: list[str] = []  # hit-stack order; selection promotes a regiment as on the minimap
         self.battle_log: deque[tuple[str, str]] = deque(maxlen=100)  # full react-message history for the HUD log panel
         self.log_scroll = 0  # lines scrolled back from the newest entry (0 = show latest)
+        self._event_batch: list[BattleEvent] | None = None
+        self._event_index = 0
 
         ctx.includes["camera"] = CAMERA_BLOCK
         self.camera_buffer = ctx.buffer(size=CAMERA.size, uniform=True)
@@ -638,7 +641,20 @@ class BattleView(SceneView[BattleScene]):
             self.camera.tilt(tilt * TILT_SPEED * seconds)
         self.scene.battle.set_view_angle(view_angle(self.camera.yaw))
         self._publish_view_rect()
-        for event in self.scene.battle.events:
+        self._consume_events()
+
+    def _consume_events(self) -> None:
+        # A battle tick replaces the list, while several rendered frames can share it. Orders may
+        # also append events between ticks, so remember both the list and the consumed position.
+        events = self.scene.battle.events
+        if events is not self._event_batch:
+            self._event_batch = events
+            self._event_index = 0
+        new_events = events[self._event_index:]
+        self._event_index = len(events)
+        if not new_events:
+            return
+        for event in new_events:
             if hasattr(event, "kind") and event.kind in {"projectile_launch", "projectile_impact"}:
                 code = event.data.get("code")
                 if isinstance(code, int) and (event.kind == "projectile_launch" or event.data.get("blast")):
@@ -662,10 +678,10 @@ class BattleView(SceneView[BattleScene]):
                 message = event.data.get("message", str(event))
                 self.battle_log.append((f"{sender}:", reaction_text(message)))
                 self.log_scroll = 0  # auto-scroll to newest on a new message
-        self.event_log.extend(str(event) for event in self.scene.battle.events)
+        self.event_log.extend(str(event) for event in new_events)
         battle_sounds: BattleSounds | None = getattr(self, "battle_sounds", None)  # tests build views without __init__
         if battle_sounds is not None:
-            battle_sounds.handle(self.scene.battle.events)
+            battle_sounds.handle(new_events)
 
     def _publish_view_rect(self) -> None:
         """Tell the battle which ground the camera shows (the "on screen" test for enemy reactions)."""

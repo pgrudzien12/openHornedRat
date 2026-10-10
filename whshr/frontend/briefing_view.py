@@ -10,6 +10,7 @@ from ..campaign_scenes import BriefingScene
 from ..controlpanel import ControlPanel, button_y, control_panel
 from ..scenes import SceneEvent
 from .bitmap_font import BitmapFont
+from .click_cues import play_click_cue
 from .gpu import Gpu, ScreenQuad, TextLabel
 from .glue_bitmap import TENT_POSITIONS, bitmap_frame_name, load_bitmap
 from .scene_view import SceneView
@@ -58,6 +59,7 @@ class BriefingView(SceneView[BriefingScene]):
 
     def __init__(self, gpu: Gpu, scene: BriefingScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
+        self.pressed_action: str | None = None
         self.font = BitmapFont(scene.font)  # glue slot 4: speech subtitles, 22 px native
         self.ui_font = BitmapFont(scene.ui_font)  # glue slot 2: map labels and panel buttons, 12 px native
         layout = scene.briefing
@@ -168,9 +170,14 @@ class BriefingView(SceneView[BriefingScene]):
     def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             action = self._panel_action(event.pos)
-            if action:
+            pressed, self.pressed_action = self.pressed_action, None
+            if action and action == pressed:
+                play_click_cue(self.options.get("installation"), 3)
                 return (action,)
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self.pressed_action = self._panel_action(event.pos)
+            if self.pressed_action is not None:
+                play_click_cue(self.options.get("installation"), 4)
             return ("fast_forward_dialogue",)
         return ()
 

@@ -244,11 +244,14 @@ class MagicBookView(NativeScreenView[MagicBookScene]):
             self.cursors.show("HANDCURSOR" if any(rect.collidepoint(point) for rect, _ in self.buttons) else None)
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.pressed = next((action for rect, action in self.buttons if rect.collidepoint(point)), None)
+            if self.pressed is not None:
+                self._click_cue(4)
             self.refresh()
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             action, self.pressed = self.pressed, None
             self.refresh()
             if action and any(rect.collidepoint(point) and candidate == action for rect, candidate in self.buttons):
+                self._click_cue(3)
                 return (action,)
         return ()
 

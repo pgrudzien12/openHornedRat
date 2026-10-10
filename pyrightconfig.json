@@ -22,7 +22,6 @@
   "reportIndexIssue": "error",
   "reportMissingImports": "error",
   "reportOptionalMemberAccess": "none",
-  "disableTaggedHints": true,
   "strict": [
     "whshr/figure_capture.py",
     "whshr/portrait_popup.py",

@@ -2347,6 +2347,16 @@ class ScriptInterpreter:
         state.cond_flags = True
         return state.pc + 1
 
+    def op_TakeRangedEventTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """Opcode 0x88 shares the target-taking rule with 0x3A, without the broken-target check."""
+        return self.op_TakeEventTarget(state, operand, script_words, unit_id, tick_count, rng)
+
+    def op_TakeSpellEventTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
+            tick_count: int, rng: random.Random) -> int | None:
+        """Opcode 0xAF shares the target-taking rule with 0x88 for spells and items."""
+        return self.op_TakeEventTarget(state, operand, script_words, unit_id, tick_count, rng)
+
     # ===== Placeholder opcodes (stubs for future implementation) =====
     # These are high-priority opcodes needed by missions but not yet integrated with the battle engine.
     # Each logs a placeholder message and continues, allowing partial mission execution.
