@@ -720,9 +720,10 @@ solely for the scroll pile. The cached count is written only when a mission wind
 (`addobject:res=<window>`) and after every mission-window release — so while the player
 is in the caravan the value is simply the last count taken on the map.
 
-### 7.5 Why the count changes while you stay in the same place ✅
+### 7.5 Why the count changes after a mission while you stay in the same place ✅
 
-After the player picks a row:
+A row click selects the mission; it does not release the mission window. The following
+release and write-back run later, when `UnwindMission` leaves the after-mission or info caravan:
 
 1. the chosen mission's `releaseflag` is remembered;
 2. the `MISS` record is copied over the selected record (this writes the taken flag back);

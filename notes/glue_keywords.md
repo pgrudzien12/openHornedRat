@@ -205,8 +205,9 @@ The engine parses `set:book`, `textx`/`texty`, `upsfx`/`downsfx`, `clickres`/`cl
 `[DEMODEFAULT]`. It uses `set:res` for hints and `res:` for hotspot actions, including named
 click speech with consecutive lines. The shipped target paths use `res:`; the `script:` fallback
 question does not block them. The `-1` hint displays current coffers. `setdemodefault` is inert
-in this build. Click sounds and `PopContext` hotspot actions remain focused implementation work
-in issues #156 and #155; parsing those names does not by itself make the behavior complete.
+in this build. Shared click-sound playback remains implementation work in issue #156.
+`PopContext` and `PopContextCheckResume` hotspot actions are implemented: they close the
+caravan overlay and restore the parked screen without releasing a mission.
 
 - 🟡 `script:` versus `res:` precedence in hotspots and mission records remains unverified for unused fallback paths.
 - 🟡 Hotspot `res=-2` special value (no hint) was read from usage, not from the hint code.
