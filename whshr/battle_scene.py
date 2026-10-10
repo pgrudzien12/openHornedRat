@@ -3,6 +3,7 @@
 
 import os
 from os import PathLike
+from collections.abc import Sequence
 from typing import Any
 from . import battle_log, behaviour, casualties, combat, figure_capture, npc_merge, payments, roster, skirmish_log
 from .assets import AssetId
@@ -122,6 +123,25 @@ class BattleScene(Scene):
         """The F2 capture still recording `unit_id`, if any (a second F2 extends it)."""
         return next((capture for capture in self.captures if capture.unit_id == unit_id and capture.running), None)
 
+    def _magic_order(self, kind: str, args: Sequence[Any]) -> None:
+        """The player's Magic order on the selected wizard (notes/player_magic_panel.md); refused orders do nothing."""
+        if self.selected_id is None:
+            return
+        try:
+            if kind == "select_spell":
+                self.battle.select_spell(self.selected_id, int(args[0]))
+            elif kind == "cast":
+                code, x, y, repeat = args
+                self.battle.order_cast(self.selected_id, int(code), x, y, repeat=bool(repeat))
+            elif kind == "clear_spells":
+                self.battle.clear_spell_selection(self.selected_id)
+            elif kind == "cancel_spell_effects":
+                self.battle.cancel_spell_effects(self.selected_id, int(args[0]))
+            else:
+                self.battle.order_wizard_target(self.selected_id, args[0])
+        except ValueError:
+            pass
+
     def close_log(self, reason: str) -> None:
         """Write the `end` record and close the log file; idempotent, so both a normal transition and
         an early frontend shutdown (the player closing the window mid-battle) can safely call it."""
@@ -202,6 +222,8 @@ class BattleScene(Scene):
                     self.battle.order_item_target(self.selected_id, args[0], args[1], args[2])
                 except ValueError:
                     pass
+        elif kind in {"select_spell", "cast", "clear_spells", "cancel_spell_effects", "wizard_target"}:
+            self._magic_order(kind, args)
         elif kind == "append_waypoint":
             if self.selected_id is not None:
                 try:
@@ -232,11 +254,15 @@ class BattleScene(Scene):
             if regiment is not None and regiment.active and not (
                     self.battle.phase == "deployment" and (regiment.routing or regiment.held)):
                 self.battle.end_deployment_drag()
+                if self.selected_id is not None and self.selected_id != identifier:
+                    self.battle.clear_spell_selection(self.selected_id)  # notes/player_magic_panel.md 5
                 self.selected_id = identifier
                 if self.battle.phase == "deployment":
                     self.battle.refresh_visibility()
         elif kind == "deselect":
             self.battle.end_deployment_drag()
+            if self.selected_id is not None:
+                self.battle.clear_spell_selection(self.selected_id)
             self.selected_id = None
         elif kind == "move_to":
             x, y = args

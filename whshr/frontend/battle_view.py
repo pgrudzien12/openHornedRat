@@ -22,12 +22,12 @@ from typing import Any
 import pygame
 import zengl
 
-from .. import animation, figure_capture, picking, spell_effects
+from .. import animation, figure_capture, magic, picking, spell_effects
 from ..battle3d import SPRITE_DEPTH_BIAS
 from ..battle_events import BattleEvent
 from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, bake_mesh, sprite_direction, view_angle
 from ..camera import BattleCamera
-from ..engine import Regiment
+from ..engine import NO_TARGET_SPELLS, Regiment
 from ..formation import SPRITE_PIXEL_WORLD_UNITS
 from ..rules import Side
 from ..battle_scene import BattleScene
@@ -349,8 +349,8 @@ class BattleView(SceneView[BattleScene]):
             action = self.hud.hit_test(event.pos)
             if action is not None:
                 self.hud.set_pressed(action)
-                if action.startswith("item:"):
-                    return ()  # item rows commit on release, so their pressed state is visible
+                if action.startswith(("item:", "spell:")):
+                    return ()  # item and spell rows commit on release, so their pressed state is visible
                 if action == "scroll_up":
                     self.log_scroll = min(self.log_scroll + 1, max(0, len(self.battle_log) - 1))
                     return ()
@@ -359,11 +359,22 @@ class BattleView(SceneView[BattleScene]):
                     return ()
                 if action in {"next_regiment", "prev_regiment"}:
                     return self._cycle_regiment(1 if action == "next_regiment" else -1)
+                # Another command, Back or Magic again clears a selected spell; nothing is refunded
+                # (notes/player_magic_panel.md 4.1, 5).
+                cleared: tuple[SceneEvent, ...] = (("clear_spells",),) if self._in_magic_mode() else ()
                 order = self.hud.press(action)
+                if order in {"magic_list", "magic_auto"}:
+                    self.order_mode = "magic" if order == "magic_auto" else None
+                    self._set_cursor("magic" if self.order_mode else "default")
+                    return (("clear_spells",),)
+                if action == "back" and cleared:
+                    self.order_mode = None
+                    self._set_cursor("default")
+                    return cleared
                 if action in {"move", "attack", "fire", "face_point"}:
                     self.order_mode = action
                     self._set_cursor(action if action != "face_point" else "move")
-                    return (("prepare_move",),) if deploying and action == "move" else ()
+                    return cleared + ((("prepare_move",),) if deploying and action == "move" else ())
                 if order is not None:
                     self.order_mode = None
                     self._set_cursor("default")
@@ -371,11 +382,11 @@ class BattleView(SceneView[BattleScene]):
                     # player can click ranks or facing adjustments multiple times in a row.
                     if action not in {"ranks_up", "ranks_down", "turn_left", "turn_right", "about_face"}:
                         self.hud.order_completed()
-                    return ((order,),)
-                if action in {"items", "back"}:
+                    return cleared + ((order,),)
+                if action in {"items", "back"} or cleared:
                     self.order_mode = None
                     self._set_cursor("default")
-                return ()
+                return cleared
             if self.hud.occupies(event.pos):
                 return ()
             control = self._control_held(event)
@@ -389,6 +400,8 @@ class BattleView(SceneView[BattleScene]):
                 self.order_mode = pressed if item != "ItemPotionOfStrength" else None
                 self._set_cursor("magic" if self.order_mode else "default")
                 return (("arm_item", item),)
+            if pressed is not None and pressed.startswith("spell:") and self.hud.hit_test(event.pos) == pressed:
+                return self._spell_row_click(int(pressed[6:]), self._control_held(event))
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
             self._right_minimap = deploying and self.hud.minimap_position(event.pos) is not None
             self._right_down = None if self.hud.occupies(event.pos) else event.pos
@@ -398,6 +411,54 @@ class BattleView(SceneView[BattleScene]):
                     and math.dist(start, event.pos) <= CLICK_DRAG_THRESHOLD):
                 return self._ground_click(event.pos, direct=True)
         return ()
+
+    def _in_magic_mode(self) -> bool:
+        return self.order_mode is not None and (self.order_mode == "magic" or self.order_mode.startswith("spell:"))
+
+    def _spell_row_click(self, code: int, control: bool) -> Sequence[SceneEvent]:
+        """A released click on a spell row (notes/player_magic_panel.md 4.1, 7): Ctrl cancels an active spell and
+        does nothing on any other row; a plain click on a usable row pays and selects it, then waits for a target
+        with the wand unless the spell needs none. An unusable row does nothing."""
+        battle, selected = self.scene.battle, self.scene.selected_id
+        if selected is None:
+            return ()
+        if control:
+            if spell_effects.spell_active(battle, selected, code):
+                return (("cancel_spell_effects", code),)
+            return ()
+        if not battle.spell_usable(selected, code):
+            return ()
+        if code in NO_TARGET_SPELLS:
+            self.order_mode = None
+            self._set_cursor("default")
+            self.hud.order_completed()
+        else:
+            self.order_mode = f"spell:{code}"
+            self._set_cursor("magic")
+            self.hud.enter_magic_targeting()
+        return (("select_spell", code),)
+
+    def _magic_click(self, mode: str, point: tuple[float, float] | None, target_id: str | None,
+                     control: bool) -> Sequence[SceneEvent] | None:
+        """A battlefield or minimap click in Magic mode, or None when the mode is another one. With a spell: the
+        order for the point; Ctrl with the cost still in the pool repeats it and stays in targeting
+        (player_magic_panel.md 4.2). With no spell: the wizard's own target, nothing on open ground (3)."""
+        if mode.startswith("spell:"):
+            code = int(mode[6:])
+            if point is None:
+                return ()
+            if not (control and self.scene.battle.player_power >= (magic.cost(code) or 0)):
+                self._end_magic_mode()
+            return (("cast", code, point[0], point[1], control),)
+        if mode == "magic":
+            self._end_magic_mode()
+            return (("wizard_target", target_id),) if target_id is not None else ()
+        return None
+
+    def _end_magic_mode(self) -> None:
+        self.order_mode = None
+        self._set_cursor("default")
+        self.hud.order_completed()
 
     @staticmethod
     def _control_held(event: pygame.event.Event) -> bool:
@@ -503,6 +564,11 @@ class BattleView(SceneView[BattleScene]):
         if (self.order_mode.startswith("item:") and repeat_item
                 and self.scene.battle.event_bus.power.player >= 1):
             return (("item_target", self.order_mode[5:], *target_point),)
+        # Magic: a spell aims at the ground point, never snapped to a unit; with no spell the click picks the
+        # wizard's target like a Fire click (notes/player_magic_panel.md 3, 4.2).
+        wizard_target = (building_id if regiment_id is None else regiment_id)
+        if self._in_magic_mode():
+            return self._magic_click(self.order_mode, (x, y), wizard_target, repeat_item) or ()
         if self.order_mode == "move" and ground_point is None:
             return ()
         mode, self.order_mode = self.order_mode, None
@@ -631,6 +697,12 @@ class BattleView(SceneView[BattleScene]):
         if (self.order_mode.startswith("item:") and repeat_item and world is not None
                 and self.scene.battle.event_bus.power.player >= 1):
             return (("item_target", self.order_mode[5:], *world),)
+        # Magic on the minimap: a picked unit (any side) gives its centre as the point (player_magic_panel.md 4.2).
+        if self._in_magic_mode():
+            picked = self.scene.battle.regiments.get(target_id) if target_id is not None else None
+            point = spell_effects.footprint_centre(picked) if picked is not None else (
+                (world[0], world[1]) if world is not None else None)
+            return self._magic_click(self.order_mode, point, target_id, repeat_item) or ()
         mode, self.order_mode = self.order_mode, None
         self._set_cursor("default")
         self.hud.order_completed()
