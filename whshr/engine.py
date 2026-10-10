@@ -303,6 +303,7 @@ class Regiment:
     flee_x: float | None = None
     flee_y: float | None = None
     fled: bool = False  # a routing regiment that has left the battlefield (removed from play)
+    removal_announced: bool = False  # the "unit removed" broadcast 0x16 went out (notes/unit_removal_broadcast.md 1)
     flight_check_ticks: int = 0
     flight_departed: bool = False
     flight_complete: bool = False
@@ -2086,6 +2087,8 @@ class Battle:
         for regiment in self.regiments.values():
             self._step_burning(regiment)
             self._step_dying(regiment)
+            if regiment.destroyed and not regiment.dying:
+                self._announce_removal(regiment)
             if not regiment.active:
                 regiment.walking = False
                 continue
@@ -2124,6 +2127,7 @@ class Battle:
                     if (self.tick_count > regiment.flight_complete_tick
                             and all(model.at_rest for model in regiment.melee_models)):
                         self.remove_from_play(regiment)
+                        self._announce_removal(regiment)
                         self.events.append(BattleEvent(
                             f"{regiment.name} routs off the battlefield.", "fled",
                             regiment=regiment.identifier, x=regiment.x, y=regiment.y,
@@ -3083,6 +3087,22 @@ class Battle:
             self.events.append(BattleEvent(
                 "Defeat! Your army is destroyed.", "result",
                 result="defeat", counts=self.side_counts()))
+
+    def _announce_removal(self, regiment: Regiment) -> None:
+        """Broadcast event 0x16 ("unit removed", source = the unit) once, to every other unit still in the battle:
+        both armies, hidden and routing units (notes/unit_removal_broadcast.md 1). Their scripts drop it as a target
+        through Query 22 (notes/script_queries.md 9); nothing here touches their targets. Sent for a unit wiped out,
+        once its last dying model's collapse delay is over (section 2), and for a routing unit when it finally leaves
+        the table (after the 0x0E of its departure). A script's RemoveFromBattle is quiet and never calls this.
+        PROVISIONAL: our unit already counts as out of the fight while its last models collapse (the report keeps it
+        in the battle until then); only the broadcast waits for the collapse."""
+        if regiment.removal_announced:
+            return
+        regiment.removal_announced = True
+        for other in self.regiments.values():
+            if other is regiment or other.fled or other.removal_announced:
+                continue
+            self.event_bus.queue_event(other.identifier, interpreter.Event(code=0x16, source=regiment.identifier))
 
     def remove_from_play(self, regiment: Regiment) -> None:
         """``regiment`` leaves the battle alive (it routed off the map, or a script removed it): it is marked fled,
