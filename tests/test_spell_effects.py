@@ -10,6 +10,7 @@ from unittest import mock
 
 from whshr.engine import Battle, Regiment  # first: it resolves the combat/interpreter import cycle
 from whshr import interpreter, magic, spell_effects
+from whshr.battle_events import BattleEvent
 from whshr.rules import Side
 from whshr.spell_effects import Impact
 
@@ -137,8 +138,13 @@ class ActivatedItemTests(unittest.TestCase):
         battle.order_item_target("G", "ItemBannerOfWrath", 0, 400)
         self.assertEqual(spell_effects.table(battle).effects(), [])
         self.assertIn("ItemBannerOfWrath", bearer.used_items)
+        earlier = BattleEvent("Earlier message", "message", text_id=9999)
+        battle.events.append(earlier)
+        battle.pending_feedback.append(earlier)
         self.assertFalse(battle.arm_item("G", "ItemPotionOfStrength"))
         self.assertFalse(bearer.potion_strength)
+        self.assertEqual(battle.events, [earlier])
+        self.assertEqual(battle.pending_feedback, [earlier])
         with self.assertRaises(ValueError):
             battle.arm_item("G", "ItemPotionOfStrength")
 
@@ -149,6 +155,8 @@ class ActivatedItemTests(unittest.TestCase):
                       items=("ItemPotionOfStrength",))
         enemy = unit("E", 0, 10, Side.ENEMY, toughness=5)
         battle = Battle(100, 100, [bearer, enemy])
+        battle.events.append(BattleEvent("Earlier event", "message", text_id=9998))
+        battle.pending_feedback.append(BattleEvent("Earlier feedback", "message", text_id=9999))
         feedback_before = list(battle.events)
         pending_before = list(battle.pending_feedback)
         bearer.model_positions()
