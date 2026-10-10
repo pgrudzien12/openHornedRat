@@ -267,15 +267,17 @@ Per-object details: `extracted/si/INDEX.md` and `extracted/si/<SI>/objects.json`
   versions (`musicawe\`), selected by the `MIDIType` variable (FM vs AWE32 setup).
 
 ## Open questions
-> **Tracked on GitHub**: these open items are tracked as issue #41 (`topic:cutscenes`). Kept here for
-> reference; the broad backlog audit (issue #45) is closed. Issue #41 now tracks only EVT behavior needed for generic playback.
+> Issue #41 tracks the EVT speaker, subtitle, and fade behavior needed for generic playback.
+> The other unknowns below are historical notes, not part of that issue; the broad backlog
+> audit (issue #45) is closed.
 
 
 - `MxHd` second u32 (`0x100`), `MxOb.unk14` (1 for Events), `unk_a/unk_b` (always 0),
   `palette_mgmt` (always 1), `sustain` (−1 for films), `flags` (2 vs 0/1), WAV header field `44`.
-- EVT semantics: what `speaker` 2/3/4 means, why speech tracks last 15 ticks past the line,
-  the 6th field `1` (A13030, A14010), the `Fade` record `(10, 10)`. Needs subtitles/texts (1.1)
+- EVT behavior tracked by #41: what `speaker` 2/3/4 means, why speech tracks last 15 ticks
+  past the line, and what the `Fade` record `(10, 10)` does. Needs subtitles/texts (1.1)
   or watching the game under Wine.
+- Historical EVT unknown: the 6th field `1` (A13030, A14010).
 - The exact frame timing: whether the engine really ignores the Smacker frame rate (the chunk
   times say 125 ms for all films; A1/A27 headers say 85 ms per frame).
 - Why 24 speech lines differ from their `GLUE/SPEECH` counterparts, and which version the game
