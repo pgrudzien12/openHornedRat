@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 import math
 
+from . import map_objects
 from .deployment import Point, Segment
 from .script import View
 
@@ -32,8 +33,7 @@ def clear_ray(start: Point, end: Point, boundaries: Sequence[View], objects: Seq
     if length2 == 0:
         return True
     for obj in objects:
-        flags = {str(flag).casefold() for flag in obj.get("status") or ()}
-        if not {"os_active", "os_solid"}.issubset(flags):
+        if not map_objects.blocks_sight(obj):  # notes/map_objects_and_projectiles.md 2
             continue
         x, y = float(obj.get("x") or 0), float(obj.get("y") or 0)
         rects: Sequence[Sequence[float]] = obj.get("rects") or ()

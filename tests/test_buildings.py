@@ -95,7 +95,7 @@ class DamageTests(unittest.TestCase):
         queue = b.event_bus.unit_states["S"].event_queue
         self.assertIn((0x18, "building:3"), [(e.code, e.source) for e in queue])
         solid = [o for o in b.shooting_objects if o.get("building") == "building:3"]
-        self.assertEqual(solid[0]["status"], ["os_solid"])  # the ruin keeps blocking
+        self.assertEqual(solid[0]["status"], ["os_active", "os_solid"])  # the ruin keeps blocking
 
     def test_a_missile_without_building_strength_does_no_damage(self):
         b = battle()
