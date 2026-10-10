@@ -36,9 +36,9 @@ if floor(before / q) != floor(after / q):
   per-volley limit**: a volley whose victims start their death sequences in the same tick runs one check per
   victim, so it tests once for every quarter boundary it crosses.
 - **The first loss from full strength never tests** (correction: `game_rules.md` said "−2 at the first loss below
-  16"). For orgsize 16 the boundaries are 12 (modifier −1), 8 (0) and 4 (+1). The −2 step is reached only by a unit
-  that starts below orgsize but at 13–15, and even then only when it falls to 11 or less: 15 → 14 → 13 → 12 cross
-  nothing.
+  16"). For orgsize 16 the tested boundaries are 12 (modifier −1), 8 (0) and 4 (+1). The −2 step (crossing 4q) exists
+  only when orgsize is **not** a multiple of 4: e.g. orgsize 18 (q = 4) tests at −2 when it falls from 16 to 15, but
+  not on its first losses 18 → 17 → 16.
 - A unit **starting below orgsize** (e.g. 12 of 16) tests on its first loss if that loss crosses a boundary: 12 → 11
   crosses 12 → test at −1.
 - **Order with removal**: if the killed model was the last one, its check runs first (it crosses into 0, modifier
