@@ -2,10 +2,11 @@
 boundaries are battle ticks 19, 38, 57 ...; meeting a battle-ending letter decides the battle without ending it,
 and the battle ends when the player leaves through the tent."""
 
+import random
 import unittest
 
 from tests.script_helpers import FakeDll, word
-from whshr import behaviour, interpreter
+from whshr import behaviour, combat, interpreter
 from whshr.engine import Battle, Regiment
 from whshr.nodes import ScriptNode
 from whshr.objectives import Objectives
@@ -189,6 +190,62 @@ class NodeLetterTests(unittest.TestCase):
         battle = make([["K", 0, 3]], picker, regiment("e", Side.ENEMY), nodes=nodes)
         at_boundary(battle)
         self.assertFalse(battle.objectives.get("K").met)
+
+    def test_given_a_sword_of_might_picked_up_when_the_leader_next_attacks_then_it_strikes_at_plus_one_strength(self):
+        # Given a leader at S 3 facing T 5, and the Sword of Might (K item 10) lying in its node
+        nodes = [ScriptNode(500.0, 500.0, radius=40)]
+        picker = regiment("p", Side.PLAYER, x=500, y=500, has_leader=True, strength=3)
+        enemy = regiment("e", Side.ENEMY, toughness=5)
+        battle = make([["K", 0, 10]], picker, enemy, nodes=nodes)
+        before = self._leader_wound_need(picker, enemy)
+
+        # When the item is picked up during this battle
+        at_boundary(battle)
+
+        # Then the bonus applies at once, not from the next battle
+        self.assertIn("ItemSwordOfMight", picker.items)
+        self.assertEqual(picker.displayed_leader_strength, 4)
+        self.assertEqual((before, self._leader_wound_need(picker, enemy)), (6, 5))
+
+    def test_given_a_drunk_potion_and_four_items_when_entering_an_item_node_then_the_potion_still_fills_a_slot(self):
+        # Given five items, one of them a Potion of Strength already drunk this battle
+        nodes = [ScriptNode(500.0, 500.0, radius=40)]
+        picker = regiment("p", Side.PLAYER, x=500, y=500, has_leader=True,
+                          items=("ItemPotionOfStrength", "a", "b", "c", "d"))
+        battle = make([["K", 0, 10]], picker, regiment("e", Side.ENEMY), nodes=nodes)
+        battle.arm_item("p", "ItemPotionOfStrength")
+
+        # When it stands in the item's node
+        at_boundary(battle)
+
+        # Then all five slots are still full: no pickup, and the potion's bonus remains
+        self.assertFalse(battle.objectives.get("K").met)
+        self.assertNotIn("ItemSwordOfMight", picker.items)
+        self.assertTrue(picker.potion_strength)
+
+    def test_given_a_drunk_potion_and_a_free_slot_when_the_sword_is_picked_up_then_both_bonuses_stack(self):
+        # Given a drunk potion (+3 S) and a free slot
+        nodes = [ScriptNode(500.0, 500.0, radius=40)]
+        picker = regiment("p", Side.PLAYER, x=500, y=500, has_leader=True, strength=3,
+                          items=("ItemPotionOfStrength",))
+        battle = make([["K", 0, 10]], picker, regiment("e", Side.ENEMY), nodes=nodes)
+        battle.arm_item("p", "ItemPotionOfStrength")
+
+        # When the Sword of Might is picked up
+        at_boundary(battle)
+
+        # Then it takes the slot after the potion and the leader shows S 3 + 3 + 1
+        self.assertEqual(picker.items, ("ItemPotionOfStrength", "ItemSwordOfMight"))
+        self.assertEqual(picker.displayed_leader_strength, 7)
+
+    @staticmethod
+    def _leader_wound_need(attacker, defender):
+        attacker.model_positions()
+        defender.model_positions()
+        leader = attacker.living_leader_index
+        assert leader is not None
+        return combat._roll_model_attacks(attacker, defender, random.Random(1), model=attacker.melee_models[leader],
+                                          defender_model=defender.melee_models[0])[1]["wound_need"]
 
     def test_an_unknown_item_number_is_never_met(self):
         nodes = [ScriptNode(500.0, 500.0, radius=40)]
