@@ -294,3 +294,32 @@ r = 17 (100, 110), r = 16 (100, 120), r = 15 (100, 130).
 
 So the trail lags the head by two positions from tick 3 on, and there is a one-tick gap after the first puff. Each puff
 plays 125 → 144 and is gone after its 20th tick (P1's last frame, 144, is on tick 20).
+
+### 8.5 Whole-number ground height
+
+Every ground height in the bolt maths comes from one lookup. The same lookup serves the start, the destination, the
+current position and the explosion.
+
+1. The position is a whole-unit world point (§8.2).
+2. The terrain height there is **interpolated** on the `GRND.GD` triangle plane that contains the point
+   (`terrain_gd.md`).
+3. It is converted to world units (× 8, the same scale as the horizontal axes).
+4. It is **rounded to the nearest whole number, halves up**: `ground = floor(8 × h_GD + 0.5)` (heights are never
+   negative).
+
+It is **not** truncated: a ridge at 9.9 world units counts as **10**, so a bolt whose line is at 9 there is below the
+ground and removed. The engine's battle ground lookup already returns world units (the ×8 is applied), so only the
+rounding step is missing.
+
+Vectors (BF003, whole-unit points, interpolated world-unit height → value the original uses; truncation in brackets
+for contrast):
+
+| Point | Interpolated | Original | (trunc) |
+|---|---|---|---|
+| (1100, 983) | 40.6 | 41 | (40) |
+| (1100, 987) | 41.4 | 41 | (41) |
+| (1100, 988) | 41.6 | 42 | (41) |
+| any point at exactly n + 0.5 | n + 0.5 | n + 1 | (n) |
+
+🟡 The original interpolates in single precision, so a value within about 10⁻⁵ of a half could round the other way.
+This does not matter for an engine.
