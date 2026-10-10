@@ -12,7 +12,8 @@ PACKAGING = ROOT / "packaging"
 NOTICES = (PACKAGING / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
 LICENSE_FILES = ("LGPL-2.1.txt", "Apache-2.0.txt")
 REQUIRED_THIRD_PARTY_LICENSES = (
-    "LICENSE.sdl2_ttf.txt", "LICENSE.harfbuzz.txt", "LICENSE.brotli.txt", "LICENSE.wavpack.txt",
+    "LICENSE.sdl2_ttf.txt", "LICENSE.harfbuzz.txt", "LICENSE.harfbuzz-ms-use.txt", "LICENSE.brotli.txt",
+    "LICENSE.wavpack.txt",
     "LICENSE.libxmp.txt", "LICENSE.libsndfile.txt", "LICENSE.alsa.txt", "LICENSE.python.txt",
     "LICENSE.tcl-8.6.txt", "LICENSE.tk-8.6.txt", "LICENSE.tcl-9.0.txt", "LICENSE.tk-9.0.txt",
 )
@@ -131,6 +132,13 @@ class ThirdPartyNoticesTests(unittest.TestCase):
                 text = (PACKAGING / "licenses" / "third-party" / name).read_text(encoding="utf-8")
                 self.assertIn("copyrighted by the Regents of the University of", text)
                 self.assertIn("this notice is included verbatim", " ".join(text.split()))
+
+    def test_given_harfbuzz_ms_use_then_its_microsoft_mit_notice_is_present(self):
+        text = (PACKAGING / "licenses" / "third-party" / "LICENSE.harfbuzz-ms-use.txt").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Copyright (c) Microsoft Corporation.", text)
+        self.assertIn("MIT License", text)
 
     def test_given_portmidi_then_the_notices_say_apache_not_mit(self):
         row = next(line for line in NOTICES.splitlines() if "portmidi.dll" in line)

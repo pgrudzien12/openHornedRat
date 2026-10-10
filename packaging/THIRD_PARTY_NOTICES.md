@@ -98,6 +98,7 @@ distribution) are included unchanged in `packaging/licenses/third-party/` and in
 | `LICENSE.fluidsynth.txt`, `LICENSE.mpg123.txt` | FluidSynth, mpg123 (LGPL 2.1) |
 | `LICENSE.sdl2_ttf.txt` | SDL2_ttf |
 | `LICENSE.harfbuzz.txt` | HarfBuzz |
+| `LICENSE.harfbuzz-ms-use.txt` | HarfBuzz's Microsoft USE shaper component |
 | `LICENSE.brotli.txt` | brotli |
 | `LICENSE.wavpack.txt` | WavPack |
 | `LICENSE.libxmp.txt` | libxmp |
@@ -111,6 +112,7 @@ the version of a native binary in a pygame-ce wheel):
 |---|---|
 | `LICENSE.sdl2_ttf.txt` | [SDL_ttf 2.24.0 `LICENSE.txt`](https://raw.githubusercontent.com/libsdl-org/SDL_ttf/release-2.24.0/LICENSE.txt) |
 | `LICENSE.harfbuzz.txt` | [HarfBuzz 10.4.0 `COPYING`](https://raw.githubusercontent.com/harfbuzz/harfbuzz/10.4.0/COPYING) |
+| `LICENSE.harfbuzz-ms-use.txt` | [HarfBuzz 10.4.0 `src/ms-use/COPYING`](https://raw.githubusercontent.com/harfbuzz/harfbuzz/10.4.0/src/ms-use/COPYING) |
 | `LICENSE.brotli.txt` | [brotli 1.1.0 `LICENSE`](https://raw.githubusercontent.com/google/brotli/v1.1.0/LICENSE) |
 | `LICENSE.wavpack.txt` | [WavPack 5.8.1 `COPYING`](https://raw.githubusercontent.com/dbry/WavPack/5.8.1/COPYING) |
 | `LICENSE.libxmp.txt` | [libxmp 4.6.3 `docs/COPYING`](https://raw.githubusercontent.com/libxmp/libxmp/libxmp-4.6.3/docs/COPYING) |
