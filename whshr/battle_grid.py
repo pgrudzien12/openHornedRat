@@ -274,7 +274,8 @@ def _pair_joiner(battle: "Battle", grid: BattleGrid, regiment: "Regiment", membe
     budget = max(1, regiment.front_rank_models())
     collected = [index for index, model in enumerate(regiment.melee_models)
                  if model.opponent is None and not model.reserve
-                 and model.freeze_ticks <= 0 and model.rout_pause_ticks <= 0][:budget]
+                 and model.freeze_ticks <= 0 and model.rout_pause_ticks <= 0
+                 and not model.pause_just_ended][:budget]
     if not collected:
         return
     # The owner switching to this procedure uses side A (the first candidate row).

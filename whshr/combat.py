@@ -841,7 +841,7 @@ def start_rout(regiment: "Regiment", battle: "Battle", flee_point: formation.Poi
         if not model.at_rest:
             continue
         pause = (model.stagger & 7) * 3 + 6
-        model.rout_pause_ticks = pause
+        model.start_pause(pause, rout=True)
         model.at_rest = False
         model.current_speed = model.distance_budget = 0.0
         # The public rule specifies a slight scatter, but not its exact distance or bearing.
@@ -854,7 +854,7 @@ def start_rout(regiment: "Regiment", battle: "Battle", flee_point: formation.Poi
             opponent_index = opponent.index_of(opponent_uid) if opponent is not None else None
             if opponent is not None and opponent_index is not None:
                 opposing_model = opponent.melee_models[opponent_index]
-                opposing_model.rout_pause_ticks = max(opposing_model.rout_pause_ticks, pause)
+                opposing_model.start_pause(max(opposing_model.rout_pause_ticks, pause), rout=True)
     battle_grid.release(battle, regiment)
     regiment.routing = True
     regiment.flight_check_ticks = 0

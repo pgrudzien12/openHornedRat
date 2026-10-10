@@ -1791,7 +1791,7 @@ class ScriptInterpreter:
         if unit is not None:
             unit.model_positions()  # seeds the per-model state
             for model in unit.melee_models:
-                model.freeze_ticks = (model.stagger & 15) * 2 + 2
+                model.start_pause((model.stagger & 15) * 2 + 2)
         return state.pc + 1
 
     def op_Rally(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
