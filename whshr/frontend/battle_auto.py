@@ -16,7 +16,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame  # noqa: E402
 
 from ..assets import AssetId
-from ..battle_auto import describe, parse_order
+from ..battle_auto import camera_values, describe, parse_order, target_values
 from ..battle_scene import BATTLE_TICK_SECONDS, BattleScene
 from ..engine import DEFAULT_SEED
 from ..game import scene_context
@@ -35,6 +35,8 @@ class BattleSession:
                  size: tuple[int, int] = (1280, 800), seed: int = DEFAULT_SEED,
                  log_dir: str | os.PathLike[str] | None = None,
                  camera: Sequence[float] | None = None) -> None:
+        if camera is not None:
+            camera = camera_values(camera)
         os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
         self.context = scene_context(installation)
         self.scene = BattleScene(AssetId("vanilla", "battle", Path(battle).stem.casefold()),
@@ -72,7 +74,9 @@ class BattleSession:
                     break
                 self.machine.update(BATTLE_TICK_SECONDS)
                 self._sync_view()
-                self.view.animate(BATTLE_TICK_SECONDS)
+                # BattleView.animate publishes camera geometry to Battle and can re-snap wagons.
+                # Those view changes are not scene orders in the replay log. This controller
+                # runs the same headless simulation as battle-replay; camera is for captures only.
                 advanced += 1
             return {"ok": True, "advanced": advanced, "state": describe(self.scene)}
         if op == "capture":
@@ -82,34 +86,27 @@ class BattleSession:
             output = Path(path)
             output.parent.mkdir(parents=True, exist_ok=True)
             self.gpu.ctx.new_frame()
-            self.view.draw()
-            self.gpu.target.save_png(output)
-            self.gpu.ctx.end_frame()
+            try:
+                self.view.draw()
+                self.gpu.target.save_png(output)
+            finally:
+                self.gpu.ctx.end_frame()
             return {"ok": True, "path": str(output), "state": describe(self.scene)}
         if op == "camera":
             if not isinstance(self.view, BattleView):
                 raise ValueError("camera is only available during a battle")
-            values = command.get("values")
-            if not isinstance(values, list) or len(values) != 3 or not all(
-                    isinstance(value, (int, float)) and not isinstance(value, bool) for value in values):
-                raise ValueError("camera needs [yaw, pitch, distance]")
-            yaw, pitch, distance = map(float, values)
-            if not 5 <= pitch <= 85 or distance <= 0:
-                raise ValueError("camera pitch must be 5..85 and distance must be positive")
-            self.view.camera.yaw = yaw % 360
+            yaw, pitch, distance = camera_values(command.get("values"))
+            self.view.camera.yaw = yaw
             self.view.camera.pitch = pitch
             self.view.camera.distance = distance
-            self.view.animate(0)
-            return {"ok": True, "camera": [yaw % 360, pitch, distance]}
+            self.view.camera.set_target(self.view.camera.target_x, self.view.camera.target_y)
+            return {"ok": True, "camera": [self.view.camera.yaw, self.view.camera.pitch,
+                                            self.view.camera.distance]}
         if op == "target":
             if not isinstance(self.view, BattleView):
                 raise ValueError("camera target is only available during a battle")
-            point = command.get("point")
-            if not isinstance(point, list) or len(point) != 2 or not all(
-                    isinstance(value, (int, float)) and not isinstance(value, bool) for value in point):
-                raise ValueError("target needs [world_x, world_y]")
-            self.view.camera.set_target(float(point[0]), float(point[1]))
-            self.view.animate(0)
+            x, y = target_values(command.get("point"))
+            self.view.camera.set_target(x, y)
             return {"ok": True, "target": [self.view.camera.target_x, self.view.camera.target_y]}
         raise ValueError(f"unknown operation: {op}")
 

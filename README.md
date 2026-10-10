@@ -173,7 +173,9 @@ engine and advances one 100 ms simulation update per requested tick. For example
 The `state` response lists each regiment's side, position, figures, ranks, and orders. `camera`
 accepts `{"op":"camera","values":[225,45,120]}` (yaw, pitch, distance); `target` accepts
 `{"op":"target","point":[500,500]}` in battlefield coordinates. Closing stdin ends the session.
-Captures and battle logs contain derived game data and belong in ignored local directories.
+The automated camera is for captures; battle rules use the same camera-independent state as
+`battle-replay`, so camera changes do not alter the recorded simulation. Captures and battle logs
+contain derived game data and belong in ignored local directories.
 
 For a repeatable example pilot, run `.venv/bin/python -m scripts.auto_play_battle --ticks 200`. It reads
 the launcher-configured installation, orders active player regiments toward their nearest visible enemy,

@@ -270,6 +270,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "battle-auto":
         if args.width <= 0 or args.height <= 0:
             parser.error("--width and --height must be greater than zero")
+        if args.camera is not None:
+            from .battle_auto import camera_values
+            try:
+                args.camera = camera_values(args.camera)
+            except ValueError as error:
+                parser.error(str(error))
         try:
             from .frontend import battle_auto
         except ModuleNotFoundError as error:
