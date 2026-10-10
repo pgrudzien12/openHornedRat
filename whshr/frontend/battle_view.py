@@ -55,9 +55,14 @@ DRAG_ROTATE = 0.3  # degrees per pixel
 CLICK_DRAG_THRESHOLD = 4  # pixels; a right button press/release closer than this counts as a click
 # Public ranged handoff §5: installed GMCUR groups are Fire 100, default 101, Attack 102, Magic 103.
 BATTLE_CURSOR_GROUPS: dict[str, int] = {"default": 101, "attack": 102, "fire": 100, "magic": 103}
-MISSILE_MESH = {"arrow": "arrows1", "arrow_alt": "arrows2", "bolt": "arrows3",
-                "cannon": "spear1", "mortar": "spear2", "rock": "spear3",
-                "diver": "spear4", "bomb": "flames1"}
+MISSILE_MESH = {"arrow": "arrows1", "arrow_alt": "arrows2", "bolt": "arrows3", "bomb": "flames1"}
+# PROVISIONAL (user's choice from reviewing the GENBATT set, not traced; SPEAR1-4 are the Hunting Spear's meshes,
+# notes/spell_visuals.md 0): artillery shots are GENBATT sprites 56-72, one frame per flight tick and holding the
+# last, and frame 73 is a puff where the shot lands, shown for ARTILLERY_PUFF_TICKS.
+ARTILLERY_VISUALS = frozenset({"cannon", "mortar", "rock", "diver"})
+ARTILLERY_CODES = frozenset({5, 6, 8, 11, 12})  # the ranged codes drawn as those visuals (whshr.ranged)
+ARTILLERY_SHOT_FRAMES = (56, 17)
+ARTILLERY_PUFF_FRAME, ARTILLERY_PUFF_TICKS = 73, 4
 BANNER_MARKER_RAISE = 4.0  # mesh units: above a 64-pixel troop sprite, below the camera's horizon
 EVENT_LOG_LINES = 3  # battle events shown in the debug overlay (whshr.engine.Battle.events, per tick)
 INSTANCE = struct.Struct("10f")  # foot position (mesh), atlas rectangle (pixels), anchor (pixels), selected
@@ -835,7 +840,8 @@ class BattleView(SceneView[BattleScene]):
                       transform, rotate, out=vertices)
 
         for p in self.scene.battle.projectiles:
-            append(MISSILE_MESH.get(p.visual, "arrows1"), p.x, p.y, p.z, p.x1-p.x0, p.y1-p.y0)
+            if p.visual not in ARTILLERY_VISUALS:  # artillery shots are sprites (_artillery_sprites)
+                append(MISSILE_MESH.get(p.visual, "arrows1"), p.x, p.y, p.z, p.x1-p.x0, p.y1-p.y0)
         for p in self.scene.battle.innate_projectiles:
             family = "fire" if p.code == 14 else "flames" if p.code == 15 else "boltbur"
             append(f"{family}{1 + p.elapsed % 4}", p.x, p.y,
@@ -911,6 +917,7 @@ class BattleView(SceneView[BattleScene]):
                 )))
         data += self._item_markers()
         data += self._spell_sprites()
+        data += self._artillery_sprites()
         # The original promotes the focused banner in z-order and leaves it promoted after deselecting.
         order: list[str] = getattr(self, "_banner_order", [])  # tests build views without __init__
         identifiers = list(self.scene.battle.regiments)
@@ -941,6 +948,27 @@ class BattleView(SceneView[BattleScene]):
                 ended.add(effect.serial)
             flights.append(Flight(effect.serial, effect.x, effect.y, max(0.0, effect.height), not flying))
         return flights
+
+    def _artillery_sprites(self) -> bytes:
+        """Artillery shots in flight and their landing puffs, from the GENBATT set (ARTILLERY_VISUALS, PROVISIONAL)."""
+        field, battle = self.scene.field, self.scene.battle
+        sheet = field.ui_sheets.get("genbatt")
+        if sheet is None or not sheet.rects:
+            return b""
+        first, count = ARTILLERY_SHOT_FRAMES
+        sprites = [(p.x, p.y, p.z / WORLD_PER_MESH, first + min(p.elapsed, count - 1))
+                   for p in battle.projectiles if p.visual in ARTILLERY_VISUALS]
+        sprites += [(x, y, field.ground_height(x, y), ARTILLERY_PUFF_FRAME)
+                    for x, y, code, started in battle.impact_effects
+                    if code in ARTILLERY_CODES and battle.tick_count - started < ARTILLERY_PUFF_TICKS]
+        data = bytearray()
+        for x, y, height, number in sprites:
+            if number >= len(sheet.frames) or sheet.rects[number] is None:
+                continue
+            frame, rect = sheet.frames[number], _atlas_rect(sheet, number)
+            data += INSTANCE.pack(x / WORLD_PER_MESH, height, y / WORLD_PER_MESH, *rect,
+                                  frame.anchor_x, frame.anchor_y, 0.0)
+        return bytes(data)
 
     def _spell_sprites(self) -> bytes:
         """Fireball head, trail puffs and explosion from the SPELLS set (bf003_playtest section 2), advanced once
