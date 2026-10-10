@@ -22,7 +22,7 @@ from typing import Any
 import pygame
 import zengl
 
-from .. import animation, figure_capture, picking
+from .. import animation, figure_capture, picking, spell_effects
 from ..battle3d import SPRITE_DEPTH_BIAS
 from ..battle_events import BattleEvent
 from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, bake_mesh, sprite_direction, view_angle
@@ -39,10 +39,12 @@ from .battle_text import display_text, reaction_text
 from .battle_sound import BattleSounds
 from .ranged_sound import MissileSounds
 from .gpu import Gpu
+from .spell_visuals import FireballVisuals, Flight
 from .scene_view import SceneView
 from .hud import Hud, select_regiment_hit
 
 Point = tuple[int, int]
+WORLD_EFFECT_RESERVE = 512  # instances kept free for world effects (Fireball heads, puffs, explosions) so banners stay
 SKY = (112, 150, 196)
 NEAR, FAR = 0.5, 4000.0  # mesh units
 PAN_SPEED = 0.8  # camera distances per second
@@ -219,7 +221,8 @@ class BattleView(SceneView[BattleScene]):
         self.atlas = ctx.image(field.atlas_size, "r8unorm", field.atlas)
         self.palette = ctx.image((256, 1), "rgba8unorm", b"".join(bytes((*rgb, 255)) for rgb in field.palette))
         self.capacity = max(1, sum(regiment.models for regiment in scene.battle.regiments.values())
-                            + len(scene.battle.regiments))
+                            + len(scene.battle.regiments)
+                            + WORLD_EFFECT_RESERVE)
         self.instance_buffer = ctx.buffer(size=self.capacity * INSTANCE.size)
 
         camera_layout: Any = {"name": "Camera", "binding": 0}
@@ -813,6 +816,7 @@ class BattleView(SceneView[BattleScene]):
                     *rect, frame.width / 2, frame.height, selected,
                 )))
         data += self._item_markers()
+        data += self._spell_sprites()
         # The original promotes the focused banner in z-order and leaves it promoted after deselecting.
         order: list[str] = getattr(self, "_banner_order", [])  # tests build views without __init__
         identifiers = list(self.scene.battle.regiments)
@@ -826,6 +830,46 @@ class BattleView(SceneView[BattleScene]):
         for _, instance in sorted(banner_instances, key=lambda pair: rank[pair[0]]):
             data.extend(instance)
         return bytes(data[:self.capacity * INSTANCE.size])
+
+    def _fireball_flights(self) -> list[Flight]:
+        """The Fireball bolts (the spell and the Grudgebringer's item launch share the code) updated this tick. The
+        first tick an effect is past its flight (visual tail) is reported once as the ending tick."""
+        battle = self.scene.battle
+        ended: set[int] = self.__dict__.setdefault("_spell_ended", set())
+        flights: list[Flight] = []
+        for effect in battle.spell_effects.active:
+            if effect.code != spell_effects.FIREBALL or effect.ended or effect.elapsed == 0:
+                continue
+            flying = effect.tail < 0
+            if not flying:
+                if effect.serial in ended:
+                    continue
+                ended.add(effect.serial)
+            flights.append(Flight(effect.serial, effect.x, effect.y, max(0.0, effect.height), not flying))
+        return flights
+
+    def _spell_sprites(self) -> bytes:
+        """Fireball head, trail puffs and explosion from the SPELLS set (bf003_playtest section 2), advanced once
+        per battle tick. Other spells' frames are an open item: nothing is drawn for them.
+        The anchor is each frame's own .FOL anchor (bf003_playtest 8.3: bottom-centre)."""
+        field = self.scene.field
+        visuals: FireballVisuals = self.__dict__.setdefault("_spell_visuals", FireballVisuals())
+        tick = self.scene.battle.tick_count
+        if tick != self.__dict__.get("_spell_tick"):
+            self.__dict__["_spell_tick"] = tick
+            visuals.advance(self._fireball_flights())
+        sheet = field.ui_sheets.get("spells")
+        if sheet is None or not sheet.rects:
+            return b""
+        data = bytearray()
+        for sprite in visuals.sprites():
+            if sprite.frame >= len(sheet.frames) or sheet.rects[sprite.frame] is None:
+                continue
+            frame, rect = sheet.frames[sprite.frame], _atlas_rect(sheet, sprite.frame)
+            data += INSTANCE.pack(sprite.x / WORLD_PER_MESH,
+                                  field.ground_height(sprite.x, sprite.y) + sprite.height / WORLD_PER_MESH,
+                                  sprite.y / WORLD_PER_MESH, *rect, frame.anchor_x, frame.anchor_y, 0.0)
+        return bytes(data)
 
     def _item_markers(self) -> bytes:
         """The sparkle over each item still to be picked up (notes/battle_end_objectives.md 12.2): effect set
