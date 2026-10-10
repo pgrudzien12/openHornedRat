@@ -81,7 +81,8 @@ class PanelStateTests(unittest.TestCase):
         hud._log_panel = None
         hud._unit_info_panel = object()
         hud._draw_panel = lambda quad, *args, **kwargs: order.append("unit_info") if quad is hud._unit_info_panel else None
-        hud._draw_readout = lambda regiment: None
+        hud._draw_readout = lambda regiment, camera=None: None
+        hud._draw_compass_window = lambda *args: None
         hud._draw_fixed_buttons = lambda: None
         hud._draw_slots = lambda regiment: None
         hud._draw_minimap = lambda regiment, camera: None
