@@ -21,7 +21,8 @@ of the recorded battle log, and the original's behaviour is stated where it diff
 ## 2. How the original draws a Fireball (also the Grudgebringer)
 
 Both the Fireball spell and the Grudgebringer's item launch use the same visuals. They come from the battle's spell
-sprite set `SPELLS` (`sprite_names.md`: `SpellSprites`), colour map 0. Frame numbers below count from 0 in
+sprite set `SPELLS` (`sprite_names.md`: `SpellSprites`). Each frame uses its own colour map from its `.FOL` entry
+(`FORMATS.md` "Color map"); the Fireball adds no bank offset, i.e. maps 0–15. Frame numbers below count from 0 in
 `SPELLS.FOL`, and the frame ranges were checked by rendering them (`scripts/render_sprites.py`).
 
 | Frames | Look | Use |
@@ -30,14 +31,15 @@ sprite set `SPELLS` (`sprite_names.md`: `SpellSprites`), colour map 0. Frame num
 | 145–176 | a flame bolt in 8 directions × 4 phases | not used by the normal Fireball (only by the Shift-key developer variant, `spell_effects.md` §3.9) |
 | 177–185 | a growing fireball (177–180), then an expanding, fading ring (181–185) | the explosion |
 
-**Head.** For every tick of the flight, one sprite is drawn at the projectile's position and height (§2.1 of
+**Head.** For every tick of the flight, **from the launch tick on** (§8.3), one sprite is drawn at the projectile's position and height (§2.1 of
 `spell_effects.md`, arc included). Its frame cycles **125, 126, 127, 128, 125, …**, advancing one step per tick.
 It has no direction, because the puff is round.
 
-**Trail.** Each tick the head has moved, a puff is left at the head's **previous** position and height. A puff
-plays frames **125 → 144**, one frame per tick (20 ticks), and then disappears. It does not move or loop. The
-original keeps at most about 30 puffs per Fireball. This limit is optional for an engine, because 18 flight ticks
-never reach it.
+**Trail.** On the launch tick a puff is left at the start point. After that, a puff is left at the head's
+**previous** position and height only when that position differs from the newest puff's position. So there is no
+second puff at the start; tick-by-tick table in §8.4. A puff plays frames **125 → 144**, one frame per tick
+(20 ticks), and then disappears. It does not move or loop. The original keeps at most about 30 puffs per Fireball;
+this limit is optional for an engine, because 18 flight ticks never reach it.
 
 **Explosion.** When the flight ends, a 9-frame explosion (177–185, one frame per tick) is placed on the ground at
 the projectile's **last position**. The cause of the end does not matter: stopped by a hit, below the ground on
@@ -45,8 +47,7 @@ the last tick (the usual case for a ground target, `spell_effects.md` §3.4), or
 effect stays active (visual tail, `spell_effects.md` §1.5) until the explosion and every trail puff have finished,
 i.e. about 20 ticks after the last puff was left. During this tail it does no more damage.
 
-🟡 The vertical anchor of these sprites (bottom of the frame vs centre on the point) was not checked against the
-original. Centre them on the point as an engine choice. The engine's other projectiles use scenery meshes
+Anchor: see §8.3. The engine's other projectiles use scenery meshes
 (`Arrows*`, `Explosion1..8`); the Fireball does **not**, because its art is the `SPELLS` sprite frames above.
 
 ## 3. What happened to the three casts
@@ -132,8 +133,9 @@ Test vectors:
 | Before | Tick | After |
 |---|---|---|
 | model at rest in a melee unit, unpaired, no cell, pause 3 | 1 | pause 2, still pausing, not collected |
-| same | 3 | pause 0, not pausing; collected by the joiner pass of that tick or the next (🟡 within-tick order: count down before the grid pass) |
-| 9 Wolf Riders vs 9 cavalry, 7 riders with pauses 2–7 at the clash | 8 ticks later | every Wolf Rider has been collected (≤ frontage = 3 per tick), and the fight spreads along the front |
+| same | 3 | pause 0, not pausing; not collected yet (that tick's grid pass ran before the countdown) |
+| same | 4 | collected by this tick's joiner pass (§8.1: the pass after the pause reached 0) |
+| 9 Wolf Riders vs 9 cavalry, 7 riders with pauses 2–7 at the clash | 8–10 ticks later | each rider is collected on the tick after its pause reaches 0 (≤ frontage = 3 per tick), so all are in by about tick 8–10, and the fight spreads along the front |
 
 ## 5. Pursuit and buildings (symptoms 5 and 6)
 
@@ -187,8 +189,139 @@ Test vectors:
 
 ## 7. Open items
 
-- 🟡 Sprite anchor of the head, trail and explosion (§2).
+- 🟡 Sprite anchor: the frame data gives bottom-centre (§8.3); whether effect sprites are drawn with the same anchor
+  rule as unit figures was not checked on screen.
 - 🟡 Frame ranges of the other spells' visuals in `SPELLS` (each spell has its own first frame; only the Fireball
-  was mapped and checked visually).
-- 🟡 Within one tick, whether a pause that reaches 0 lets the model be collected by that same tick's grid pass. It
-  depends on the unit's order of model update and grid pass; at most a one-tick difference.
+  was mapped and checked visually). Ask for a separate batch when other spell visuals are implemented.
+- ~~Same-tick vs next-tick collection of an expired pause~~: answered in §8.1 (next tick).
+
+## 8. Follow-up answers (implementer questions, 2026-10-10)
+
+### 8.1 Pause timing
+
+- **One pause per model.** The original keeps a **single** timed-pause countdown per model. The charge start, the rout
+  start and `ResetModelAnimations` all **set** that same countdown, so a newer pause **replaces** whatever was left of
+  an older one. Two pauses never run side by side, and one never blocks the other's countdown.
+  - Charge start: every model, `(stagger & 7) + 1` ticks (1–8).
+  - Rout start: only models **at rest** at that moment, `(stagger & 7) × 3 + 6` ticks (6–27). A model that is walking
+    when the rout starts keeps whatever pause it had.
+  - `ResetModelAnimations`: `(stagger & 15) × 2 + 2` ticks (`movement_formation.md`).
+  An engine with two fields gets the same result if setting either one clears the other.
+- **Counting down.** The pause drops by 1 once per tick in the unit's model update, for every model, whatever its
+  state (§4). When it reaches 0 the pausing state ends that tick.
+- **Same tick or next? Next.** For a unit in melee, its update runs its **grid pass first** (the joiner or owner
+  search of `grid_gap_closing.md` §2) and **then** its model update with the countdown. A pause that reaches 0 in
+  tick T is therefore first collected by the grid pass of tick **T + 1**.
+
+| Before (tick T, unit in melee) | During tick T | Tick T + 1 |
+|---|---|---|
+| unpaired at-rest model, pause 1 | grid pass skips it (still pausing); countdown → 0, no longer pausing | grid pass collects it |
+| same, pause 3 | skipped; → 2 | skipped; → 1 (collected at T + 3) |
+| model with charge pause 5, at rest, unit starts a rout | rout pause set to `(stagger & 7) × 3 + 6`, replacing the 5 | counts down from the new value only |
+
+### 8.2 Bolt positions and heights
+
+- **Whole units.** In the original the start point (unit position plus the origin model's offset), the scattered
+  destination and the ground heights are whole numbers. Positions are `dest + trunc((start − dest) × r / N)` per
+  axis, truncating toward zero, so at r = N the position **is** the start point exactly. An engine with fractional
+  unit positions should round the start and destination to whole units **once, at launch**, then use the same
+  formula. The r = N position then equals the stored (whole) start, and the ground under it equals the ground the
+  launch line starts from. Truncating the start toward zero matches the original's conversion of positions; any
+  consistent rounding avoids the cast-3 failure.
+- **Height.** Confirmed: height = launch height + arc + `line(r)` − ground(here). Here
+  `line(r) = trunc((startLevel − endLevel) × r / N) + endLevel`, with `startLevel = ground(start) + L` and
+  `endLevel = ground(dest) + A`, all whole numbers. The in-flight test always runs first. The projectile is then
+  removed if the height is **< 0**; height exactly **0 survives**.
+- Beams (Lightning, Gaze, Warp Lightning, Banner of Wrath) have arc 0 and are subject to the same removal: a ridge
+  stops a beam.
+
+Beam vector (Lightning: L = 4, A = 4; flat ground 0 at start and destination; start (0, 0), destination after scatter
+(0, 200); N = 1 + trunc(200 / 20) = 11; `line` = 4 throughout, so height = 8 − ground here):
+
+| r | position | ground here | height | result |
+|---|---|---|---|---|
+| 11 | (0, 0) | 0 | 8 | test, flies on |
+| 6 | (0, 91) | 8 | 0 | test, **survives** (exactly 0) |
+| 5 | (0, 110) | 9 (a ridge) | −1 | test runs at −1 (a ground unit standing there is struck); then **removed**, no terminal impact |
+| (no ridge) 2 | (0, 164) | 0 | 8 | within 40 of the destination: terminal impact at the destination after the test (`spell_effects.md` §2.4) |
+
+(r = 6: −200 × 6 / 11 = −109.09 → −109, y = 91; r = 5: −90.9 → −90, y = 110; r = 2: −36.4 → −36, y = 164.)
+
+### 8.3 Fireball visuals: timing and anchor
+
+- **Head on the launch tick: yes.** The effect's first update runs later in the launch tick (`spell_effects.md`
+  §1.6, §1.7). It places the head at the start point and draws frame 125. The frame advances by one after each
+  update: 126 on the next tick, and so on.
+- **Trail.** See §8.4 for the exact rule. In short: the first puff appears on the launch tick at the start point.
+  After that a puff is left at the head's previous position only when that position differs from the newest puff's
+  position. A new puff is drawn at frame 125 on the tick it appears.
+- **End tick.** On the tick the flight ends (the tick of the final in-flight test), the head is **no longer drawn**
+  and the explosion **starts that same tick**, showing frame 177. It sits on the ground under the last tested
+  position and shows frames 177–185 on that tick and the 8 following ones.
+- **Anchor.** Every frame used (125–144, 177–185) is 32 × 32. Its `.FOL` entry gives anchor x = 16 (the centre) and
+  anchor row 0 counted from the bottom (`FORMATS.md` `.FOL`, the same fields as unit figures). Read as for unit
+  figures, the point is the **bottom-centre** of the sprite:
+  - the head and puffs sit just above their 3-D point;
+  - the explosion stands on the ground, like a figure.
+  🟡 This was not checked on screen. Use the frame's own anchor fields, read the same way as for unit sprites,
+  rather than a hard-coded centre.
+- **Other spells.** Not traced. Each spell has its own first frame in `SPELLS` and its own particle use (beams use
+  a flash particle, not a head). Request a separate batch when they are implemented.
+
+### 8.4 Trail spawn rule, tick by tick
+
+Each tick, after the head has been placed:
+- With no puff yet (the launch tick), a puff is left at the head's **previous position**. On the launch tick that is
+  the start point, the same as the head.
+- Otherwise a puff is left at the head's previous position **only if** the distance from there to the **newest puff**
+  is greater than 0.
+
+The test compares against the newest puff, not "did the head move this tick". So on tick 2 the previous position is the
+start point, where the launch-tick puff already is, and **no second puff** is left there. Exactly one puff is ever
+at the start point. On the final tick a puff is left at the previous position as usual, because it differs from
+the newest puff.
+
+Each puff's height is the previous tick's launch-height-plus-arc term plus the current tick's launch line. This is
+within a fraction of a unit of the head's previous height, and an engine may simply use the head's previous height.
+
+Example: Fireball from (100, 100) to (100, 280), N = 18, flat ground. The head positions are r = 18 (100, 100),
+r = 17 (100, 110), r = 16 (100, 120), r = 15 (100, 130).
+
+| Tick | Head (frame, position) | Puffs after the tick (frame, position), newest last |
+|---|---|---|
+| 1 (launch, r = 18) | 125, (100, 100) | P1 125 (100, 100) |
+| 2 (r = 17) | 126, (100, 110) | P1 126 (100, 100). No new puff: previous position (100, 100) is P1's |
+| 3 (r = 16) | 127, (100, 120) | P1 127 (100, 100); P2 125 (100, 110) |
+| 4 (r = 15) | 128, (100, 130) | P1 128; P2 126; P3 125 (100, 120) |
+
+So the trail lags the head by two positions from tick 3 on, and there is a one-tick gap after the first puff. Each puff
+plays 125 → 144 and is gone after its 20th tick (P1's last frame, 144, is on tick 20).
+
+### 8.5 Whole-number ground height
+
+Every ground height in the bolt maths comes from one lookup. The same lookup serves the start, the destination, the
+current position and the explosion.
+
+1. The position is a whole-unit world point (§8.2).
+2. The terrain height there is **interpolated** on the `GRND.GD` triangle plane that contains the point
+   (`terrain_gd.md`).
+3. It is converted to world units (× 8, the same scale as the horizontal axes).
+4. It is **rounded to the nearest whole number, halves up**: `ground = floor(8 × h_GD + 0.5)` (heights are never
+   negative).
+
+It is **not** truncated: a ridge at 9.9 world units counts as **10**, so a bolt whose line is at 9 there is below the
+ground and removed. The engine's battle ground lookup already returns world units (the ×8 is applied), so only the
+rounding step is missing.
+
+Vectors (BF003, whole-unit points, interpolated world-unit height → value the original uses; truncation in brackets
+for contrast):
+
+| Point | Interpolated | Original | (trunc) |
+|---|---|---|---|
+| (1100, 983) | 40.6 | 41 | (40) |
+| (1100, 987) | 41.4 | 41 | (41) |
+| (1100, 988) | 41.6 | 42 | (41) |
+| any point at exactly n + 0.5 | n + 0.5 | n + 1 | (n) |
+
+🟡 The original interpolates in single precision, so a value within about 10⁻⁵ of a half could round the other way.
+This does not matter for an engine.
