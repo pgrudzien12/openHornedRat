@@ -1382,6 +1382,7 @@ class Battle:
         regiment.turn_order_key = None
         regiment.route_follows_unit = False
         self.set_point_route(regiment, (float(x), float(y)))
+        self._order_applied_restart(regiment)
 
     def set_point_route(self, regiment: Regiment, goal: Point) -> None:
         regiment.ordered_while_moving = regiment.moving
@@ -1494,6 +1495,8 @@ class Battle:
         regiment.waypoints.clear()
         regiment.route_follows_unit = False
         regiment.clear_shooting()
+        if self.interpreter is not None:  # notes/player_missile_orders.md 1.1: a running fire loop ends next pass
+            self.interpreter.stop_keep_firing(identifier)
         # game_rules.md "Braced": Halt is the one order still accepted while braced, and clears it.
         regiment.braced = False
         regiment.braced_target = None
@@ -1681,6 +1684,7 @@ class Battle:
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
         regiment.route_speed = 0.0
+        self._order_applied_restart(regiment)
 
     def order_turn_right(self, identifier: str) -> None:
         """Rotate a player regiment 90° clockwise in place (game_rules.md, opcodes 0x0D)."""
@@ -1693,6 +1697,7 @@ class Battle:
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
         regiment.route_speed = 0.0
+        self._order_applied_restart(regiment)
 
     def order_about_face(self, identifier: str) -> None:
         """Rotate a player regiment 180° in place (game_rules.md, opcodes 0x0E)."""
@@ -1705,6 +1710,7 @@ class Battle:
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
         regiment.route_speed = 0.0
+        self._order_applied_restart(regiment)
 
     def order_face_point(self, identifier: str, x: float, y: float) -> None:
         """Turn a player regiment to face world coordinates (x, y) in place."""
@@ -1722,6 +1728,7 @@ class Battle:
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
         regiment.route_speed = 0.0
+        self._order_applied_restart(regiment)
 
     def _bearing_from_centre(self, regiment: Regiment, x: float, y: float) -> int | None:
         """Facing toward (x, y) from the formation centre, by the Ctrl-drag rule; None on the centre itself."""
@@ -2911,6 +2918,15 @@ class Battle:
         """A React reaction outside the unit's script (an objective's pickup or warning)."""
         if self.interpreter is not None:
             self.interpreter.react(identifier, code)
+
+    def _order_applied_restart(self, regiment: Regiment) -> None:
+        """With scripts running, an applied Move, Face point or Turn order restarts the unit's script at its restart
+        point and drops its target and queued events; the braced state ends too
+        (notes/player_missile_orders.md 1.1)."""
+        if self.interpreter is not None:
+            self.interpreter.restart_for_order(regiment.identifier)
+        regiment.braced = False
+        regiment.braced_target = None
 
     def broadcast_script_event(self, code: int) -> None:
         """Queue a script event to every unit (the siege Z rule's event 0x38)."""

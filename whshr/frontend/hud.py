@@ -48,6 +48,22 @@ def select_regiment_hit(hits: Sequence["Regiment"], selected: str | None) -> str
     return pool[0].identifier if pool else top.identifier
 
 
+def order_target_hit(hits: Sequence["Regiment"], acting: "Regiment | None") -> str | None:
+    """Choose the target of an order aimed at the enemy (Attack, Fire, item launches, and any enemy-targeted
+    spell order to come) from a bottom-to-top hit stack: the topmost unit of another side than the acting
+    regiment, else the topmost hit. Where friend and foe overlap (a melee scrum) the player means the foe. For
+    Attack this agrees with the original, which only considers enemy-army units. DEVIATION for Fire: the original
+    takes the first footprint near the point of any side, friends included (notes/player_missile_orders.md 5); the
+    foe preference is a deliberate usability choice. An order aimed at friends would need the opposite preference."""
+    if not hits:
+        return None
+    if acting is not None:
+        for regiment in reversed(hits):
+            if regiment.side != acting.side:
+                return regiment.identifier
+    return hits[-1].identifier
+
+
 # Documented for completeness; battle_view.py's 3D pipeline does not yet clip its viewport to this
 # rect (it renders full-screen, with the HUD's own chrome simply drawn over it).
 VIEW_RECT = (8, 8, 624, 417)
@@ -616,12 +632,12 @@ class Hud:
         """Return the topmost active regiment at *pos*, ignoring current selection entirely - for
         resolving an order's target (Attack). Unlike a plain click (minimap_regiment_at()'s
         cycle-when-already-selected rule, meant for picking a unit to inspect or command),
-        commanding an attack against an overlapping stack of enemies always targets whichever one
-        is visually on top, with no cycling: the cycling rule exists to make an otherwise-stuck
+        commanding an attack against an overlapping stack always targets the topmost unit of another
+        side than the selection (order_target_hit), with no cycling: the cycling rule exists to make an otherwise-stuck
         selection reachable, which does not apply here since the order's own acting regiment
         (self.selected) is essentially never the one being targeted."""
         hits = self._marker_hits(pos)
-        return hits[-1].identifier if hits else None
+        return order_target_hit(hits or [], self._regiment(self.selected))
 
     def click_minimap_tab(self, pos: Sequence[float]) -> str | None:
         """Handle a click on a marker-display-mode tab or the book: "tab", "book" or None when neither was hit."""

@@ -316,5 +316,38 @@ class UnitTestOpcodeTests(QueryTestCase):
         self.assertFalse(self.call("TargetValid"))  # crossbow: the friend is on the line of fire
 
 
+class CrossbowLineOfFireTests(QueryTestCase):
+    """notes/player_missile_orders.md 3.1: shooter (0, 0), aim point (0, 350), footprint radius 30."""
+
+    call = UnitTestOpcodeTests.call
+
+    VECTORS = [((5, 300), True), ((28, 300), True), ((-28, 300), False), ((31, 300), False), ((40, 300), False),
+               ((5, 349), True), ((5, 360), False), ((0, -100), False), ((0, 20), False), ((0, 30), True)]
+
+    def test_given_the_report_vectors_then_the_line_test_matches(self):
+        for centre, blocks in self.VECTORS:
+            with self.subTest(centre=centre):
+                self.assertEqual(
+                    interpreter.ScriptInterpreter._on_line_of_fire((0, 0), (0, 350), centre, 30), blocks)
+
+    def _blocked(self, other_side, missile_code=2):
+        self.make(unit("T", 0, 350, Side.ENEMY), unit("O", 5, 300, other_side), searcher=unit("S", 0, 0, Side.PLAYER))
+        self.s.missile_code = missile_code
+        self.state.current_target = ("T", 0)
+        return not self.call("TargetValid")
+
+    def test_given_a_friend_near_side_of_the_target_then_a_crossbow_refuses(self):
+        self.assertTrue(self._blocked(Side.PLAYER))
+
+    def test_given_a_neutral_unit_on_the_line_then_a_crossbow_refuses(self):
+        self.assertTrue(self._blocked(Side.NEUTRAL))
+
+    def test_given_a_hostile_unit_on_the_line_then_it_does_not_block(self):
+        self.assertFalse(self._blocked(Side.ENEMY))
+
+    def test_given_a_bow_then_a_friend_on_the_line_does_not_block(self):
+        self.assertFalse(self._blocked(Side.PLAYER, missile_code=1))
+
+
 if __name__ == "__main__":
     unittest.main()
