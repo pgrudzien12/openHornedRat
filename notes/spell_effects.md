@@ -166,8 +166,9 @@ Each tick the projectile takes its next position `dest + trunc((start − dest) 
 ticks, counting down from N; the **first** tested position, r = N, is the start point), then runs one **in-flight
 impact test** there (§4) with: the caster's own unit **excluded**, **no messages**, radius 0.
 
-- Units, buildings and solid objects (scenery, and spell **area objects**: Tangling Thorn, Flamestorm column, Wind
-  Blast trail, Da Krunch) can be struck. A projectile that **stops on hit** ends as soon as its in-flight test hits
+- Units, buildings and solid objects (the battle file's **`[OBJECTS]` collision objects**, height `z`, not placed
+  furniture such as roads or trees, `map_objects_and_projectiles.md`; and spell **area objects**: Tangling Thorn,
+  Flamestorm column, Wind Blast trail, Da Krunch) can be struck. A projectile that **stops on hit** ends as soon as its in-flight test hits
   anything (a unit, even if every roll failed, a building, or a solid object at a height it reaches).
 - A projectile whose height above the ground under it (**arc included**, §2.1) is **negative** is removed after that
   tick's in-flight test (which still runs, `bf003_playtest_fireball_grid_pursuit.md` §3.2), without a terminal impact:
@@ -356,7 +357,8 @@ or not a wound resulted; in-flight tests and Hunting Spear strikes are silent.
   `D6 ≥ TO_WOUND[S vs buildings][T]` and `rand mod die + 1` wounds; no save, no `MagicResistent`, lethal-only credit
   to the caster. All spells here have S vs buildings = S.
 - **Rolling stock and war machines** are ordinary unit objects for impacts (🟡 not separately traced).
-- **Other solid objects** (trees, walls, area objects): no damage, but a hit for stop-on-hit purposes and for the
+- **Other solid objects** (`[OBJECTS]` collision objects, which designers place over woods and walls, and area
+  objects; `map_objects_and_projectiles.md`): no damage, but a hit for stop-on-hit purposes and for the
   Fireball/Burning Head side effects.
 
 ### 4.4 Consequences
