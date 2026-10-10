@@ -103,8 +103,13 @@ class ModelState:
     heading_x: float = 0.0
     heading_y: float = 0.0
     at_rest: bool = True
-    freeze_ticks: int = 0  # charge-start pause, (stagger & 7) + 1 ticks
+    # The model's one timed pause (bf003_playtest 8.1), kept as two kinds because they step differently: a newer
+    # pause replaces the older one (`start_pause`), so at most one of these is nonzero.
+    freeze_ticks: int = 0  # charge start (stagger & 7) + 1, ResetModelAnimations (stagger & 15) * 2 + 2 ticks
     rout_pause_ticks: int = 0  # break-and-turn pause, (stagger & 7) * 3 + 6 ticks
+    # The pause ran out during this tick's model update: the grid pass first collects the model on the next tick
+    # (bf003_playtest 8.1, the original's grid pass runs before the model update).
+    pause_just_ended: bool = False
     action: int = animation.STAND  # current action id, whshr.animation (game_rules.md "Figure animation")
     action_pc: int = 0  # ticks elapsed since the action's program counter was last reset
     action_entry: int = 0  # random entry/choice drawn on that reset, whshr.animation.step
@@ -125,6 +130,26 @@ class ModelState:
     # (None = re-aim on the next step) and the countdown to the next re-aim.
     reform_step: Point | None = None
     reaim_countdown: float = 0.0
+
+    def start_pause(self, ticks: int, rout: bool = False) -> None:
+        """Set the model's timed pause, replacing whatever was left of an older one (bf003_playtest 8.1)."""
+        self.freeze_ticks, self.rout_pause_ticks = (0, ticks) if rout else (ticks, 0)
+
+    def count_down_pause(self) -> bool:
+        """One tick of the timed pause, for every model whatever its state (bf003_playtest 4, 8.1). Returns
+        whether the model was pausing. A pause that runs out sets the model's action to walk and marks it
+        `pause_just_ended`, so the grid pass collects it on the next tick."""
+        self.pause_just_ended = False
+        if self.freeze_ticks <= 0 and self.rout_pause_ticks <= 0:
+            return False
+        if self.freeze_ticks > 0:
+            self.freeze_ticks -= 1
+        else:
+            self.rout_pause_ticks -= 1
+        if self.freeze_ticks <= 0 and self.rout_pause_ticks <= 0:
+            self.pause_just_ended = True
+            self.own_request = animation.WALK
+        return True
 
 
 @dataclass
@@ -1973,7 +1998,7 @@ class Battle:
                             and math.hypot(target.x - regiment.x, target.y - regiment.y)
                             <= regiment.charge_reach):
                         for model in regiment.melee_models:
-                            model.freeze_ticks = (model.stagger & 7) + 1
+                            model.start_pause((model.stagger & 7) + 1)
                             model.current_speed = 0.0
                         regiment.charge_started_target = target.identifier
                     # A pursuer runs straight at the chase point set at the last segment tick
@@ -2517,18 +2542,14 @@ class Battle:
         still_moving = False
         for index, ((px, py), slot) in enumerate(zip(regiment.positions, targets)):
             model = regiment.melee_models[index]
-            if model.rout_pause_ticks > 0:
-                model.rout_pause_ticks -= 1
+            # The timed pause counts down every tick for every model, before any step decision, so a model
+            # at rest in a melee also leaves its pause (bf003_playtest 4, 8.1).
+            in_rout_pause = model.rout_pause_ticks > 0
+            was_frozen = model.count_down_pause() and not in_rout_pause
+            if in_rout_pause:
                 updated.append((px, py))
                 still_moving = True
                 continue
-            # The timed pause counts down every tick for every model, before any step decision, so a model
-            # at rest in a melee also leaves its pause (bf003_playtest 4). PROVISIONAL: the grid's joiner pass
-            # runs after this movement update, so an expired pause is collected in the same tick or the next
-            # depending on that order (open question).
-            was_frozen = model.freeze_ticks > 0
-            if was_frozen:
-                model.freeze_ticks -= 1
             if regiment.in_melee and model.at_rest:
                 updated.append((px, py))
                 continue
@@ -2621,11 +2642,7 @@ class Battle:
         stepped = pausing = False
         for index in range(len(current)):
             model = regiment.melee_models[index]
-            if model.freeze_ticks > 0 or model.rout_pause_ticks > 0:
-                if model.freeze_ticks > 0:
-                    model.freeze_ticks -= 1
-                else:
-                    model.rout_pause_ticks -= 1
+            if model.count_down_pause():
                 pausing = True
                 continue
             if model.at_rest:
@@ -3154,7 +3171,7 @@ class Battle:
         distance = math.hypot(building.x - regiment.x, building.y - regiment.y)
         if regiment.charge_started_target != building.identifier and distance - building.radius <= regiment.charge_reach:
             for model in regiment.melee_models:
-                model.freeze_ticks = (model.stagger & 7) + 1
+                model.start_pause((model.stagger & 7) + 1)
                 model.current_speed = 0.0
             regiment.charge_started_target = building.identifier
         return self._advance_toward(regiment, centre, regiment.speed_for_mode(CHARGING_K) * move_scale, arrive=False,
