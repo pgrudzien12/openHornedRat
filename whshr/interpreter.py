@@ -1237,45 +1237,36 @@ class ScriptInterpreter:
 
     # ===== Conditional branches =====
 
+    def _skip_false_branch(self, state: UnitScriptState, script_words: Words) -> int:
+        """The pc after a false If/IfNot: past the Else or EndIf of the same nesting level. Else and EndIf words
+        of nested If/IfNot blocks are skipped with their blocks."""
+        pc = state.pc + 1
+        depth = 1
+        while pc < len(script_words):
+            opcode = behaviour.opcode_of(script_words[pc])
+            if opcode == 0x6E and depth == 1:  # Else
+                return pc + 1
+            if opcode == 0x6F:  # EndIf
+                depth -= 1
+                if depth == 0:
+                    return pc + 1
+            elif opcode in (0x6C, 0x6D):  # If, IfNot
+                depth += 1
+            pc += behaviour.LENGTHS[opcode] if opcode is not None else 1
+        return pc
+
     def op_If(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """If: skip to else/endif if cond_flags is false."""
+        """If: skip to the else/endif of its own block if cond_flags is false."""
         if not state.cond_flags:
-            pc = state.pc + 1
-            depth = 1
-            while pc < len(script_words) and depth > 0:
-                word = script_words[pc]
-                opcode = behaviour.opcode_of(word)
-                if opcode == 0x6E:  # Else
-                    return pc + 1
-                elif opcode == 0x6F:  # EndIf
-                    depth -= 1
-                    if depth == 0:
-                        return pc + 1
-                elif opcode in (0x6C, 0x6D):  # If, IfNot
-                    depth += 1
-                pc += behaviour.LENGTHS[opcode] if opcode is not None else 1
+            return self._skip_false_branch(state, script_words)
         return state.pc + 1
 
     def op_IfNot(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """IfNot: skip to else/endif if cond_flags is true."""
+        """IfNot: skip to the else/endif of its own block if cond_flags is true."""
         if state.cond_flags:
-            # Same skip logic as If
-            pc = state.pc + 1
-            depth = 1
-            while pc < len(script_words) and depth > 0:
-                word = script_words[pc]
-                opcode = behaviour.opcode_of(word)
-                if opcode == 0x6E:  # Else
-                    return pc + 1
-                elif opcode == 0x6F:  # EndIf
-                    depth -= 1
-                    if depth == 0:
-                        return pc + 1
-                elif opcode in (0x6C, 0x6D):  # If, IfNot
-                    depth += 1
-                pc += behaviour.LENGTHS[opcode] if opcode is not None else 1
+            return self._skip_false_branch(state, script_words)
         return state.pc + 1
 
     def op_Else(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
