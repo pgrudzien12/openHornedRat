@@ -991,7 +991,7 @@ script each tick (the per-tick script step, called from the battle tick).
 | 0x0B | movement collision | bumped into a unit | engage it (Query 8) |
 | 0x0C | break test, panic, flank test, lost grid, contact handler | **rout** | op 0xC8, React 4, rout script 162 |
 | 0x0D | failed fear/terror | **flee from a fear/terror enemy** | op 0xC8, React 6, rout script 162 |
-| 0x0E | `FleeingUnitUpdate` (broadcast) | a unit left the battlefield | drop it as target |
+| 0x0E | `FleeingUnitUpdate` (broadcast) | a routing unit departs (its centre leaves the battle area; it is removed later, with 0x16; `unit_removal_broadcast.md`) | drop it as target |
 | 0x0F | `StartRout`, withdraw | an enemy broke or withdrew | pursue or switch opponent (op 0x53) |
 | 0x10 | rally, pursuit restraint, pursuit end | **rally / stop pursuing** | React 17, re-form script 163 |
 | 0x13 | own attack script, missions | a friendly unit attacks | look for a target (Query 9) |
