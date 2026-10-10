@@ -524,13 +524,18 @@ class BattleView(SceneView[BattleScene]):
         return ()
 
     def _figure_hits(self, pixel: Sequence[float], projection: Projection) -> list[tuple[Regiment, tuple[float, float]]]:
-        """Active regiments with an opaque rendered figure under the pixel, bottom to top.
+        """Active regiments under the pixel, bottom to top.
 
-        Use the same frame, position, foot anchor and scale as the billboard renderer. A gap
-        inside the formation, or a transparent sprite pixel, has no unit hit.
+        A figure hit uses the same frame, position, foot anchor and scale as the billboard renderer, so a
+        transparent sprite pixel is no hit. A unit of two or more figures is also hit inside the screen outline
+        (convex hull) of its figures' sprite rectangles, so a click between its figures selects it; such an
+        outline hit ranks below every figure hit. A single figure stays pixel-exact.
         """
         field, yaw = self.scene.field, self.camera.yaw
         hits: dict[str, tuple[Regiment, tuple[float, float], float]] = {}
+        # Per regiment: sprite rectangle corners, (screen distance, figure point) candidates, nearest foot depth.
+        outlines: dict[str, tuple[Regiment, list[tuple[float, float]], list[tuple[float, tuple[float, float]]],
+                                  float]] = {}
         for regiment in self.scene.battle.regiments.values():
             if not regiment.active or not regiment.visible_to_player:
                 continue
@@ -547,6 +552,13 @@ class BattleView(SceneView[BattleScene]):
                     continue
                 foot_x, foot_y, _ = projection.project(foot)
                 scale = SPRITE_PIXEL_WORLD_UNITS / WORLD_PER_MESH * projection.focal_length / depth
+                left, top = foot_x - frame.anchor_x * scale, foot_y - frame.anchor_y * scale
+                right, bottom = left + frame.width * scale, top + frame.height * scale
+                outline = outlines.setdefault(regiment.identifier, (regiment, [], [], depth))
+                outline[1].extend(((left, top), (right, top), (left, bottom), (right, bottom)))
+                outline[2].append((math.hypot(pixel[0] - foot_x, pixel[1] - foot_y), (x, y)))
+                if depth < outline[3]:
+                    outlines[regiment.identifier] = (regiment, outline[1], outline[2], depth)
                 column = math.floor(frame.anchor_x + (pixel[0] + 0.5 - foot_x) / scale)
                 row = math.floor(frame.anchor_y + (pixel[1] + 0.5 - foot_y) / scale)
                 if (0 <= column < frame.width and 0 <= row < frame.height
@@ -554,6 +566,12 @@ class BattleView(SceneView[BattleScene]):
                     prior = hits.get(regiment.identifier)
                     if prior is None or depth < prior[2]:
                         hits[regiment.identifier] = (regiment, (x, y), depth)
+        figure_ids = set(hits)
+        for identifier, (regiment, corners, figures, depth) in outlines.items():
+            if identifier in hits or len(figures) < 2:
+                continue
+            if picking.inside_convex((pixel[0] + 0.5, pixel[1] + 0.5), picking.convex_hull(corners)):
+                hits[identifier] = (regiment, min(figures)[1], depth)
         if hits:
             scene_depth = picking.mesh_depth_at(projection, pixel[0], pixel[1], field.vertices,
                                                 field.texture_layers, field.texture_size, NEAR, FAR)
@@ -566,9 +584,11 @@ class BattleView(SceneView[BattleScene]):
                 hits = {identifier: hit for identifier, hit in hits.items()
                         if hit[2] - SPRITE_DEPTH_BIAS < scene_depth}
         # Equal-depth sprites use a strict depth test: the first emitted regiment owns
-        # the pixel. Return hits bottom-to-top, with that regiment last in a tie.
+        # the pixel. Return hits bottom-to-top, with that regiment last in a tie; outline hits
+        # sit below every figure hit.
         return [(regiment, point) for _order, (regiment, point, _depth) in sorted(
-            enumerate(hits.values()), key=lambda ordered: (-ordered[1][2], -ordered[0]))]
+            enumerate(hits.values()), key=lambda ordered: (ordered[1][0].identifier in figure_ids,
+                                                           -ordered[1][2], -ordered[0]))]
 
     def _select_figure_hit(self, hits: list[tuple[Regiment, tuple[float, float]]]) -> str | None:
         """Apply the minimap's promotion and cycling rule to a visible figure stack."""

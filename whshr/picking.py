@@ -151,3 +151,37 @@ def view_rect(projection: "Projection", width: int, height: int, camera_ground: 
             xs.append(ground[0])
             zs.append(ground[1])
     return min(xs) - margin, min(zs) - margin, max(xs) + margin, max(zs) + margin
+
+
+def convex_hull(points: Sequence[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Counter-clockwise convex hull of 2-D points (monotone chain); collinear points are dropped."""
+    unique = sorted(set(points))
+    if len(unique) <= 2:
+        return unique
+
+    def cross(o: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower: list[tuple[float, float]] = []
+    for point in unique:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0:
+            lower.pop()
+        lower.append(point)
+    upper: list[tuple[float, float]] = []
+    for point in reversed(unique):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0:
+            upper.pop()
+        upper.append(point)
+    return lower[:-1] + upper[:-1]
+
+
+def inside_convex(point: tuple[float, float], hull: Sequence[tuple[float, float]]) -> bool:
+    """Whether a point lies inside or on a counter-clockwise convex polygon of at least three corners."""
+    if len(hull) < 3:
+        return False
+    x, y = point
+    for index, (ax, ay) in enumerate(hull):
+        bx, by = hull[(index + 1) % len(hull)]
+        if (bx - ax) * (y - ay) - (by - ay) * (x - ax) < 0:
+            return False
+    return True
