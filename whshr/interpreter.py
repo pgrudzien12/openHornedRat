@@ -3251,28 +3251,53 @@ class ScriptInterpreter:
 
     def op_CheckCollisions(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
-        """CheckCollisions: the collision pass in probe mode (notes/movement_formation.md 3.10,
-        notes/script_grid_events.md 4): nothing is engaged; touching an enemy runs the contact fear test (a
-        refusal makes it the target and queues 0x0D). Condition: anything overlapping. PROVISIONAL: overlap is
-        "centres closer than the two footprint radii" and the push-apart is left to the engine's own pass. Not
-        modelled: event 0x27 for solid objects ahead. A unit leaving the battle is skipped (false)."""
+        """CheckCollisions: the unit's collision pass at once, in probe mode (notes/collision_probe_result.md). Probe
+        mode only keeps an enemy contact from being recorded; pushes, re-check states, 0x27 and the contact fear
+        0x0D really happen. Each overlapping footprint gives an answer (or none), and the condition is the LAST
+        answer given, so a later no overwrites an earlier yes; no answer at all is false, and false clears the
+        contact latch. Scenery and buildings are examined first (`Battle.probe_scenery`), then the regiments in
+        creation order. Per regiment X whose circle overlaps (section 1):
+        1. a wagon mover with X within 45 degrees ahead: 0x27 queued, yes;
+        2. X a war machine or wagon, or any regiment X that is not the mover's target, on the mover's side: push
+           apart unless either unit is in melee, broken or pursuing or a friendly push already happened (no
+           answer then); a wagon mover is never moved, so it answers no;
+        3. X on the other side (or the mover's target): a broken mover gives no answer for a regiment X and is
+           pushed by a war machine or wagon (also in a catch-up re-form walk); otherwise the contact fear test
+           (regiments only), then yes iff the footprints touch.
+        Hidden units, routing footprints and units leaving the battle are not examined. Not modelled: contact
+        attacks on a broken mover (run every tick by `combat.resolve_router_contact_attacks`), fanatic footprints.
+        A unit leaving the battle is skipped (false)."""
         unit = self.battle.regiments.get(unit_id)
-        if unit is None or state.unit_flags & LEAVING_BATTLE_FLAG:
+        if unit is None or state.unit_flags & LEAVING_BATTLE_FLAG or not unit.active:
             state.cond_flags = False
             return state.pc + 1
-        touched = False
-        for other in self.battle.regiments.values():
-            if other is unit or not other.active:
+        answer = self.battle.probe_scenery(unit)
+        friendly_pushed = False
+        target = state.current_target[0] if state.current_target else None
+        for other in list(self.battle.regiments.values()):
+            if (other is unit or not other.active or other.hidden or other.routing or self._leaving(other)
+                    or not self.battle.circles_overlap(unit, other)):
                 continue
-            if math.hypot(other.x - unit.x, other.y - unit.y) >= other.bounding_radius() + unit.bounding_radius():
+            if unit.is_wagon and self._point_in_arc(unit, other.x, other.y):
+                self.event_bus.queue_event(unit_id, Event(code=0x27), checked=True)
+                answer = True
+            machine = other.is_wagon or other.hud_class == "art"
+            if not self._hostile(unit, other) and (machine or other.identifier != target):
+                blocked = any(side.in_melee or side.routing or side.pursuing for side in (unit, other))
+                if not blocked and not friendly_pushed:
+                    answer = self.battle.probe_push(unit, other)
+                    friendly_pushed = answer
                 continue
-            touched = True
-            if (self._hostile(unit, other) and not unit.routing and not self._leaving(other)
-                    and not self._may_engage(unit, other, state, rng)):
-                state.current_target = (other.identifier, 0)
-                self.event_bus.queue_event(unit_id, Event(code=0x0D))
-        state.cond_flags = touched
-        if not touched:
+            if machine and (unit.routing or (unit.reforming and unit.reform_walk_back)):
+                answer = self.battle.probe_push(unit, other)
+                continue
+            if unit.routing:
+                continue
+            if not machine:
+                self._contact_fear(unit, other)
+            answer = self.battle.footprints_overlap(unit, other)
+        state.cond_flags = bool(answer)
+        if not answer:
             state.contact_latch = False
         return state.pc + 1
 
