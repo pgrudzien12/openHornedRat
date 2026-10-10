@@ -97,7 +97,7 @@ Notes:
 | Event | Sent for | Source | Argument | Point | Opcode | Outcome |
 |---|---|---|---|---|---|---|
 | 0x04 | attack order on a unit/building; also `ReacquireEventSource`, Find* queries | the target unit | 0 | 0,0 | 0x3A | unit branch; **pending := 0 (none)**; refused also if the target is broken |
-| 0x1E / 0x1F (0x25 for an independent Archers unit) | shoot order clicked on a building / an enemy unit | that unit | 0 | – | 0x88 | unit branch; pending := none |
+| 0x1E / 0x1F (0x25 for an independent Archers unit) | shoot order clicked on a building / any other unit, of any side (`player_missile_orders.md` §5) | that unit | 0 | – | 0x88 | unit branch; pending := none |
 | 0x20 (0x24 independent Archers) | shoot order clicked on the shooter itself | none | 0 | (−1,−1) | 0x88 | ground: target := none, point := (−1,−1) |
 | 0x21 | shoot order on open ground | none | 0 | click | 0x88 | ground: target := none, point := click |
 | 0x28 / 0x29 (0x2F independent) | wizard order without a chosen spell, clicked on a building / another unit 🟡 (UI action) | that unit | −1 | (−1,−1) | 0xAF | unit branch; pending := −1 (none) |
