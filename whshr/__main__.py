@@ -109,6 +109,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     engine_parser = commands.add_parser(
         "engine", help="run the real-time engine (needs the packages in requirements-engine.txt)"
     )
+    auto_parser = commands.add_parser(
+        "battle-auto", help="control a hidden battle through JSON Lines on stdin (needs frontend packages)"
+    )
+    auto_parser.add_argument("installation", type=Path, help="WARFB installation directory")
+    auto_parser.add_argument("--battle", default="BF001", help="battle id (default: BF001)")
+    auto_parser.add_argument("--width", type=int, default=1280)
+    auto_parser.add_argument("--height", type=int, default=800)
+    auto_parser.add_argument("--seed", type=int, default=engine.DEFAULT_SEED)
+    auto_parser.add_argument("--battle-log", type=Path, default=REPOSITORY_LOGS)
+    auto_parser.add_argument("--no-battle-log", action="store_true")
+    auto_parser.add_argument("--camera", type=float, nargs=3, metavar=("YAW", "PITCH", "DISTANCE"))
     engine_parser.add_argument("installation", type=Path, nargs="?", default=None, help="WARFB installation directory")
     engine_parser.add_argument("--width", type=int, default=1280, help="window width (default: 1280)")
     engine_parser.add_argument("--height", type=int, default=800, help="window height (default: 800)")
@@ -255,6 +266,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                          log_dir, args.seed, args.glue_program, resolve_save_dir(args.save_dir), args.no_battle,
                          None if args.no_campaign_log else args.campaign_log, args.profile_frames, debug=args.debug)
         print(f"{result['frames']} frames, {result['ticks']} ticks, final scene {result['scene']}")
+        return 0
+    if args.command == "battle-auto":
+        if args.width <= 0 or args.height <= 0:
+            parser.error("--width and --height must be greater than zero")
+        try:
+            from .frontend import battle_auto
+        except ModuleNotFoundError as error:
+            if error.name not in ("pygame", "zengl"):
+                raise
+            print(f"battle-auto needs {error.name}; install requirements-engine.txt into .venv", file=sys.stderr)
+            return 2
+        battle_auto.run(args.installation, args.battle, (args.width, args.height), args.seed,
+                        None if args.no_battle_log else args.battle_log, args.camera)
         return 0
     if args.command == "viewer":
         try:
