@@ -170,11 +170,12 @@ class Effect:
 
 @dataclass
 class EffectTable:
-    """The battle's active effects in launch order, their area objects, and the per-unit spell states: Dispel Magic
-    used (B 5.4), lifted by a Flying Bower (C2 2.3), inside a Sapphire Arch with its transport stamp (C2 3.2)."""
+    """The battle's active effects in launch order, their area objects, and the per-unit spell states: the selected
+    spell entries as (caster, code) (B 0.2; Dispel Magic stays selected for the battle, B 5.4), lifted by a Flying
+    Bower (C2 2.3), inside a Sapphire Arch with its transport stamp (C2 3.2)."""
     active: list[Effect] = field(default_factory=list[Effect])
     next_serial: int = 0
-    dispel_used: set[str] = field(default_factory=set[str])
+    selected: set[tuple[str, int]] = field(default_factory=set[tuple[str, int]])
     areas: list[Area] = field(default_factory=list[Area])
     flying: set[str] = field(default_factory=set[str])
     in_arch: set[str] = field(default_factory=set[str])
@@ -226,8 +227,35 @@ def _sync_lifted(battle: Battle, unit: Regiment) -> None:
 
 
 def dispel_selected(battle: Battle, caster: str) -> bool:
-    """The caster has launched Dispel Magic this battle: its entry stays selected (B 5.4)."""
-    return caster in table(battle).dispel_used
+    """The caster has clicked or launched Dispel Magic this battle: its entry stays selected (B 5.4)."""
+    return spell_selected(battle, caster, DISPEL_MAGIC)
+
+
+def spell_selected(battle: Battle, caster: str, code: int) -> bool:
+    """The caster's spell entry for `code` is selected: the player clicked it and has not yet given (or has
+    cancelled) its target; Dispel Magic once clicked or launched (B 0.2, 5.4)."""
+    return (caster, code) in table(battle).selected
+
+
+def select_spell(battle: Battle, caster: str, code: int) -> None:
+    """Mark the entry selected (the player's spell click, B 0.2)."""
+    table(battle).selected.add((caster, code))
+
+
+def deselect_spell(battle: Battle, caster: str, code: int) -> None:
+    """The target click or a cancelled targeting clears the selection; never for Dispel Magic (B 0.2, 5.4)."""
+    if code != DISPEL_MAGIC:
+        table(battle).selected.discard((caster, code))
+
+
+def cancel_owned(battle: Battle, caster: str, code: int) -> int:
+    """Ctrl+click on an active spell: cancel the caster's (non-innate) effects of that code, no refund
+    (game_rules.md "Winds of magic and casting"). Returns how many were cancelled."""
+    owned = [effect for effect in table(battle).effects()
+             if effect.owner == caster and effect.code == code and not effect.innate]
+    for effect in owned:
+        cancel(battle, effect)
+    return len(owned)
 
 
 def solid_areas(battle: Battle) -> list[Area]:
@@ -360,7 +388,7 @@ def launch(battle: Battle, code: int, caster: Regiment, origin_model: int, x: fl
     effects.next_serial += 1
     caster.hidden = False
     if spell == DISPEL_MAGIC:
-        effects.dispel_used.add(caster.identifier)
+        select_spell(battle, caster.identifier, DISPEL_MAGIC)
     battle.events.append(BattleEvent(f"{caster.name} casts spell {spell}", "spell", regiment=caster.identifier,
                                      spell=spell, x=x, y=y))
     _start(battle, effect, caster, origin_model, target)

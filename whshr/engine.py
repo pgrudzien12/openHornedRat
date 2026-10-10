@@ -29,6 +29,8 @@ CLOSING_K = 1.0     # unused directly (player/AI attack orders go straight to ch
 CHARGING_K = 2.5
 FLEEING_K = 1.5
 
+# Spells with no target click: the cast order is given on the spell click (game_rules.md "Winds of magic and casting").
+NO_TARGET_SPELLS = frozenset({spell_effects.AZURE_BLADES, spell_effects.DISPEL_MAGIC, spell_effects.FISTS})
 DEFAULT_SEED = 1995  # arbitrary but fixed: battles are deterministic unless a caller picks a seed
 
 # Placeholder s_rlmv for a regiment whose script has no decoded M/I profile (game_rules.md leaves
@@ -1307,6 +1309,71 @@ class Battle:
             return False
         spell = spell_effects.LIGHTNING if code == 0x105 else spell_effects.FIREBALL
         return spell_effects.launch(self, spell, unit, -1, x, y)
+
+    # ----------------------------------------------------------------- the player's Magic order
+
+    @staticmethod
+    def can_cast(unit: Regiment) -> bool:
+        """A caster: class Wizard, or a leader carrying the casting weapon (game_rules.md "Winds of magic and
+        casting", Checks)."""
+        return unit.unit_class == interpreter.WIZARD_CLASS or unit.shooting_code == 16
+
+    @property
+    def player_power(self) -> int:
+        """The player army's (and allies') power pool, 0-8."""
+        return self.event_bus.power.player
+
+    def spell_usable(self, identifier: str, code: int) -> bool:
+        """A player caster's spell entry can be clicked: not selected and its cost fits the pool
+        (notes/spell_lasting_effects.md 0.2)."""
+        unit = self.regiments.get(identifier)
+        cost = magic.cost(code)
+        return (unit is not None and unit.side == Side.PLAYER and unit.active and self.can_cast(unit)
+                and code in unit.spells and cost is not None and cost <= self.player_power
+                and not spell_effects.spell_selected(self, identifier, code))
+
+    def select_spell(self, identifier: str, code: int) -> bool:
+        """The spell click of the Magic order (order 0x17): pay the cost at once and select the entry
+        (game_rules.md "Winds of magic and casting"; notes/spell_lasting_effects.md 0.2). Return whether the spell
+        waits for a target click; Azure Blades, Dispel Magic and Fists of Gork do not: their cast order is given
+        here, aimed at the caster's own position."""
+        self._require_battle_order()
+        if not self.spell_usable(identifier, code):
+            raise ValueError("spell is unavailable")
+        cost = magic.cost(code) or 0
+        self.event_bus.power.add(False, -cost)
+        spell_effects.select_spell(self, identifier, code)
+        if code in NO_TARGET_SPELLS:
+            unit = self.regiments[identifier]
+            self.order_cast(identifier, code, unit.x, unit.y)
+            return False
+        return True
+
+    def order_cast(self, identifier: str, code: int, x: float, y: float) -> None:
+        """The target click of a selected spell: clear the selection (never Dispel Magic's) and give the caster's
+        script the cast order, event 0x2B with the spell and the clicked point (notes/script_magic.md 4). Range, arc
+        and the unit under the point are checked only at the launch; nothing is refunded."""
+        self._require_battle_order()
+        unit = self.regiments[identifier]
+        if unit.side != Side.PLAYER or not spell_effects.spell_selected(self, identifier, code):
+            raise ValueError("spell was not selected")
+        spell_effects.deselect_spell(self, identifier, code)
+        if unit.active:
+            self.event_bus.queue_event(identifier, interpreter.Event(code=0x2B, parameter=code, x=int(x), y=int(y)))
+
+    def cancel_spell_target(self, identifier: str, code: int) -> None:
+        """Cancelled targeting: the selection is cleared, the power stays spent (notes/spell_lasting_effects.md
+        0.2)."""
+        spell_effects.deselect_spell(self, identifier, code)
+
+    def cancel_spell_effects(self, identifier: str, code: int) -> bool:
+        """Ctrl+click on an active spell: end the caster's effects of that spell, no refund (game_rules.md
+        "Winds of magic and casting"). Return whether anything was active."""
+        self._require_battle_order()
+        unit = self.regiments.get(identifier)
+        if unit is None or unit.side != Side.PLAYER:
+            raise ValueError("not a player caster")
+        return spell_effects.cancel_owned(self, identifier, code) > 0
 
     def append_waypoint(self, identifier: str, x: float, y: float) -> None:
         """Ctrl Move targeting: retain up to nine manual destinations (§3)."""
