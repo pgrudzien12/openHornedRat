@@ -1316,7 +1316,7 @@ selection. The description below is how the portrait is drawn (🟡 parts marked
 `portrait_bg` sprite set frame 0 at (4, 12) (no fallback: a missing portrait is simply not drawn); the unit's animated
 portrait (loaded by the unit type's portrait id) at (4, 12); and an ornamental frame of eight `ICONS` pieces (frames
 181–188 for the default look, 189–196 for enemy units, 197–204 for wizards/monsters — 🟡 which class bits pick the last
-two) at fixed offsets. When nothing is selected the same rectangle shows a compass (frames 99 and 105). Unit name and counts
+two) at fixed offsets. When nothing is selected the same rectangle shows a compass (art from the panel background frame 98, heading tape 105, wind strip 106, power markers 107; `battle_compass.md`). Unit name and counts
 are not drawn here; whether the scroll-text window shows them was not read ⬜. Using another background than `portrait_bg`
 (such as a `BACKALL` frame) is a guess.
 
