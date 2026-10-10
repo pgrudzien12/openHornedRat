@@ -353,5 +353,31 @@ class WorkedExampleTests(ContactTestCase):
         self.assertEqual(self.battle.engage_requests, [])
 
 
+class ScriptedSameSideEngagementTests(ContactTestCase):
+    """notes/game_rules.md, engagement rules: a script's own target may be a friend (BF001: Sleaquit's
+    AttackTagged on Otto Hiln, both enemy side). With scripts running, the fight starts from the contact
+    handler's engagement, and must outlive the tick it starts on."""
+
+    def setUp(self):
+        self.assassin = regiment("S", 0, 0, Side.ENEMY, speed_per_tick=0.0)
+        self.otto = regiment("O", 0, 6, Side.ENEMY, speed_per_tick=0.0)
+        self.make(self.assassin, self.otto)
+        self.assassin.attack_target = "O"
+        self.bus.unit_states["S"].current_target = ("O", 0)
+
+    def test_the_engaged_friend_is_fought_on_the_attackers_own_camp(self):
+        self.contact("S", "O")
+        combat.resolve_contacts(self.battle)
+        self.assertTrue(self.assassin.in_melee and self.otto.in_melee)
+        self.assertEqual((self.assassin.camp, self.otto.camp), (Side.DUEL, Side.ENEMY))
+
+    def test_the_fight_does_not_dissolve_on_the_next_tick(self):
+        self.contact("S", "O")
+        combat.resolve_contacts(self.battle)
+        self.battle.tick()
+        self.assertTrue(self.assassin.in_melee and self.otto.in_melee)
+        self.assertEqual(self.assassin.melee_group, self.otto.melee_group)
+
+
 if __name__ == "__main__":
     unittest.main()
