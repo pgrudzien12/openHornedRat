@@ -9,6 +9,7 @@ import struct
 import sys
 import types
 import unittest
+from array import array
 from collections import deque
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -1099,9 +1100,13 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
         view.cursors, view._cursor_mode = None, None
         view.event_log = []
         view.hud = SimpleNamespace(order_completed=Mock())
+        view._figure_hits = lambda pixel, projection: []
         return view
 
     def _click_at(self, view, world_x, world_y):
+        identifier = view.scene.battle.regiment_at(world_x, world_y, player_only=False)
+        view._figure_hits = lambda pixel, projection: ([(view.scene.battle.regiments[identifier], (world_x, world_y))]
+                                                        if identifier is not None else [])
         with patch("whshr.frontend.battle_view.picking.pick_ground",
                   return_value=(world_x / WORLD_PER_MESH, world_y / WORLD_PER_MESH)):
             return view._ground_click((0, 0))
@@ -1138,8 +1143,6 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
     def test_given_an_armed_attack_order_and_empty_ground_then_it_cancels_and_logs_cannot(self):
         regiments = [Regiment("player", "Player", 100, 100, 0, Side.PLAYER, models=10)]
         view = self._view(regiments, selected_id="player", order_mode="attack")
-        view._sprite_pick = lambda pixel, projection: None  # the stubbed projection isn't real
-
         events = self._click_at(view, 900, 900)  # nothing there
 
         self.assertEqual(events, ())
@@ -1164,6 +1167,7 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
 
         with patch("whshr.frontend.battle_view.picking.pick_ground",
                   return_value=(200.0 / WORLD_PER_MESH, 200.0 / WORLD_PER_MESH)):
+            view._figure_hits = lambda pixel, projection: [(view.scene.battle.regiments["enemy"], (200.0, 200.0))]
             events = view._ground_click((0, 0), direct=True)
 
         self.assertEqual(events, (("attack", "enemy"),))
@@ -1196,11 +1200,8 @@ class EnemyInspectionSelectionTests(unittest.TestCase):
         self.assertFalse(enemy.fight_harder)
 
 
-class SpritePickTests(unittest.TestCase):
-    """BattleView._sprite_pick(): a screen-space fallback for _ground_click() when the ground-plane
-    pick misses a regiment's own footprint - troop sprites are billboards standing well above
-    their ground anchor (SPRITE_VERTEX_SHADER), so clicking the visible body, not just the feet,
-    needs its own hit test against each regiment's rendered sprite block."""
+class FigurePickTests(unittest.TestCase):
+    """Battlefield clicks use the same visible figure frames and positions as rendering."""
 
     def _projection_factory(self):
         from whshr.battle3d import Projection
@@ -1211,52 +1212,156 @@ class SpritePickTests(unittest.TestCase):
 
         return make_projection
 
-    def _view(self, regiments):
+    def _view(self, regiments, pixels=bytes([1] * 9)):
+        from whshr.battlefield import SpriteFrame
+
         view = BattleView.__new__(BattleView)
-        field = SimpleNamespace(width=1000, height=800, ground_height=lambda x, y: 0.0)
-        view.scene = SimpleNamespace(field=field, battle=Battle(1000, 800, regiments))
+        frame = SpriteFrame(3, 3, 1, 2, pixels)
+        sheet = SimpleNamespace(frames=[frame], frame_index=lambda *args: 0)
+        field = SimpleNamespace(width=1000, height=800, ground_height=lambda x, y: 0.0,
+                                sprite_sheet=lambda resource: sheet, vertices=array("f"),
+                                texture_layers=[], texture_size=(1, 1), effect_meshes={})
+        battle = Battle(1000, 800, regiments)
+        for regiment in regiments:
+            regiment.model_positions()
+        view.scene = SimpleNamespace(field=field, battle=battle, selected_id=None)
         view.camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=180.0, pitch=45.0,
                                       distance=100.0, fov=45.0, projection=self._projection_factory())
         view.gpu = SimpleNamespace(target=SimpleNamespace(size=(640, 480)))
+        view.order_mode = None
+        view.cursors = None
+        view.hud = SimpleNamespace(order_completed=Mock())
+        view.event_log = []
         return view
 
-    def test_given_a_pixel_on_the_rendered_sprite_body_then_the_regiment_is_picked(self):
-        from whshr.frontend.battle_view import SPRITE_MID_HEIGHT
-        regiments = [Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=10)]
+    def _pixel(self, view, x, y, column=1, row=1):
+        from whshr.formation import SPRITE_PIXEL_WORLD_UNITS
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+        foot = projection.view(x / WORLD_PER_MESH, 0.0, y / WORLD_PER_MESH)
+        px, py, _ = projection.project(foot)
+        scale = SPRITE_PIXEL_WORLD_UNITS / WORLD_PER_MESH * projection.focal_length / foot[2]
+        return (px + (column + 0.5 - 1) * scale - 0.5,
+                py + (row + 0.5 - 2) * scale - 0.5)
+
+    def test_a_figure_far_from_the_regiment_anchor_can_be_selected(self):
+        regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=1)
+        view = self._view([regiment])
+        regiment.positions[0] = (700, 400)
+        pixel = self._pixel(view, 700, 400)
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+
+        self.assertEqual([(r.identifier, point) for r, point in view._figure_hits(pixel, projection)],
+                         [("player", (700, 400))])
+        with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
+            self.assertEqual(view._ground_click(pixel), (("select", "player"),))
+        with patch("whshr.frontend.battle_view.picking.pick_ground",
+                   return_value=(500 / WORLD_PER_MESH, 400 / WORLD_PER_MESH)):
+            self.assertEqual(view._ground_click(pixel), (("select", "player"),))
+
+    def test_empty_footprint_and_transparent_sprite_pixel_do_not_select(self):
+        regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=1)
+        view = self._view([regiment], pixels=bytes([1, 1, 1, 1, 0, 1, 1, 1, 1]))
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+
+        self.assertEqual(view._figure_hits(self._pixel(view, 500, 400), projection), [])
+        with patch("whshr.frontend.battle_view.picking.pick_ground",
+                   return_value=(500 / WORLD_PER_MESH, 400 / WORLD_PER_MESH)):
+            self.assertEqual(view._ground_click(self._pixel(view, 500, 400)), ())
+
+    def test_inactive_and_hidden_enemies_are_not_picked(self):
+        destroyed = Regiment("destroyed", "Destroyed", 500, 400, 0, Side.PLAYER, models=0)
+        hidden = Regiment("hidden", "Hidden", 500, 400, 0, Side.ENEMY, models=1, hidden=True)
+        view = self._view([destroyed, hidden])
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+
+        self.assertEqual(view._figure_hits(self._pixel(view, *hidden.positions[0]), projection), [])
+
+    def test_terrain_or_scenery_hides_a_figure_but_a_texture_hole_does_not(self):
+        from whshr.frontend.battle_view import SPRITE_DEPTH_BIAS
+        from whshr.picking import screen_ray
+
+        regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=1)
+        view = self._view([regiment])
+        x, y = regiment.positions[0]
+        pixel = self._pixel(view, x, y)
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+        self.assertEqual(len(view._figure_hits(pixel, projection)), 1)
+        origin, direction = screen_ray(projection, *pixel)
+        foot_depth = projection.view(x / WORLD_PER_MESH, 0.0, y / WORLD_PER_MESH)[2]
+        forward = sum(direction[i] * projection.view_direction[i] for i in range(3))
+        distance = (foot_depth - SPRITE_DEPTH_BIAS - 3.0) / forward
+        centre = tuple(origin[i] + distance * direction[i] for i in range(3))
+        for sx, sy in ((-10, -10), (10, -10), (0, 10)):
+            view.scene.field.vertices.extend((*(centre[i] + sx * projection.right[i]
+                                                  + sy * projection.up[i] for i in range(3)),
+                                              0.25, 0.25, 0.0, 1.0))
+        view.scene.field.texture_layers = [bytes((100, 100, 100, 255))]
+
+        self.assertEqual(view._figure_hits(pixel, projection), [])
+        occluder = array("f", view.scene.field.vertices)
+        shift = (SPRITE_DEPTH_BIAS + 2.5) / forward
+        for start in (0, 7, 14):
+            for coordinate in range(3):
+                view.scene.field.vertices[start + coordinate] += shift * direction[coordinate]
+        self.assertEqual(len(view._figure_hits(pixel, projection)), 1)  # the renderer's depth bias keeps it visible
+        view.scene.field.vertices = occluder
+        view.scene.field.texture_layers = [bytes((0, 0, 0, 0))]
+        self.assertEqual(len(view._figure_hits(pixel, projection)), 1)
+        view.scene.field.texture_layers = [bytes((100, 100, 100, 255))]
+        effect_vertices = view.scene.field.vertices
+        view.scene.field.vertices = array("f")
+        view.scene.field.effect_meshes = {"active": object()}
+        view._effect_vertices = Mock(return_value=effect_vertices)
+        self.assertEqual(view._figure_hits(pixel, projection), [])
+        view._effect_vertices.assert_called_once_with()
+
+    def test_overlap_cycles_selection_and_uses_topmost_figure_for_attack(self):
+        regiments = [Regiment(name, name, 500, 400, 0, Side.PLAYER, models=1)
+                     for name in ("first", "second", "third")]
         view = self._view(regiments)
+        pixel = self._pixel(view, *regiments[0].positions[0])
         projection = view.camera.projection(640, 480, 1000, 800, 0.0)
-        mesh_x, mesh_z = 500 / WORLD_PER_MESH, 400 / WORLD_PER_MESH
-        pixel = projection.project(projection.view(mesh_x, SPRITE_MID_HEIGHT, mesh_z))[:2]
+        self.assertEqual([r.identifier for r, _ in view._figure_hits(pixel, projection)],
+                         ["third", "second", "first"])
+        with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
+            selected = []
+            for _ in range(3):
+                identifier = view._ground_click(pixel)[0][1]
+                selected.append(identifier)
+                view.scene.selected_id = identifier
+            self.assertEqual(selected, ["first", "third", "second"])
+            view.order_mode = "attack"
+            self.assertEqual(view._ground_click(pixel), (("attack", "first"),))
 
-        self.assertEqual(view._sprite_pick(pixel, projection), "player")
-
-    def test_given_a_pixel_far_from_any_regiment_then_nothing_is_picked(self):
-        regiments = [Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=10)]
+    def test_selection_elsewhere_in_an_overlap_does_not_replace_the_top_figure(self):
+        regiments = [Regiment(name, name, 500, 400, 0, Side.PLAYER, models=1)
+                     for name in ("first", "second", "third")]
         view = self._view(regiments)
-        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+        view.scene.selected_id = "second"  # selected through the minimap or keyboard
+        pixel = self._pixel(view, *regiments[0].positions[0])
+        with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
+            self.assertEqual(view._ground_click(pixel), (("select", "first"),))
+            view.scene.selected_id = "first"
+            self.assertEqual(view._ground_click(pixel), (("select", "third"),))
 
-        self.assertIsNone(view._sprite_pick((0, 0), projection))
+    def test_move_click_on_a_figure_without_ground_keeps_the_order_armed(self):
+        regiment = Regiment("target", "Target", 500, 400, 0, Side.PLAYER, models=1)
+        view = self._view([regiment])
+        view.order_mode = "move"
+        pixel = self._pixel(view, *regiment.positions[0])
+        with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
+            self.assertEqual(view._ground_click(pixel), ())
+        self.assertEqual(view.order_mode, "move")
+        view.hud.order_completed.assert_not_called()
 
-    def test_given_an_inactive_regiment_then_its_sprite_is_never_picked(self):
-        from whshr.frontend.battle_view import SPRITE_MID_HEIGHT
-        regiments = [Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=0)]  # destroyed
-        view = self._view(regiments)
-        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
-        mesh_x, mesh_z = 500 / WORLD_PER_MESH, 400 / WORLD_PER_MESH
-        pixel = projection.project(projection.view(mesh_x, SPRITE_MID_HEIGHT, mesh_z))[:2]
-
-        self.assertIsNone(view._sprite_pick(pixel, projection))
-
-    def test_given_two_overlapping_regiments_then_the_nearer_to_the_camera_wins(self):
-        from whshr.frontend.battle_view import SPRITE_MID_HEIGHT
-        near = Regiment("near", "Near", 500, 400, 0, Side.PLAYER, models=10)
-        far = Regiment("far", "Far", 500, 460, 0, Side.ENEMY, models=10)  # further from the camera, same spot-ish
-        view = self._view([near, far])
-        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
-        mesh_x, mesh_z = 500 / WORLD_PER_MESH, 400 / WORLD_PER_MESH
-        pixel = projection.project(projection.view(mesh_x, SPRITE_MID_HEIGHT, mesh_z))[:2]
-
-        self.assertEqual(view._sprite_pick(pixel, projection), "near")
+    def test_spell_point_uses_the_hit_figures_world_position(self):
+        regiment = Regiment("target", "Target", 500, 400, 0, Side.ENEMY, models=1)
+        view = self._view([regiment])
+        regiment.positions[0] = (700, 400)
+        view.order_mode = "item:spell"
+        pixel = self._pixel(view, 700, 400)
+        with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
+            self.assertEqual(view._ground_click(pixel), (("item_target", "spell", 700, 400),))
 
 
 def _seeded(battle):

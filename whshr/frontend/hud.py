@@ -35,6 +35,19 @@ Size = tuple[int, int]
 Rect4 = tuple[int, int, int, int]
 Tint = tuple[float, float, float, float]
 
+
+def select_regiment_hit(hits: Sequence["Regiment"], selected: str | None) -> str | None:
+    """Choose a plain-click selection from a bottom-to-top hit stack."""
+    if not hits:
+        return None
+    top = hits[-1]
+    if top.identifier != selected:
+        return top.identifier
+    others = hits[:-1]
+    pool = [regiment for regiment in others if regiment.side == Side.PLAYER] or others
+    return pool[0].identifier if pool else top.identifier
+
+
 # Documented for completeness; battle_view.py's 3D pipeline does not yet clip its viewport to this
 # rect (it renders full-screen, with the HUD's own chrome simply drawn over it).
 VIEW_RECT = (8, 8, 624, 417)
@@ -597,15 +610,7 @@ class Hud:
         as not being in the stack at all (selects the top one) rather than special-casing a third
         rule - simpler, and topmost-wins is the expected default whenever the exact previously
         picked regiment isn't being re-clicked."""
-        hits = self._marker_hits(pos)
-        if not hits:
-            return None
-        top = hits[-1]
-        if top.identifier != self.selected:
-            return top.identifier
-        others = hits[:-1]
-        pool = [regiment for regiment in others if regiment.side == Side.PLAYER] or others
-        return pool[0].identifier if pool else top.identifier
+        return select_regiment_hit(self._marker_hits(pos) or (), self.selected)
 
     def minimap_target_at(self, pos: Sequence[float]) -> str | None:
         """Return the topmost active regiment at *pos*, ignoring current selection entirely - for
