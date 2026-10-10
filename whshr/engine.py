@@ -303,6 +303,7 @@ class Regiment:
     flee_x: float | None = None
     flee_y: float | None = None
     fled: bool = False  # a routing regiment that has left the battlefield (removed from play)
+    removal_announced: bool = False  # the "unit removed" broadcast 0x16 went out (notes/unit_removal_broadcast.md 1)
     flight_check_ticks: int = 0
     flight_departed: bool = False
     flight_complete: bool = False
@@ -504,7 +505,9 @@ class Regiment:
 
     @property
     def is_wagon(self) -> bool:
-        return self.unit_class == 7 and self.models == 2
+        """RollingStock class, whatever the model count: a wagon whose team or cart was killed is still a wagon
+        (notes/collision_probe_result.md 5)."""
+        return self.unit_class == 7
 
     @property
     def turns_on_the_spot(self) -> bool:
@@ -2084,6 +2087,8 @@ class Battle:
         for regiment in self.regiments.values():
             self._step_burning(regiment)
             self._step_dying(regiment)
+            if regiment.destroyed and not regiment.dying:
+                self._announce_removal(regiment)
             if not regiment.active:
                 regiment.walking = False
                 continue
@@ -2122,6 +2127,7 @@ class Battle:
                     if (self.tick_count > regiment.flight_complete_tick
                             and all(model.at_rest for model in regiment.melee_models)):
                         self.remove_from_play(regiment)
+                        self._announce_removal(regiment)
                         self.events.append(BattleEvent(
                             f"{regiment.name} routs off the battlefield.", "fled",
                             regiment=regiment.identifier, x=regiment.x, y=regiment.y,
@@ -3082,6 +3088,22 @@ class Battle:
                 "Defeat! Your army is destroyed.", "result",
                 result="defeat", counts=self.side_counts()))
 
+    def _announce_removal(self, regiment: Regiment) -> None:
+        """Broadcast event 0x16 ("unit removed", source = the unit) once, to every other unit still in the battle:
+        both armies, hidden and routing units (notes/unit_removal_broadcast.md 1). Their scripts drop it as a target
+        through Query 22 (notes/script_queries.md 9); nothing here touches their targets. Sent for a unit wiped out,
+        once its last dying model's collapse delay is over (section 2), and for a routing unit when it finally leaves
+        the table (after the 0x0E of its departure). A script's RemoveFromBattle is quiet and never calls this.
+        PROVISIONAL: our unit already counts as out of the fight while its last models collapse (the report keeps it
+        in the battle until then); only the broadcast waits for the collapse."""
+        if regiment.removal_announced:
+            return
+        regiment.removal_announced = True
+        for other in self.regiments.values():
+            if other is regiment or other.fled or other.removal_announced:
+                continue
+            self.event_bus.queue_event(other.identifier, interpreter.Event(code=0x16, source=regiment.identifier))
+
     def remove_from_play(self, regiment: Regiment) -> None:
         """``regiment`` leaves the battle alive (it routed off the map, or a script removed it): it is marked fled,
         keeping its models as routed, and each model pays the kill credit it still carries
@@ -3182,6 +3204,59 @@ class Battle:
             self._end_charge_on_obstruction(mover, "a friendly unit")
         self._translate_regiment(mover, shift_x, shift_y)
         self._carry_recheck(mover, other)
+        return True
+
+    def footprints_overlap(self, first: Regiment, second: Regiment) -> bool:
+        """The collision pass's broad + narrow overlap test (`_footprints_overlap`), for the scripted probe."""
+        return self._footprints_overlap(first, second)
+
+    def circles_overlap(self, first: Regiment, second: Regiment) -> bool:
+        """The collision pass's broad phase alone: trunc(distance between the footprint-box centres) minus both
+        radii is negative (notes/script_behaviours.md 2.2, "Against what")."""
+        (ax, ay), (bx, by) = self.formation_centre(first), self.formation_centre(second)
+        return math.trunc(math.hypot(bx - ax, by - ay)) - first.bounding_radius() - second.bounding_radius() < 0
+
+    def probe_push(self, mover: Regiment, other: Regiment) -> bool:
+        """A friendly push-apart row of the `CheckCollisions` probe (notes/collision_probe_result.md 1, rows 2c, 2d',
+        2f): both re-check states go on, and the answer is whether the mover itself was moved. A wagon is never
+        moved, so its answer is always no. PROVISIONAL: a regiment whose circles overlap but whose boxes do not is
+        not pushed by our engine (`_push_self`), so it answers no there (the report answers yes for any push)."""
+        self._carry_recheck(mover, other)
+        if mover.is_wagon:
+            return False
+        return self._push_self(mover, other)
+
+    def probe_scenery(self, mover: Regiment) -> bool | None:
+        """Boundary, solid-scenery and building rows of the `CheckCollisions` probe (notes/collision_probe_result.md
+        1, rows 2a, 2b, 2b'). Boundary correction runs and never answers. Overlapping scenery or a building: a wagon is
+        not moved (no); a regiment is pushed clear (yes), or, when charging or in melee, a building overlap is its
+        contact (yes; not recorded in probe mode). No overlap: no answer (None). PROVISIONAL: scenery and buildings
+        are treated as one group examined before the regiments, and the building contact test is the circle
+        overlap of `overlaps_building` rather than a box corner."""
+        self._correct_boundaries(mover)
+        centre = self.formation_centre(mover)
+        radius = mover.bounding_radius()
+        scenery = any(
+            map_objects.pushes_units(obj) and math.hypot(centre[0] - float(obj.get("x") or 0),
+                                                         centre[1] - float(obj.get("y") or 0))
+            < float(obj.get("radius") or 0) + radius
+            for obj in self.objects)
+        building = not mover.routing and self.overlaps_building(mover)
+        if not (scenery or building):
+            return None
+        if mover.is_wagon:
+            return False
+        if scenery:
+            self._correct_solid_objects(mover)
+        if building and not (mover.charging or mover.in_melee):
+            for site in self.buildings:
+                if mover.assaulting_building == site.identifier:
+                    continue
+                push = site.penetration(centre[0], centre[1], radius)
+                if push is not None:
+                    self._translate_regiment(mover, push[0], push[1])
+                    centre = centre[0] + push[0], centre[1] + push[1]
+            self._carry_recheck(mover)
         return True
 
     def _carry_recheck(self, *regiments: Regiment) -> None:
