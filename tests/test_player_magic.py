@@ -1,5 +1,8 @@
 """The player's Magic order: the spell click pays and selects, the target click gives the cast order
-(game_rules.md "Winds of magic and casting"; notes/spell_lasting_effects.md 0.2, 5.4; notes/script_magic.md 4)."""
+(notes/player_magic_panel.md; notes/spell_lasting_effects.md 0.2, 5.4; notes/script_magic.md 4).
+
+The report's section 10 vectors: wizard W with Lightning (1), Fireball (1), Azure Blades (1), Dispel Magic (1) and
+Storm of Shemtek (3), player pool 4."""
 
 import unittest
 
@@ -9,6 +12,7 @@ from whshr.rules import Side
 
 AMBER = ("AmberHuntingSpear", "AmberFlockOfDoom", "AmberCurseOfAnraheir", "GeneralDispel")
 CELESTIAL = ("CelestialAzureBlades", "CelestialLightning")
+VECTOR = ("CelestialLightning", "BrightFireball", "CelestialAzureBlades", "GeneralDispel", "CelestialStormOfShemtek")
 
 
 def wizard(identifier: str = "W", side: Side = Side.PLAYER, spells: tuple[str, ...] = AMBER) -> Regiment:
@@ -95,21 +99,23 @@ class TargetClickTests(PlayerMagicCase):
         battle = self.make(power=4)
         spear = magic.SPELL_CODES["amberhuntingspear"]
         battle.select_spell("W", spear)
-        battle.cancel_spell_target("W", spear)
+        battle.clear_spell_selection("W")
         self.assertFalse(spell_effects.spell_selected(battle, "W", spear))
         self.assertEqual(battle.player_power, 2)
         self.assertTrue(battle.spell_usable("W", spear))
 
 
 class NoTargetSpellTests(PlayerMagicCase):
-    def test_azure_blades_is_ordered_on_the_click_at_the_casters_position(self):
-        battle = self.make(wizard(spells=CELESTIAL), power=1)
+    def test_azure_blades_is_ordered_on_the_click_and_stays_usable(self):
+        battle = self.make(wizard(spells=CELESTIAL), power=2)
         blades = spell_effects.AZURE_BLADES
         self.assertFalse(battle.select_spell("W", blades))
         [event] = self.queued()
         self.assertEqual((event.code, event.parameter, event.x, event.y), (0x2B, blades, 100, 200))
-        self.assertEqual(battle.player_power, 0)
+        self.assertEqual(battle.player_power, 1)
         self.assertFalse(spell_effects.spell_selected(battle, "W", blades))
+        self.assertTrue(battle.spell_cast_ordered("W", blades))
+        self.assertTrue(battle.spell_usable("W", blades))
 
     def test_dispel_magic_stays_selected_for_the_battle_after_the_click(self):
         battle = self.make(power=8)
@@ -117,6 +123,113 @@ class NoTargetSpellTests(PlayerMagicCase):
         self.assertFalse(battle.select_spell("W", dispel))
         self.assertTrue(spell_effects.dispel_selected(battle, "W"))
         self.assertFalse(battle.spell_usable("W", dispel))
+
+
+class ReportVectorTests(PlayerMagicCase):
+    """notes/player_magic_panel.md 10."""
+
+    def setUp(self):
+        self.battle = self.make(wizard(spells=VECTOR), power=4)
+        self.lightning, self.fireball = magic.SPELL_CODES["celestiallightning"], magic.SPELL_CODES["brightfireball"]
+        self.storm = magic.SPELL_CODES["celestialstormofshemtek"]
+
+    def test_clicking_another_targeted_spell_loses_the_first_cost(self):
+        battle = self.battle
+        battle.select_spell("W", self.lightning)
+        self.assertEqual(battle.player_power, 3)
+        self.assertTrue(battle.spell_usable("W", self.storm))
+        battle.select_spell("W", self.fireball)
+        self.assertFalse(spell_effects.spell_selected(battle, "W", self.lightning))
+        self.assertTrue(spell_effects.spell_selected(battle, "W", self.fireball))
+        self.assertEqual(battle.player_power, 2)
+        self.assertFalse(battle.spell_usable("W", self.storm))
+
+    def test_ctrl_target_clicks_pay_again_and_keep_targeting(self):
+        battle = self.battle
+        battle.select_spell("W", self.fireball)
+        battle.select_spell("W", self.lightning)  # pool 2 now
+        self.assertTrue(battle.order_cast("W", self.lightning, 10, 20, repeat=True))
+        self.assertEqual(battle.player_power, 1)
+        self.assertTrue(spell_effects.spell_selected(battle, "W", self.lightning))
+        self.assertTrue(battle.order_cast("W", self.lightning, 30, 40, repeat=True))
+        self.assertEqual(battle.player_power, 0)
+        self.assertFalse(battle.order_cast("W", self.lightning, 50, 60, repeat=True))  # pool < cost: a plain click
+        self.assertFalse(spell_effects.spell_selected(battle, "W", self.lightning))
+        self.assertEqual([(e.x, e.y) for e in self.queued()], [(10, 20), (30, 40), (50, 60)])
+
+    def test_an_empty_pool_makes_every_row_unusable(self):
+        battle = self.battle
+        battle.event_bus._power = magic.PowerPools(1, 8)
+        battle.select_spell("W", spell_effects.DISPEL_MAGIC)
+        self.assertEqual(battle.player_power, 0)
+        for code in battle.regiments["W"].spells:
+            self.assertFalse(battle.spell_usable("W", code))
+
+    def test_the_target_click_puts_the_wizard_in_the_casting_state(self):
+        battle = self.battle
+        self.assertFalse(battle.casting("W"))
+        battle.select_spell("W", self.fireball)
+        self.assertFalse(battle.casting("W"))
+        battle.order_cast("W", self.fireball, 0, 900)
+        self.assertTrue(battle.casting("W"))
+        self.assertTrue(battle.spell_cast_ordered("W", self.fireball))
+
+    def test_a_held_wizard_refuses_the_order_silently_and_the_power_is_lost(self):
+        battle = self.battle
+        battle.select_spell("W", self.lightning)
+        battle.regiments["W"].held = True
+        battle.order_cast("W", self.lightning, 0, 900)
+        self.assertEqual(self.queued(), [])
+        self.assertEqual(battle.player_power, 3)
+        self.assertFalse(spell_effects.spell_selected(battle, "W", self.lightning))
+
+    def test_the_order_halts_a_moving_wizard(self):
+        battle = self.battle
+        w = battle.regiments["W"]
+        w.target_x, w.target_y = 900.0, 900.0
+        battle.select_spell("W", self.lightning)
+        battle.order_cast("W", self.lightning, 0, 900)
+        self.assertFalse(w.moving)
+
+    def test_the_order_is_not_gated_by_melee(self):
+        battle = self.battle
+        battle.regiments["W"].in_melee = True
+        battle.select_spell("W", self.lightning)
+        battle.order_cast("W", self.lightning, 0, 900)
+        self.assertEqual([e.code for e in self.queued()], [0x2B])
+
+    def test_cancelling_clears_every_selection_but_dispel(self):
+        battle = self.battle
+        battle.select_spell("W", spell_effects.DISPEL_MAGIC)
+        battle.select_spell("W", self.lightning)
+        battle.clear_spell_selection("W")
+        self.assertFalse(spell_effects.spell_selected(battle, "W", self.lightning))
+        self.assertTrue(spell_effects.dispel_selected(battle, "W"))
+
+
+class WizardTargetTests(PlayerMagicCase):
+    """Magic with no spell (notes/player_magic_panel.md 3)."""
+
+    def test_clicking_a_regiment_orders_an_auto_cast_at_it(self):
+        enemy = Regiment("E", "E", 100, 600, 256, Side.ENEMY, models=5, ranks=1)
+        battle = self.make(wizard(), enemy, power=4)
+        battle.order_wizard_target("W", "E")
+        [event] = self.queued()
+        self.assertEqual((event.code, event.source), (0x29, "E"))
+        self.assertEqual([e.data.get("text_id") for e in battle.events if e.kind == "message"], [2012])
+        self.assertEqual(battle.player_power, 4)
+
+    def test_clicking_the_wizard_itself_searches_and_an_independent_wizard_uses_its_own_event(self):
+        battle = self.make(power=4)
+        battle.regiments["W"].independent = True
+        battle.order_wizard_target("W", "W")
+        self.assertEqual([e.code for e in self.queued()], [0x2E])
+        self.assertEqual([e.data.get("text_id") for e in battle.events if e.kind == "message"], [2013])
+
+    def test_open_ground_does_nothing(self):
+        battle = self.make(power=4)
+        battle.order_wizard_target("W", None)
+        self.assertEqual(self.queued(), [])
 
 
 class CtrlClickTests(PlayerMagicCase):
