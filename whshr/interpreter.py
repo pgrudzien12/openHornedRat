@@ -2238,9 +2238,9 @@ class ScriptInterpreter:
         """TargetValid: is it safe to shoot at the aim point (the target's position, or the target point when
         there is no target or aim-at-point is on)? An independent unit refuses when another friendly unit's
         centre is within its footprint radius + 24 of the aim point; a crossbow unit (missile code 2) refuses
-        when a non-hostile unit stands on the line of fire. No range, arc or broken test
-        (target_queries.md section 3). PROVISIONAL: blast radii above 24 are not modelled, and the line test
-        is "the segment passes within the unit's footprint radius"."""
+        when a non-hostile unit stands on the line of fire (_on_line_of_fire). No range, arc or broken test
+        (target_queries.md section 3). PROVISIONAL: blast radii above 24 are not modelled. Not modelled: the
+        camera-collide scenery candidates of the crossbow test (notes/player_missile_orders.md 3, BF016 only)."""
         unit = self.battle.regiments.get(unit_id)
         target = self.battle.regiments.get(state.current_target[0]) if state.current_target else None
         aim = ((target.x, target.y) if target is not None and not state.aim_at_point else state.target_point)
@@ -2252,17 +2252,28 @@ class ScriptInterpreter:
         crowded = unit.independent and any(
             math.hypot(other.x - aim[0], other.y - aim[1]) < other.bounding_radius() + 24 for other in friends)
         blocked = unit.missile_code == 2 and any(
-            self._segment_distance((unit.x, unit.y), aim, (other.x, other.y)) < other.bounding_radius()
-            for other in friends)
+            self._on_line_of_fire((unit.x, unit.y), aim, (other.x, other.y), other.bounding_radius())
+            for other in self.battle.regiments.values() if other.active and not self._hostile(unit, other))
         state.cond_flags = not (crowded or blocked)
         return state.pc + 1
 
     @staticmethod
-    def _segment_distance(start: tuple[float, float], end: tuple[float, float], point: tuple[float, float]) -> float:
-        dx, dy = end[0] - start[0], end[1] - start[1]
-        length = dx * dx + dy * dy
-        t = 0.0 if length == 0 else max(0.0, min(1.0, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length))
-        return math.hypot(point[0] - start[0] - t * dx, point[1] - start[1] - t * dy)
+    def _on_line_of_fire(shooter: tuple[float, float], aim: tuple[float, float], centre: tuple[float, float],
+                         radius: float) -> bool:
+        """The crossbow line test (notes/player_missile_orders.md 3): a footprint blocks when its centre is nearer
+        than the aim point (strict, truncated distances), the shooter is not inside it, and its bearing from the
+        shooter is within its angular half-width asin(r/d) of the aim point's bearing (strict). Bearings are
+        truncated, so the test is slightly asymmetric left and right of the line."""
+        def bearing(point: tuple[float, float]) -> int:
+            return math.trunc(256 - 256 * math.atan2(point[0] - shooter[0], shooter[1] - point[1]) / math.pi) % 512
+
+        line = math.trunc(math.hypot(aim[0] - shooter[0], aim[1] - shooter[1]))
+        distance = math.trunc(math.hypot(centre[0] - shooter[0], centre[1] - shooter[1]))
+        if distance >= line or distance == 0 or radius > distance:
+            return False
+        half_width = math.trunc(math.asin(radius / distance) * 256 / math.pi)
+        delta = (bearing(aim) - bearing(centre)) % 512
+        return min(delta, 512 - delta) < half_width
 
     def op_IfThreatOutweighsWorth(self, state: UnitScriptState, operand: int | None, script_words: Words,
             unit_id: str, tick_count: int, rng: random.Random) -> int | None:
