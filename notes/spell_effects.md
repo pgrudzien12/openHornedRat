@@ -169,7 +169,8 @@ impact test** there (§4) with: the caster's own unit **excluded**, **no message
 - Units, buildings and solid objects (scenery, and spell **area objects**: Tangling Thorn, Flamestorm column, Wind
   Blast trail, Da Krunch) can be struck. A projectile that **stops on hit** ends as soon as its in-flight test hits
   anything (a unit, even if every roll failed, a building, or a solid object at a height it reaches).
-- A projectile whose height above the ground under it would be **negative** is removed at once, without impact:
+- A projectile whose height above the ground under it (**arc included**, §2.1) is **negative** is removed after that
+  tick's in-flight test (which still runs, `bf003_playtest_fireball_grid_pursuit.md` §3.2), without a terminal impact:
   **hills and ridges between caster and target stop bolts** (the launch has no line-of-sight check, the flight has
   this one).
 - Flight length: **beams** (Lightning, Gaze of Mork, Warp Lightning, Banner of Wrath): `N = 1 + trunc(d(start,

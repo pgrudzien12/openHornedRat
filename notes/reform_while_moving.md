@@ -80,7 +80,8 @@ and simply add up.
 Per figure, per tick, positions relative to the unit:
 
 1. A figure in its timed pause (`ResetModelAnimations`, charge start stagger) counts down and does not step. It still
-   counts as "not settled".
+   counts as "not settled". The countdown runs for **every** figure, also one at rest or in a melee unit, before
+   step 2 (`bf003_playtest_fireball_grid_pursuit.md` §4).
 2. A figure that is at rest is skipped.
 3. **Re-aim** happens on the figure's first step and whenever a countdown runs out. The countdown is set to
    `trunc(d) div 2` at each re-aim and decreased by `s_rlmv` every tick. At a re-aim, the integer offset to the slot

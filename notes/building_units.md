@@ -112,6 +112,7 @@ The public reports already give this; restated for the building case:
 | walking (not charging, not in melee) | any building, target or not | pushed apart; no contact |
 | charging or in melee | building that is its target | contact → engage (counter 0) |
 | charging | building that is not its target | **charge ends** (halted, charge sound off, 0x09 to its target); contact latch stays on |
+| pursuing | any building | not charging (a pursuit ends the charging state): **pushed apart**, pursuit continues, no latch (`bf003_playtest_fireball_grid_pursuit.md` §5) |
 | routing / any | — | routing movers are not edge-corrected; buildings are not exempt from push-apart |
 
 **Steering** (`obstacle_steering.md` §6): a building footprint blocks a route unless it is the regiment's current

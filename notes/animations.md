@@ -250,7 +250,8 @@ python3 scripts/anim_export.py ".../WARFB"      # all 72 directional sets: 274 G
 (e.g. by `render_battle` once names map to files, ROADMAP 1.4).
 
 ## Open questions
-> **Historical questions:** issue #35 is closed. These notes preserve the findings; the remaining unknowns are not standing research tasks. Reopen a focused issue only when a shipped feature or reproducible defect needs an answer.
+> **Tracked on GitHub**: these open items are tracked as issue #35 (`topic:sprites-animation`). Kept here for
+> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
 
 
 - Zero point of the `dir` → direction mapping (the clockwise sense is established) — compare a unit's
@@ -278,6 +279,7 @@ python3 scripts/anim_export.py ".../WARFB"      # all 72 directional sets: 274 G
   (`scripts/anim_export.py`)". Remaining work as new rows:
   - 1.5a `dir` 0..511 → direction index, frame timing, anchor y — verified against the game under Wine (S–M);
   - 1.5b effect sprites: layout of `SPELLS` and `GENBATT` (projectiles, spell effects in 8/16 rotations?) (M).
+    Fireball/Grudgebringer frames done: `bf003_playtest_fireball_grid_pursuit.md` §2.
 - `FORMATS.md`: rename bytes 0–3 of `FolEntry` (int16 x/y for portraits; `u8 zero, zero, anchor_y_from_bottom, anchor_x`
   for directional sprites), describe the nibble as "animation group with its own colour map",
   and add the layout tables above; the old open question "hotspot, direction and frame order" can be closed.
