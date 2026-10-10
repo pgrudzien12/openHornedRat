@@ -4,6 +4,7 @@ import math
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from whshr.battle_log import BattleLogger
@@ -263,6 +264,10 @@ class BattleNavigationTests(unittest.TestCase):
         battle = Battle(500, 500, [mover, ally])
         mover.collision_recheck = True  # it has just stepped
         self.assertEqual(mover.bounding_radius() + ally.bounding_radius(), 16)
+        # Broad phase only: the narrow (box) phase is assumed to pass, so the circle test alone decides.
+        boxes = mock.patch("whshr.formation.boxes_overlap", return_value=True)
+        boxes.start()
+        self.addCleanup(boxes.stop)
         battle._resolve_collisions()
         self.assertEqual(mover.x, 100)
         ally.x = 115

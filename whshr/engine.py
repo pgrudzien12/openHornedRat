@@ -3007,30 +3007,38 @@ class Battle:
             if may_engage(mover, other):
                 machine = (mover.is_wagon or mover.hud_class == "art") or (other.is_wagon or other.hud_class == "art")
                 if not (machine and (mover.routing or (mover.reforming and mover.reform_walk_back))):
-                    if machine and self._circles_overlap(mover, other):
+                    if machine and self._footprints_overlap(mover, other):
                         self._carry_recheck(other)  # notes/script_behaviours.md 2.2: U re-check on, contact or not
                     continue
             elif mover.routing or mover.pursuing or other.pursuing:
                 continue
             if pushed or mover.is_wagon:
-                if self._circles_overlap(mover, other):
+                if self._footprints_overlap(mover, other):
                     self._carry_recheck(mover, other)
                 continue
             pushed = self._push_self(mover, other)
 
-    @staticmethod
-    def _circles_overlap(first: Regiment, second: Regiment) -> bool:
-        return math.hypot(first.x - second.x, first.y - second.y) < first.bounding_radius() + second.bounding_radius()
+    @classmethod
+    def _footprints_overlap(cls, first: Regiment, second: Regiment) -> bool:
+        """The collision pass's overlap test (notes/script_behaviours.md 2.2, "Against what"): broad phase on the
+        bounding circles around the two footprint-box centres (trunc(centre distance) - both radii < 0), then the
+        narrow phase on the boxes themselves, so circles that overlap across visibly empty ground do not collide."""
+        (ax, ay), (bx, by) = cls.formation_centre(first), cls.formation_centre(second)
+        if math.trunc(math.hypot(bx - ax, by - ay)) - first.bounding_radius() - second.bounding_radius() >= 0:
+            return False
+        return formation.boxes_overlap(first.block(), second.block())
 
     def _push_self(self, mover: Regiment, other: Regiment) -> bool:
-        """Move `mover` away from `other` by (|o| + 2) / 2 along the line between the centres, per axis
+        """When the two footprints overlap (`_footprints_overlap`), move `mover` away from `other` by (|o| + 2) / 2
+        along the line between the footprint-box centres ("object centres", notes/script_behaviours.md 2.2), per axis
         trunc(trunc(SIN/COS[bearing] x (o - 2) / 256) / 2) with o = trunc(distance) - both radii (negative); switch
         both re-check states on; end a charge that meets the footprint within +-45 degrees of its facing. Returns
         whether a push was made."""
-        dx, dy = other.x - mover.x, other.y - mover.y
-        overlap = math.trunc(math.hypot(dx, dy)) - mover.bounding_radius() - other.bounding_radius()
-        if overlap >= 0:
+        if not self._footprints_overlap(mover, other):
             return False
+        (mx, my), (ox, oy) = self.formation_centre(mover), self.formation_centre(other)
+        dx, dy = ox - mx, oy - my
+        overlap = math.trunc(math.hypot(dx, dy)) - mover.bounding_radius() - other.bounding_radius()
         bearing = round(math.atan2(dx, dy) * 512 / math.tau) % 512 if (dx or dy) else 0
         angle = bearing * math.tau / 512
         shift_x = math.trunc(math.trunc(math.trunc(256 * math.sin(angle)) * (overlap - 2) / 256) / 2)
