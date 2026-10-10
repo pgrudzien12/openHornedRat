@@ -6,6 +6,10 @@ Flight paths, timing, heights and impacts are public in `spell_effects.md` §2�
 where**. Companions: `sprite_names.md` (effect records 1–49 and their mesh files), `pbx_rnc.md` (`SCENERY.PBX` effect
 meshes), `FORMATS.md` (`.FOL` anchors, colour maps).
 
+For Curse of Anraheir, Azure Blades, Ere We Go and Mork Save Uz, see `spell_attached_visuals.md`:
+per-figure animation, anchors, timing and cleanup. That report also confirms the absence of separate
+effect art for Dispel Magic and Fists of Gork.
+
 ## 0. Shared model (read this first)
 
 Two kinds of art are used:

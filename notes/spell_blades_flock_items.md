@@ -10,6 +10,9 @@ path, radius > 0), "Special weapons", "Spells", "Magic items in battle"; `script
 `script_grid_events.md` §1.3 (event 0x2D, `TakeSpellEventTarget`); `script_behaviours.md` §1.10 (behaviour 26);
 `casualty_bookkeeping.md` §2 (kill credit).
 
+Azure Blades presentation: `spell_attached_visuals.md` §§1–4 specifies its four-frame sparkle loop,
+one sprite per target figure, 16 battle units above the ground, and immediate cleanup.
+
 Conventions as part A: distances in battle units (24 = 1"), `d` = `trunc(sqrt(dx² + dy²))`, angles in 1/512 turn
 (0 = +y, clockwise), `D6` = `rand mod 6 + 1`, "tick T" = the tick of the launch (the effect gets its first update
 later in that same tick, part A §1.7). **Unit position** = the front-rank centre; **footprint** = the unit's map
