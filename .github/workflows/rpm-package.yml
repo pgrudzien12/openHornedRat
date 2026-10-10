@@ -101,8 +101,8 @@ jobs:
         run: |
           python3.11 -m venv /tmp/ohr-bootstrap
           /tmp/ohr-bootstrap/bin/pip install --only-binary=:all: uv
-          /tmp/ohr-bootstrap/bin/uv python install 3.12
-          /tmp/ohr-bootstrap/bin/uv venv --python 3.12 /tmp/ohr-build-venv
+          /tmp/ohr-bootstrap/bin/uv python install 3.12.12
+          /tmp/ohr-bootstrap/bin/uv venv --python 3.12.12 /tmp/ohr-build-venv
           /tmp/ohr-bootstrap/bin/uv pip install --python /tmp/ohr-build-venv/bin/python -r requirements-engine.txt pyinstaller
 
       - name: Freeze engine

@@ -22,6 +22,13 @@ INSTALL_STEPS = (
     PACKAGING / "linux" / "ohr-engine.rpm.spec", PACKAGING / "macos" / "build-pkg.sh",
     PACKAGING / "windows" / "installer.iss",
 )
+PACKAGE_WORKFLOWS = (
+    ROOT / ".github" / "workflows" / "appimage.yml",
+    ROOT / ".github" / "workflows" / "debian-package.yml",
+    ROOT / ".github" / "workflows" / "macos-package.yml",
+    ROOT / ".github" / "workflows" / "rpm-package.yml",
+    ROOT / ".github" / "workflows" / "windows-installer.yml",
+)
 
 
 def library_name(filename: str) -> str:
@@ -69,6 +76,21 @@ class ThirdPartyNoticesTests(unittest.TestCase):
         self.assertIsNotNone(pinned)
         assert pinned is not None
         self.assertIn(pinned.group(1), NOTICES, "update the audit when pygame-ce is bumped")
+
+    def test_given_each_package_workflow_then_its_python_matches_the_audited_license_version(self):
+        audited = re.search(r"\[CPython ([\d.]+) `LICENSE`\]", NOTICES)
+        self.assertIsNotNone(audited)
+        assert audited is not None
+        for workflow in PACKAGE_WORKFLOWS:
+            text = workflow.read_text(encoding="utf-8")
+            versions = re.findall(
+                r'python-version:\s*"([^"]+)"|uv python install\s+(\S+)|uv venv --python\s+(\S+)',
+                text,
+            )
+            configured = [next(value for value in match if value) for match in versions]
+            with self.subTest(workflow=workflow.name):
+                self.assertTrue(configured, "package workflow must select a Python runtime")
+                self.assertEqual(configured, [audited.group(1)] * len(configured))
 
     def test_given_each_package_recipe_then_it_installs_every_license_text_the_notices_rely_on(self):
         for recipe in INSTALL_STEPS:
