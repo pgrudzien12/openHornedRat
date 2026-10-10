@@ -1284,7 +1284,12 @@ class Battle:
         if self.interpreter is not None:
             self.event_bus.queue_event(identifier, interpreter.Event(code=0x2D, parameter=code, x=int(x), y=int(y)))
         else:
+            # Launched between ticks: the next tick replaces `events`, so carry what the launch reported (its
+            # message or the bolt's launch record) over with the pending feedback.
+            mark = len(self.events)
             self.launch_item(unit, code, x, y)
+            self.pending_feedback.extend(self.events[mark:])
+            del self.events[mark:]
 
     def launch_item(self, unit: Regiment, code: int, x: float, y: float) -> bool:
         """Apply the item launch checks, then create Lightning or Fireball without spending power."""
