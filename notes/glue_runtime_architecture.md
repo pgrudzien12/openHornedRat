@@ -270,9 +270,9 @@ Do not block implementation on low-value unknowns. Unsupported behavior must be 
 | Troop selection | Main model/layout established | Implement; research reinforcement window and a few edge flows | starting campaign battles |
 | Books/options/save UI | Entry points known | Implement built-in adapters; some layouts remain | complete campaign shell |
 | Debrief/economy | Established: `notes/debrief_evaluation.md` (evaluator table, `Result:` values and payment paths) | Integrate evaluator and payment state with campaign persistence | correct post-battle campaign |
-| Save compatibility | Container and major state known | Runtime snapshot plus remaining `STAX` fields | original save import/export |
+| Engine saves | The engine has its own save format and campaign-state snapshot | Resume maps, briefing waits and post-battle flow from engine saves | Import/export of the original game's `savegame.N` files is out of scope |
 
-Priority research remains the register in `ROADMAP.md`. The evaluator research is complete; its integration is now implementation work. Unused ornament fields and machine-dependent historical timer speed do not block the VM.
+Research is opened for a concrete implementation gap or reproducible defect, as described in `ROADMAP.md`. The evaluator research is complete; its integration is now implementation work. Unused ornament fields and machine-dependent historical timer speed do not block the VM.
 
 ## 6. Incremental implementation plan
 
@@ -403,8 +403,7 @@ Exit criteria:
 - Tests inject fake movie/battle results without creating a frontend.
 
 ### Phase 7 — Remaining built-in widgets and save support
-> **Tracked on GitHub**: these open items are tracked as issue #34 (`topic:campaign-glue`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+> **Historical questions:** issue #34 is closed. These notes preserve the findings; the remaining unknowns are not standing research tasks. Reopen a focused issue only when a shipped feature or reproducible defect needs an answer.
 
 
 Deliverables:
@@ -412,7 +411,7 @@ Deliverables:
 - Debrief and economy evaluator integration.
 - Books, reinforcement selection, save/load and options adapters.
 - Runtime snapshot in the open-engine save format.
-- Original save import mapped into `CampaignModel` and compatible glue runtime state where established.
+- Original-game `savegame.N` import/export is not required; persist and restore the engine's own campaign and glue state.
 
 Exit criteria:
 

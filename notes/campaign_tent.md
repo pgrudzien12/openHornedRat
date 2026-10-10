@@ -262,8 +262,7 @@ generic "position source" so that further keywords of that kind would plug in th
 - `notes/glue_portraits.md` §3.2 mentions that portrait sequences advance once per 25 ms message; `[BITMAP]` animations use the 2-tick step of §5.3 here.
 
 ## 10. Open questions
-> **Tracked on GitHub**: these open items are tracked as issue #25 (`topic:campaign-glue`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+> **Historical questions:** issue #25 is closed. These notes preserve the findings; the remaining unknowns are not standing research tasks. Reopen a focused issue only when a shipped feature or reproducible defect needs an answer.
 
 
 - ✅ `animrestartframe` default: equal to `animstartframe` (same code path in the parser); `bkindex` (bitmap): a repaint flag;

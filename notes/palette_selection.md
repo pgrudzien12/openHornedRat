@@ -198,8 +198,7 @@ engine that wants the authored look could substitute `GLUEREND` for these icons;
    belong in one documented table (this note's §2.1).
 
 ## 9. Open items
-> **Tracked on GitHub**: these open items are tracked as issue #32 (`topic:campaign-glue`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+> **Historical questions:** issue #32 is closed. These notes preserve the findings; the remaining unknowns are not standing research tasks. Reopen a focused issue only when a shipped feature or reproducible defect needs an answer.
 
 
 - After the roster book returns to the troop window the palette appears to stay at id 9 (`notes/builtin_widgets.md`); unverified.

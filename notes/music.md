@@ -13,7 +13,7 @@ GOG installation; nothing from the game is in the repo (`extracted/music/` is gi
 | All 40 `.MID` files | ✅ parsed, 0 structural errors (SMF format 1, tempo, lengths, channels, programs) |
 | Which presets come from the SBK and which from the AWE32 ROM | ✅ bank MSB 1 = SBK (every bank-1 program exists in the SBK); everything else = 1 MB GM ROM |
 | GM vs FM variants (`XXXXXXFM.MID`) | ✅ naming rule verified on all files; selection by `MIDI.DLL` (strings) |
-| Where each track is used | 🟡 16/21 tracks located (glue scripts, cutscenes, EXE); `BATTLE`, `FOREST`, `LOOKIN2`, `TENSE`, `VICTORY` not located |
+| Playback selection | ✅ | Tune names in glue scripts, window records, cutscene data and native screens are documented; the runtime plays glue `playmidi` plus native debrief and credits tunes. Window-record and cutscene music remain unwired. |
 | Full audio render with original sound | ✅ all 21 GM tracks rendered with FluidSynth (FluidR3_GM + the converted SBK in bank 1) at one uniform gain, no clipped samples; the project owner listened to and confirmed both the SBK stems and the full renders |
 
 ## Summary (ready to paste into `FORMATS.md`)
@@ -226,40 +226,21 @@ the conversion. To compare, render without `WARINTR3_bank1.sf2`: bank-1 notes th
 GM Choir Aahs / Synth Voice / Trombone. `music_render.py commands … --run` runs exactly these
 steps once the tools exist.
 
-## Open questions
-> **Tracked on GitHub**: these open items are tracked as issue #39 (`topic:audio`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+## Research boundary
 
+Issue #39 is closed. Glue scripts, window records and cutscene data supply tune names for
+data-driven playback; `win`, `lose` and `tactical` are documented in `notes/native-windows.md` §9.
+The current frontend plays glue `playmidi` effects; it does not yet use window-record music or
+schedule cutscene MIDI.
+The locations of unreferenced tracks and the original AWE32's exact filter, envelope and drum-kit
+choices are not prerequisites for playback. Investigate a music discrepancy when a shipped scene
+actually plays the wrong tune or sounds wrong with the supported renderer.
 
-- SF1 units of the filter (`initialFilterFc` 0, `modEnvToFilterFc` 47–63), modulation envelope,
-  LFO and volume envelope generators. Also, is gen 55 really "root key in cents" or a related
-  field (e.g. pitch correction)? Nothing contradicts it on this file, but it is one file. awesfx
-  (Linux AWE32 tools) reportedly converts SBK files. Its conversion code would settle the units (unverified).
-- Where `BATTLE`, `FOREST`, `LOOKIN2`, `TENSE` and `VICTORY` are played. Most likely picked in
-  the battle code (`GAMEF.DLL` has a bare `battle.mid` next to `binary\music\%s`, but also next to
-  sound-editor strings `LoadSfxPacket`, `ShutDownEdSound`) or not used at all. Needs disassembly
-  (phase 4) or Wine logging of `MIDI_InitTune` arguments.
-- What exactly `win`/`lose`/`tactical` in `WHSHR.EXE` do (debriefing and troop selection?)
-  and how glue `sighted` hands over to battle music.
-- Drum-channel programs 27 and 58 (`INTRO3`, `TITLE`) are not standard GS kits. It is unknown
-  which kit the AWE32 ROM chose for them.
-- How the Omni cutscene player resolves `musicawe\` and when it chooses FM.
-- Whether the looping/fade behaviour (`MIDI_SetRepeats`, `MIDI_FadeAndDiscard`) is controlled
-  by glue commands (`setmidivolume`) or by code.
-- `TRUMPC3` is stored but unused, and the `WarBrass` 12–107 layer overlaps the other zones
-  (intentional layering? editor leftover?).
+## Current ROADMAP status
 
-## Proposed ROADMAP changes
-
-- 1.2 → 🟡 with this text: "`.MID` (21 tracks × GM/FM) and `WARINTR3.SBK` parsed.
-  SBK is **SoundFont 1.0** with only 3 presets (bank 1: choirs 52/54, brass 57), everything else
-  came from the AWE32 GM ROM. Pure-Python SBK→SF2 converter and stem renderer exist. Remaining:
-  full render with FluidSynth + a GM soundfont and a listening check, SF1 filter/envelope units."
-- Area table: "Music … | **standard** MIDI + SoundFont **1.0** (SBK, 3 presets) on top of the AWE32 GM ROM".
-- Add to 3.1/3.3: cutscene `.SR` files reference `music\<x>fm.mid`/`musicawe\<x>.mid`
-  (cutscene → track list in `notes/music.md`).
-- Add to 4.2 (glue language): music commands `playmidi`, `stopmidi`, `setmidivolume`,
-  `addmidiobject`, `[MIDI] name:`. The glue scripts themselves live in `DLL/WND.DLL` resources,
-  which is relevant to 1.1.
-- For the engine: pick music by the same `name[:6]+'FM'` rule, prefer the GM file, and ship no
-  instruments. Use the user's GM soundfont plus the converted SBK in bank 1.
+Item 1.2 is ✅: the MIDI and SBK formats, bank mapping, FluidSynth renders of all 21 GM tracks,
+and listening review are complete. Cutscene music references and glue music commands are documented
+above and in their respective topic notes. Offline FluidSynth verification used a GM soundfont
+with the converted SBK in bank 1. That combination is the intended runtime design; currently the
+frontend passes installed `.MID` files to `pygame.mixer.music` without configuring those banks.
+Unresolved SF1 filter and envelope units are outside the current playback scope.
