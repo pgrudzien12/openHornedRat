@@ -78,6 +78,29 @@ per pass" rule only ever triggers for regiment movers, because a wagon's push ne
 - `convoy_jam_and_melee_obstacles.md` A.2 / A.3: the probe of a cart with a friendly cart ahead **returns false**, so
   the cart restarts and creeps rather than standing; "never drives through W1" is replaced by the creep behaviour.
 
+## 5. Addendum: damage to a wagon, and a 1-model wagon
+
+**(6) Damage.** Missiles, blasts and spells treat a RollingStock unit **like any regiment, model by model**. There is
+no special case for its class: a direct hit with blast radius 0 strikes **one random model**, a blast strikes the
+models it covers, and each model rolls its own wound and save against its own profile (`ranged_combat_handoff.md`
+§3, `game_rules.md` §8). The two models are the **team** (front, the draught animals) and the **wagon** (behind,
+22 units back; `game_rules.md` "Wagons"). Either can be killed first, so **a wagon unit can be left with 1 model**.
+It stays an active unit until its last model is gone. (Close-combat damage goes to its first model,
+`casualty_bookkeeping.md`.)
+
+**(7) Wagon behaviour is the class, not the model count.** The layout, the wagon footprint kind (the 0x27
+look-ahead, never moved by a push, the 45° camera-relative facing snap, no reciprocal contact) are all chosen from
+the unit's **class RollingStock**. The footprint kind is fixed when the battle is loaded. Losing a model changes
+none of it. `game_rules.md`'s "units of exactly 2 models" describes the shipped data, not a condition.
+
+| before | event | after |
+|---|---|---|
+| allied horse-and-cart (2 models), crossbow bolt strikes it | one random model takes the hit, dies | 1 model left; still RollingStock: 0x27 look-ahead, never pushed, facing snap, `CheckCollisions` answers as §1 |
+| same, second model killed | – | unit destroyed (removed) as any unit |
+
+🟡 Where the surviving model stands in the 2-slot wagon layout, and whether a lone wagon (team killed) still moves at
+its normal speed, were not traced; nothing in the class rules depends on it.
+
 ## 🟡 Open
 
 - The exact order of footprints when several overlap at once (it decides cases like (e')).
