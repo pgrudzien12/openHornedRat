@@ -914,6 +914,10 @@ def _react_to_rout(routed: "Regiment", opponents: Sequence["Regiment"], group_id
         opponent.attack_target = routed.identifier
         opponent.target_x = opponent.target_y = None
         opponent.pursuing = True  # notes/pursuit_map_edge.md: a pursuit, not a charge
+        opponent.free_charging = False  # starting a pursuit ends the charging state (bf003_playtest 5.2)
+        # ... and the contact latch the winner kept from its engagement (bf003_playtest 5.2).
+        if (state := battle.event_bus.unit_states.get(opponent.identifier)) is not None:
+            state.contact_latch = False
         opponent.pursuit_budget = opponent.pursuit_point = None
         # notes/pursuit_restraint.md 2: a pursuit start switches the rally-attempt state off (even for an
         # Independent regiment) and schedules the first possible restraint test one full turn later.

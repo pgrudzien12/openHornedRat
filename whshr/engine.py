@@ -575,6 +575,15 @@ class Regiment:
         local_forward = dx * sin + dy * cos
         return abs(local_side) <= half_side and abs(local_forward) <= half_forward
 
+    @property
+    def charging(self) -> bool:
+        """The named charging state: an attack order's charge or a free charge. A pursuer keeps its pursued unit as
+        its attack target but is pursuing, not charging (notes/bf003_playtest_fireball_grid_pursuit.md 5.2); a unit
+        in melee keeps its target too but is fighting, not charging."""
+        if self.in_melee:
+            return False
+        return (self.attack_target is not None and not self.pursuing) or self.free_charging
+
     def bounding_radius(self) -> float:
         return float(math.trunc(formation.bounding_radius(self.models, self.ranks)))
 
@@ -3211,7 +3220,7 @@ class Battle:
             if not regiment.collision_recheck or not self.overlaps_building(regiment):
                 return  # no building overlap: the state is left for the regiment pass that follows
             regiment.collision_recheck = False
-        contact = regiment.attack_target is not None or regiment.free_charging or regiment.in_melee
+        contact = regiment.charging or regiment.in_melee
         pushed = False
         for building in self.buildings:
             if regiment.assaulting_building == building.identifier:
@@ -3224,7 +3233,7 @@ class Battle:
                     state.contact_record = building.identifier
                     self.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x0B), checked=True)
                 continue
-            if state is None and regiment.attack_target is not None:
+            if state is None and regiment.attack_target is not None and not regiment.pursuing:
                 if (regiment.attack_target == building.identifier
                         and regiment.charge_started_target == building.identifier and not building.destroyed):
                     self.begin_building_assault(regiment, building)
