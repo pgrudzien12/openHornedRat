@@ -282,6 +282,16 @@ class BeamTests(EffectTestCase):
         self.assertEqual([name for name, _ in hits], ["A"] * 3 + ["B"] * 3)
         self.assertEqual(self.messages(2004), [])
 
+    def test_scatter_takes_its_step_from_the_whole_start(self):
+        """bf003_playtest 8.2: start 0.9 becomes 0, so 72 away at Lightning range 576 gives step 1 (not 0)."""
+        self.make(bs=9)
+        self.w.x = 0.9
+        self.dice(1, 0, 0, 0)  # x: magnitude 1, sign +; y: magnitude 0
+        self.launch(spell_effects.LIGHTNING, 72, 0)
+        effect = self.effects()[0]
+        self.assertEqual(effect.start[0], 0)
+        self.assertEqual(effect.dest, (73, 0))
+
     def test_scatter_uses_the_casters_bs_and_the_spell_range(self):
         """V3: BS 3, d 400, Lightning range 576: step 5; draws 13, 4, 7, 3 -> (25, 365), N 19."""
         self.make(bs=3)
@@ -498,8 +508,22 @@ class SpearAndFireballTests(EffectTestCase):
         self.make()
         self.launch(spell_effects.FIREBALL, 0, 300)
         self.update(2)
-        spell_effects.cancel(self.battle, self.effects()[0])
+        effect = self.effects()[0]
+        spell_effects.cancel(self.battle, effect)
         self.assertEqual([event.data["reason"] for event in self.bolt_ends()], ["cancelled"])
+        self.assertEqual(self.bolt_ends()[0].data["height"], effect.height)
+        self.assertNotEqual(effect.height, 0)
+
+    def test_a_strike_that_does_not_wound_logs_zero_wounds_and_deaths(self):
+        self.radii = {"E": 40}
+        self.make(unit("E", 0, 300, toughness=10))
+        self.launch(spell_effects.FIREBALL, 0, 300)
+        self.update(19)
+        strikes = [event for event in self.battle.events if event.kind == "spell_strike"]
+        self.assertTrue(strikes)
+        self.assertTrue(all((strike.data["wounds"], strike.data["killed"]) == (0, 0) for strike in strikes
+                            if strike.data["outcome"] != "wounded"))
+        self.assertTrue(all("wounds" in strike.data and "killed" in strike.data for strike in strikes))
 
     def test_burning_head_panics_every_unit_containing_the_point(self):
         """V9: Ld 7; a draw of 9 gives 11 > 7 and routs; a draw of 4 gives 6 and passes."""
