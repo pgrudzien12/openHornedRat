@@ -7,9 +7,9 @@ game's on-screen battle message window. The item name remains visible in the Ite
 while that list is open, but that label is not a new battle message. Existing or
 unrelated messages may remain visible in the message window.
 
-The click immediately marks the potion active and spent, then refreshes its item row.
-Its +3 Strength bonus applies to the bearer regiment's leader figure for the rest of
-the battle, as documented in [battlefield_items.md](battlefield_items.md#potion-of-strength-and-grudgebringer-in-melee).
+The click immediately marks the potion spent, then refreshes its item row. Unless the
+bearer is held, it also activates the +3 Strength bonus for the bearer regiment's leader
+figure for the rest of the battle, as documented in [battlefield_items.md](battlefield_items.md#potion-of-strength-and-grudgebringer-in-melee).
 The activation has no target-selection step and does not request a battle message,
 reaction, portrait pop-up, or scripted item event. The message-window route is used
 by other battle events; the potion activation does not take that route.
