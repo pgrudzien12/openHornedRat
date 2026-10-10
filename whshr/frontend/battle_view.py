@@ -39,7 +39,7 @@ from .battle_text import display_text, reaction_text
 from .battle_sound import BattleSounds
 from .ranged_sound import MissileSounds
 from .gpu import Gpu
-from .spell_visuals import FireballVisuals, Flight
+from .spell_visuals import DirectionalSprite, FireballVisuals, Flight, ProjectileVisuals, projectile_shots
 from .scene_view import SceneView
 from .hud import Hud, order_target_hit, select_regiment_hit
 
@@ -843,6 +843,11 @@ class BattleView(SceneView[BattleScene]):
         for x, y, _code, started in self.scene.battle.impact_effects:
             frame = min(8, 1 + self.scene.battle.tick_count - started)
             append(f"ex{frame}", x, y, self.scene.battle.ground_height(x, y))
+        if hasattr(self.scene.battle, "spell_effects"):
+            # Spell heads and beam segments (notes/spell_visuals.md 0): at their height above the ground, level.
+            for item in self._advance_spell_visuals()[1].meshes():
+                append(item.name, item.x, item.y, self.scene.battle.ground_height(item.x, item.y) + item.height,
+                       item.dx, item.dy)
         return vertices
 
     def _instances(self) -> bytes:
@@ -947,23 +952,41 @@ class BattleView(SceneView[BattleScene]):
         per battle tick. Other spells' frames are an open item: nothing is drawn for them.
         The anchor is each frame's own .FOL anchor (bf003_playtest 8.3: bottom-centre)."""
         field = self.scene.field
-        visuals: FireballVisuals = self.__dict__.setdefault("_spell_visuals", FireballVisuals())
-        tick = self.scene.battle.tick_count
-        if tick != self.__dict__.get("_spell_tick"):
-            self.__dict__["_spell_tick"] = tick
-            visuals.advance(self._fireball_flights())
+        visuals, projectiles = self._advance_spell_visuals()
         sheet = field.ui_sheets.get("spells")
         if sheet is None or not sheet.rects:
             return b""
         data = bytearray()
-        for sprite in visuals.sprites():
-            if sprite.frame >= len(sheet.frames) or sheet.rects[sprite.frame] is None:
+        for sprite in [*visuals.sprites(), *projectiles.sprites()]:
+            number = (sprite.first + sprite_direction(self.camera.yaw, sprite.bearing)
+                      if isinstance(sprite, DirectionalSprite) else sprite.frame)
+            if number >= len(sheet.frames) or sheet.rects[number] is None:
                 continue
-            frame, rect = sheet.frames[sprite.frame], _atlas_rect(sheet, sprite.frame)
+            frame, rect = sheet.frames[number], _atlas_rect(sheet, number)
             data += INSTANCE.pack(sprite.x / WORLD_PER_MESH,
                                   field.ground_height(sprite.x, sprite.y) + sprite.height / WORLD_PER_MESH,
                                   sprite.y / WORLD_PER_MESH, *rect, frame.anchor_x, frame.anchor_y, 0.0)
         return bytes(data)
+
+    def _advance_spell_visuals(self) -> tuple[FireballVisuals, ProjectileVisuals]:
+        """Both spell presentation states, advanced once per battle tick whichever draw path asks first."""
+        visuals: FireballVisuals = self.__dict__.setdefault("_spell_visuals", FireballVisuals())
+        projectiles: ProjectileVisuals = self.__dict__.setdefault("_projectile_visuals", ProjectileVisuals())
+        battle = self.scene.battle
+        tick = battle.tick_count
+        if tick != self.__dict__.get("_spell_tick"):
+            self.__dict__["_spell_tick"] = tick
+            visuals.advance(self._fireball_flights())
+            memory: dict[int, list[Any]] = self.__dict__.setdefault("_projectile_memory", {})
+            shots, storms = projectile_shots(battle.spell_effects.active, memory)
+            projectiles.advance(shots)
+            for serial, owner, forming in storms:
+                caster = battle.regiments.get(owner)
+                if caster is not None:
+                    positions = caster.model_positions()
+                    x, y = positions[0] if positions else (caster.x, caster.y)
+                    projectiles.storm_sprite(serial, x, y, forming)
+        return visuals, projectiles
 
     def _item_markers(self) -> bytes:
         """The sparkle over each item still to be picked up (notes/battle_end_objectives.md 12.2): effect set
