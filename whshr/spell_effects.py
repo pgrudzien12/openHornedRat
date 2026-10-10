@@ -156,6 +156,7 @@ class Effect:
     x: float = 0.0
     y: float = 0.0
     arc: int = 0
+    height: float = 0.0  # a bolt's height above the ground at (x, y), as last tested (for drawing)
     strength: int = 0
     value: int = 0  # Storm: bolts left; Conflagration: k
     stopped: bool = False  # Hunting Spear: its leg stopped on a hit last tick
@@ -817,7 +818,7 @@ def _fly(battle: Battle, effect: Effect, bolt: Bolt) -> bool:
     effect.x, effect.y = x, y
     if effect.code == FIREBALL or effect.arched:
         effect.arc += 1 if 2 * r > effect.steps else -1
-    height = _height_above_ground(battle, effect, bolt, x, y) + effect.arc
+    effect.height = height = _height_above_ground(battle, effect, bolt, x, y) + effect.arc
     impact = Impact(effect.owner, bolt.strength, bolt.wound_die, bolt.save, bolt.fire)
     hit = impact_test(battle, x, y, height, impact, effect.owner, messages=False, source=effect)
     if hit:
