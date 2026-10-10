@@ -344,6 +344,9 @@ class Regiment:
     # The fight's own-side tally, breakdown and next break-test turn (6.1-6.2) live on
     # `Battle.fights[regiment.melee_group]`, shared by every regiment in that fight.
     original_models: int = -1  # starting model count, for rally's casualties modifier; negative = the `models` given
+    # notes/panic_tests.md 0: the organisational size from the unit's .BTS/.MRC record (s_orgsize), not its size at
+    # load; the casualty panic tests at its quarters. 0 (also the default when no record gives one): no casualty panic.
+    orgsize: int = 0
     # game_rules.md 6.1: the formed frontage, which casualties never reduce (only a re-form would).
     # The rank bonus divides the live model count by this, so it decays as the unit is worn down.
     frontage: int = -1  # negative = derived from `models`/`ranks` in __post_init__
@@ -919,11 +922,8 @@ class Battle:
                     written_npcs[identifier] = int(npc_merge.numbered_regiment(unit) or 0)
                 models, ranks = formation.unit_size(unit)
                 leader: View = unit.get("leader") or {}
-                if forced_side is not None:
-                    side = forced_side
-                else:
-                    fields, _conflicts = stat_fields(unit.get("stats") or {})
-                    side = side_of_code(stat_int(fields, "s_side"))
+                fields, _conflicts = stat_fields(unit.get("stats") or {})
+                side = forced_side if forced_side is not None else side_of_code(stat_int(fields, "s_side"))
                 x_value, y_value = position.get("x"), position.get("y")
                 direction = int(position.get("dir") or 0) % 512
                 if side == Side.PLAYER and skip_slots >= 0:
@@ -948,6 +948,7 @@ class Battle:
                     spells=magic.spell_codes(unit.get("spells") or ()),
                     items=tuple(str(item) for item in unit.get("items") or ())[:objective_table.ITEM_SLOTS],
                     shooting_code=_shooting_code(unit),
+                    orgsize=max(0, stat_int(fields, "s_orgsize") or 0),
                     **_decode_combat_profile(unit),
                 ))
                 script_value = position.get("script")
@@ -2904,6 +2905,9 @@ class Battle:
             if dying.ticks_left > 0:
                 animation.step(dying.model, dying.model.action, self.rng, regiment.animation_family)
                 continue
+            # notes/panic_tests.md 1: the model leaves the unit as its death sequence starts; the size counts it
+            # and the models still collapsing.
+            combat.casualty_panic(self, regiment, regiment.models + len(regiment.dying))
             regiment.dying.remove(dying)
             if dying.burns:
                 # Fire/warpfire kills leave the roster's animation and burn as a free figure first.

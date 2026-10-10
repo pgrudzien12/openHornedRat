@@ -483,6 +483,7 @@ def _damage_unit(battle: Battle, unit: Regiment, projectile: Projectile,
     if not unit.active:
         return
     unit.model_positions()
+    size_before = unit.models + len(unit.dying)  # models still collapsing are still in the unit (panic_tests.md 0)
     building = unit.unit_class in {8, 9}
     if building and not projectile.building_strength:
         return
@@ -513,10 +514,10 @@ def _damage_unit(battle: Battle, unit: Regiment, projectile: Projectile,
     battle.events.append(BattleEvent(f"{unit.name} is hit by a missile.", "projectile_hit",
                                      regiment=unit.identifier, direct=direct, kills=killed,
                                      text_id=2004 if direct else 2005))
-    if (not building and unit.models <= unit.original_models / 4 and projectile.code != 17
-            and unit.active and not unit.routing and "CantBreak" not in unit.psychology):
-        if not combat.leadership_test(unit.effective_leadership, battle.rng):
-            combat.start_rout(unit, battle)
+    # notes/panic_tests.md 2: impact panic (weapon flag 0x80: every ordinary missile, not the Gyrocopter bomb), on a
+    # direct hit only, once per impact, even with nobody wounded; the size is taken before this impact's deaths.
+    if direct and not building and projectile.code != 17 and size_before <= unit.orgsize >> 2:
+        combat.panic_test(battle, unit, 0, "impact")
 
 
 def _damage_buildings(battle: Battle, p: Projectile, flight: bool) -> None:

@@ -63,6 +63,48 @@ def leadership_test(leadership: float, rng: random.Random, modifier: float = 0) 
     return modifier + _2_to_12(rng) <= leadership
 
 
+def panic_test(battle: "Battle", regiment: "Regiment", modifier: int, cause: str) -> bool:
+    """A panic test (notes/panic_tests.md 0, 3): pass iff modifier + uniform 2-12 <= effective Ld. Nothing exempts a unit
+    from the test itself; a failure is a rout request (`request_rout`). Logged as a "panic_test" event with the
+    `cause` ("casualties", "impact", a spell name); the original prints no battle message. True when it failed."""
+    roll = _2_to_12(battle.rng)
+    passed = modifier + roll <= regiment.effective_leadership
+    battle.events.append(BattleEvent(
+        f"{regiment.name} takes a panic test ({cause}; Ld {regiment.effective_leadership}, roll {roll} + {modifier}): "
+        f"{'passes' if passed else 'fails'}.", "panic_test",
+        regiment=regiment.identifier, cause=cause, leadership=regiment.effective_leadership, roll=roll,
+        modifier=modifier, passed=passed))
+    if not passed:
+        request_rout(battle, regiment)
+    return not passed
+
+
+def request_rout(battle: "Battle", regiment: "Regiment") -> None:
+    """A failed panic test (notes/panic_tests.md 3): with behaviour scripts running, event 0x0C to the unit, whose own
+    handler decides (an already broken unit ignores it, CantBreak holds, artillery does not rout, otherwise the rout
+    script starts the flight); a unit already removed drops it. Without scripts the same filter is applied here and
+    the flight starts at once; a thorn-held unit cannot start one (notes/spell_area_effects.md 3.3)."""
+    if battle.interpreter is not None:
+        battle.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x0C))
+        return
+    if (regiment.active and not regiment.routing and "CantBreak" not in regiment.psychology
+            and regiment.hud_class != "art" and not regiment.held):
+        start_rout(regiment, battle)
+
+
+def casualty_panic(battle: "Battle", regiment: "Regiment", before: int) -> None:
+    """The per-death casualty check (notes/panic_tests.md 1), run when a killed model's death sequence starts, with
+    `before` the unit's size counting that model and every model still collapsing. With q = orgsize >> 2: no test
+    when q is 0 or the unit was at exactly its organisational size; otherwise a test at 1 - floor(after / q) when the
+    loss crosses a multiple of q."""
+    q = regiment.orgsize >> 2
+    if q == 0 or before == regiment.orgsize:
+        return
+    after = before - 1
+    if before // q != after // q:
+        panic_test(battle, regiment, 1 - after // q, "casualties")
+
+
 def _armour_threshold(armour: int, strength: int) -> int:
     save = EXPECTED_ARMOUR_SAVE[armour] if 0 <= armour < len(EXPECTED_ARMOUR_SAVE) else 7
     return save + max(0, strength - 3)
@@ -154,6 +196,7 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
         regiment.volley_countdown = None
     grid = _grid_of(battle, regiment)
     dead_opponents: dict[int, tuple[str, int] | None] = {}
+    immediate_checks: list[int] = []
     for index in victims:
         model = regiment.melee_models[index]
         if clear_credit:
@@ -167,6 +210,8 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
                 *positions[index], model=model, ticks_left=delay, death_kind=death_kind,
                 body=regiment.body_class, burns=regiment.burns_on(death_kind)))
         else:
+            # Its death sequence starts now: the casualty check counts it and the models still collapsing.
+            immediate_checks.append(len(regiment.positions) + len(regiment.dying))
             animation.step(model, animation.DEAD, battle.rng, regiment.animation_family)
             regiment.corpses.append((*positions[index], battle.rng.randrange(animation.FULL_TURN)))
         dead_opponents[model.uid] = model.opponent
@@ -180,6 +225,8 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
         if index < len(regiment.reform_slots):
             del regiment.reform_slots[index]
     regiment.models -= len(victims)
+    for before in immediate_checks:
+        casualty_panic(battle, regiment, before)
     if leader_killed:
         battle.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x17), route="self")
     _unpair_dead(battle, regiment, dead_opponents)
