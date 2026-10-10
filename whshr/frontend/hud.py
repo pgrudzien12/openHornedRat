@@ -211,6 +211,7 @@ class Hud:
         self.item_list_open = False
         self.item_list_owner: str | None = None
         self._item_labels: list[Any] = []
+        self._used_item_check: ScreenQuad | None = None
         self._draw_size: Size | None = None
         # Name of the fixed button or command held down, for its pressed art; hit_test()'s return
         # value (fixed-button names and command names never collide).
@@ -822,6 +823,18 @@ class Hud:
             pressed = self.pressed == f"item:{item}" and enabled
             self._draw_panel(label, 205 + int(pressed), 72 + index * 19 + int(pressed), 232, 18,
                              tint=(1, 1, 1, 1) if enabled else (0.45, 0.45, 0.45, 0.85))
+            if item in regiment.used_items:
+                self._draw_panel(self._used_item_check_quad(), 420, 74 + index * 19)
+
+    def _used_item_check_quad(self) -> ScreenQuad:
+        if self._used_item_check is None:
+            surface = pygame.Surface((14, 14), pygame.SRCALPHA)
+            points = ((2, 7), (6, 11), (12, 2))
+            pygame.draw.lines(surface, (18, 44, 18), False, points, 5)
+            pygame.draw.lines(surface, (58, 220, 70), False, points, 3)
+            self._used_item_check = ScreenQuad(self.gpu, surface.get_size())
+            self._used_item_check.write(pygame.image.tobytes(surface, "RGBA"))
+        return self._used_item_check
 
     def _draw_camera_target(self, camera: "BattleCamera") -> None:
         """A small "x" mark at the camera's look-at target (BattleCamera.target_x/y), the ICONS
@@ -877,3 +890,5 @@ class Hud:
             self._unit_info_panel.release()
         for label in self._item_labels:
             label.release()
+        if self._used_item_check is not None:
+            self._used_item_check.release()

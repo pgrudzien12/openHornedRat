@@ -132,6 +132,37 @@ class PanelStateTests(unittest.TestCase):
         self.assertTrue(hud.item_list_open)
         self.assertIsNone(hud.hit_test(_panel_pos(hud, 210, 75)))
 
+    def test_used_item_has_a_check_on_the_right_until_rearmed(self):
+        from whshr import spell_effects
+
+        bearer = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf",
+                          items=("ItemPotionOfStrength", "ItemGrudgeBringer", "ItemSwordOfMight"),
+                          has_leader=True)
+        hud = _hud(regiments=[bearer])
+        hud.press("attack")
+        hud.press("items")
+        hud._item_labels = [Mock() for _ in bearer.items]
+        hud._icon = Mock(return_value=object())
+        check = object()
+        hud._used_item_check_quad = Mock(return_value=check)
+        draws = []
+        hud._draw_panel = lambda quad, *args, **kwargs: draws.append((quad, args))
+
+        hud._draw_item_list(bearer)
+        self.assertEqual([args for quad, args in draws if quad is check], [])
+
+        hud.battle.arm_item("player", "ItemPotionOfStrength")
+        hud.battle.arm_item("player", "ItemGrudgeBringer")
+        draws.clear()
+        hud._draw_item_list(bearer)
+        self.assertEqual([args for quad, args in draws if quad is check], [(420, 74), (420, 93)])
+
+        hud.battle.tick_count = spell_effects.WIND_TICKS
+        hud.battle.tick()
+        draws.clear()
+        hud._draw_item_list(bearer)
+        self.assertEqual([args for quad, args in draws if quad is check], [(420, 74)])
+
     def test_item_menu_requires_a_living_leader(self):
         bearer = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf",
                           items=("ItemGrudgeBringer",), has_leader=False)
