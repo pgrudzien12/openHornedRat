@@ -4,7 +4,7 @@ building only pushes it clear, with no contact event and no latch, and later mov
 import unittest
 
 from tests.script_helpers import FakeDll, word
-from whshr import behaviour, interpreter
+from whshr import behaviour, combat, interpreter
 from whshr.engine import Battle, Regiment
 from whshr.rules import Side
 
@@ -46,6 +46,19 @@ class PursuerAndBuildingTests(unittest.TestCase):
         self.assertFalse(cav.charging)
         cav.attack_target, cav.pursuing, cav.free_charging = None, False, True
         self.assertTrue(cav.charging)
+
+    def test_a_unit_in_melee_keeps_its_target_but_is_not_charging(self):
+        _, cav, _ = make(False)
+        cav.attack_target, cav.in_melee = "fug", True
+        self.assertFalse(cav.charging)
+
+    def test_starting_a_pursuit_clears_the_contact_latch_kept_from_the_engagement(self):
+        battle, cav, fug = make(True)
+        battle.event_bus.unit_states["cav"].contact_latch = True
+        combat._react_to_rout(fug, [cav], None, battle)
+        self.assertTrue(cav.pursuing)
+        self.assertFalse(cav.charging)
+        self.assertFalse(battle.event_bus.unit_states["cav"].contact_latch)
 
     def test_a_move_order_after_the_push_is_obeyed(self):
         battle, cav, _ = make(True)

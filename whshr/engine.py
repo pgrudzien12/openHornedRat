@@ -578,7 +578,10 @@ class Regiment:
     @property
     def charging(self) -> bool:
         """The named charging state: an attack order's charge or a free charge. A pursuer keeps its pursued unit as
-        its attack target but is pursuing, not charging (notes/bf003_playtest_fireball_grid_pursuit.md 5.2)."""
+        its attack target but is pursuing, not charging (notes/bf003_playtest_fireball_grid_pursuit.md 5.2); a unit
+        in melee keeps its target too but is fighting, not charging."""
+        if self.in_melee:
+            return False
         return (self.attack_target is not None and not self.pursuing) or self.free_charging
 
     def bounding_radius(self) -> float:
