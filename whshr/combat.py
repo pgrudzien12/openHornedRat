@@ -534,6 +534,10 @@ def resolve_contacts(battle: "Battle") -> None:
         battle.interpreter.raise_contacts(contacts)
         for joiner_id, owner_id, counter in battle.engage_requests:
             if joiner_id in by_id and owner_id in by_id:
+                if by_id[joiner_id].camp == by_id[owner_id].camp:
+                    # A script engaged a friend (BF001: Sleaquit's AttackTagged on Otto Hiln). Without
+                    # its own camp the new fight has no enemy in it and dissolves on the next tick.
+                    _split_scripted_pair(by_id[joiner_id], by_id[owner_id])
                 touching[joiner_id].add(owner_id)
                 touching[owner_id].add(joiner_id)
                 pending_counter[joiner_id] = counter
