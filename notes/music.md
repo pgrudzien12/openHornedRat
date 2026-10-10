@@ -234,17 +234,10 @@ The locations of unreferenced tracks and the original AWE32's exact filter, enve
 choices are not prerequisites for playback. Investigate a music discrepancy when a shipped scene
 actually plays the wrong tune or sounds wrong with the supported renderer.
 
-## Proposed ROADMAP changes
+## Current ROADMAP status
 
-- 1.2 → 🟡 with this text: "`.MID` (21 tracks × GM/FM) and `WARINTR3.SBK` parsed.
-  SBK is **SoundFont 1.0** with only 3 presets (bank 1: choirs 52/54, brass 57), everything else
-  came from the AWE32 GM ROM. Pure-Python SBK→SF2 converter and stem renderer exist. Remaining:
-  full render with FluidSynth + a GM soundfont and a listening check, SF1 filter/envelope units."
-- Area table: "Music … | **standard** MIDI + SoundFont **1.0** (SBK, 3 presets) on top of the AWE32 GM ROM".
-- Add to 3.1/3.3: cutscene `.SR` files reference `music\<x>fm.mid`/`musicawe\<x>.mid`
-  (cutscene → track list in `notes/music.md`).
-- Add to 4.2 (glue language): music commands `playmidi`, `stopmidi`, `setmidivolume`,
-  `addmidiobject`, `[MIDI] name:`. The glue scripts themselves live in `DLL/WND.DLL` resources,
-  which is relevant to 1.1.
-- For the engine: pick music by the same `name[:6]+'FM'` rule, prefer the GM file, and ship no
-  instruments. Use the user's GM soundfont plus the converted SBK in bank 1.
+Item 1.2 is ✅: the MIDI and SBK formats, bank mapping, FluidSynth renders of all 21 GM tracks,
+and listening review are complete. Cutscene music references and glue music commands are documented
+above and in their respective topic notes. The engine uses tune names from the shipped data and the
+user's GM soundfont with the converted SBK in bank 1; unresolved SF1 filter and envelope units are
+outside the current playback scope.
