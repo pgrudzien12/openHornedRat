@@ -28,7 +28,9 @@ re-check throttle), `unit_script_control.md` §1 (event entry), `obstacle_steeri
 `166: Yield; HaltAndReform; PushPC; SetWait 20; Wait; CheckCollisions; LoopIfTrue; Restart`
 
 - `CheckCollisions` runs the cart's collision pass in probe mode. The 0x27 test is part of that pass, so while the
-  cart ahead is still within ±45° and the circles overlap, the probe **queues another 0x27 and returns true**.
+  cart ahead is still within ±45° and the circles overlap, the probe **queues another 0x27**, but it **returns false**:
+  the same-army push that follows does not move the cart, and that "no" is the answer (corrected October 2026,
+  `collision_probe_result.md`).
 - Each further 0x27 enters the handler at the start of the next tick. Its `SwitchScript 166` is ignored (A.1 #1), so
   the cart goes back into its 20-tick wait. The timer keeps counting (`unit_script_control.md` §1, nested handlers).
 - When the probe finds no footprint ahead (the cart in front has moved on), `LoopIfTrue` falls through to
@@ -48,12 +50,15 @@ progress. Tick numbers start at W2's first pass that finds the overlap.
 | 1 (movement) | still under `MoveToNode`: advances `v` more; pass → 0x27 queued again | its pass: nothing |
 | 2 (start) | 0x27 → handler → `SwitchScript 166` **ignored** → resumes at `HaltAndReform`: **halted**; `SetWait 20`; `Wait` | — |
 | 3 … 22 | each tick: 0x27 (from the mutual re-check) → handler → switch ignored → back in the wait | stands |
-| 22 | wait over → `CheckCollisions`: overlap ahead → true, another 0x27 → `LoopIfTrue` → new 20-tick wait | stands |
+| 22 | wait over → `CheckCollisions`: overlap ahead → another 0x27 queued, but the answer is **false** → `Restart` → main script, `MoveToNode 2`, W2 moves | stands |
+| 23 | 0x27 → handler → switch to 166 (a different script now) → 166 from `Yield`; W2 still moving | stands |
+| 24 | `HaltAndReform`: halted; 20-tick wait again (W2 crept about 2–3 × `v`) | stands |
 | W1 moves on, centre distance ≥ `2r` | next `CheckCollisions` → false → `Restart` → main script → `MoveToNode 2` | — |
 | after | W2 drives on; if it closes in again, the cycle repeats from tick 0 | — |
 
 W2 stops after travelling at most about `(3 + 2) × v` into the overlap: up to 3 updates of throttle before the
-first pass, then the `Yield` tick. It never drives through W1. If W1 then halts, W2 waits behind it indefinitely,
+first pass, then the `Yield` tick. If W1 then halts, W2 **creeps** (about 2–3 ticks of movement every ~22 ticks, rows
+22–24) instead of standing still 🟡 (whether it can eventually drive into a long-halted W1 is open),
 re-testing every 20 ticks.
 
 ## B. Friendly units in melee as route obstacles
