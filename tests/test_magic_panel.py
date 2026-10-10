@@ -204,7 +204,7 @@ class PowerDisplayTests(MagicPanelCase):
         self.hud._draw_panel = lambda quad, *args, **kwargs: draws.append((quad, args))
         self.hud._draw_power(0, 0)
         self.assertEqual([args for _quad, args in draws],
-                         [(4 + x, 12 + y) for x, y in hud_module.POWER_MARKER_POSITIONS[:4]])
+                         list(hud_module.POWER_MARKER_POSITIONS[:4]))
 
 
 if __name__ == "__main__":

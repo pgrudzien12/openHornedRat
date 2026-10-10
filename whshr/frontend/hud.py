@@ -196,9 +196,17 @@ DOT_BASE: dict[tuple[str, bool], int] = {
     ("normal", True): 135, ("normal", False): 127,
     ("broken", True): 151, ("broken", False): 143,
 }
-COMPASS_FRAMES = (99, 105)
+# The compass (notes/battle_compass.md): its art is the panel background's own region; on it a heading tape window,
+# under it a wind-cycle strip window, a lightning warning and the power markers. Positions are compass-local, the
+# compass sitting at the readout rectangle's origin.
+HEADING_TAPE_FRAME, HEADING_TAPE_WINDOW = 105, (17, 76, 91, 27)
+WIND_STRIP_FRAME, WIND_STRIP_WINDOW = 106, (38, 108, 49, 18)
+LIGHTNING_POSITION = (57, 114)
+# PROVISIONAL (battle_compass.md 2.1): the order of the flicker's frames and blank steps is not given.
+LIGHTNING_STEPS: tuple[int | None, ...] = (108, None, 109, None, 110, None)
+WIND_CYCLE_MS, WIND_WARNING_MS = 50000, 40000
 # The player's power pool on the compass: one marker per point, compass-local positions, first point leftmost
-# (notes/player_magic_panel.md 2). PROVISIONAL: the marker frame and whether the position is its top-left corner.
+# (notes/player_magic_panel.md 2, battle_compass.md 3).
 POWER_MARKER_FRAME = 107
 POWER_MARKER_POSITIONS = ((34, 63), (40, 58), (47, 54), (55, 52), (63, 52), (71, 54), (78, 58), (84, 63))
 # Spell list rows (notes/player_magic_panel.md 1.1; positions as the item rows, notes/battlefield_items.md).
@@ -225,6 +233,39 @@ HUD_CLASS_NAMES: dict[str, str] = {
 BLACK = (0, 0, 0)
 
 
+def heading_tape_offset(yaw_degrees: float) -> int:
+    """The heading tape's source x for a camera yaw (notes/battle_compass.md 1): a = trunc(theta * 255 / 2pi) with
+    theta the yaw in radians (yaw 180 looks at minimap-up, north), src_x = (a - 173) mod 256."""
+    a = math.trunc(math.radians(yaw_degrees) * 255 / (2 * math.pi))
+    return (a - 173) % 256
+
+
+def wind_strip_offset(battle_ms: int) -> int:
+    """The wind strip's source x for the unpaused battle clock (notes/battle_compass.md 2)."""
+    c = (battle_ms % WIND_CYCLE_MS) * 255 // (WIND_CYCLE_MS - 1) % 256
+    return (c - 24) % 256
+
+
+def lightning_frame(battle_ms: int) -> int | None:
+    """The lightning warning's ICONS frame in the last 10 s before a wind, one step per second; None while blank or
+    outside the warning (notes/battle_compass.md 2.1)."""
+    phase = battle_ms % WIND_CYCLE_MS
+    if phase < WIND_WARNING_MS:
+        return None
+    return LIGHTNING_STEPS[(phase - WIND_WARNING_MS) // 1000 % len(LIGHTNING_STEPS)]
+
+
+def wrapped_slice(rgba: bytes, width: int, height: int, src_x: int, window: int) -> bytes:
+    """A window-wide horizontal slice of a top-down RGBA image starting at src_x, wrapping past its right edge."""
+    columns = [(src_x + column) % width for column in range(window)]
+    out = bytearray(window * height * 4)
+    for row in range(height):
+        base = row * width * 4
+        for column, source in enumerate(columns):
+            out[(row * window + column) * 4:(row * window + column) * 4 + 4] = rgba[base + source * 4:base + source * 4 + 4]
+    return bytes(out)
+
+
 def frame_rgba(frame: SpriteFrame, palette: Sequence[tuple[int, int, int]]) -> bytes:
     """Convert a decoded indexed frame to top-down RGBA for a ScreenQuad."""
     rgba = bytearray(frame.width * frame.height * 4)
@@ -246,7 +287,8 @@ class Hud:
         self._icon_cache: dict[int, ScreenQuad | None] = {}  # ICONS frame index -> ScreenQuad, built lazily and kept for the view's life
         self._sheet_frame_cache: dict[int, ScreenQuad] = {}  # id(frame) -> ScreenQuad, for portrait/banner/plan-map frames outside ICONS
         self.minimap_layers = {index: self._icon(int(index)) for index, _pos, _size in MINIMAP_LAYERS}
-        self.compass_quads = tuple(self._icon(f) for f in COMPASS_FRAMES)
+        # Compass windows: (frame index) -> (window quad, frame RGBA, source x last written).
+        self._compass_windows: dict[int, tuple[ScreenQuad, bytes, int | None]] = {}
         self.selected: str | None = None
         self.battle: Battle | None = None
         self.marker_mode = 0
@@ -807,15 +849,44 @@ class Hud:
             base = 181
         return tuple(range(base, base + 8))
 
-    def _draw_readout(self, regiment: "Regiment | None") -> None:
+    def _battle_ms(self) -> int:
+        """The unpaused battle clock as the compass samples it: whole seconds (notes/battle_compass.md 2)."""
+        ticks = self.battle.tick_count if self.battle is not None else 0
+        return ticks // 10 * 1000
+
+    def _compass_shown(self) -> bool:
+        popup = self.battle.portrait_popup if self.battle is not None else None
+        return popup is None or not popup.active or self._regiment(popup.unit_id) is None
+
+    def _draw_compass_window(self, frame_index: int, window: tuple[int, int, int, int], src_x: int) -> None:
+        """Draw a window-wide slice of a compass strip frame, rewriting its texture only when the slice moves."""
+        entry = self._compass_windows.get(frame_index)
+        if entry is None:
+            if self.icons is None or frame_index >= len(self.icons.frames):
+                return
+            frame = self.icons.frames[frame_index]
+            entry = (ScreenQuad(self.gpu, (window[2], window[3])), frame_rgba(frame, self.field.palette), None)
+        quad, rgba, written = entry
+        if written != src_x:
+            frame = self.icons.frames[frame_index] if self.icons is not None else None
+            if frame is None:
+                return
+            quad.write(wrapped_slice(rgba, frame.width, min(frame.height, window[3]), src_x, window[2]))
+        self._compass_windows[frame_index] = (quad, rgba, src_x)
+        self._draw_panel(quad, READOUT_RECT[0] + window[0], READOUT_RECT[1] + window[1])
+
+    def _draw_readout(self, regiment: "Regiment | None", camera: "BattleCamera | None" = None) -> None:
         """The portrait rectangle: the compass, or the reacting unit's portrait while the pop-up is up
         (notes/react_portrait.md 3-4); selecting a regiment never changes it."""
         rx, ry = READOUT_RECT[0], READOUT_RECT[1]
         popup = self.battle.portrait_popup if self.battle is not None else None
         shown = self._regiment(popup.unit_id) if popup is not None and popup.active else None
         if popup is None or shown is None:
-            for quad in self.compass_quads:
-                self._draw_panel(quad, rx + 4, ry + 12)
+            if camera is not None:
+                self._draw_compass_window(HEADING_TAPE_FRAME, HEADING_TAPE_WINDOW, heading_tape_offset(camera.yaw))
+            frame = lightning_frame(self._battle_ms())
+            if frame is not None:
+                self._draw_panel(self._icon(frame), rx + LIGHTNING_POSITION[0], ry + LIGHTNING_POSITION[1])
             self._draw_power(rx, ry)
             return
         self._draw_panel(self.portrait_bg_quad, rx + 4, ry + 12)
@@ -835,9 +906,12 @@ class Hud:
 
     def draw(self, width: int, height: int, camera: "BattleCamera | None" = None) -> None:
         self._draw_size = (width, height)
+        if self._compass_shown():
+            # The wind strip lies under the panel art and shows through its opening (battle_compass.md 0).
+            self._draw_compass_window(WIND_STRIP_FRAME, WIND_STRIP_WINDOW, wind_strip_offset(self._battle_ms()))
         self._draw_panel(self.panel_bg, 0, 0)
         regiment = self._regiment(self.selected)
-        self._draw_readout(regiment)
+        self._draw_readout(regiment, camera)
         self._draw_fixed_buttons()
         self._draw_slots(regiment)
         self._draw_minimap(regiment, camera)
@@ -964,7 +1038,7 @@ class Hud:
             return
         quad = self._icon(POWER_MARKER_FRAME)
         for px, py in POWER_MARKER_POSITIONS[:self.battle.player_power]:
-            self._draw_panel(quad, rx + 4 + px, ry + 12 + py)
+            self._draw_panel(quad, rx + px, ry + py)
 
     def _used_item_check_quad(self) -> ScreenQuad:
         if self._used_item_check is None:
@@ -1019,7 +1093,7 @@ class Hud:
         )
 
     def release(self) -> None:
-        quads = [self.panel_bg, self.portrait_bg_quad, *self.compass_quads,
+        quads = [self.panel_bg, self.portrait_bg_quad, *(quad for quad, _rgba, _x in self._compass_windows.values()),
                 *self._icon_cache.values(), *self._sheet_frame_cache.values()]
         for quad in quads:
             if quad:
