@@ -49,7 +49,7 @@ def play(installation: str, battle: str, ticks: int, output: Path, seed: int) ->
             average_y = sum(unit["y"] for _, unit in players) / len(players)
             command({"op": "target", "point": [average_x, average_y]})
         command({"op": "capture", "path": str(output / "tick-0000.png")})
-        command({"op": "order", "event": ["start_battle"]})
+        state = command({"op": "order", "event": ["start_battle"]})["state"]
         while state["tick"] < ticks and state["result"] is None:
             regiments = state["regiments"]
             enemies = [(name, unit) for name, unit in regiments.items() if unit["side"] == "enemy"]
