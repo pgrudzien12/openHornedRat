@@ -253,8 +253,10 @@ Public: `movement_formation.md` §3.10. Settled here:
     if the unit is not broken and fear-passed is off and `MayEngage` refuses → current target := that enemy and event
     **0x0D** queued to the unit (no meaningful source);
   - 🟡 the automatic contact attacks against/by a routing unit (`game_rules.md` §7.7) appear to run in probe mode too.
-- Condition: true if anything was pushed, touched (an enemy footprint corner inside the box) or 0x27 raised; false
-  otherwise, and then the one-tick contact latch is cleared.
+- Condition: the answer of the **last** overlapping footprint that gives one, not "anything happened"
+  (`collision_probe_result.md`): a push that moves the unit = yes (a wagon is never moved: no), an enemy footprint corner
+  inside the box = yes; a 0x27 is overwritten when the same footprint then answers no. When false, the one-tick contact
+  latch is cleared.
 
 | Before | Instruction | After |
 |---|---|---|

@@ -328,7 +328,7 @@ Runs the per-tick collision pass ("Routes, collisions and visibility") **for thi
 friendly-unit and scenery push-apart, the battle-edge repel, a charging unit's stop within ±45° and the `INVSOLID`-ahead
 event 0x27 all happen as usual, and an enemy footprint overlap is **detected but not engaged** (no contact handler).
 🟡 The fear-on-contact test against an overlapping enemy still runs.
-Condition = **true if anything was pushed or touched**. If false, the contact latch `unit_flags 0x1000000` is cleared.
+Condition = the answer of the **last** overlapping footprint that gives one (a push of the unit itself = yes, a wagon is never moved so its push = no; an enemy box corner inside = yes); see `collision_probe_result.md`. If false, the contact latch `unit_flags 0x1000000` is cleared.
 A unit flagged as leaving the battle (`unit_flags 0x100`) or with an inactive footprint is skipped (false).
 
 Script 166 ("separate after a collision", `game_rules.md` script table): `Yield / HaltAndReform / every 20 ticks
