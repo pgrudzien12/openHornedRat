@@ -38,6 +38,13 @@ def parse_order(command: dict[str, Any]) -> tuple[Any, ...]:
     if event[0] in {"move_to", "face_point"} and not all(
             _finite_number(value) for value in event[1:]):
         raise ValueError("world coordinates must be finite numbers")
+    if event[0] == "fire":
+        target, point = event[1:]
+        if target is not None and not isinstance(target, str):
+            raise ValueError("fire target must be a regiment identifier or null")
+        if point is not None and (not isinstance(point, (list, tuple)) or len(point) != 2
+                                  or not all(_finite_number(value) for value in point)):
+            raise ValueError("fire point must be two finite world coordinates or null")
     return tuple(event)
 
 
