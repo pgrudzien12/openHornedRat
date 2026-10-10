@@ -2522,6 +2522,13 @@ class Battle:
                 updated.append((px, py))
                 still_moving = True
                 continue
+            # The timed pause counts down every tick for every model, before any step decision, so a model
+            # at rest in a melee also leaves its pause (bf003_playtest 4). PROVISIONAL: the grid's joiner pass
+            # runs after this movement update, so an expired pause is collected in the same tick or the next
+            # depending on that order (open question).
+            was_frozen = model.freeze_ticks > 0
+            if was_frozen:
+                model.freeze_ticks -= 1
             if regiment.in_melee and model.at_rest:
                 updated.append((px, py))
                 continue
@@ -2533,8 +2540,7 @@ class Battle:
             tx, ty = cell if cell is not None else scatter if scatter is not None else slot
             dx, dy = tx - px, ty - py
             distance = math.hypot(dx, dy)
-            if model.freeze_ticks > 0:
-                model.freeze_ticks -= 1
+            if was_frozen:
                 model.at_rest = distance <= MODEL_ARRIVAL_DISTANCE
                 new_position = (px, py)
                 still_moving |= not model.at_rest

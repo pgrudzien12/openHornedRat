@@ -544,3 +544,63 @@ class EngagementAsymmetryTests(unittest.TestCase):
             fallbacks.add(tuple(chosen))
 
         self.assertEqual(len(fallbacks), 4)  # each approach direction wraps in its own order
+
+
+class TimedPauseInMeleeTests(unittest.TestCase):
+    """notes/bf003_playtest_fireball_grid_pursuit.md 4: the timed pause counts down every tick for every model."""
+
+    def _melee_unit(self):
+        regiment = _regiment("aaa_rest", 0, 0, Side.ENEMY, initiative=5)
+        enemy = _regiment("bbb_foe", 0, 14, Side.PLAYER, initiative=5)
+        battle = Battle(1000, 1000, [regiment, enemy], seed=0)
+        regiment.model_positions()
+        regiment.in_melee = True
+        return battle, regiment
+
+    def test_given_an_at_rest_model_in_melee_with_a_pause_when_a_tick_passes_then_the_pause_falls_by_one(self):
+        battle, regiment = self._melee_unit()
+        model = regiment.melee_models[0]
+        model.at_rest, model.freeze_ticks = True, 3
+
+        battle._advance_models(regiment, 1)
+
+        self.assertEqual(model.freeze_ticks, 2)
+
+    def test_given_an_at_rest_model_in_melee_with_a_pause_of_three_when_three_ticks_pass_then_it_is_no_longer_pausing(self):
+        battle, regiment = self._melee_unit()
+        model = regiment.melee_models[0]
+        model.at_rest, model.freeze_ticks = True, 3
+
+        for _ in range(3):
+            battle._advance_models(regiment, 1)
+
+        self.assertEqual(model.freeze_ticks, 0)
+        self.assertTrue(model.at_rest)
+
+    def test_given_an_at_rest_model_in_melee_with_a_rout_pause_when_ticks_pass_then_it_also_expires(self):
+        battle, regiment = self._melee_unit()
+        model = regiment.melee_models[0]
+        model.at_rest, model.rout_pause_ticks = True, 2
+
+        for _ in range(2):
+            battle._advance_models(regiment, 1)
+
+        self.assertEqual(model.rout_pause_ticks, 0)
+
+    def test_given_a_unit_whose_models_pause_at_rest_in_melee_when_the_pauses_expire_then_every_model_is_placed(self):
+        defender = _regiment("aaa_def", 0, 0, Side.ENEMY, initiative=5, models=9, ranks=3)
+        charger = _regiment("bbb_att", 0, 14, Side.PLAYER, initiative=5, models=9, ranks=3)
+        battle = Battle(1000, 1000, [defender, charger], seed=0)
+        battle.tick()
+        grid = _grid(battle, defender)
+        joiner = charger if grid.owner_id != charger.identifier else defender
+        self.assertTrue(joiner.in_melee)
+        for number, model in enumerate(joiner.melee_models):
+            model.at_rest, model.freeze_ticks = True, 2 + number % 6
+            model.cell, model.opponent, model.reserve = None, None, False
+
+        for _ in range(8 + combat.SEGMENT_TICKS):
+            battle.tick()
+
+        self.assertTrue(all(model.freeze_ticks == 0 for model in joiner.melee_models))
+        self.assertTrue(all(model.cell is not None for model in joiner.melee_models))
