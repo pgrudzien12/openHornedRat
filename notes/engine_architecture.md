@@ -304,7 +304,9 @@ constant, and models walk to their own formation slot rather than teleporting wi
   the ground ray misses. If multiple regiments' figures overlap, plain selection uses the same
   cycling rule as minimap markers (the selected unit is promoted in the selection stack), while
   an order targets the nearest visible figure in the stack. Point-targeted items use the hit
-  figure's world position.
+  figure's world position. Click-time depth checks against opaque terrain, scenery and active
+  effect meshes use the same sprite depth bias as rendering; hidden figures are excluded before
+  cycling, while overlapping figures remain available.
 - **Collisions**: `Battle._resolve_collisions`, run once per tick after movement, is a simplified,
   deterministic push-apart rule (game_rules.md, "Routes, collisions and visibility"): when the bounding circles
   (`formation.bounding_radius`) of two regiments overlap, only the regiments under a move order give way,

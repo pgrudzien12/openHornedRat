@@ -9,6 +9,7 @@ import struct
 import sys
 import types
 import unittest
+from array import array
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -1185,7 +1186,8 @@ class FigurePickTests(unittest.TestCase):
         frame = SpriteFrame(3, 3, 1, 2, pixels)
         sheet = SimpleNamespace(frames=[frame], frame_index=lambda *args: 0)
         field = SimpleNamespace(width=1000, height=800, ground_height=lambda x, y: 0.0,
-                                sprite_sheet=lambda resource: sheet)
+                                sprite_sheet=lambda resource: sheet, vertices=array("f"),
+                                texture_layers=[], texture_size=(1, 1), effect_meshes={})
         battle = Battle(1000, 800, regiments)
         for regiment in regiments:
             regiment.model_positions()
@@ -1205,7 +1207,8 @@ class FigurePickTests(unittest.TestCase):
         foot = projection.view(x / WORLD_PER_MESH, 0.0, y / WORLD_PER_MESH)
         px, py, _ = projection.project(foot)
         scale = SPRITE_PIXEL_WORLD_UNITS / WORLD_PER_MESH * projection.focal_length / foot[2]
-        return (px + (column + 0.5 - 1) * scale, py + (row + 0.5 - 2) * scale)
+        return (px + (column + 0.5 - 1) * scale - 0.5,
+                py + (row + 0.5 - 2) * scale - 0.5)
 
     def test_a_figure_far_from_the_regiment_anchor_can_be_selected(self):
         regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=1)
@@ -1239,6 +1242,45 @@ class FigurePickTests(unittest.TestCase):
         projection = view.camera.projection(640, 480, 1000, 800, 0.0)
 
         self.assertEqual(view._figure_hits(self._pixel(view, *hidden.positions[0]), projection), [])
+
+    def test_terrain_or_scenery_hides_a_figure_but_a_texture_hole_does_not(self):
+        from whshr.frontend.battle_view import SPRITE_DEPTH_BIAS
+        from whshr.picking import screen_ray
+
+        regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=1)
+        view = self._view([regiment])
+        x, y = regiment.positions[0]
+        pixel = self._pixel(view, x, y)
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+        self.assertEqual(len(view._figure_hits(pixel, projection)), 1)
+        origin, direction = screen_ray(projection, *pixel)
+        foot_depth = projection.view(x / WORLD_PER_MESH, 0.0, y / WORLD_PER_MESH)[2]
+        forward = sum(direction[i] * projection.view_direction[i] for i in range(3))
+        distance = (foot_depth - SPRITE_DEPTH_BIAS - 3.0) / forward
+        centre = tuple(origin[i] + distance * direction[i] for i in range(3))
+        for sx, sy in ((-10, -10), (10, -10), (0, 10)):
+            view.scene.field.vertices.extend((*(centre[i] + sx * projection.right[i]
+                                                  + sy * projection.up[i] for i in range(3)),
+                                              0.25, 0.25, 0.0, 1.0))
+        view.scene.field.texture_layers = [bytes((100, 100, 100, 255))]
+
+        self.assertEqual(view._figure_hits(pixel, projection), [])
+        occluder = array("f", view.scene.field.vertices)
+        shift = (SPRITE_DEPTH_BIAS + 2.5) / forward
+        for start in (0, 7, 14):
+            for coordinate in range(3):
+                view.scene.field.vertices[start + coordinate] += shift * direction[coordinate]
+        self.assertEqual(len(view._figure_hits(pixel, projection)), 1)  # the renderer's depth bias keeps it visible
+        view.scene.field.vertices = occluder
+        view.scene.field.texture_layers = [bytes((0, 0, 0, 0))]
+        self.assertEqual(len(view._figure_hits(pixel, projection)), 1)
+        view.scene.field.texture_layers = [bytes((100, 100, 100, 255))]
+        effect_vertices = view.scene.field.vertices
+        view.scene.field.vertices = array("f")
+        view.scene.field.effect_meshes = {"active": object()}
+        view._effect_vertices = Mock(return_value=effect_vertices)
+        self.assertEqual(view._figure_hits(pixel, projection), [])
+        view._effect_vertices.assert_called_once_with()
 
     def test_overlap_cycles_selection_and_uses_topmost_figure_for_attack(self):
         regiments = [Regiment(name, name, 500, 400, 0, Side.PLAYER, models=1)

@@ -539,13 +539,24 @@ class BattleView(SceneView[BattleScene]):
                     continue
                 foot_x, foot_y, _ = projection.project(foot)
                 scale = SPRITE_PIXEL_WORLD_UNITS / WORLD_PER_MESH * projection.focal_length / depth
-                column = math.floor(frame.anchor_x + (pixel[0] - foot_x) / scale)
-                row = math.floor(frame.anchor_y + (pixel[1] - foot_y) / scale)
+                column = math.floor(frame.anchor_x + (pixel[0] + 0.5 - foot_x) / scale)
+                row = math.floor(frame.anchor_y + (pixel[1] + 0.5 - foot_y) / scale)
                 if (0 <= column < frame.width and 0 <= row < frame.height
                         and frame.pixels[row * frame.width + column]):
                     prior = hits.get(regiment.identifier)
                     if prior is None or depth < prior[2]:
                         hits[regiment.identifier] = (regiment, (x, y), depth)
+        if hits:
+            scene_depth = picking.mesh_depth_at(projection, pixel[0], pixel[1], field.vertices,
+                                                field.texture_layers, field.texture_size)
+            if field.effect_meshes:
+                effects_depth = picking.mesh_depth_at(projection, pixel[0], pixel[1], self._effect_vertices(),
+                                                      field.texture_layers, field.texture_size)
+                if effects_depth is not None:
+                    scene_depth = min(scene_depth, effects_depth) if scene_depth is not None else effects_depth
+            if scene_depth is not None:
+                hits = {identifier: hit for identifier, hit in hits.items()
+                        if hit[2] - SPRITE_DEPTH_BIAS < scene_depth}
         return [(regiment, point) for regiment, point, _depth in sorted(
             hits.values(), key=lambda hit: hit[2], reverse=True)]
 

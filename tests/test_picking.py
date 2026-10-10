@@ -1,7 +1,8 @@
 import unittest
+from array import array
 
 from whshr.battle3d import Projection
-from whshr.picking import intersect_ground, pick_ground
+from whshr.picking import intersect_ground, mesh_depth_at, pick_ground, screen_ray
 
 
 def _flat(height):
@@ -34,6 +35,27 @@ class IntersectGroundTests(unittest.TestCase):
         x, z = point
         self.assertAlmostEqual(x, 20.0, places=1)
         self.assertAlmostEqual(z, 0.0, places=1)
+
+
+class MeshDepthTests(unittest.TestCase):
+    def test_opaque_mesh_occludes_but_a_transparent_texel_does_not(self):
+        projection = _looking_down()
+        pixel = (320.0, 240.0)
+        origin, direction = screen_ray(projection, *pixel)
+        centre = tuple(origin[i] + 50 * direction[i] for i in range(3))
+        right, up = projection.right, projection.up
+        vertices = array("f")
+        for sx, sy in ((-10, -10), (10, -10), (0, 10)):
+            vertices.extend((*(centre[i] + sx * right[i] + sy * up[i] for i in range(3)),
+                             0.25, 0.25, 0.0, 1.0))
+        expected = projection.view(*centre)[2]
+
+        opaque = [bytes((100, 100, 100, 255))]
+        transparent = [bytes((0, 0, 0, 0))]
+        depth = mesh_depth_at(projection, *pixel, vertices, opaque, (1, 1))
+        assert depth is not None
+        self.assertAlmostEqual(depth, expected, places=4)
+        self.assertIsNone(mesh_depth_at(projection, *pixel, vertices, transparent, (1, 1)))
 
 
 class PickGroundTests(unittest.TestCase):
