@@ -2874,6 +2874,30 @@ class ScriptInterpreter:
         self.react(unit_id, operand or 0)
         return state.pc + 2
 
+    def restart_for_order(self, unit_id: str) -> None:
+        """The "order applied" restart of a player Move, Face point or Turn order (notes/player_missile_orders.md
+        0 and 1.1): the target is dropped, the script stack reset, every queued event discarded, and the script
+        continues at its restart point (for library player units, script 100's idle loop). It ends a fire loop,
+        so the unit does not shoot on arrival."""
+        state = self.event_bus.unit_states.get(unit_id)
+        if state is None:
+            return
+        state.current_target = None
+        state.return_stack = []
+        state.event_queue.clear()
+        state.wait_remaining = 0.0
+        state.waiting_for_start = False
+        if state.restart_script_id is not None:
+            state.script_id = state.restart_script_id
+        state.pc = state.restart_pc
+
+    def stop_keep_firing(self, unit_id: str) -> None:
+        """Halt-and-re-form clears the fire loops' keep-firing state, so the loop restarts on its next pass while
+        the target is kept (notes/player_missile_orders.md 0 and 1.1, Halt)."""
+        state = self.event_bus.unit_states.get(unit_id)
+        if state is not None:
+            state.unit_flags2 &= ~SHOOTING_SEQUENCE_FLAG2
+
     def react(self, unit_id: str, code: int) -> None:
         """React `code` for a unit outside its script too (the objectives' item pickup and retreat warning)."""
         unit = self.battle.regiments.get(unit_id)
