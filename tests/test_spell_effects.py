@@ -149,6 +149,8 @@ class ActivatedItemTests(unittest.TestCase):
                       items=("ItemPotionOfStrength",))
         enemy = unit("E", 0, 10, Side.ENEMY, toughness=5)
         battle = Battle(100, 100, [bearer, enemy])
+        feedback_before = list(battle.events)
+        pending_before = list(battle.pending_feedback)
         bearer.model_positions()
         assert bearer.living_leader_index is not None
         leader = bearer.melee_models[bearer.living_leader_index]
@@ -162,6 +164,8 @@ class ActivatedItemTests(unittest.TestCase):
         self.assertLess(after["wound_need"], before["wound_need"])
         self.assertEqual(ordinary_after["wound_need"], ordinary_before["wound_need"])
         self.assertEqual(bearer.displayed_leader_strength, 7)
+        self.assertEqual(battle.events, feedback_before)
+        self.assertEqual(battle.pending_feedback, pending_before)
 
     def test_grudgebringer_passive_stays_with_leader_after_its_use_is_spent(self):
         from whshr import combat
