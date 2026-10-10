@@ -462,10 +462,11 @@ def _start_projectile(battle: Battle, effect: Effect, start: tuple[float, float]
                       bolt: Bolt, bs: int, reach: float, beam: bool, steps: int | None = None,
                       arched: bool = False) -> None:
     """Start point, scatter and flight length (A 2.1-2.3)."""
-    dest = _scatter(battle.rng, start, aim, bs, reach)
     # bf003_playtest 8.2: start and destination are whole units, rounded once at launch (toward zero), so the
     # first flight position is exactly the start and the ground under it is the ground the launch line starts from.
+    # The start is whole before the scatter step is taken from its distance to the aim point.
     start = (float(math.trunc(start[0])), float(math.trunc(start[1])))
+    dest = _scatter(battle.rng, start, aim, bs, reach)
     dest = (float(math.trunc(dest[0])), float(math.trunc(dest[1])))
     effect.start, effect.dest = start, dest
     effect.x, effect.y = start
@@ -642,7 +643,7 @@ def impact_test(battle: Battle, x: float, y: float, height: float, impact: Impac
     for unit in struck:
         if messages:
             _message(battle, unit, GMTXT_DIRECT_HIT)
-        trace: dict[str, Any] = {}
+        trace: dict[str, Any] = {"wounds": 0, "killed": 0}  # a strike that does not wound still logs both as 0
         before = unit.models
         magical_hit(battle, unit, impact, trace)
         if source is not None:
@@ -1355,7 +1356,7 @@ def _end(battle: Battle, effect: Effect) -> None:
 def cancel(battle: Battle, effect: Effect) -> None:
     """Immediate removal through the end step: no impact, projectile and area objects gone (A 1.4)."""
     if effect.code in LOGGED_FLIGHTS and effect.flying and not effect.ended and effect.tail < 0:
-        _log_end(battle, effect, "cancelled", effect.x, effect.y, 0.0)
+        _log_end(battle, effect, "cancelled", effect.x, effect.y, effect.height)
     _end(battle, effect)
 
 
