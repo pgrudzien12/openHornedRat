@@ -68,6 +68,9 @@ class EffectTestCase(unittest.TestCase):
     def effects(self):
         return spell_effects.table(self.battle).effects()
 
+    def bolt_ends(self):
+        return [event for event in self.battle.events if event.kind == "spell_bolt_end"]
+
 
 class ActivatedItemTests(unittest.TestCase):
     def test_banner_starts_at_leader_and_existing_target_overrides_clicked_point(self):
@@ -236,9 +239,9 @@ def record_hits():
     hits = []
     original = spell_effects.magical_hit
 
-    def recorder(battle, target, impact):
+    def recorder(battle, target, impact, trace=None):
         hits.append((target.identifier, impact.strength))
-        original(battle, target, impact)
+        original(battle, target, impact, trace)
     return hits, mock.patch.object(spell_effects, "magical_hit", recorder)
 
 
@@ -372,6 +375,74 @@ class SpearAndFireballTests(EffectTestCase):
             self.update(19)
         self.assertEqual(hits, [("E", 4)])
         self.assertEqual(self.messages(2004), [])
+
+    def test_fireball_is_not_removed_on_its_first_tick_when_ground_under_the_start_rises_a_fraction(self):
+        """bf003_playtest 3.2 vector 2: height 1 - 0.0001 with the arc included, so the bolt flies on and tests."""
+        self.radii = {"E": 10}
+        self.make(unit("E", 0, 300))
+        self.battle.ground_height = lambda x, y: 16.0001 if (x, y) == (0, 0) else 16.0
+        self.launch(spell_effects.FIREBALL, 0, 300)
+        self.update()
+        effect = self.effects()[0]
+        self.assertEqual((effect.x, effect.y, effect.arc, effect.remaining), (0, 0, 1, 17))
+        self.assertFalse(effect.ended)
+        self.assertEqual(self.bolt_ends(), [])
+
+    def test_the_first_tested_position_is_exactly_the_start_point(self):
+        self.make()
+        self.w.x, self.w.y = 628.7, 869.3
+        self.launch(spell_effects.FIREBALL, 628.7, 1169.3)
+        self.update()
+        effect = self.effects()[0]
+        self.assertEqual((effect.x, effect.y), effect.start)
+
+    def test_the_in_flight_test_runs_at_a_negative_height_then_the_bolt_is_removed_without_a_terminal_impact(self):
+        """Vector 3: r = 0, arc -1, a ground unit at the destination: struck silently, then removed."""
+        self.radii = {"E": 10}
+        self.make(unit("E", 0, 300))
+        hits, patch = record_hits()
+        with patch:
+            self.launch(spell_effects.FIREBALL, 0, 300)
+            self.update(19)
+        self.assertEqual(hits, [("E", 4)])
+        self.assertEqual(self.bolt_ends()[-1].data["reason"], "below_ground")
+        self.assertLess(self.bolt_ends()[-1].data["height"], 0)
+
+    def test_a_bolt_that_kills_a_model_logs_launch_strike_with_deaths_and_the_end_reason(self):
+        self.radii = {"E": 40}
+        self.make(unit("E", 0, 300, models=7))
+        self.dice(*([0] * 3), 5, 0, 5, 0)  # whatever the dice, the hit rolls are recorded
+        self.launch(spell_effects.FIREBALL, 0, 300)
+        self.update(19)
+        kinds = [event.kind for event in self.battle.events]
+        self.assertEqual(kinds.count("spell_bolt_launch"), 1)
+        strikes = [event for event in self.battle.events if event.kind == "spell_strike"]
+        self.assertTrue(strikes)
+        for strike in strikes:
+            self.assertEqual(strike.data["regiment"], "E")
+            self.assertIn("wound_roll", strike.data)
+            self.assertEqual(strike.data["models_before"] - strike.data["models_after"], strike.data.get("killed", 0))
+        self.assertEqual(len(self.bolt_ends()), 1)
+
+    def test_a_forced_kill_is_logged_as_a_death(self):
+        self.radii = {"E": 40}
+        self.make(unit("E", 0, 300, models=7))
+        self.battle.rng = ScriptedRng([0, 5, 0])  # model 0, wound roll 6, wound die 1
+        self.launch(spell_effects.FIREBALL, 0, 300)
+        self.battle.rng.draws = [0, 5, 0]
+        self.update(19)
+        strike = next(event for event in self.battle.events if event.kind == "spell_strike")
+        self.assertEqual(strike.data["outcome"], "wounded")
+        self.assertEqual(strike.data["killed"], 1)
+        self.assertEqual(strike.data["models_after"], strike.data["models_before"] - 1)
+        self.assertEqual(self.bolt_ends()[0].data["reason"], "hit")
+
+    def test_a_dispelled_bolt_logs_the_cancellation(self):
+        self.make()
+        self.launch(spell_effects.FIREBALL, 0, 300)
+        self.update(2)
+        spell_effects.cancel(self.battle, self.effects()[0])
+        self.assertEqual([event.data["reason"] for event in self.bolt_ends()], ["cancelled"])
 
     def test_burning_head_panics_every_unit_containing_the_point(self):
         """V9: Ld 7; a draw of 9 gives 11 > 7 and routs; a draw of 4 gives 6 and passes."""

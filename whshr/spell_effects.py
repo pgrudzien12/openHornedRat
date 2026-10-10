@@ -22,7 +22,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import animation, combat, magic
 from .battle_events import BattleEvent
@@ -471,6 +471,9 @@ def _start_projectile(battle: Battle, effect: Effect, start: tuple[float, float]
     effect.flying = True
     effect.arched = arched
     effect.arc = 0
+    battle.events.append(BattleEvent(
+        f"spell {effect.code} bolt launched", "spell_bolt_launch", regiment=effect.owner, spell=effect.code,
+        serial=effect.serial, start=list(start), aim=list(aim), dest=list(dest), steps=effect.steps))
 
 
 def _start_spear(effect: Effect, caster: Regiment) -> None:
@@ -548,21 +551,39 @@ def _solid_at(battle: Battle, x: float, y: float, height: float) -> bool:
 
 
 def _wound_roll(battle: Battle, unit: Regiment, strength: int, save: bool, fire: bool,
-                index: int) -> bool:
+                index: int, trace: dict[str, Any] | None = None) -> bool:
     """To-wound with the unit's T, then the save when allowed (a regenerator's 4+ roll for damage type 0, never
     wounded by fire with a save), then MagicResistent (an even draw ignores the hit). True = wounded."""
     rng = battle.rng
     model = unit.melee_models[index]
-    if rng.randrange(6) + 1 < wfb_to_wound(strength, unit.model_toughness(model)):
+    trace = trace if trace is not None else {}
+    trace["wound_roll"] = roll = rng.randrange(6) + 1
+    trace["wound_needed"] = wfb_to_wound(strength, unit.model_toughness(model))
+    if roll < trace["wound_needed"]:
+        trace["outcome"] = "no_wound"
         return False
     if save:
         armour = unit.model_armour(model)
         if armour == 6:  # regeneration (game_rules.md "Regeneration by damage source")
-            if fire or rng.randrange(6) + 1 >= 4:
+            if fire:
+                trace["outcome"] = "saved"
                 return False
-        elif rng.randrange(6) + 1 >= combat.armour_threshold(armour, strength):
+            trace["save_roll"] = save_roll = rng.randrange(6) + 1
+            if save_roll >= 4:
+                trace["outcome"] = "saved"
+                return False
+        else:
+            trace["save_roll"] = save_roll = rng.randrange(6) + 1
+            if save_roll >= combat.armour_threshold(armour, strength):
+                trace["outcome"] = "saved"
+                return False
+    if "MagicResistent" in unit.psychology:
+        trace["resist_draw"] = draw = rng.randrange(2)
+        if draw == 0:
+            trace["outcome"] = "resisted"
             return False
-    return not ("MagicResistent" in unit.psychology and rng.randrange(2) == 0)
+    trace["outcome"] = "wounded"
+    return True
 
 
 def _wound(unit: Regiment, index: int, wounds: int, dead: set[int]) -> None:
@@ -577,32 +598,50 @@ def _kill(battle: Battle, unit: Regiment, dead: Iterable[int], impact: Impact) -
     combat.kill_models(unit, dead, battle, kind, killer=impact.caster)
 
 
-def magical_hit(battle: Battle, unit: Regiment, impact: Impact) -> None:
+def magical_hit(battle: Battle, unit: Regiment, impact: Impact, trace: dict[str, Any] | None = None) -> None:
     """One hit on one unit (A 4.2): a uniform random model, the wound roll, then 1..die wounds on that model only;
-    a lethal wound credits the caster. Buildings (A 4.3): the first model, no save, no MagicResistent."""
+    a lethal wound credits the caster. Buildings (A 4.3): the first model, no save, no MagicResistent. `trace`, when
+    given, receives the rolls and outcome for the battle log (bf003_playtest 3.1)."""
     rng = battle.rng
+    trace = trace if trace is not None else {}
     unit.model_positions()
     building = _building(unit)
     index = 0 if building else rng.randrange(unit.models)
+    trace["model"] = index
     if building:
-        if rng.randrange(6) + 1 < wfb_to_wound(impact.strength, unit.toughness):
+        trace["wound_roll"] = roll = rng.randrange(6) + 1
+        trace["wound_needed"] = wfb_to_wound(impact.strength, unit.toughness)
+        if roll < trace["wound_needed"]:
+            trace["outcome"] = "no_wound"
             return
-    elif not _wound_roll(battle, unit, impact.strength, impact.save, impact.fire, index):
+        trace["outcome"] = "wounded"
+    elif not _wound_roll(battle, unit, impact.strength, impact.save, impact.fire, index, trace):
         return
     dead: set[int] = set()
-    _wound(unit, index, rng.randrange(impact.wound_die) + 1, dead)
+    trace["wounds"] = wounds = rng.randrange(impact.wound_die) + 1
+    _wound(unit, index, wounds, dead)
     _kill(battle, unit, dead, impact)
+    trace["killed"] = len(dead)
 
 
 def impact_test(battle: Battle, x: float, y: float, height: float, impact: Impact, excluded: str | None,
-                messages: bool) -> bool:
+                messages: bool, source: Effect | None = None) -> bool:
     """One impact test with radius 0 (A 4): each struck unit takes one magical hit; True when anything (unit or
-    solid object) was struck. Terminal impacts (messages on) show message 2004 for every unit struck."""
+    solid object) was struck. Terminal impacts (messages on) show message 2004 for every unit struck. With a
+    `source` effect every struck unit also yields a "spell_strike" battle event (rolls, wounds, deaths)."""
     struck = _units_at(battle, x, y, height, excluded)
     for unit in struck:
         if messages:
             _message(battle, unit, GMTXT_DIRECT_HIT)
-        magical_hit(battle, unit, impact)
+        trace: dict[str, Any] = {}
+        before = unit.models
+        magical_hit(battle, unit, impact, trace)
+        if source is not None:
+            battle.events.append(BattleEvent(
+                f"{unit.name}: struck by spell {source.code} ({trace.get('outcome')})", "spell_strike",
+                regiment=unit.identifier, caster=impact.caster, spell=source.code, serial=source.serial,
+                x=x, y=y, height=height, terminal=messages, models_before=before, models_after=unit.models,
+                **trace))
     return bool(struck) or _solid_at(battle, x, y, height)
 
 
@@ -753,36 +792,51 @@ def _height_above_ground(battle: Battle, effect: Effect, bolt: Bolt, x: float, y
 
 
 def _fly(battle: Battle, effect: Effect, bolt: Bolt) -> bool:
-    """One flight step (A 2.3-2.5); True when the projectile is over. Position dest + trunc((start - dest) r / N),
-    removal below the ground (terrain blocks), the silent in-flight test with the caster's unit excluded, then the
-    terminal impact: beams once within 40 of the destination (also on the tick they stop), others at r = 0.
-    Fireball (and arched Storm bolts, C2 1.3) rise +1 per tick while 2r > N and fall afterwards; Fireball's arc ends
-    at -1, so a ground shot makes its last in-flight test and no terminal impact (A 3.4)."""
+    """One flight step (A 2.3-2.5, bf003_playtest 3.2); True when the projectile is over. In this order: position
+    dest + trunc((start - dest) r / N), exactly the start point on the first tick; the arc step (Fireball and arched
+    Storm bolts, C2 1.3: +1 while 2r > N, else -1); the height with the arc included; the silent in-flight test, which
+    always runs, even at a negative height; then removal after the test when the bolt hit and stops, or when the
+    height is below 0 (exactly 0 survives); then the terminal impact: beams once within 40 of the destination (also
+    on the tick they stop), others at r = 0. Fireball's arc ends at -1, so a ground shot makes its last in-flight
+    test and no terminal impact (A 3.4). The end reason is logged."""
     r = effect.remaining
     sx, sy = effect.start
     dx, dy = effect.dest
-    x = dx + int((sx - dx) * r / effect.steps)
-    y = dy + int((sy - dy) * r / effect.steps)
+    if r == effect.steps:
+        x, y = sx, sy
+    else:
+        x = dx + int((sx - dx) * r / effect.steps)
+        y = dy + int((sy - dy) * r / effect.steps)
     effect.x, effect.y = x, y
     if effect.code == FIREBALL or effect.arched:
         effect.arc += 1 if 2 * r > effect.steps else -1
-    level = _height_above_ground(battle, effect, bolt, x, y)
-    if level < 0:
-        return True
-    height = level + effect.arc
+    height = _height_above_ground(battle, effect, bolt, x, y) + effect.arc
     impact = Impact(effect.owner, bolt.strength, bolt.wound_die, bolt.save, bolt.fire)
-    hit = impact_test(battle, x, y, height, impact, effect.owner, messages=False)
+    hit = impact_test(battle, x, y, height, impact, effect.owner, messages=False, source=effect)
     if hit:
         _after_hit(battle, effect, bolt, x, y)
     effect.remaining -= 1
     if height < 0:
+        _log_end(battle, effect, "below_ground", x, y, height)
         return True
     terminal = (_d(x, y, dx, dy) < BEAM_TERMINAL) if bolt.beam else r == 0
     if terminal:
-        if impact_test(battle, dx, dy, effect.terminal_height, impact, None, messages=True):
+        if impact_test(battle, dx, dy, effect.terminal_height, impact, None, messages=True, source=effect):
             _after_hit(battle, effect, bolt, dx, dy)
+        _log_end(battle, effect, "terminal", dx, dy, effect.terminal_height)
         return True
-    return hit and bolt.stops
+    if hit and bolt.stops:
+        _log_end(battle, effect, "hit", x, y, height)
+        return True
+    return False
+
+
+def _log_end(battle: Battle, effect: Effect, reason: str, x: float, y: float, height: float) -> None:
+    """The flight's end reason for the battle log (bf003_playtest 3.1; an engine choice): "hit", "below_ground",
+    "terminal" or "cancelled" (dispelled, or the caster was removed)."""
+    battle.events.append(BattleEvent(f"spell {effect.code} flight ends: {reason}", "spell_bolt_end",
+                                     regiment=effect.owner, spell=effect.code, serial=effect.serial,
+                                     reason=reason, x=x, y=y, height=height))
 
 
 def _after_hit(battle: Battle, effect: Effect, bolt: Bolt, x: float, y: float) -> None:
@@ -1281,6 +1335,8 @@ def _end(battle: Battle, effect: Effect) -> None:
 
 def cancel(battle: Battle, effect: Effect) -> None:
     """Immediate removal through the end step: no impact, projectile and area objects gone (A 1.4)."""
+    if effect.code in BOLTS and effect.flying and not effect.ended and effect.tail < 0:
+        _log_end(battle, effect, "cancelled", effect.x, effect.y, 0.0)
     _end(battle, effect)
 
 
