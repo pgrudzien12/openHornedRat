@@ -9,6 +9,7 @@ import struct
 import sys
 import types
 import unittest
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -41,6 +42,7 @@ except ModuleNotFoundError:
     sys.modules["zengl"] = types.ModuleType("zengl")
 
 from whshr.battle_scene import BattleScene
+from whshr.battle_events import BattleEvent
 from whshr.battlefield import WORLD_PER_MESH
 from whshr.engine import Battle, Regiment
 from whshr.frontend.battle_view import BattleView
@@ -1435,3 +1437,34 @@ class ItemMarkerTests(unittest.TestCase):
 
     def test_no_marker_once_picked_up(self):
         self.assertEqual(self._view({})._item_markers(), b"")
+
+
+class BattleViewEventConsumptionTests(unittest.TestCase):
+    def test_a_reaction_is_shown_once_across_rendered_frames_and_again_on_a_new_tick(self):
+        view = BattleView.__new__(BattleView)
+        reaction = BattleEvent("Grudgebringers: Engage!", "react", sender="Grudgebringers", message="Engage!")
+        battle = SimpleNamespace(events=[reaction], text_resources={})
+        view.scene = SimpleNamespace(battle=battle)
+        view.battle_log = deque(maxlen=100)
+        view.event_log = deque(maxlen=100)
+        view.log_scroll = 0
+        view._event_batch = None
+        view._event_index = 0
+        view.battle_sounds = Mock()
+
+        for _ in range(4):
+            view._consume_events()
+        self.assertEqual(list(view.battle_log), [("Grudgebringers:", "Engage!")])
+        self.assertEqual(list(view.event_log), [str(reaction)])
+        view.battle_sounds.handle.assert_called_once_with([reaction])
+
+        battle.events.append(BattleEvent("message 1005", "message", text_id=1005))
+        battle.text_resources[1005] = "Mission complete!"
+        view._consume_events()
+        self.assertEqual(list(view.battle_log)[-1], ("", "Mission complete!"))
+        self.assertEqual(len(view.battle_log), 2)
+
+        battle.events = [BattleEvent("Grudgebringers: Engage!", "react",
+                                     sender="Grudgebringers", message="Engage!")]
+        view._consume_events()
+        self.assertEqual(len(view.battle_log), 3)
