@@ -285,8 +285,7 @@ python3 scripts/sfx_wavstats.py ".../WARFB" [--list] --json extracted/sfx/wavsta
   `extracted/sfx/wavstats.json`.
 
 ## Open questions
-> **Tracked on GitHub**: these open items are tracked as issue #40 (`topic:audio`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+> **Historical questions:** issue #40 is closed. These notes preserve the findings; the remaining unknowns are not standing research tasks. Reopen a focused issue only when a shipped feature or reproducible defect needs an answer.
 
 
 - `param_a`/`param_b` (+36/+38): values `0x0a00/0x0a00` (most), `0/0`, `0xffff/0xffff`

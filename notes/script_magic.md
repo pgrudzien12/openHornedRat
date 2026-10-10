@@ -239,7 +239,7 @@ Used by library 115/117 to choose `FireAtTarget` instead of a volley.
 
 ## 4. The cast order path (player), for completeness
 
-The cast order is taken by `TakeEventTarget` (0xAF, library 155 case 0x2B, after `IfCasting 1 1` returned false):
+The cast order is taken by `TakeSpellEventTarget` (0xAF, library 155 case 0x2B, after `IfCasting 1 1` returned false):
 pending spell := the order's spell. **Correction (batch 9, `script_grid_events.md`):** a player cast order (event
 0x2B) never names a unit — its source is always none — so it always takes the ground branch: current target := none and
 target point := the click (for an **item** with an existing target, the target is kept). Then library 132 runs (range,

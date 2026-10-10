@@ -720,9 +720,10 @@ solely for the scroll pile. The cached count is written only when a mission wind
 (`addobject:res=<window>`) and after every mission-window release — so while the player
 is in the caravan the value is simply the last count taken on the map.
 
-### 7.5 Why the count changes while you stay in the same place ✅
+### 7.5 Why the count changes after a mission while you stay in the same place ✅
 
-After the player picks a row:
+A row click selects the mission; it does not release the mission window. The following
+release and write-back run later, when `UnwindMission` leaves the after-mission or info caravan:
 
 1. the chosen mission's `releaseflag` is remembered;
 2. the `MISS` record is copied over the selected record (this writes the taken flag back);
@@ -768,8 +769,7 @@ Only Escort Engrol releases the flow script, so the player works through the oth
 the scroll pile counts down.
 
 ## 8. Open questions
-> **Tracked on GitHub**: these open items are tracked as issue #24 (`topic:campaign-glue`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+> **Historical questions:** issue #24 is closed. These notes preserve the findings; the remaining unknowns are not standing research tasks. Reopen a focused issue only when a shipped feature or reproducible defect needs an answer.
 
 
 - ✅ `SHDR+0xC8` is `tentpos` (`notes/campaign_tent.md`). ⬜ The two `u32` per script in `STAX`.

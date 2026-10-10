@@ -85,7 +85,7 @@ perspective battle scene.
 | 3.1 | `.SI` container | ✅ | M | 30/30 files fully covered; films, sounds, MIDI, event tracks extracted |
 | 3.2 | Smacker playback | ✅ | S | pure-Python decoder; frames viewed; play at 125 ms per frame |
 | 3.3 | `.SR/.SM/.SN` and scene timeline | 🟡 | M | side files decoded; opening captions and movie assets are present across A1–A27. TODO: replace the A1-specific frontend with a generic `.SI` player that runs caption/prologue states plus event (`EVT`) semantics (speaker, fade); verify under Wine |
-| 3.4 | Speech ↔ texts ↔ scenes | 🟡 | M | `A*.WAV` ↔ `ANTXT` ids ↔ scenes done; open: `B*.WAV` lines ↔ portraits and missions |
+| 3.4 | Speech ↔ texts ↔ scenes | ✅ | M | `A*.WAV` ↔ `ANTXT` ids ↔ scenes; glue speech loads `B<text id>.WAV` directly. A manual catalogue of which mission uses every recording is not required. |
 
 ## Phase 4 — game logic (hardest; disassembly)
 
@@ -127,7 +127,7 @@ from phases 1–3.
 - **Original mission DLLs**: never execute `SCRIPT/BFxxx.DLL` as native code. Read their bytecode tables
   as data and implement the original interpreter for vanilla compatibility. New mission content will use
   a readable normalized mission format once the opcode/event model is established.
-- Audio in the engine: MIDI through the user's GM soundfont + the converted SBK in bank 1 (GM file
+- Planned audio in the engine: MIDI through the user's GM soundfont + the converted SBK in bank 1 (GM file
   preferred, FM name rule `name[:6] + 'FM'`); SFX = PCM resampled to `pitch`, volume/pan, loop/list/random,
   priority channels.
 
@@ -142,7 +142,7 @@ The M6 implementation architecture and its phased, testable migration from the c
 ---
 
 ## Proposed order of the next steps
-> **Tracked on GitHub**: see issue #45 (management) for the mapping of these open items to epics.
+> Focused implementation work is tracked in GitHub issues. The historical open-question tickets and their management audit are retired under the Research policy below.
 
 
 Phase 2 is closed (M2 reached). Priorities, as decided by the project owner:
@@ -174,77 +174,24 @@ fidelity) is tracked as a set of GitHub epics, each with research and implementa
 open questions and implementation notes live in `notes/engine_gaps/` (see its `README.md`), separate from
 the WFB rule math in `notes/game_rules.md`.
 
-## Open research questions
-> **Tracked on GitHub**: see issue #45 (management) for the mapping of these open items to epics.
+## Research policy
 
+The former A–D open-question register was a historical inventory, not a set of required engine
+features. Its broad GitHub research tickets have been retired. The source notes may still record
+unknown original-game details; investigate one only when a shipped feature or reproducible defect
+needs the answer. Unused fields and resources do not require research solely to complete a table.
 
-One register of every open item (🟡 inferred, ⬜ unknown, ⚠ conflicting evidence) from the notes, so nothing is lost inside a
-per-topic note. Each row: id, question, where it is documented, what engine feature it blocks, and how to settle it. Priority: **P1**
-blocks a screen being built now (briefing, mission map, caravan, troop selection); **P2** blocks campaign correctness (progression, money,
-outcomes); **P3** polish or curiosity. When an item is settled, fix the source note first, then delete the row here.
+Music playback should select tunes by the names in glue scripts, window records and cutscene data.
+The current frontend loads installed `.MID` files for glue `playmidi` commands; window-record and
+cutscene music playback are not yet wired. A manual catalogue of where every other track plays is
+not required. The engine also uses its own campaign save format;
+importing or exporting the original game's `savegame.N` files is out of scope.
 
-### A. Needs a running original (Wine observation)
-
-The game reaches the menu, the campaign map and the first mission under Wine (no sound). One session covering the P1 rows below would
-settle most of this group; audio questions cannot be observed without sound.
-
-| Id | Question | Source | Blocks | Prio |
-|---|---|---|---|---|
-| A1 | ⚠ Does double-clicking a mission-list row run Brief? (code says yes; the owner observed no effect) | `mission_selection.md` §4.1 | list input | P1 |
-| A2 | Default of `animrestartframe` when absent (lamp, candle, tent, blink loops): equals `animstartframe`? | `campaign_tent.md` §10 | all animated glue bitmaps | P1 |
-| A3 | Real step rate of text/animation (25 ms designed vs the original's about 55 ms on Windows 9x) | `briefing_dialogue.md` §8, `glue_portraits.md` §3.2 | dialogue and portrait feel | P2 |
-| A4 | Tent position on screen and draw order relative to the trail dots | `campaign_tent.md` §10 | briefing map | P1 |
-| A5 | `bkindex=1` repaint semantics and the bitmap `Mask` name | `campaign_tent.md` §10 | animated bitmaps | P3 |
-| A6 | Ctrl+click in troop selection: does hiring append to the selection, and does the roster-full sound play? | `troop_selection.md` §11 | troop selection | P2 |
-| A7 | Banner frame and rank/`RingMark` icon placement on troop rows | `troop_selection.md` §3.3, §11 | troop selection | P2 |
-| A8 | Abort in troop selection opened from a briefing: which screen does it return to? | `mission_selection.md` §5, §10 | flow | P2 |
-| A9 | Does the list order chosen on the marching-order page affect initial deployment in the battle? | `troop_selection.md` §11 | battle setup | P2 |
-| A10 | Do the taken flags of the other missions in a window survive save and load (predicted: no, an original bug)? | `campaign.md` §8 | save/load | answered in `save_resume.md` §5: taken flags live only in saved window snapshots; other windows' flags survive only if their snapshot is saved (code reading, 🟡) | P2 |
-| A11 | Is the debrief payment added twice in modes 4 / 7? Finish `bf003` and compare `PLAY.MRC`/`ARMY.MRC`/coffers (predicted 680) | `campaign.md` §8 | economy | P2 |
-| A12 | Clicking during a single-line spoken block: can the audio be cut short? | `briefing_dialogue.md` §8 | dialogue | P3 |
-| A13 | Music on the first campaign map after Abort from a briefing; does `scribe` carry over from the caravan? | `briefing_dialogue.md` §8, `mission_selection.md` §10 | music | P3 |
-| A14 | Zero point of the unit `dir` mapping; frame timing per action; hit moment of attack phases | `animations.md` | unit animation (M3) | P2 |
-| A15 | Which palette rule applies where: `SetWinGPalette` (GLUE+WIND) vs the bitmap's own table; BOOK pair vs bitmaps embedding `GLUEREND` | `fonts_glue.md` §6, `troop_selection.md` §11 | glue bitmap colours | P2 |
-
-### B. Static analysis of `WHSHR.EXE` / `GAMEF.DLL` (no running game needed)
-
-| Id | Question | Source | Blocks | Prio |
-|---|---|---|---|---|
-| B1 | Decode the 7 per-mission debrief evaluator functions (42 table entries) and the four `Result:` values per objective type | `campaign.md` §8 | success/failure end screens, `testmission` branches (`REMISSION4`, `WEMISSION2`, `GMMISSION3`) | **done: `debrief_evaluation.md` (41 records, 8 evaluators, all `Result:` values)** |
-| B2 | Objectives `G`, `Y`, `Z` as campaign-defeat conditions; text for "wounded could not be recovered" | `debrief_evaluation.md` §4 | game over | done (G partly, 🟡) |
-| B3 | `testmission` falling through into `autosave` (jump table check) | `glue_interpreter.md` §3, `debrief_evaluation.md` | progression | done: confirmed at instruction level |
-| B4 | The two `u32` per script in the save file's `STAX` chunk; `BKTXT 610` item finds (who uses it; roles of `FILE/SCRIPT/ARMY.MRC`, `REVARMY.MRC`) | `campaign.md` §8 | save/load, items | P3 |
-| B5 | Stale caravan scroll count when a caravan is drawn between `closewindow` and the next `addobject` | `campaign.md` §8 | caravan scrolls | P3 |
-| B6 | Accelerator commands: Ctrl+X = 16, F2 = 14 (test table) | `mission_selection.md` §10 | quit shortcut | P3 |
-| B7 | `Attack!` (panel 4) sets the true/false status flag before the battle; what "drain text" does with its two flag values; whether Brief's push is skipped for windows with their own portraits | `mission_selection.md` §10 | encounters, briefing | P2 |
-| B8 | What `Report` (panel 5, unused) does | `mission_selection.md` §10 | none (unused) | P3 |
-| B9 | Meaning of `set:frame=3`; the second flag that pauses animation ticks; the two extra integers per portrait record | `glue_portraits.md` §6 | portrait animation | P3 |
-| B10 | Suspension conditions of the animation step beyond the two global flags | `campaign_tent.md` §10 | animation | P3 |
-| B11 | Font slot -> `.FON` mapping for the troop window's two fonts | `troop_selection.md` §11 | troop selection text | P1 |
-| B12 | Open mode 1 of the troop window (P1 alone) and the destination after Done on the bankruptcy page | `troop_selection.md` §11 | edge flows | P3 |
-| B13 | Layout of the reinforcements sub-window (only bitmaps and strings known); roster-book pages | `builtin_widgets.md` | recruit screens, books | done (pixel offsets 🟡) |
-| B14 | Uses of `MarchOrderMove` / `MarchOrderMoveDone` names | `troop_selection.md` §11 | troop selection | P3 |
-| B15 | Where `BATTLE`, `FOREST`, `LOOKIN2`, `TENSE`, `VICTORY` music plays; how the Omni player resolves `musicawe\` / FM; default music option on a fresh install | `music.md` | battle and cutscene music | P2 |
-| B16 | Which screens use `GLUEGAME`/`WINDGAME` and `GLUEOPT`/`WINDOPT`; why `GLUEREND.PAL` exists | `palette_selection.md` §6 | options screen colours | done: none use them; `GLUEREND` is an orphan |
-| B17 | SF1 filter/envelope units for the AWE32 soundfont bank; drum-channel kits for `INTRO3`/`TITLE` | `music.md` | music rendering fidelity | P3 |
-
-### C. Data grep and visual checks
-
-| Id | Question | Source | Blocks | Prio |
-|---|---|---|---|---|
-| C1 | Overlay frame numbers of the 6- and 7-frame portraits (`Dwarf1`, `Treeman`, ...) against the kind-5 sequences | `briefing_dialogue.md` §8, `glue_portraits.md` | portraits | P3 |
-| C2 | `tentpos` values 8, 16, 17, 21 are not used by any script (8 and 17 duplicate 7 and 15) | `campaign_tent.md` §10 | none (data only) | P3 |
-| C3 | Story reason for `CeridanWindow` / `IlmarinWindow` using the hooded portrait | `glue_portraits.md` §6 | none | P3 |
-| C4 | Direction/anchor labels: uncertain action labels, cannons split across `*CANON`/`*WAG`, 10 outlier anchors, flag bytes 13-15, `SPELLS`/`GENBATT` layout | `animations.md` | unit animation, effects | P2 |
-| C5 | Whether `setdemodefault` is read by an out-of-tree demo build (inert here) | `briefing_dialogue.md` §8 | none | P3 |
-
-### D. Note corrections owed
-
-- `notes/campaign.md` §7.5: the mission-list *release step* runs when the after-mission (or info) caravan is left through `UnwindMission`
-  (`mission_selection.md` §8.1), not "after the player picks a row"; a row pick only selects. Reword when `campaign.md` is next edited.
-- `notes/music.md` "What exactly `win`/`lose`/`tactical` do": answered by `troop_selection.md` §1.3 and `briefing_dialogue.md` §2.3 (they loop;
-  `tactical` for selection and marching order, `win`/`lose` for the debrief).
-- `notes/music.md` "whether looping/fade is controlled by glue commands": answered by `briefing_dialogue.md` §2.2 (always loops, no fade is ever requested).
+The active exceptions are [cutscene event playback](https://github.com/pgrudzien12/openHornedRat/issues/41),
+where subtitles, speakers and fades from the shipped `.SI` event records are needed for a generic
+player, and the open game-rules and script-semantics questions tracked in
+[issue #44](https://github.com/pgrudzien12/openHornedRat/issues/44). Other implementation gaps remain
+in their focused issues and epics.
 
 ## Risks and rules
 

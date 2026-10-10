@@ -299,6 +299,8 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             point = self._native_point(event.pos)
             self.pressed_button = next((action for rect, action in self.buttons if rect.collidepoint(point)), None)
+            if self.pressed_button is not None:
+                self._click_cue(4)
             self.refresh()
             return ()
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
@@ -306,6 +308,7 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
             action, self.pressed_button = self.pressed_button, None
             self.refresh()
             if action and any(rect.collidepoint(point) and candidate == action for rect, candidate in self.buttons):
+                self._click_cue(3)
                 if action == "book:stat-info":
                     self.info = not self.info
                     self.refresh()

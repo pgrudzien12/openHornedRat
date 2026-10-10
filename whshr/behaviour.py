@@ -108,7 +108,7 @@ OPCODE_NAMES = {
     0x7E: 'FindTargetOfClassAnyRange', 0x7F: 'FindFriendTarget', 0x80: 'FindFriendTargetOfClass',
     0x81: 'FindFriendTargetAnyRange', 0x82: 'FindFriendTargetOfClassAnyRange', 0x83: 'FindNewTarget',
     0x84: 'FireAtTarget', 0x85: 'FireAt90PercentRange', 0x86: 'StampReload', 0x87: 'FireAtNode',
-    0x88: 'TakeEventTarget', 0x89: 'Nop1', 0x8A: 'TurningToCastMessage', 0x8B: 'KillAllModels',
+    0x88: 'TakeRangedEventTarget', 0x89: 'Nop1', 0x8A: 'TurningToCastMessage', 0x8B: 'KillAllModels',
     0x8C: 'RemoveFromBattle', 0x8D: 'SetActionState', 0x8E: 'PlayUnitAnimation', 0x8F: 'PlayLeaderAnimation',
     0x90: 'IfAnimationDone', 0x91: 'AttackUnitAtNode', 0x92: 'AttackNearestFlag40Unit', 0x93: 'CastPending',
     0x94: 'PendingInRangeArc', 0x95: 'PendingInRange', 0x96: 'TargetInCastArc',
@@ -119,7 +119,7 @@ OPCODE_NAMES = {
     0xA3: 'TargetNearestEnemy', 0xA4: 'TargetNearestEnemyOfClass', 0xA5: 'TargetNearestAlly',
     0xA6: 'TargetNearestAllyOfClass', 0xA7: 'RetargetNearestEnemy', 0xA8: 'IfCastingAnimation',
     0xA9: 'IfCasting', 0xAA: 'DropPendingSpell', 0xAB: 'AddPlayerPower', 0xAC: 'AddEnemyPower',
-    0xAD: 'SubPlayerPower', 0xAE: 'SubEnemyPower', 0xAF: 'TakeEventTarget', 0xB0: 'AttackNearestEnemy',
+    0xAD: 'SubPlayerPower', 0xAE: 'SubEnemyPower', 0xAF: 'TakeSpellEventTarget', 0xB0: 'AttackNearestEnemy',
     0xB1: 'AttackNearestVisibleEnemy', 0xB2: 'AttackNearestEnemyByAxis',
     0xB3: 'AttackNearestVisibleEnemyByAxis', 0xB4: 'AttackNearestEnemyOfClass',
     0xB5: 'AttackNearestEnemyOfClassB', 0xB6: 'AttackNthNearestEnemy', 0xB7: 'AttackNthNearestVisibleEnemy',
@@ -406,7 +406,7 @@ _PC_LOADS.update({b'\x66\x8b' + bytes([modrm]) + struct.pack('<I', VA_PC): reg
 _PC_PREINCREMENT = b'\x66\xff\x05' + struct.pack('<I', VA_PC)   # inc word [pc]
 
 
-def handler_returns(gamef):
+def handler_returns(gamef: PeImage) -> dict[int, tuple[set[int], bool]]:
     """Re-derives the 'return PC + n' increments of every handler from GAMEF.DLL.
 
     Recognises ``mov r16, [pc]`` followed (after pops or ``add esp, imm8``) by ``add r16, imm8``,
@@ -450,7 +450,7 @@ def handler_returns(gamef):
     return result
 
 
-def check_lengths(gamef):
+def check_lengths(gamef: PeImage) -> tuple[list[str], int]:
     """Compares LENGTHS with the handler code; returns (failures, number of opcodes confirmed)."""
     failures, confirmed = [], 0
     for opcode, (increments, preincrement) in handler_returns(gamef).items():
@@ -465,7 +465,7 @@ def check_lengths(gamef):
 
 # ---------------------------------------------------------------- checks
 
-def check(installation):
+def check(installation: str | PathLike[str]) -> bool:
     """Decodes every script of every mission DLL and cross-checks the battles. Prints one summary line."""
     game = Installation(installation)
     failures = []
@@ -532,11 +532,11 @@ def check(installation):
     return not failures
 
 
-def _script_values(path):
+def _script_values(path: Path) -> set[str]:
     """Distinct set:script= values of the unit blocks of a .BTS file."""
     values = set()
 
-    def walk(node):
+    def walk(node: script.Node) -> None:
         value = node['set'].get('script')
         if value is not None and node['kind'] in ('addunit', 'addleader'):
             values.add(str(value).strip())
@@ -558,7 +558,9 @@ def _find_dll(installation, name):
     raise FileNotFoundError(name)
 
 
-def main(installation, dll=None, ids=None, name_files=None):
+def main(installation: str | PathLike[str], dll: str | None = None,
+         ids: Sequence[str] | None = None,
+         name_files: Iterable[str | PathLike[str]] | None = None) -> int:
     names = load_names(name_files)
     if dll is None:
         for path in script_dlls(installation):

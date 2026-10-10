@@ -6,6 +6,7 @@ from typing import Any
 import pygame
 
 from ..scenes import Scene, SceneEvent
+from .click_cues import play_click_cue
 from .cursors import CursorController
 from .gpu import Gpu
 
@@ -59,6 +60,10 @@ class NativeScreenView[S: Scene](SceneView[S]):
         # (glue hotspots, troop selection) replace this controller with theirs.
         self.cursors = CursorController(self.options.get("installation"))
         self.cursors.show(None)
+
+    def _click_cue(self, cue: int, *, speech_playing: bool = False, speech_enabled: bool = True) -> None:
+        play_click_cue(getattr(self, "options", {}).get("installation"), cue, speech_playing=speech_playing,
+                       speech_enabled=speech_enabled)
 
     def _layout(self) -> tuple[float, float, float]:
         screen_width, screen_height = self.gpu.target.size

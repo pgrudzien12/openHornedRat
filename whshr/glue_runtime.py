@@ -38,6 +38,7 @@ TENT_POSITIONS: tuple[tuple[int, int], ...] = ((405, 332), (405, 332), (405, 332
 class GlueInput:
     kind: str
     target: str | None = None
+    cue: int | None = None  # cue named by the hit-tested glue hotspot
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,12 @@ class PlaySpeech:
 
 
 @dataclass(frozen=True)
+class PlayClickCue:
+    """Play one glue speech-directory click cue (notes/native-windows.md §1.1)."""
+    cue: int
+
+
+@dataclass(frozen=True)
 class StopMusic:
     pass
 
@@ -177,7 +184,7 @@ class MissionSelectRequested:
 
 
 GlueEffect = (OpenWindow | CloseWindow | UpdateWindow | StartMovie | StartBattle | StartDialogue |
-              EnterCaravan | StartDebrief | PlayMusic | HotspotSpeech | PlaySpeech | StopMusic | StopSpeech |
+              EnterCaravan | StartDebrief | PlayMusic | HotspotSpeech | PlaySpeech | PlayClickCue | StopMusic | StopSpeech |
               Autosave | EndGame | MissionSelectRequested | Diagnostic)
 
 
@@ -470,6 +477,10 @@ class GlueRuntime:
         """Resume a parked script when its explicit wait event arrives."""
         if not isinstance(input_, GlueInput):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("handle expects GlueInput")
+        if input_.kind in ("hotspot-press", "hotspot-release-cue", "panel-press", "panel-release-cue"):
+            cue = (4 if input_.kind == "panel-press" else 3 if input_.kind == "panel-release-cue"
+                   else input_.cue)
+            return (PlayClickCue(cue),) if self.speech_enabled and cue is not None and cue > 0 else ()
         if input_.kind == "mission-select":
             selected = self._visible_mission(input_.target)
             if selected is not None:

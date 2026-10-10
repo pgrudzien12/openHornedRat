@@ -2,8 +2,9 @@
 
 Report on `REMOTE/BINARY/ANIM/*.SN`, `*.SM`, `*.SR` (30 scenes × 3 files) and the link between
 cutscenes, the `GLUE/SPEECH/*.WAV` recordings and the texts in `ANTXT.DLL`. Black-box analysis
-(bytes + cross-checks), no disassembly. The `.SI` containers were not extracted: only the
-4-byte tag and fixed header fields at offsets given by `.SM` were read, to verify `.SM`.
+(bytes + cross-checks), no disassembly. For this side-file analysis, only the 4-byte tag and
+fixed `.SI` header fields at offsets given by `.SM` were read to verify `.SM`. The `.SI`
+containers were subsequently decoded in `notes/si_omni.md`.
 
 ## Status
 
@@ -15,8 +16,8 @@ cutscenes, the `GLUE/SPEECH/*.WAV` recordings and the texts in `ANTXT.DLL`. Blac
 | Object kinds (video / sound / music / speech / subtitle / fade / animdone) | ✅ from names, paths and SI object type, consistent in all scenes |
 | Scene ↔ campaign glue script (`playmovie:A9`) | ✅ 27/30 scenes in `WND.DLL` glue scripts; `A1` (`binary\anim\a1`, hypothesis: intro) and `DEATH01/02` referenced from `WHSHR.EXE` |
 | Speech `A*.WAV` ↔ scene ↔ text | ✅ 63 of 64 numbered `A*.WAV` are used by a scene; number == string id in `ANTXT.DLL` (64/64) |
-| Speech `B*.WAV` ↔ text | 🟡 489/502 numbered `B*.WAV` have a string with the same id in `BRTXT.DLL` (battle/glue lines, not cutscenes) |
-| Contents of `.evt` chunks (subtitle timing?), MxCh flag semantics beyond split/end | ❌ Not examined (inside `.SI`, another task) |
+| Glue speech load and `B*.WAV` ↔ text | ✅ glue loads `B<text id>.WAV` directly; 489/502 numbered files have the same id in `BRTXT.DLL`. The other recordings do not block playback. |
+| `.evt` records and MxCh flags | ✅ event records decoded in `notes/si_omni.md`; 🟡 speaker, subtitle and fade playback behavior tracked in issue #41. Other MxCh flag meanings are historical unknowns. |
 
 ## Format description (ready to paste into FORMATS.md)
 
@@ -248,13 +249,14 @@ first/last data chunk time, end time, speech file + duration, text), `check_scen
 
 Output: `extracted/scene_scripts/<SCENE>.json` (30 files; game data, not for distribution).
 
-## Open questions
-> **Tracked on GitHub**: these open items are tracked as issue #42 (`topic:cutscenes`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+## Remaining research and historical questions
 
+Issue #42 is closed. The event records are decoded in `notes/si_omni.md`; issue #41 tracks the
+remaining speaker, subtitle timing and fade behavior needed for generic `.SI` playback. The other
+questions below are historical and are not standing research tasks.
 
-- Contents of `.evt` chunks (20/24/4/8 B): subtitle trigger / text id? To be checked by whoever extracts `.SI`.
-- Meaning of the `u16` SI type values (3/4/7/8/9) and of the remaining `MxOb` header fields: `.SI` task (ROADMAP 3.1).
+- Visible meaning of decoded EVT speaker values, subtitle timing and fade: issue #41 (ROADMAP 3.3).
+- Meaning of the `u16` SI type values (3/4/7/8/9) and of the remaining `MxOb` header fields.
 - Why `.SR` in A18/A18B/A25 lists chunks missing from `.SI` (empty frames? build tool limit?).
 - Whether the embedded speech WAVs are identical to `GLUE/SPEECH` (the sizes differ; different sample rate/format?).
 - `A25020` and `A9010.WAV` have recordings but no voice object in any scene. Unused, or played by the glue
@@ -264,13 +266,10 @@ Output: `extracted/scene_scripts/<SCENE>.json` (30 files; game data, not for dis
 - How `OMNI000R.DLL` uses `.SN/.SM/.SR` (the extensions are in its strings; details need disassembly
   or a Wine file-access trace, e.g. `WINEDEBUG=+file`).
 
-## Proposed ROADMAP.md changes
+## Current ROADMAP status
 
-- Table row "Cutscenes": `.SR/.SM/.SN` ✅ (side files decoded: names, SI index, source list); `.SI` remains ⬜/🟡.
-- 3.3 → 🟡: "`.SN/.SM/.SR` decoded (`scripts/scene_dump.py`, `notes/scene_scripts.md`); scene = 1 Smacker
-  video at 8 fps + sounds + FM/AWE music + speech with subtitle events; order and timing known from `.SM`.
-  Remaining: `.evt` contents and playback (depends on 3.1)."
-- 3.4 → 🟡: "`A*.WAV` = cutscene lines, number == `ANTXT.DLL` string id (63/64 placed in scenes with timing);
-  `B*.WAV` = battle/glue lines, number == `BRTXT.DLL` string id (489/502). Remaining: speaker → portrait, B lines → missions."
-- New item under Phase 1 or 4.2: the glue scripts (`WND.DLL` rcdata) define when scenes play
-  (`playmovie`, `iftrueplaymovie` + `setgluestatusmask`), which is useful for the campaign flow (M6).
+- 3.1 is ✅: `.SI` containers and event records are decoded (`notes/si_omni.md`).
+- 3.3 is 🟡: `.SN/.SM/.SR` and the scene timeline are decoded. A generic player still needs
+  issue #41's speaker, subtitle and fade behavior, followed by verification under Wine.
+- 3.4 is ✅: `A*.WAV` cutscene lines map to `ANTXT` ids and scenes; glue speech loads
+  `B<text id>.WAV` directly. A complete mission-by-mission speech catalogue is not required.

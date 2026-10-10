@@ -9,6 +9,8 @@ import struct
 import sys
 import types
 import unittest
+from array import array
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -41,6 +43,7 @@ except ModuleNotFoundError:
     sys.modules["zengl"] = types.ModuleType("zengl")
 
 from whshr.battle_scene import BattleScene
+from whshr.battle_events import BattleEvent
 from whshr.battlefield import WORLD_PER_MESH
 from whshr.engine import Battle, Regiment
 from whshr.frontend.battle_view import BattleView
@@ -129,6 +132,37 @@ class PanelStateTests(unittest.TestCase):
         hud.press("items")
         self.assertTrue(hud.item_list_open)
         self.assertIsNone(hud.hit_test(_panel_pos(hud, 210, 75)))
+
+    def test_used_item_has_a_check_on_the_right_until_rearmed(self):
+        from whshr import spell_effects
+
+        bearer = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf",
+                          items=("ItemPotionOfStrength", "ItemGrudgeBringer", "ItemSwordOfMight"),
+                          has_leader=True)
+        hud = _hud(regiments=[bearer])
+        hud.press("attack")
+        hud.press("items")
+        hud._item_labels = [Mock() for _ in bearer.items]
+        hud._icon = Mock(return_value=object())
+        check = object()
+        hud._used_item_check_quad = Mock(return_value=check)
+        draws = []
+        hud._draw_panel = lambda quad, *args, **kwargs: draws.append((quad, args))
+
+        hud._draw_item_list(bearer)
+        self.assertEqual([args for quad, args in draws if quad is check], [])
+
+        hud.battle.arm_item("player", "ItemPotionOfStrength")
+        hud.battle.arm_item("player", "ItemGrudgeBringer")
+        draws.clear()
+        hud._draw_item_list(bearer)
+        self.assertEqual([args for quad, args in draws if quad is check], [(420, 74), (420, 93)])
+
+        hud.battle.tick_count = spell_effects.WIND_TICKS
+        hud.battle.tick()
+        draws.clear()
+        hud._draw_item_list(bearer)
+        self.assertEqual([args for quad, args in draws if quad is check], [(420, 74)])
 
     def test_item_menu_requires_a_living_leader(self):
         bearer = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf",
@@ -1185,7 +1219,8 @@ class FigurePickTests(unittest.TestCase):
         frame = SpriteFrame(3, 3, 1, 2, pixels)
         sheet = SimpleNamespace(frames=[frame], frame_index=lambda *args: 0)
         field = SimpleNamespace(width=1000, height=800, ground_height=lambda x, y: 0.0,
-                                sprite_sheet=lambda resource: sheet)
+                                sprite_sheet=lambda resource: sheet, vertices=array("f"),
+                                texture_layers=[], texture_size=(1, 1), effect_meshes={})
         battle = Battle(1000, 800, regiments)
         for regiment in regiments:
             regiment.model_positions()
@@ -1205,7 +1240,8 @@ class FigurePickTests(unittest.TestCase):
         foot = projection.view(x / WORLD_PER_MESH, 0.0, y / WORLD_PER_MESH)
         px, py, _ = projection.project(foot)
         scale = SPRITE_PIXEL_WORLD_UNITS / WORLD_PER_MESH * projection.focal_length / foot[2]
-        return (px + (column + 0.5 - 1) * scale, py + (row + 0.5 - 2) * scale)
+        return (px + (column + 0.5 - 1) * scale - 0.5,
+                py + (row + 0.5 - 2) * scale - 0.5)
 
     def test_a_figure_far_from_the_regiment_anchor_can_be_selected(self):
         regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=1)
@@ -1240,6 +1276,45 @@ class FigurePickTests(unittest.TestCase):
 
         self.assertEqual(view._figure_hits(self._pixel(view, *hidden.positions[0]), projection), [])
 
+    def test_terrain_or_scenery_hides_a_figure_but_a_texture_hole_does_not(self):
+        from whshr.frontend.battle_view import SPRITE_DEPTH_BIAS
+        from whshr.picking import screen_ray
+
+        regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=1)
+        view = self._view([regiment])
+        x, y = regiment.positions[0]
+        pixel = self._pixel(view, x, y)
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+        self.assertEqual(len(view._figure_hits(pixel, projection)), 1)
+        origin, direction = screen_ray(projection, *pixel)
+        foot_depth = projection.view(x / WORLD_PER_MESH, 0.0, y / WORLD_PER_MESH)[2]
+        forward = sum(direction[i] * projection.view_direction[i] for i in range(3))
+        distance = (foot_depth - SPRITE_DEPTH_BIAS - 3.0) / forward
+        centre = tuple(origin[i] + distance * direction[i] for i in range(3))
+        for sx, sy in ((-10, -10), (10, -10), (0, 10)):
+            view.scene.field.vertices.extend((*(centre[i] + sx * projection.right[i]
+                                                  + sy * projection.up[i] for i in range(3)),
+                                              0.25, 0.25, 0.0, 1.0))
+        view.scene.field.texture_layers = [bytes((100, 100, 100, 255))]
+
+        self.assertEqual(view._figure_hits(pixel, projection), [])
+        occluder = array("f", view.scene.field.vertices)
+        shift = (SPRITE_DEPTH_BIAS + 2.5) / forward
+        for start in (0, 7, 14):
+            for coordinate in range(3):
+                view.scene.field.vertices[start + coordinate] += shift * direction[coordinate]
+        self.assertEqual(len(view._figure_hits(pixel, projection)), 1)  # the renderer's depth bias keeps it visible
+        view.scene.field.vertices = occluder
+        view.scene.field.texture_layers = [bytes((0, 0, 0, 0))]
+        self.assertEqual(len(view._figure_hits(pixel, projection)), 1)
+        view.scene.field.texture_layers = [bytes((100, 100, 100, 255))]
+        effect_vertices = view.scene.field.vertices
+        view.scene.field.vertices = array("f")
+        view.scene.field.effect_meshes = {"active": object()}
+        view._effect_vertices = Mock(return_value=effect_vertices)
+        self.assertEqual(view._figure_hits(pixel, projection), [])
+        view._effect_vertices.assert_called_once_with()
+
     def test_overlap_cycles_selection_and_uses_topmost_figure_for_attack(self):
         regiments = [Regiment(name, name, 500, 400, 0, Side.PLAYER, models=1)
                      for name in ("first", "second", "third")]
@@ -1247,16 +1322,37 @@ class FigurePickTests(unittest.TestCase):
         pixel = self._pixel(view, *regiments[0].positions[0])
         projection = view.camera.projection(640, 480, 1000, 800, 0.0)
         self.assertEqual([r.identifier for r, _ in view._figure_hits(pixel, projection)],
-                         ["first", "second", "third"])
+                         ["third", "second", "first"])
         with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
             selected = []
             for _ in range(3):
                 identifier = view._ground_click(pixel)[0][1]
                 selected.append(identifier)
                 view.scene.selected_id = identifier
-            self.assertEqual(selected, ["third", "first", "second"])
+            self.assertEqual(selected, ["first", "third", "second"])
             view.order_mode = "attack"
-            self.assertEqual(view._ground_click(pixel), (("attack", "third"),))
+            self.assertEqual(view._ground_click(pixel), (("attack", "first"),))
+
+    def test_selection_elsewhere_in_an_overlap_does_not_replace_the_top_figure(self):
+        regiments = [Regiment(name, name, 500, 400, 0, Side.PLAYER, models=1)
+                     for name in ("first", "second", "third")]
+        view = self._view(regiments)
+        view.scene.selected_id = "second"  # selected through the minimap or keyboard
+        pixel = self._pixel(view, *regiments[0].positions[0])
+        with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
+            self.assertEqual(view._ground_click(pixel), (("select", "first"),))
+            view.scene.selected_id = "first"
+            self.assertEqual(view._ground_click(pixel), (("select", "third"),))
+
+    def test_move_click_on_a_figure_without_ground_keeps_the_order_armed(self):
+        regiment = Regiment("target", "Target", 500, 400, 0, Side.PLAYER, models=1)
+        view = self._view([regiment])
+        view.order_mode = "move"
+        pixel = self._pixel(view, *regiment.positions[0])
+        with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
+            self.assertEqual(view._ground_click(pixel), ())
+        self.assertEqual(view.order_mode, "move")
+        view.hud.order_completed.assert_not_called()
 
     def test_spell_point_uses_the_hit_figures_world_position(self):
         regiment = Regiment("target", "Target", 500, 400, 0, Side.ENEMY, models=1)
@@ -1477,3 +1573,34 @@ class ItemMarkerTests(unittest.TestCase):
 
     def test_no_marker_once_picked_up(self):
         self.assertEqual(self._view({})._item_markers(), b"")
+
+
+class BattleViewEventConsumptionTests(unittest.TestCase):
+    def test_a_reaction_is_shown_once_across_rendered_frames_and_again_on_a_new_tick(self):
+        view = BattleView.__new__(BattleView)
+        reaction = BattleEvent("Grudgebringers: Engage!", "react", sender="Grudgebringers", message="Engage!")
+        battle = SimpleNamespace(events=[reaction], text_resources={})
+        view.scene = SimpleNamespace(battle=battle)
+        view.battle_log = deque(maxlen=100)
+        view.event_log = deque(maxlen=100)
+        view.log_scroll = 0
+        view._event_batch = None
+        view._event_index = 0
+        view.battle_sounds = Mock()
+
+        for _ in range(4):
+            view._consume_events()
+        self.assertEqual(list(view.battle_log), [("Grudgebringers:", "Engage!")])
+        self.assertEqual(list(view.event_log), [str(reaction)])
+        view.battle_sounds.handle.assert_called_once_with([reaction])
+
+        battle.events.append(BattleEvent("message 1005", "message", text_id=1005))
+        battle.text_resources[1005] = "Mission complete!"
+        view._consume_events()
+        self.assertEqual(list(view.battle_log)[-1], ("", "Mission complete!"))
+        self.assertEqual(len(view.battle_log), 2)
+
+        battle.events = [BattleEvent("Grudgebringers: Engage!", "react",
+                                     sender="Grudgebringers", message="Engage!")]
+        view._consume_events()
+        self.assertEqual(len(view.battle_log), 3)

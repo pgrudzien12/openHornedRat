@@ -304,8 +304,7 @@ Outputs (local only, `extracted/` is git-ignored):
   `verify_MAP_MAP.png`, `verify_MINDSCAPELOGO_MIND.png`.
 
 ## 6. Open questions
-> **Tracked on GitHub**: these open items are tracked as issue #33 (`topic:campaign-glue`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+> **Historical questions:** issue #33 is closed. These notes preserve the findings; the remaining unknowns are not standing research tasks. Reopen a focused issue only when a shipped feature or reproducible defect needs an answer.
 
 
 - ✅ Which font number is used for the mission-list/button UI elements not declared via `[TEXT]

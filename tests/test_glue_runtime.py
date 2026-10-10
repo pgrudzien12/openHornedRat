@@ -11,6 +11,7 @@ from whshr.glue_runtime import (
     GlueRuntime,
     OpenWindow,
     PlayMusic,
+    PlayClickCue,
     StartBattle,
     StopMusic,
     StartDebrief,
@@ -47,6 +48,17 @@ class GlueRuntimeTests(unittest.TestCase):
                          "iftrueaddcash:20\ntestforunitinmarch:7\niftrueaddcash:30\n"
                          "addtroop:3=2\nunitjoinmission:5\nunitleavemission:7\nautosave:\nendgame:\n[END]"),
         })
+
+    def test_click_cues_are_runtime_effects_from_hotspot_and_panel_input(self):
+        runtime = GlueRuntime(self.content)
+
+        self.assertEqual(runtime.handle(GlueInput("hotspot-press", cue=4)), (PlayClickCue(4),))
+        self.assertEqual(runtime.handle(GlueInput("hotspot-release-cue", cue=3)), (PlayClickCue(3),))
+        self.assertEqual(runtime.handle(GlueInput("panel-press")), (PlayClickCue(4),))
+        self.assertEqual(runtime.handle(GlueInput("panel-release-cue")), (PlayClickCue(3),))
+        self.assertEqual(runtime.handle(GlueInput("hotspot-press")), ())
+        runtime.speech_enabled = False
+        self.assertEqual(runtime.handle(GlueInput("panel-press")), ())
 
     def test_given_a_waiting_flow_when_mission_release_arrives_then_it_runs_the_subroutine_and_ends(self):
         runtime = GlueRuntime(self.content)

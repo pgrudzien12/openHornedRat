@@ -2585,7 +2585,7 @@ chart for shooting).
 
 ## 11. Open points
 > **Tracked on GitHub**: these open items are tracked as issue #44 (`topic:combat-rules`). Kept here for
-> reference; a follow-up pass (issue #45) will verify nothing was lost in the move.
+> reference; the broad backlog audit (issue #45) is closed. Reassess a row when its engine behavior is needed.
 
 
 Everything that is not established, as a register for the next sessions. **Priority** is for an
@@ -2671,7 +2671,7 @@ research unless marked Wine.
 | R56 | **Casting in close combat, turning to cast** | ✅ casts at once in combat if in arc, else cancelled; turn step outside combat (section 8.8). | — | done |
 | R57 | **Area objects** | ✅ temporary solid scenery (`os_active|os_solid`): push units back, stop charges, bend routes, block spotting, obstruct missiles. | — | done |
 | R58 | **Spells against regenerators** | ✅ no-save spells wound them; save + type 0 spells allow regeneration; Burning Head never wounds them (section 5.3). | — | done |
-| R59 | **Duplicate opcode names** | 0x3A, 0x88 and 0xAF share the name `TakeEventTarget` (same helper, different arguments). | Give distinct names in `whshr/behaviour.py`. | low |
+| R59 | **Duplicate opcode names** | ✅ 0x3A is `TakeEventTarget`, 0x88 `TakeRangedEventTarget`, and 0xAF `TakeSpellEventTarget`; all use the same handler rule, with the broken-target check only for 0x3A. | — | done |
 | R60 | **Objective index 7 and leaving the battle** | ✅ letter G "Inside the gates!" in the siege battles BF015/BF017 (Missions and objectives). | — | done |
 | R61 | **Visibility details** | Unit flag bit 3 (`0x8`) also doubles the view cone together with melee (`0x208`); the shooting/effect region behaviour is not fully confirmed; mode 1 of the "attack the n-th nearest" opcodes uses a signed-axis metric (🟡). | Verify the behaviour in a controlled play session. | low |
 | R62 | **AI deployment** | See [deployment.md §1](deployment.md#1-mission-entry-and-default-positions). | — | done |

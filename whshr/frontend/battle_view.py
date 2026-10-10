@@ -24,6 +24,7 @@ import zengl
 
 from .. import animation, figure_capture, picking
 from ..battle3d import SPRITE_DEPTH_BIAS
+from ..battle_events import BattleEvent
 from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, bake_mesh, sprite_direction, view_angle
 from ..camera import BattleCamera
 from ..engine import Regiment
@@ -207,6 +208,8 @@ class BattleView(SceneView[BattleScene]):
         self._figure_order: list[str] = []  # hit-stack order; selection promotes a regiment as on the minimap
         self.battle_log: deque[tuple[str, str]] = deque(maxlen=100)  # full react-message history for the HUD log panel
         self.log_scroll = 0  # lines scrolled back from the newest entry (0 = show latest)
+        self._event_batch: list[BattleEvent] | None = None
+        self._event_index = 0
 
         ctx.includes["camera"] = CAMERA_BLOCK
         self.camera_buffer = ctx.buffer(size=CAMERA.size, uniform=True)
@@ -495,6 +498,8 @@ class BattleView(SceneView[BattleScene]):
         if (self.order_mode.startswith("item:") and repeat_item
                 and self.scene.battle.event_bus.power.player >= 1):
             return (("item_target", self.order_mode[5:], *target_point),)
+        if self.order_mode == "move" and ground_point is None:
+            return ()
         mode, self.order_mode = self.order_mode, None
         self._set_cursor("default")
         self.hud.order_completed()
@@ -535,19 +540,32 @@ class BattleView(SceneView[BattleScene]):
                 frame = sheet.frames[sheet.frame_index(action, phase, sprite_direction(yaw, facing))]
                 foot = projection.view(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH)
                 depth = foot[2]
-                if depth <= projection.near:
+                if depth < NEAR or depth > FAR:
                     continue
                 foot_x, foot_y, _ = projection.project(foot)
                 scale = SPRITE_PIXEL_WORLD_UNITS / WORLD_PER_MESH * projection.focal_length / depth
-                column = math.floor(frame.anchor_x + (pixel[0] - foot_x) / scale)
-                row = math.floor(frame.anchor_y + (pixel[1] - foot_y) / scale)
+                column = math.floor(frame.anchor_x + (pixel[0] + 0.5 - foot_x) / scale)
+                row = math.floor(frame.anchor_y + (pixel[1] + 0.5 - foot_y) / scale)
                 if (0 <= column < frame.width and 0 <= row < frame.height
                         and frame.pixels[row * frame.width + column]):
                     prior = hits.get(regiment.identifier)
                     if prior is None or depth < prior[2]:
                         hits[regiment.identifier] = (regiment, (x, y), depth)
-        return [(regiment, point) for regiment, point, _depth in sorted(
-            hits.values(), key=lambda hit: hit[2], reverse=True)]
+        if hits:
+            scene_depth = picking.mesh_depth_at(projection, pixel[0], pixel[1], field.vertices,
+                                                field.texture_layers, field.texture_size, NEAR, FAR)
+            if field.effect_meshes:
+                effects_depth = picking.mesh_depth_at(projection, pixel[0], pixel[1], self._effect_vertices(),
+                                                      field.texture_layers, field.texture_size, NEAR, FAR)
+                if effects_depth is not None:
+                    scene_depth = min(scene_depth, effects_depth) if scene_depth is not None else effects_depth
+            if scene_depth is not None:
+                hits = {identifier: hit for identifier, hit in hits.items()
+                        if hit[2] - SPRITE_DEPTH_BIAS < scene_depth}
+        # Equal-depth sprites use a strict depth test: the first emitted regiment owns
+        # the pixel. Return hits bottom-to-top, with that regiment last in a tie.
+        return [(regiment, point) for _order, (regiment, point, _depth) in sorted(
+            enumerate(hits.values()), key=lambda ordered: (-ordered[1][2], -ordered[0]))]
 
     def _select_figure_hit(self, hits: list[tuple[Regiment, tuple[float, float]]]) -> str | None:
         """Apply the minimap's promotion and cycling rule to a visible figure stack."""
@@ -555,14 +573,15 @@ class BattleView(SceneView[BattleScene]):
         order[:] = [identifier for identifier in order if identifier in self.scene.battle.regiments]
         order.extend(regiment.identifier for regiment, _point in hits if regiment.identifier not in order)
         selected = self.scene.selected_id
-        if selected in order:
-            order.remove(selected)
-            order.append(selected)
         self._figure_order = order
         rank = {identifier: index for index, identifier in enumerate(order)}
         selection_hits = sorted((regiment for regiment, _point in hits),
                                 key=lambda regiment: rank[regiment.identifier])
-        return select_regiment_hit(selection_hits, selected)
+        choice = select_regiment_hit(selection_hits, selected)
+        if choice is not None:
+            order.remove(choice)
+            order.append(choice)
+        return choice
 
     def _minimap_click(self, pixel: Sequence[float], append: bool = False,
                        repeat_item: bool = False) -> Sequence[SceneEvent]:
@@ -627,7 +646,20 @@ class BattleView(SceneView[BattleScene]):
             self.camera.tilt(tilt * TILT_SPEED * seconds)
         self.scene.battle.set_view_angle(view_angle(self.camera.yaw))
         self._publish_view_rect()
-        for event in self.scene.battle.events:
+        self._consume_events()
+
+    def _consume_events(self) -> None:
+        # A battle tick replaces the list, while several rendered frames can share it. Orders may
+        # also append events between ticks, so remember both the list and the consumed position.
+        events = self.scene.battle.events
+        if events is not self._event_batch:
+            self._event_batch = events
+            self._event_index = 0
+        new_events = events[self._event_index:]
+        self._event_index = len(events)
+        if not new_events:
+            return
+        for event in new_events:
             if hasattr(event, "kind") and event.kind in {"projectile_launch", "projectile_impact"}:
                 code = event.data.get("code")
                 if isinstance(code, int) and (event.kind == "projectile_launch" or event.data.get("blast")):
@@ -651,10 +683,10 @@ class BattleView(SceneView[BattleScene]):
                 message = event.data.get("message", str(event))
                 self.battle_log.append((f"{sender}:", reaction_text(message)))
                 self.log_scroll = 0  # auto-scroll to newest on a new message
-        self.event_log.extend(str(event) for event in self.scene.battle.events)
+        self.event_log.extend(str(event) for event in new_events)
         battle_sounds: BattleSounds | None = getattr(self, "battle_sounds", None)  # tests build views without __init__
         if battle_sounds is not None:
-            battle_sounds.handle(self.scene.battle.events)
+            battle_sounds.handle(new_events)
 
     def _publish_view_rect(self) -> None:
         """Tell the battle which ground the camera shows (the "on screen" test for enemy reactions)."""

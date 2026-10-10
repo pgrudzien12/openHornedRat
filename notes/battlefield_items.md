@@ -46,7 +46,9 @@ for launch checks and effects.
 **Potion of Strength** takes effect as soon as its row is clicked. It gives **+3 Strength
 to the leader figure's attacks** for the remainder of the battle. It is not a timed
 spell effect and cannot be dispelled. Ordinary figures in the same regiment do not gain
-the bonus. The leader's displayed Strength also reflects the active Potion.
+the bonus. The leader's displayed Strength also reflects the active Potion. Drinking it
+does not add a line to the original battle message window; see
+[potion_strength_battle_message.md](potion_strength_battle_message.md).
 
 **Grudgebringer** gives **+1 Strength and +1 Weapon Skill** when the bearer regiment's
 **leader figure attacks in melee**. Other figures in that regiment do not receive
