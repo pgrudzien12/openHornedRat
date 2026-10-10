@@ -479,7 +479,7 @@ class BattleView(SceneView[BattleScene]):
         x, y = ground_point or hits[-1][1]
         if not direct and self.order_mode is None:
             regiment_id = self._select_figure_hit(hits)
-        else:  # an order target: the foe where friend and foe overlap (hud.order_target_hit)
+        else:  # an order target (attack, fire, item): the foe where friend and foe overlap (hud.order_target_hit)
             regiment_id = order_target_hit([regiment for regiment, _point in hits],
                                            self.scene.battle.regiments.get(self.scene.selected_id or ""))
         target_point = next((point for regiment, point in reversed(hits) if regiment.identifier == regiment_id),
