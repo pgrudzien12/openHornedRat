@@ -26,6 +26,7 @@ from .. import animation, figure_capture, picking
 from ..battle3d import SPRITE_DEPTH_BIAS
 from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, bake_mesh, sprite_direction, view_angle
 from ..camera import BattleCamera
+from ..engine import Regiment
 from ..formation import SPRITE_PIXEL_WORLD_UNITS
 from ..rules import Side
 from ..battle_scene import BattleScene
@@ -38,7 +39,7 @@ from .battle_sound import BattleSounds
 from .ranged_sound import MissileSounds
 from .gpu import Gpu
 from .scene_view import SceneView
-from .hud import Hud
+from .hud import Hud, select_regiment_hit
 
 Point = tuple[int, int]
 SKY = (112, 150, 196)
@@ -55,7 +56,6 @@ MISSILE_MESH = {"arrow": "arrows1", "arrow_alt": "arrows2", "bolt": "arrows3",
                 "cannon": "spear1", "mortar": "spear2", "rock": "spear3",
                 "diver": "spear4", "bomb": "flames1"}
 BANNER_MARKER_RAISE = 4.0  # mesh units: above a 64-pixel troop sprite, below the camera's horizon
-SPRITE_MID_HEIGHT = BANNER_MARKER_RAISE / 2  # mesh units: halfway up that ~64px sprite, for picking
 EVENT_LOG_LINES = 3  # battle events shown in the debug overlay (whshr.engine.Battle.events, per tick)
 INSTANCE = struct.Struct("10f")  # foot position (mesh), atlas rectangle (pixels), anchor (pixels), selected
 CAMERA = struct.Struct("24f")
@@ -204,6 +204,7 @@ class BattleView(SceneView[BattleScene]):
         self._right_minimap = False
         self.event_log: deque[str] = deque(maxlen=EVENT_LOG_LINES)  # recent whshr.engine.Battle.events, newest last
         self._banner_order: list[str] = []  # promoted selection order; persists after deselect like the original battle view
+        self._figure_order: list[str] = []  # hit-stack order; selection promotes a regiment as on the minimap
         self.battle_log: deque[tuple[str, str]] = deque(maxlen=100)  # full react-message history for the HUD log panel
         self.log_scroll = 0  # lines scrolled back from the newest entry (0 = show latest)
 
@@ -464,18 +465,19 @@ class BattleView(SceneView[BattleScene]):
             projection, pixel[0], pixel[1],
             lambda x, z: field.ground_height(x * WORLD_PER_MESH, z * WORLD_PER_MESH),
         )
-        if ground is None:
+        hits = self._figure_hits(pixel, projection)
+        if ground is None and not hits:
             return ()
-        x, y = ground[0] * WORLD_PER_MESH, ground[1] * WORLD_PER_MESH
-        regiment_id = self.scene.battle.regiment_at(x, y, player_only=False)
-        if regiment_id is None:
-            # The ground-plane pick above only ever lands on a regiment's own ground footprint;
-            # troop sprites are billboards standing well above that (SPRITE_VERTEX_SHADER), so a
-            # click on the visible body - not just the feet - misses it entirely. Fall back to a
-            # screen-space hit test against each regiment's actual rendered sprite block.
-            regiment_id = self._sprite_pick(pixel, projection)
+        ground_point = ((ground[0] * WORLD_PER_MESH, ground[1] * WORLD_PER_MESH)
+                        if ground is not None else None)
+        x, y = ground_point or hits[-1][1]
+        if not direct and self.order_mode is None:
+            regiment_id = self._select_figure_hit(hits)
+        else:
+            regiment_id = hits[-1][0].identifier if hits else None
+        target_point = hits[-1][1] if hits else (x, y)
         # A building is a target of the attack order only when no regiment is under the click.
-        building_id = self.scene.battle.building_at(x, y) if regiment_id is None else None
+        building_id = self.scene.battle.building_at(x, y) if regiment_id is None and ground is not None else None
         if direct:
             if self.scene.battle.phase == "deployment":
                 return ()
@@ -489,10 +491,10 @@ class BattleView(SceneView[BattleScene]):
                 return self._deployment_press(regiment_id, (x, y), pixel, "main")
             return (("select", regiment_id),) if regiment_id is not None else ()
         if append and self.order_mode == "move":
-            return (("append_waypoint", x, y),)
+            return (("append_waypoint", *ground_point),) if ground_point is not None else ()
         if (self.order_mode.startswith("item:") and repeat_item
                 and self.scene.battle.event_bus.power.player >= 1):
-            return (("item_target", self.order_mode[5:], x, y),)
+            return (("item_target", self.order_mode[5:], *target_point),)
         mode, self.order_mode = self.order_mode, None
         self._set_cursor("default")
         self.hud.order_completed()
@@ -504,41 +506,63 @@ class BattleView(SceneView[BattleScene]):
                 return ()
             return (("attack", regiment_id),)
         if mode == "move":
-            return (("move_to", x, y),)
+            return (("move_to", *ground_point),) if ground_point is not None else ()
         if mode == "fire":
-            return (("fire", regiment_id, (x, y), bool(pygame.key.get_mods() & pygame.KMOD_CTRL)),)
+            return (("fire", regiment_id, target_point, bool(pygame.key.get_mods() & pygame.KMOD_CTRL)),)
         if mode.startswith("item:"):
-            return (("item_target", mode[5:], x, y),)
+            return (("item_target", mode[5:], *target_point),)
         if mode == "face_point":
             return (("face_point", x, y),)
         return ()
 
-    def _sprite_pick(self, pixel: Sequence[float], projection: Projection) -> str | None:
-        """Screen-space fallback for _ground_click(): which active regiment's rendered sprite
-        block, if any, covers this raw window pixel - approximated as a circle around each
-        regiment's centre, at half its sprite height (SPRITE_MID_HEIGHT) above the ground and
-        sized to its actual formation footprint (Regiment.bounding_radius()), projected to screen
-        space at that regiment's own depth. Nearest to the camera wins when more than one
-        regiment's circle covers the point (the one actually visible there, same as occlusion)."""
-        field = self.scene.field
-        best_id: str | None = None
-        best_depth: float | None = None
+    def _figure_hits(self, pixel: Sequence[float], projection: Projection) -> list[tuple[Regiment, tuple[float, float]]]:
+        """Active regiments with an opaque rendered figure under the pixel, bottom to top.
+
+        Use the same frame, position, foot anchor and scale as the billboard renderer. A gap
+        inside the formation, or a transparent sprite pixel, has no unit hit.
+        """
+        field, yaw = self.scene.field, self.camera.yaw
+        hits: dict[str, tuple[Regiment, tuple[float, float], float]] = {}
         for regiment in self.scene.battle.regiments.values():
             if not regiment.active or not regiment.visible_to_player:
                 continue
-            mesh_x, mesh_z = regiment.x / WORLD_PER_MESH, regiment.y / WORLD_PER_MESH
-            ground_height = field.ground_height(regiment.x, regiment.y)  # already mesh-space
-            view = projection.view(mesh_x, ground_height + SPRITE_MID_HEIGHT, mesh_z)
-            depth = view[2]
-            if depth <= projection.near:
-                continue  # behind (or at) the camera
-            screen_x, screen_y, _ = projection.project(view)
-            radius = regiment.bounding_radius() / WORLD_PER_MESH * projection.focal_length / depth
-            if math.hypot(pixel[0] - screen_x, pixel[1] - screen_y) > radius:
+            sheet = field.sprite_sheet(regiment.sprite)
+            if sheet is None:
                 continue
-            if best_depth is None or depth < best_depth:
-                best_id, best_depth = regiment.identifier, depth
-        return best_id
+            for (x, y), model in zip(regiment.seeded_positions(), regiment.melee_models):
+                action, phase = animation.current(model, regiment.animation_family)
+                facing = regiment.direction if model.drawn_facing is None else model.drawn_facing
+                frame = sheet.frames[sheet.frame_index(action, phase, sprite_direction(yaw, facing))]
+                foot = projection.view(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH)
+                depth = foot[2]
+                if depth <= projection.near:
+                    continue
+                foot_x, foot_y, _ = projection.project(foot)
+                scale = SPRITE_PIXEL_WORLD_UNITS / WORLD_PER_MESH * projection.focal_length / depth
+                column = math.floor(frame.anchor_x + (pixel[0] - foot_x) / scale)
+                row = math.floor(frame.anchor_y + (pixel[1] - foot_y) / scale)
+                if (0 <= column < frame.width and 0 <= row < frame.height
+                        and frame.pixels[row * frame.width + column]):
+                    prior = hits.get(regiment.identifier)
+                    if prior is None or depth < prior[2]:
+                        hits[regiment.identifier] = (regiment, (x, y), depth)
+        return [(regiment, point) for regiment, point, _depth in sorted(
+            hits.values(), key=lambda hit: hit[2], reverse=True)]
+
+    def _select_figure_hit(self, hits: list[tuple[Regiment, tuple[float, float]]]) -> str | None:
+        """Apply the minimap's promotion and cycling rule to a visible figure stack."""
+        order: list[str] = getattr(self, "_figure_order", [])
+        order[:] = [identifier for identifier in order if identifier in self.scene.battle.regiments]
+        order.extend(regiment.identifier for regiment, _point in hits if regiment.identifier not in order)
+        selected = self.scene.selected_id
+        if selected in order:
+            order.remove(selected)
+            order.append(selected)
+        self._figure_order = order
+        rank = {identifier: index for index, identifier in enumerate(order)}
+        selection_hits = sorted((regiment for regiment, _point in hits),
+                                key=lambda regiment: rank[regiment.identifier])
+        return select_regiment_hit(selection_hits, selected)
 
     def _minimap_click(self, pixel: Sequence[float], append: bool = False,
                        repeat_item: bool = False) -> Sequence[SceneEvent]:

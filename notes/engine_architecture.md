@@ -274,17 +274,14 @@ constant, and models walk to their own formation slot rather than teleporting wi
   **Placeholder**: `WALK_ANIMATION_FPS = 8.0` — the original per-frame walk-cycle timing is not traced
   (game_rules.md, "Animation bytecode" lists it as unresolved), so this is a documented guess, not a
   measured value.
-- **Selection and orders**: `Battle.regiment_at(x, y)` (game_rules.md footprint box, via
-  `formation.footprint`) finds the player regiment, if any, whose oriented block contains a ground point;
-  enemy regiments are excluded by default and so can never be selected or ordered. `BattleScene` owns the
-  presentation-facing selection state (`selected_id`) and interprets three scene events from the view:
-  `("select", regiment_id)`, `("deselect",)` and `("move_to", x, y)` (the last only acts when a player
-  regiment is selected, and silently ignores a destination `order_move` rejects, e.g. outside the field —
-  "blocked orders preserve a clear observable state" per docs/testing.md). The view never touches
-  `Battle` state directly; it only turns pygame input into these three events using a screen-to-ground
-  pick (see below) and `Battle.regiment_at`, which is a read-only query, not a rule.
-- **Controls** (`frontend/battle_view.py`): left-click picks the ground under the cursor; whatever
-  regiment (player or enemy) is under it is selected (a player regiment tints yellow in the sprite
+- **Selection and orders**: `BattleScene` owns the presentation-facing selection state
+  (`selected_id`) and handles `("select", regiment_id)`, `("deselect",)`, movement and target
+  events from the view. Only a player regiment can receive an order; enemy regiments can still
+  be selected for inspection. The view reads the battle's figure positions and state for hit
+  testing, then sends scene events without changing battle state itself. `Battle.regiment_at(x, y)`
+  remains a ground-footprint query for other callers, not the battlefield figure picker.
+- **Controls** (`frontend/battle_view.py`): left-click hit-tests the visible figures under the cursor;
+  the picked regiment (player or enemy) is selected (a player regiment tints yellow in the sprite
   shader, a per-instance `selected` flag blended into the palette colour; an enemy regiment shows
   only its HUD readout/banner/minimap highlight, never orders - `notes/game_rules.md`'s "Player
   orders and the command panel" documents every order needing its own HUD button pressed first,
@@ -299,15 +296,15 @@ constant, and models walk to their own formation slot rather than teleporting wi
   `intersect_ground` marches that ray against a terrain height function (`Battlefield.ground_height`,
   called through a small wrapper converting BTS world units to mesh units and back) and bisects the
   crossing. `tests/test_picking.py` exercises it against flat and sloped synthetic ground, independent of
-  any real battle data. This ground-plane pick alone only ever lands on a regiment's own ground
-  footprint (`Regiment.contains`, `formation.footprint_frame`); troop sprites are billboards
-  standing well above that anchor (`SPRITE_VERTEX_SHADER`, `battle_view.py`), so a click on the
-  visible body rather than the feet misses it. `BattleView._sprite_pick()` is a screen-space
-  fallback, tried only when the ground-plane pick misses: it approximates each active regiment as
-  a circle at half its sprite height (`SPRITE_MID_HEIGHT`) above the ground and sized to its own
-  formation footprint (`Regiment.bounding_radius()`), projected to screen space at that regiment's
-  own depth (`battle3d.Projection.view`/`.project`), and picks whichever covers the click point,
-  nearest to the camera first if more than one does (the one actually visible there).
+  any real battle data. The ground point supplies move coordinates and empty-ground targets.
+  `BattleView._figure_hits()` selects or targets a regiment only when the click covers a nontransparent
+  pixel of one of its active rendered figures. It reads the seeded model positions and the current
+  animation frame, foot anchor and scale used by the sprite shader; the unit anchor and empty gaps
+  in the formation are no longer hit areas. A click on a figure can still select or target it when
+  the ground ray misses. If multiple regiments' figures overlap, plain selection uses the same
+  cycling rule as minimap markers (the selected unit is promoted in the selection stack), while
+  an order targets the nearest visible figure in the stack. Point-targeted items use the hit
+  figure's world position.
 - **Collisions**: `Battle._resolve_collisions`, run once per tick after movement, is a simplified,
   deterministic push-apart rule (game_rules.md, "Routes, collisions and visibility"): when the bounding circles
   (`formation.bounding_radius`) of two regiments overlap, only the regiments under a move order give way,
