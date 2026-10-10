@@ -44,6 +44,7 @@ from .scene_view import SceneView
 from .hud import Hud, select_regiment_hit
 
 Point = tuple[int, int]
+WORLD_EFFECT_RESERVE = 512  # instances kept free for world effects (Fireball heads, puffs, explosions) so banners stay
 SKY = (112, 150, 196)
 NEAR, FAR = 0.5, 4000.0  # mesh units
 PAN_SPEED = 0.8  # camera distances per second
@@ -220,7 +221,8 @@ class BattleView(SceneView[BattleScene]):
         self.atlas = ctx.image(field.atlas_size, "r8unorm", field.atlas)
         self.palette = ctx.image((256, 1), "rgba8unorm", b"".join(bytes((*rgb, 255)) for rgb in field.palette))
         self.capacity = max(1, sum(regiment.models for regiment in scene.battle.regiments.values())
-                            + len(scene.battle.regiments))
+                            + len(scene.battle.regiments)
+                            + WORLD_EFFECT_RESERVE)
         self.instance_buffer = ctx.buffer(size=self.capacity * INSTANCE.size)
 
         camera_layout: Any = {"name": "Camera", "binding": 0}
@@ -830,30 +832,26 @@ class BattleView(SceneView[BattleScene]):
         return bytes(data[:self.capacity * INSTANCE.size])
 
     def _fireball_flights(self) -> list[Flight]:
-        """The Fireball bolts (the spell and the Grudgebringer's item launch share the code) still flying. A bolt
-        that already ended on its first update is reported once so its explosion is not lost."""
+        """The Fireball bolts (the spell and the Grudgebringer's item launch share the code) updated this tick. The
+        first tick an effect is past its flight (visual tail) is reported once as the ending tick."""
         battle = self.scene.battle
-        reported: set[int] = self.__dict__.setdefault("_spell_reported", set())
+        ended: set[int] = self.__dict__.setdefault("_spell_ended", set())
         flights: list[Flight] = []
         for effect in battle.spell_effects.active:
             if effect.code != spell_effects.FIREBALL or effect.ended or effect.elapsed == 0:
                 continue
             flying = effect.tail < 0
-            if not flying and effect.serial in reported:
-                continue
-            reported.add(effect.serial)
-            bolt = spell_effects.BOLTS[effect.code]
-            t = 1 - effect.remaining / effect.steps if effect.steps else 1.0
-            start_level = battle.ground_height(*effect.start) + bolt.launch_height
-            end_level = battle.ground_height(*effect.dest) + effect.aim_height
-            height = start_level + (end_level - start_level) * t - battle.ground_height(effect.x, effect.y) + effect.arc
-            flights.append(Flight(effect.serial, effect.x, effect.y, max(0.0, height)))
+            if not flying:
+                if effect.serial in ended:
+                    continue
+                ended.add(effect.serial)
+            flights.append(Flight(effect.serial, effect.x, effect.y, max(0.0, effect.height), not flying))
         return flights
 
     def _spell_sprites(self) -> bytes:
         """Fireball head, trail puffs and explosion from the SPELLS set (bf003_playtest section 2), advanced once
         per battle tick. Other spells' frames are an open item: nothing is drawn for them.
-        PROVISIONAL anchor: the frame is centred on the point (the report leaves bottom-vs-centre open)."""
+        The anchor is each frame's own .FOL anchor (bf003_playtest 8.3: bottom-centre)."""
         field = self.scene.field
         visuals: FireballVisuals = self.__dict__.setdefault("_spell_visuals", FireballVisuals())
         tick = self.scene.battle.tick_count
@@ -870,7 +868,7 @@ class BattleView(SceneView[BattleScene]):
             frame, rect = sheet.frames[sprite.frame], _atlas_rect(sheet, sprite.frame)
             data += INSTANCE.pack(sprite.x / WORLD_PER_MESH,
                                   field.ground_height(sprite.x, sprite.y) + sprite.height / WORLD_PER_MESH,
-                                  sprite.y / WORLD_PER_MESH, *rect, frame.width / 2, frame.height / 2, 0.0)
+                                  sprite.y / WORLD_PER_MESH, *rect, frame.anchor_x, frame.anchor_y, 0.0)
         return bytes(data)
 
     def _item_markers(self) -> bytes:
