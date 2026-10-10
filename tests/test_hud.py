@@ -48,6 +48,7 @@ from whshr.battlefield import WORLD_PER_MESH
 from whshr.engine import Battle, Regiment
 from whshr.frontend.battle_view import BattleView
 from whshr.frontend.hud import FIXED_BUTTONS, MINIMAP_RECT, PANEL_RECT, Hud
+from whshr.frontend import hud as hud_module
 from whshr.rules import Side
 
 
@@ -662,6 +663,17 @@ class MinimapTests(unittest.TestCase):
         pixel = hud._world_to_map_pixel(500, 500)
 
         self.assertEqual(hud.minimap_target_at(_map_pos(hud, *pixel)), "enemy_b")
+
+    def test_given_an_order_target_over_a_melee_scrum_then_the_enemy_under_a_friend_wins(self):
+        # Friend on top of the foe it fights: an Attack/Fire click means the foe.
+        regiments = [Regiment("enemy_a", "EnemyA", 500, 500, 0, Side.ENEMY, models=10, hud_class="inf"),
+                     Regiment("friend_b", "FriendB", 500, 500, 0, Side.PLAYER, models=10, hud_class="inf"),
+                     Regiment("shooter", "Shooter", 900, 900, 0, Side.PLAYER, models=10, hud_class="arch")]
+        hud = self._stacked_hud(regiments)
+        hud.selected = "shooter"
+        pixel = hud._world_to_map_pixel(500, 500)
+
+        self.assertEqual(hud.minimap_target_at(_map_pos(hud, *pixel)), "enemy_a")
 
     def test_given_marker_mode_0_then_every_regiment_shows_its_banner(self):
         hud = _hud()
@@ -1581,8 +1593,6 @@ class CameraMarkerTests(unittest.TestCase):
         self.assertEqual(used["frame"], CAMERA_MARKER_FRAMES[4])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class ItemMarkerTests(unittest.TestCase):
@@ -1646,3 +1656,33 @@ class BattleViewEventConsumptionTests(unittest.TestCase):
                                      sender="Grudgebringers", message="Engage!")]
         view._consume_events()
         self.assertEqual(len(view.battle_log), 3)
+
+
+class OrderTargetHitTests(unittest.TestCase):
+    """hud.order_target_hit: an Attack/Fire click prefers a unit of another side than the acting one."""
+
+    def _unit(self, identifier, side):
+        return Regiment(identifier, identifier, 0, 0, 0, side, models=10)
+
+    def test_given_a_friend_on_top_of_an_enemy_then_the_enemy_is_the_target(self):
+        acting = self._unit("shooter", Side.PLAYER)
+        hits = [self._unit("enemy", Side.ENEMY), self._unit("friend", Side.PLAYER)]
+        self.assertEqual(hud_module.order_target_hit(hits, acting), "enemy")
+
+    def test_given_two_enemies_then_the_topmost_enemy_is_the_target(self):
+        acting = self._unit("shooter", Side.PLAYER)
+        hits = [self._unit("enemy_a", Side.ENEMY), self._unit("enemy_b", Side.ENEMY), self._unit("friend", Side.PLAYER)]
+        self.assertEqual(hud_module.order_target_hit(hits, acting), "enemy_b")
+
+    def test_given_only_friends_then_the_topmost_hit_is_kept(self):
+        # Fire on the shooter itself is the "search" order, so a friendly-only click is not dropped.
+        acting = self._unit("shooter", Side.PLAYER)
+        hits = [self._unit("friend", Side.PLAYER), acting]
+        self.assertEqual(hud_module.order_target_hit(hits, acting), "shooter")
+
+    def test_given_no_hits_then_there_is_no_target(self):
+        self.assertIsNone(hud_module.order_target_hit([], self._unit("shooter", Side.PLAYER)))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -41,7 +41,7 @@ from .ranged_sound import MissileSounds
 from .gpu import Gpu
 from .spell_visuals import FireballVisuals, Flight
 from .scene_view import SceneView
-from .hud import Hud, select_regiment_hit
+from .hud import Hud, order_target_hit, select_regiment_hit
 
 Point = tuple[int, int]
 WORLD_EFFECT_RESERVE = 512  # instances kept free for world effects (Fireball heads, puffs, explosions) so banners stay
@@ -479,9 +479,11 @@ class BattleView(SceneView[BattleScene]):
         x, y = ground_point or hits[-1][1]
         if not direct and self.order_mode is None:
             regiment_id = self._select_figure_hit(hits)
-        else:
-            regiment_id = hits[-1][0].identifier if hits else None
-        target_point = hits[-1][1] if hits else (x, y)
+        else:  # an order target: the foe where friend and foe overlap (hud.order_target_hit)
+            regiment_id = order_target_hit([regiment for regiment, _point in hits],
+                                           self.scene.battle.regiments.get(self.scene.selected_id or ""))
+        target_point = next((point for regiment, point in reversed(hits) if regiment.identifier == regiment_id),
+                            (x, y))
         # A building is a target of the attack order only when no regiment is under the click.
         building_id = self.scene.battle.building_at(x, y) if regiment_id is None and ground is not None else None
         if direct:
