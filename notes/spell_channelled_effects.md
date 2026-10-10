@@ -336,8 +336,10 @@ Cost 3, range 24" (576), arc ±50° (skipped in melee), unit target.
 3. The target's current **speed stat `s_rlmv`** and **Initiative I** are saved in the effect, then halved:
    `s_rlmv := floor(s_rlmv / 2)`, `I := floor(I / 2)`. Nothing else changes (M, the stat lines, T, A are untouched;
    `s_rlmv` is not recomputed from M and I, it is halved separately).
-4. A particle per target model follows the unit (presentation; each one draws **one random number** when its first
-   animation ends, about 4 ticks after the launch, in model order — replay detail 🟡).
+4. A spirit per target model follows that figure at ground level. Appearance frames 229–260 play on T…T+3;
+   at **T+4**, each remaining spirit draws **one random number**, in model order, to choose its starting
+   phase in the loop at frames 261–292. Both stages are directional. Exact timing, placement and cleanup:
+   `spell_attached_visuals.md` §3.
 
 Consequences: half movement, charge and flight speed (everything derived from `s_rlmv`); half Initiative for the
 strike segment (`game_rules.md` §5.1): **I 1 becomes 0, and a unit with I 0 makes no close-combat attacks at all**

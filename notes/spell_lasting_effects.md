@@ -3,6 +3,9 @@
 Issue #168, part B. Status markers: ✅ established, 🟡 hypothesis, ⬜ unresolved. Companion: `notes/spell_effects.md`
 (part A: the active-effect list, the magical hit, the bolt/beam spells).
 
+Presentation companion: `spell_attached_visuals.md` specifies Ere We Go and Mork Save Uz's per-figure
+sprite loops and confirms that Dispel Magic and Fists of Gork have no separate spell-effect art.
+
 Part A (`notes/spell_effects.md`) holds the effect framework (what an active effect holds and why it is kept, removal
 on caster death) and the magical hit. Read first, do not re-derive:
 `game_rules.md` §8 "Winds of magic and casting", "Spells", "Dispel and anti-magic", "Magic items in battle", "Death

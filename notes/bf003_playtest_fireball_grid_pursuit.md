@@ -263,8 +263,8 @@ Beam vector (Lightning: L = 4, A = 4; flat ground 0 at start and destination; st
   figures, the point is the **bottom-centre** of the sprite:
   - the head and puffs sit just above their 3-D point;
   - the explosion stands on the ground, like a figure.
-  🟡 This was not checked on screen. Use the frame's own anchor fields, read the same way as for unit sprites,
-  rather than a hard-coded centre.
+  The shared battle-sprite anchor rule is confirmed in `spell_attached_visuals.md` §2.2: use the frame's
+  own anchor fields. 🟡 An original-game screen comparison of Fireball placement remains outstanding.
 - **Other spells.** Not traced. Each spell has its own first frame in `SPELLS` and its own particle use (beams use
   a flash particle, not a head). Request a separate batch when they are implemented.
 
