@@ -69,7 +69,8 @@ Aim point: the target unit's position, or the target point (see §1). Two indepe
    described publicly; treat every non-hostile unit as friendly.
 2. **Crossbows (missile code 2) only**: the shot is refused if any unit **not hostile** to the shooter stands on
    the line of fire to the aim point (the missile-obstruction line test of "Routes, collisions and visibility").
-   This is the rule already noted in §8.1.
+   This is the rule already noted in §8.1. Exact geometry (which footprints, the far end cut at the aim point,
+   truncated bearings) and test vectors: `player_missile_orders.md` §3.
 
 If neither check refuses, the condition is true. A shooter that is neither independent nor a crossbow unit always
 gets true when it has a target. `TargetValid` does not test range, arc or the broken flag.
