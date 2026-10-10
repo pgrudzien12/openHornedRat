@@ -63,7 +63,7 @@ class PushApartTests(unittest.TestCase):
 
     def test_a_push_ahead_of_a_charging_mover_ends_the_charge(self):
         with mock.patch.object(Regiment, "bounding_radius", return_value=30):
-            charger, friend = unit("A", 500, 500), unit("B", 500, 540)  # B straight ahead (facing 0 = +y)
+            charger, friend = unit("A", 500, 500), unit("B", 500, 520)  # B straight ahead (facing 0 = +y), boxes overlapping
             enemy = unit("E", 500, 900, Side.ENEMY)
             battle = Battle(2000, 2000, [charger, friend, enemy], seed=1995)
             charger.attack_target = charger.charge_started_target = "E"
@@ -71,6 +71,26 @@ class PushApartTests(unittest.TestCase):
             battle._resolve_collisions()
             self.assertIsNone(charger.attack_target)
             self.assertIn(0x09, [e.code for e in battle.event_bus.unit_states["E"].event_queue])
+
+    def test_lines_with_ground_between_them_are_not_pushed_although_their_circles_overlap(self):
+        # notes/script_behaviours.md 2.2 "Against what": broad phase on the circles, then the narrow phase on the boxes.
+        # Two 12-wide single-rank lines (radius 72), one 30 behind the other: 18 units of open ground between them.
+        rear = Regiment("A", "A", 500, 500, 0, Side.PLAYER, models=12, ranks=1, points=10)
+        front = Regiment("B", "B", 500, 530, 0, Side.PLAYER, models=12, ranks=1, points=10)
+        battle = self.pass_for(rear, front)
+        self.assertEqual(((rear.x, rear.y), (front.x, front.y)), ((500, 500), (500, 530)))
+        self.assertFalse(front.collision_recheck)
+        battle._push_apart_pass(rear, [rear, front])
+        self.assertEqual((rear.y, front.y), (500, 530))
+
+    def test_overlapping_lines_are_pushed_apart_along_the_box_centres(self):
+        # A five-rank column whose rear ranks overlap a line placed behind it: the box centre of the column is 24
+        # behind its front rank, so the push runs along the centre line (straight +y/-y), not from the front rank.
+        column = Regiment("A", "A", 500, 500, 0, Side.PLAYER, models=10, ranks=5, points=10)
+        line = Regiment("B", "B", 510, 460, 0, Side.PLAYER, models=12, ranks=1, points=10)
+        self.pass_for(column, line)
+        self.assertGreater(column.y, 500)  # moved forward, away from the line behind it
+        self.assertLess(abs(column.x - 500), abs(column.y - 500))
 
     def test_no_pass_without_the_re_check_state(self):
         mover, friend = unit("A", 500, 500), unit("B", 510, 500)
@@ -148,16 +168,21 @@ class PushApartTests(unittest.TestCase):
             battle.tick()
             self.assertEqual((mover.x, friend.x), (493, 553))
 
-    def test_enemy_machine_with_overlapping_circles_gets_its_re_check_state_on(self):
+    def test_enemy_machine_with_overlapping_footprints_gets_its_re_check_state_on(self):
         with mock.patch.object(Regiment, "bounding_radius", return_value=22.5):
-            mover, cart = unit("A", 500, 500), wagon("W", 543, 500, Side.ENEMY)
+            mover, cart = unit("A", 500, 500), wagon("W", 535, 500, Side.ENEMY)  # boxes overlap by 7
             battle = Battle(2000, 2000, [mover, cart], seed=1995)
             battle._push_apart_pass(mover, [mover, cart])
-            self.assertEqual((mover.x, cart.x), (500, 543))  # not pushed apart
+            self.assertEqual((mover.x, cart.x), (500, 535))  # not pushed apart
             self.assertTrue(cart.collision_recheck)
             cart.collision_recheck = False  # the contact sweep visited it
             battle._restore_carried_rechecks()
             self.assertTrue(cart.collision_recheck)
+        with mock.patch.object(Regiment, "bounding_radius", return_value=22.5):
+            mover, cart = unit("A", 500, 500), wagon("W", 543, 500, Side.ENEMY)  # circles overlap, boxes 1 apart
+            battle = Battle(2000, 2000, [mover, cart], seed=1995)
+            battle._push_apart_pass(mover, [mover, cart])
+            self.assertFalse(cart.collision_recheck)
 
 
 if __name__ == "__main__":

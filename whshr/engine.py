@@ -2961,21 +2961,23 @@ class Battle:
     def _resolve_collisions(self, deployment_id: str | None = None) -> None:
         """Push regiments apart (a simplified push-apart; game_rules.md, "Routes, collisions and visibility"), not
         the polygon obstruction routing (`Nav*`). In the battle phase the pass runs for the units whose collision
-        re-check state is on, in identifier order (`_push_apart_pass`); during deployment only the dragged
+        re-check state is on, in identifier order: boundary, scenery and building correction, then `_push_apart_pass`.
+        A unit that has stood still since load has no pass, so nothing moves it (notes/hidden_reserves_off_field.md 0,
+        3; notes/bf003_wolfriders_route.md item 4); during deployment only the dragged
         regiment yields to the regiments it overlaps, so scripted deployments that already overlap (BF001's
         Grudgebringer cavalry and infantry) stay where the script placed them.
         """
         regiments = [self.regiments[key] for key in sorted(self.regiments) if self.regiments[key].active]
         if deployment_id is None:
-            for regiment in regiments:
-                self._correct_boundaries(regiment)
-                self._correct_solid_objects(regiment)
-                self._correct_buildings(regiment)
             for mover in regiments:
                 if mover.collision_recheck:
                     self._recheck_carry.discard(mover.identifier)  # its own pass consumes the state
                     if self.interpreter is None:  # no scripted contact pass consumes the state afterwards
                         mover.collision_recheck = False
+                    if not self._marked(mover):  # notes/script_behaviours.md 2.2: a marked unit has no pass at all
+                        self._correct_boundaries(mover)
+                        self._correct_solid_objects(mover)
+                        self._correct_buildings(mover)
                     self._push_apart_pass(mover, regiments)
             return
         # notes/deployment.md 2: collision correction follows the zone clipping, with no final zone clamp.
@@ -3007,30 +3009,38 @@ class Battle:
             if may_engage(mover, other):
                 machine = (mover.is_wagon or mover.hud_class == "art") or (other.is_wagon or other.hud_class == "art")
                 if not (machine and (mover.routing or (mover.reforming and mover.reform_walk_back))):
-                    if machine and self._circles_overlap(mover, other):
+                    if machine and self._footprints_overlap(mover, other):
                         self._carry_recheck(other)  # notes/script_behaviours.md 2.2: U re-check on, contact or not
                     continue
             elif mover.routing or mover.pursuing or other.pursuing:
                 continue
             if pushed or mover.is_wagon:
-                if self._circles_overlap(mover, other):
+                if self._footprints_overlap(mover, other):
                     self._carry_recheck(mover, other)
                 continue
             pushed = self._push_self(mover, other)
 
-    @staticmethod
-    def _circles_overlap(first: Regiment, second: Regiment) -> bool:
-        return math.hypot(first.x - second.x, first.y - second.y) < first.bounding_radius() + second.bounding_radius()
+    @classmethod
+    def _footprints_overlap(cls, first: Regiment, second: Regiment) -> bool:
+        """The collision pass's overlap test (notes/script_behaviours.md 2.2, "Against what"): broad phase on the
+        bounding circles around the two footprint-box centres (trunc(centre distance) - both radii < 0), then the
+        narrow phase on the boxes themselves, so circles that overlap across visibly empty ground do not collide."""
+        (ax, ay), (bx, by) = cls.formation_centre(first), cls.formation_centre(second)
+        if math.trunc(math.hypot(bx - ax, by - ay)) - first.bounding_radius() - second.bounding_radius() >= 0:
+            return False
+        return formation.boxes_overlap(first.block(), second.block())
 
     def _push_self(self, mover: Regiment, other: Regiment) -> bool:
-        """Move `mover` away from `other` by (|o| + 2) / 2 along the line between the centres, per axis
+        """When the two footprints overlap (`_footprints_overlap`), move `mover` away from `other` by (|o| + 2) / 2
+        along the line between the footprint-box centres ("object centres", notes/script_behaviours.md 2.2), per axis
         trunc(trunc(SIN/COS[bearing] x (o - 2) / 256) / 2) with o = trunc(distance) - both radii (negative); switch
         both re-check states on; end a charge that meets the footprint within +-45 degrees of its facing. Returns
         whether a push was made."""
-        dx, dy = other.x - mover.x, other.y - mover.y
-        overlap = math.trunc(math.hypot(dx, dy)) - mover.bounding_radius() - other.bounding_radius()
-        if overlap >= 0:
+        if not self._footprints_overlap(mover, other):
             return False
+        (mx, my), (ox, oy) = self.formation_centre(mover), self.formation_centre(other)
+        dx, dy = ox - mx, oy - my
+        overlap = math.trunc(math.hypot(dx, dy)) - mover.bounding_radius() - other.bounding_radius()
         bearing = round(math.atan2(dx, dy) * 512 / math.tau) % 512 if (dx or dy) else 0
         angle = bearing * math.tau / 512
         shift_x = math.trunc(math.trunc(math.trunc(256 * math.sin(angle)) * (overlap - 2) / 256) / 2)
@@ -3168,8 +3178,14 @@ class Battle:
                    if boundary.solid or boundary.inverse or boundary.battle_edge)
 
     def _correct_boundaries(self, regiment: Regiment) -> None:
+        """Move the footprint centre halfway towards the nearest legal point of a solid, inverse-solid or BattleEdge
+        boundary (notes/movement_boundaries_route_finding.md). Skipped for a routing unit and for a hidden unit of the
+        enemy or allied army, which may wait in an off-field pocket until its script places it; a hidden player-army
+        unit is still corrected (notes/hidden_reserves_off_field.md 1)."""
         if regiment.routing:
             return  # notes/flight_solid_obstacles.md 4: routing units get no boundary correction of any kind
+        if regiment.hidden and regiment.side is not Side.PLAYER:
+            return
         for boundary in self.navigation_boundaries:
             if not (boundary.solid or boundary.inverse or boundary.battle_edge):
                 continue
@@ -3182,7 +3198,7 @@ class Battle:
             dx = math.trunc((nearest[0] - centre[0]) / 2)
             dy = math.trunc((nearest[1] - centre[1]) / 2)
             self._translate_regiment(regiment, dx, dy)
-            regiment.collision_recheck = True
+            self._carry_recheck(regiment)  # the correction moved it: its next pass corrects again
             if not regiment.pursuing:  # notes/pursuit_map_edge.md 3: the correction only pushes a pursuer
                 self._end_charge_on_obstruction(regiment, "a movement boundary")
 
@@ -3335,6 +3351,7 @@ class Battle:
             push = (radius - distance) / 2
             shift_x, shift_y = ux * push, uy * push
             self._translate_regiment(regiment, shift_x, shift_y)
+            self._carry_recheck(regiment)  # notes/hidden_reserves_off_field.md 0: a push switches re-check on
             centre = centre[0] + shift_x, centre[1] + shift_y
 
     def _reroute_flight(self, regiment: Regiment) -> None:

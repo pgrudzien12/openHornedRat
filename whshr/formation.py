@@ -104,6 +104,12 @@ def penetrates(a: Block, b: Block, spacing: float = MODEL_SPACING) -> bool:
     return _polygons_overlap(footprint_corners(*a, spacing), footprint_corners(*b, spacing))
 
 
+def boxes_overlap(a: Block, b: Block, spacing: float = MODEL_SPACING) -> bool:
+    """The narrow phase alone: whether the two blocks' oriented footprint boxes overlap (the same
+    separating-axis test `penetrates` uses after its broad phase)."""
+    return _polygons_overlap(footprint_corners(*a, spacing), footprint_corners(*b, spacing))
+
+
 def turn_pivot_shift(direction: float | None, new_direction: float | None, models: int, ranks: int,
                      spacing: float = MODEL_SPACING) -> Point:
     """The offset a block's anchor must move by so that an in-place turn pivots about the **block
