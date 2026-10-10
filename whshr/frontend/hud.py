@@ -51,8 +51,10 @@ def select_regiment_hit(hits: Sequence["Regiment"], selected: str | None) -> str
 def order_target_hit(hits: Sequence["Regiment"], acting: "Regiment | None") -> str | None:
     """Choose the target of an order aimed at the enemy (Attack, Fire, item launches, and any enemy-targeted
     spell order to come) from a bottom-to-top hit stack: the topmost unit of another side than the acting
-    regiment, else the topmost hit. Where friend and foe overlap (a melee scrum) the player means the foe. An
-    engine choice, not a documented original rule; an order aimed at friends would need the opposite preference."""
+    regiment, else the topmost hit. Where friend and foe overlap (a melee scrum) the player means the foe. For
+    Attack this agrees with the original, which only considers enemy-army units. DEVIATION for Fire: the original
+    takes the first footprint near the point of any side, friends included (notes/player_missile_orders.md 5); the
+    foe preference is a deliberate usability choice. An order aimed at friends would need the opposite preference."""
     if not hits:
         return None
     if acting is not None:
