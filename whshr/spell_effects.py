@@ -13,9 +13,9 @@ Engine design (not the original's): active effects live in an unbounded list in 
 and an "ended" flag; area objects are kept in a list of their own owned by the effect. There is no fixed effect
 capacity, so no launch fails for lack of room, and effects update in launch order.
 
-Not modelled: the per-quarter casualty panic of game_rules.md 7.2 (the engine has it for no damage source yet);
-presentation-only draws other than
-those the reports say matter for replays.
+The per-quarter casualty panic of game_rules.md 7.2 runs for every death (combat.casualty_panic).
+
+Not modelled: presentation-only draws other than those the reports say matter for replays.
 """
 from __future__ import annotations
 
@@ -721,15 +721,11 @@ def slay(battle: Battle, unit: Regiment, count: int | None, kind: int, caster: s
 
 
 def _panic(battle: Battle, unit: Regiment) -> bool:
-    """A panic test at modifier 0 (game_rules.md 7.1); failure routs. True when it failed. PROVISIONAL: a routing
-    or CantBreak unit does not test, a held unit cannot start a rout (C1 3.3)."""
-    if not unit.active or unit.routing or "CantBreak" in unit.psychology:
+    """A panic test at modifier 0 (game_rules.md 7.1). True when it failed. Every unit tests; a failure is a rout
+    request that the unit's handler filters (broken, CantBreak, artillery, thorn-held; notes/panic_tests.md 3)."""
+    if not unit.active:
         return False
-    if combat.leadership_test(unit.effective_leadership, battle.rng):
-        return False
-    if not unit.held:
-        combat.start_rout(unit, battle)
-    return True
+    return combat.panic_test(battle, unit, 0, "spell")
 
 
 def _panic_inside(battle: Battle, x: float, y: float) -> None:
