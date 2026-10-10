@@ -938,15 +938,18 @@ class Hud:
                     (self.gpu.text((SPELL_NAME_WIDTH, 18), self.gpu.battle_log_font, background=None, padding=0),
                      self.gpu.text((SPELL_COST_WIDTH, 18), self.gpu.battle_log_font, background=None, padding=0)))
             name_label, cost_label = self._spell_labels[index]
-            name_label.set_lines((self._spell_name(code),))
+            text_height = name_label.set_lines((self._spell_name(code),))[1]
             cost_label.set_lines((str(magic.cost(code)),))
             usable = self.battle.spell_usable(regiment.identifier, code)
             pressed = self.pressed == f"spell:{code}"
             rect = self._list_row_rect(index)
             self._draw_panel(self._icon(ROW_FRAMES[0] if usable and not pressed else ROW_FRAMES[1]), rect.x, rect.y)
             tint = (1, 1, 1, 1) if usable else (0.45, 0.45, 0.45, 0.85)
-            self._draw_panel(name_label, rect.x + 5, rect.y, SPELL_NAME_WIDTH, 18, tint=tint)
-            self._draw_panel(cost_label, rect.x + 5 + SPELL_NAME_WIDTH, rect.y, SPELL_COST_WIDTH, 18, tint=tint)
+            # The text is centred vertically inside the row frame's border, and follows a held row down by 1 px.
+            text_y = rect.y + (rect.height - text_height) // 2 + int(pressed and usable)
+            text_x = rect.x + 5 + int(pressed and usable)
+            self._draw_panel(name_label, text_x, text_y, SPELL_NAME_WIDTH, 18, tint=tint)
+            self._draw_panel(cost_label, text_x + SPELL_NAME_WIDTH, text_y, SPELL_COST_WIDTH, 18, tint=tint)
             x = rect.x
             for frame in self._spell_marks(regiment, code):
                 quad = self._icon(frame)
