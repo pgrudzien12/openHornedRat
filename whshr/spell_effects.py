@@ -110,6 +110,7 @@ BOLTS: dict[int, Bolt] = {
 }
 SPEAR = Bolt("unit", 8, 8, False, True, 6, 3, False, False)  # A 3.5: 8 above the ground everywhere
 STORM_BOLT = BOLTS[LIGHTNING]  # C2 1.3: each Storm bolt is a Lightning-type beam
+LOGGED_FLIGHTS = frozenset({*BOLTS, STORM})  # flights with launch/strike/end battle-log records (bf003_playtest 3.1)
 GUST = Bolt("origin", 0, 0, False, False, 3, 1, True, False)  # C1 1.3: height 0, S3, 1 wound, save
 UNIT_TARGET = frozenset({AZURE_BLADES, HUNTING_SPEAR, CURSE, ERE_WE_GO, MORK_SAVE_UZ, MADNESS})  # B 0.1
 REPLACING = frozenset({WIND_BLAST, FLAMESTORM, TANGLING_THORN})  # C1 6 (Curse replaces only with a target, C2 4.1)
@@ -461,6 +462,10 @@ def _start_projectile(battle: Battle, effect: Effect, start: tuple[float, float]
                       arched: bool = False) -> None:
     """Start point, scatter and flight length (A 2.1-2.3)."""
     dest = _scatter(battle.rng, start, aim, bs, reach)
+    # bf003_playtest 8.2: start and destination are whole units, rounded once at launch (toward zero), so the
+    # first flight position is exactly the start and the ground under it is the ground the launch line starts from.
+    start = (float(math.trunc(start[0])), float(math.trunc(start[1])))
+    dest = (float(math.trunc(dest[0])), float(math.trunc(dest[1])))
     effect.start, effect.dest = start, dest
     effect.x, effect.y = start
     effect.terminal_height = _flying_aim_height(battle, *dest)
@@ -471,6 +476,8 @@ def _start_projectile(battle: Battle, effect: Effect, start: tuple[float, float]
     effect.flying = True
     effect.arched = arched
     effect.arc = 0
+    if effect.code not in LOGGED_FLIGHTS:
+        return  # Wind Blast's gust has no strike or end records either
     battle.events.append(BattleEvent(
         f"spell {effect.code} bolt launched", "spell_bolt_launch", regiment=effect.owner, spell=effect.code,
         serial=effect.serial, start=list(start), aim=list(aim), dest=list(dest), steps=effect.steps))
@@ -618,10 +625,11 @@ def magical_hit(battle: Battle, unit: Regiment, impact: Impact, trace: dict[str,
     elif not _wound_roll(battle, unit, impact.strength, impact.save, impact.fire, index, trace):
         return
     dead: set[int] = set()
+    before = unit.models
     trace["wounds"] = wounds = rng.randrange(impact.wound_die) + 1
     _wound(unit, index, wounds, dead)
     _kill(battle, unit, dead, impact)
-    trace["killed"] = len(dead)
+    trace["killed"] = before - unit.models  # what was removed: a CantDie unit loses nobody
 
 
 def impact_test(battle: Battle, x: float, y: float, height: float, impact: Impact, excluded: str | None,
@@ -785,10 +793,12 @@ def _finish(effect: Effect) -> None:
 
 def _height_above_ground(battle: Battle, effect: Effect, bolt: Bolt, x: float, y: float) -> float:
     """A 2.1: L + line(t) - ground(here), the line running from ground(start) + L to ground(destination) + A."""
-    t = 1 - effect.remaining / effect.steps if effect.steps else 1.0
-    start_level = battle.ground_height(*effect.start) + bolt.launch_height
-    end_level = battle.ground_height(*effect.dest) + effect.aim_height
-    return bolt.launch_height + start_level + (end_level - start_level) * t - battle.ground_height(x, y)
+    start_level = math.trunc(battle.ground_height(*effect.start)) + bolt.launch_height
+    end_level = math.trunc(battle.ground_height(*effect.dest)) + math.trunc(effect.aim_height)
+    # bf003_playtest 8.2: line(r) = trunc((startLevel - endLevel) r / N) + endLevel, whole numbers throughout.
+    line = math.trunc((start_level - end_level) * effect.remaining / effect.steps) + end_level if effect.steps \
+        else end_level
+    return bolt.launch_height + line - math.trunc(battle.ground_height(x, y))
 
 
 def _fly(battle: Battle, effect: Effect, bolt: Bolt) -> bool:
@@ -802,11 +812,8 @@ def _fly(battle: Battle, effect: Effect, bolt: Bolt) -> bool:
     r = effect.remaining
     sx, sy = effect.start
     dx, dy = effect.dest
-    if r == effect.steps:
-        x, y = sx, sy
-    else:
-        x = dx + int((sx - dx) * r / effect.steps)
-        y = dy + int((sy - dy) * r / effect.steps)
+    x = dx + int((sx - dx) * r / effect.steps)  # r = N gives the (whole) start exactly
+    y = dy + int((sy - dy) * r / effect.steps)
     effect.x, effect.y = x, y
     if effect.code == FIREBALL or effect.arched:
         effect.arc += 1 if 2 * r > effect.steps else -1
@@ -818,6 +825,11 @@ def _fly(battle: Battle, effect: Effect, bolt: Bolt) -> bool:
     effect.remaining -= 1
     if height < 0:
         _log_end(battle, effect, "below_ground", x, y, height)
+        return True
+    if hit and bolt.stops and not bolt.beam:
+        # spell_effects.md 2.4: the terminal impact needs the projectile still alive; only a beam's terminal impact
+        # also follows a same-tick hit.
+        _log_end(battle, effect, "hit", x, y, height)
         return True
     terminal = (_d(x, y, dx, dy) < BEAM_TERMINAL) if bolt.beam else r == 0
     if terminal:
@@ -1335,7 +1347,7 @@ def _end(battle: Battle, effect: Effect) -> None:
 
 def cancel(battle: Battle, effect: Effect) -> None:
     """Immediate removal through the end step: no impact, projectile and area objects gone (A 1.4)."""
-    if effect.code in BOLTS and effect.flying and not effect.ended and effect.tail < 0:
+    if effect.code in LOGGED_FLIGHTS and effect.flying and not effect.ended and effect.tail < 0:
         _log_end(battle, effect, "cancelled", effect.x, effect.y, 0.0)
     _end(battle, effect)
 

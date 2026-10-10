@@ -130,7 +130,7 @@ class ActivatedItemTests(unittest.TestCase):
 
         self.assertEqual(spell_effects.table(battle).effects(), [])
         self.assertIn("ItemGrudgeBringer", bearer.used_items)
-        self.assertIn(2021, [event.data.get("text_id") for event in battle.events])
+        self.assertIn(2021, [event.data.get("text_id") for event in battle.pending_feedback])  # reported with the next tick
 
     def test_cancelled_or_held_item_remains_used_and_potion_is_once_per_battle(self):
         bearer = unit("G", 0, 0, Side.PLAYER,
@@ -300,6 +300,53 @@ class BeamTests(EffectTestCase):
             self.launch(spell_effects.LIGHTNING, 0, 400)
             self.update(25)
         self.assertEqual(hits, [])
+
+
+    def test_a_beam_survives_at_height_zero_and_a_ridge_one_higher_removes_it_after_the_test(self):
+        """bf003_playtest 8.2: Lightning L = A = 4, start (0, 0), destination (0, 200), N = 11; height = 8 - ground.
+        r = 6 at (0, 91) over ground 8 flies on at exactly 0; r = 5 at (0, 110) over a 9-high ridge tests at -1
+        (a ground unit there is struck), then the beam is removed with no terminal impact."""
+        self.radii = {"E": 5}
+        self.make(unit("E", 0, 110))
+        self.battle.ground_height = lambda x, y: {91: 8.0, 110: 9.0}.get(int(y), 0.0)
+        hits, patch = record_hits()
+        with patch:
+            self.launch(spell_effects.LIGHTNING, 0, 200)
+            effect = self.effects()[0]
+            self.assertEqual((effect.dest, effect.steps), ((0, 200), 11))
+            self.update(6)
+            self.assertEqual(((effect.x, effect.y), self.bolt_ends()), ((0, 91), []))
+            self.update()
+        self.assertEqual([name for name, _ in hits], ["E"])
+        self.assertEqual([(end.data["reason"], end.data["height"]) for end in self.bolt_ends()], [("below_ground", -1)])
+        self.assertEqual(self.messages(2004), [])
+
+    def test_without_the_ridge_the_beam_reaches_its_terminal_impact_at_r_2(self):
+        self.make()
+        self.battle.ground_height = lambda x, y: 0.0
+        self.launch(spell_effects.LIGHTNING, 0, 200)
+        self.update(9)
+        self.assertEqual(self.bolt_ends(), [])
+        self.update()
+        self.assertEqual([(end.data["reason"], end.data["y"]) for end in self.bolt_ends()], [("terminal", 200)])
+
+
+    def test_a_stopping_bolt_that_hits_at_its_destination_strikes_once_and_has_no_terminal_impact(self):
+        """spell_effects.md 2.4: the terminal impact needs the projectile still alive (review of #236)."""
+        self.radii = {"E": 5}
+        self.make(unit("E", 0, 360))
+        hits, patch = record_hits()
+        with patch:
+            self.launch(spell_effects.PIERCING, 0, 360)
+            self.update(spell_effects.FIXED_FLIGHT + 1)
+        self.assertEqual([name for name, _ in hits], ["E"])
+        self.assertEqual([end.data["reason"] for end in self.bolt_ends()], ["hit"])
+        self.assertEqual(self.messages(2004), [])
+
+    def test_wind_blast_logs_no_bolt_launch(self):
+        self.make()
+        self.launch(spell_effects.WIND_BLAST, 0, 300)
+        self.assertEqual([event for event in self.battle.events if event.kind == "spell_bolt_launch"], [])
 
 
 class MagicalHitTests(EffectTestCase):
