@@ -2030,9 +2030,10 @@ it makes units break more often but **independently**, not in unison.
 
 When a model is killed (any cause), with `q = orgsize >> 2` (so only units of 4 or more models):
 if `floor(size_before / q) != floor(size_after / q)`, the unit tests with
-`modifier = 1 − floor(size_after / q)`. For a 16-model unit that is −2 at the first loss below
-16, −1 below 12, 0 below 8 and +1 below 4; each quarter of the original strength lost costs one test,
-and the tests get harder. A failed test routs the unit (event 0x0C). The debug output prints
+`modifier = 1 − floor(size_after / q)`, **except** that a unit losing a model while exactly at its organisational
+strength (`size_before == orgsize`) never tests (corrected October 2026, `panic_tests.md`). For a 16-model unit at full
+strength that is no test for the first loss, −1 below 12, 0 below 8 and +1 below 4; each quarter of the original
+strength lost costs one test, and the tests get harder. A failed test routs the unit (event 0x0C). The debug output prints
 "at −1 while pursuing" for pursuing units but uses the same modifier.
 
 The area damage routine (missiles and spells, section 8.4) can additionally order a panic test at
@@ -2368,7 +2369,8 @@ against buildings, saves, magical, flags, messages. For every map object at dist
     `n = (footprint + radius − d) × size / (footprint + radius)`, at least 1, random models (with repetition)
     at **S/2 for exactly 1 wound**, with an armour save at S/2 and the `MagicResistent` roll as above; units in the
     air are not struck by height-0 blasts (`notes/spell_blades_flock_items.md` §1).
-  - Afterwards flag `0x80` → panic test if `size ≤ orgsize / 4`; flag `0x40` → rout.
+  - Afterwards, **for a direct hit only** (not the blast margin; corrected October 2026, `panic_tests.md`): flag `0x80` →
+    panic test at modifier 0 if `size ≤ orgsize >> 2` (size before this impact's deaths); flag `0x40` → rout.
 - **Buildings and furniture**: the owning unit's first model takes `TO_WOUND[S2][T]` and the wound die
   (direct) or S2/2 and 1 wound (margin), no saves.
 - A terminal impact does not exclude the firer, so a shot that scatters back can hit its own unit.
