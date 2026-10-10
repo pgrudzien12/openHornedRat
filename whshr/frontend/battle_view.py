@@ -39,7 +39,8 @@ from .battle_text import display_text, reaction_text
 from .battle_sound import BattleSounds
 from .ranged_sound import MissileSounds
 from .gpu import Gpu
-from .spell_visuals import DirectionalSprite, FireballVisuals, Flight, ProjectileVisuals, projectile_shots
+from .spell_visuals import (AttachedVisuals, DirectionalSprite, FireballVisuals, Flight, ProjectileVisuals,
+                            attached_effects, projectile_shots)
 from .scene_view import SceneView
 from .hud import Hud, order_target_hit, select_regiment_hit
 
@@ -981,11 +982,12 @@ class BattleView(SceneView[BattleScene]):
         The anchor is each frame's own .FOL anchor (bf003_playtest 8.3: bottom-centre)."""
         field = self.scene.field
         visuals, projectiles = self._advance_spell_visuals()
+        attached: AttachedVisuals = self.__dict__.setdefault("_attached_visuals", AttachedVisuals())
         sheet = field.ui_sheets.get("spells")
         if sheet is None or not sheet.rects:
             return b""
         data = bytearray()
-        for sprite in [*visuals.sprites(), *projectiles.sprites()]:
+        for sprite in [*visuals.sprites(), *projectiles.sprites(), *attached.sprites()]:
             number = (sprite.first + sprite_direction(self.camera.yaw, sprite.bearing)
                       if isinstance(sprite, DirectionalSprite) else sprite.frame)
             if number >= len(sheet.frames) or sheet.rects[number] is None:
@@ -1005,6 +1007,8 @@ class BattleView(SceneView[BattleScene]):
         if tick != self.__dict__.get("_spell_tick"):
             self.__dict__["_spell_tick"] = tick
             visuals.advance(self._fireball_flights())
+            attached: AttachedVisuals = self.__dict__.setdefault("_attached_visuals", AttachedVisuals())
+            attached.advance(attached_effects(battle))
             memory: dict[int, list[Any]] = self.__dict__.setdefault("_projectile_memory", {})
             shots, storms = projectile_shots(battle.spell_effects.active, memory)
             projectiles.advance(shots)

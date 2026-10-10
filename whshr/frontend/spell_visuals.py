@@ -10,16 +10,21 @@ advanced once per battle tick:
 - explosion: frames 177..185 from the ending tick (no head then), on the ground at the last tested position.
 
 The other projectile spells (Hunting Spear, the Lightning family, Piercing Bolts, the Burning Head, Pestilent
-Breath) follow notes/spell_visuals.md in `ProjectileVisuals` below.
+Breath) follow notes/spell_visuals.md in `ProjectileVisuals` below; the spells drawn on their target's figures (Curse
+of Anraheir, Azure Blades, Ere We Go!, Mork Save Uz!) follow notes/spell_attached_visuals.md in `AttachedVisuals`.
 """
 from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 import math
-from typing import Any
+import random
+from typing import TYPE_CHECKING, Any
 
 from .. import spell_effects
+
+if TYPE_CHECKING:
+    from ..engine import Battle
 
 HEAD_FIRST, HEAD_COUNT = 125, 4
 PUFF_FIRST, PUFF_FRAMES = 125, 20
@@ -336,3 +341,89 @@ def projectile_shots(effects: Iterable[spell_effects.Effect],
         shots.append(Shot((effect.serial, 0), code, effect.x, effect.y, height, effect.start, effect.dest,
                           effect.remaining, effect.steps, ending=not flying))
     return shots, storms
+
+
+# ===== Spells drawn on their target's figures (notes/spell_attached_visuals.md) =====
+#
+# One sprite per current figure of the target unit, at the figure's ground point (Azure Blades 16 units above it),
+# following the figures as they move; gone on the update the effect ends. Dispel Magic and Fists of Gork have no
+# effect art at all (section 5), so they are simply not listed here. The colour banks of section 1 are the maps the
+# SPELLS frames already decode with (frames 229-292 bank 0, 293-528 bank +16).
+
+CURSE_APPEARANCE, CURSE_LOOP, CURSE_APPEARANCE_TICKS = 229, 261, 4  # section 3.1: 4 phases x 8 directions each
+SPARKLES: dict[int, tuple[int, float]] = {  # section 1, 4: first of a 4-frame loop, height above local ground
+    spell_effects.AZURE_BLADES: (387, 16.0), spell_effects.ERE_WE_GO: (470, 0.0), spell_effects.MORK_SAVE_UZ: (486, 0.0),
+}
+ATTACHED_CODES = frozenset({spell_effects.CURSE, *SPARKLES})
+
+
+@dataclass(frozen=True)
+class Attachment:
+    """One active attached effect seen this tick: `age` is the ticks since launch (0 on the launch tick T), `figures`
+    the target's current figure positions in figure order, `facing` the target unit's facing (1/512 turn)."""
+    serial: int
+    code: int
+    age: int
+    figures: tuple[tuple[float, float], ...]
+    facing: int
+
+
+@dataclass
+class AttachedVisuals:
+    """Presentation state of the attached spells, advanced once per battle tick with the effects active after the
+    tick's effect update. Frames follow from the age alone, so they keep advancing off-screen and while several
+    battle ticks pass between two drawn frames; only the Curse's loop phases are remembered.
+
+    The Curse (section 3): appearance phase `age` (all figures together) for ticks T..T+3, then the loop; at its start
+    each figure draws r and starts at loop phase 3 - r mod 4, then advances one phase per tick. Direction is the
+    camera-relative octant of the unit's facing. Sparkles (section 4): every figure shows frame `first + age mod 4`.
+    PROVISIONAL: the loop-start draws come from this presentation generator, not the battle's, so a headless replay
+    and a drawn battle stay identical. Not specified, and so not modelled specially: figures added to a cursed unit
+    (one beyond the remembered phases loops as if it had drawn r = 3)."""
+    rng: random.Random = field(default_factory=lambda: random.Random(1995))
+    phases: dict[int, list[int]] = field(default_factory=dict[int, list[int]])
+    current: list[Attachment] = field(default_factory=list[Attachment])
+
+    def advance(self, seen: Iterable[Attachment]) -> None:
+        self.current = [attachment for attachment in seen if attachment.code in ATTACHED_CODES]
+        alive = {attachment.serial for attachment in self.current}
+        self.phases = {serial: phases for serial, phases in self.phases.items() if serial in alive}
+        for attachment in self.current:
+            if (attachment.code == spell_effects.CURSE and attachment.age >= CURSE_APPEARANCE_TICKS
+                    and attachment.serial not in self.phases):
+                self.phases[attachment.serial] = [3 - self.rng.randrange(4) for _ in attachment.figures]
+
+    def sprites(self) -> list[Sprite | DirectionalSprite]:
+        drawn: list[Sprite | DirectionalSprite] = []
+        for attachment in self.current:
+            if attachment.code == spell_effects.CURSE:
+                drawn += [DirectionalSprite(self._curse_first(attachment, index), x, y, 0.0, attachment.facing)
+                          for index, (x, y) in enumerate(attachment.figures)]
+            else:
+                first, height = SPARKLES[attachment.code]
+                drawn += [Sprite(first + attachment.age % 4, x, y, height) for x, y in attachment.figures]
+        return drawn
+
+    def _curse_first(self, attachment: Attachment, index: int) -> int:
+        """The first of the 8 directional frames for figure `index` this tick."""
+        if attachment.age < CURSE_APPEARANCE_TICKS:
+            return CURSE_APPEARANCE + 8 * attachment.age
+        phases = self.phases.get(attachment.serial, [])
+        start = phases[index] if index < len(phases) else 0
+        return CURSE_LOOP + 8 * ((start + attachment.age - CURSE_APPEARANCE_TICKS) % 4)
+
+
+def attached_effects(battle: Battle) -> list[Attachment]:
+    """The attached spells active after this tick's effect update (notes/spell_attached_visuals.md 2): an effect that
+    ended, or whose target is gone, draws nothing. The age counts from the launch tick, whose update has already run
+    (`elapsed` counts the updates)."""
+    seen: list[Attachment] = []
+    for effect in battle.spell_effects.active:
+        if effect.ended or effect.code not in ATTACHED_CODES or effect.target is None:
+            continue
+        target = battle.regiments.get(effect.target)
+        if target is None or not target.active:
+            continue
+        seen.append(Attachment(effect.serial, effect.code, max(0, effect.elapsed - 1),
+                               tuple(target.model_positions()), int(target.direction)))
+    return seen
