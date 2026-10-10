@@ -35,10 +35,11 @@ sprite set `SPELLS` (`sprite_names.md`: `SpellSprites`). Each frame uses its own
 `spell_effects.md`, arc included). Its frame cycles **125, 126, 127, 128, 125, …**, advancing one step per tick.
 It has no direction, because the puff is round.
 
-**Trail.** Each tick the head has moved, a puff is left at the head's **previous** position and height. A puff
-plays frames **125 → 144**, one frame per tick (20 ticks), and then disappears. It does not move or loop. The
-original keeps at most about 30 puffs per Fireball. This limit is optional for an engine, because 18 flight ticks
-never reach it.
+**Trail.** On the launch tick a puff is left at the start point. After that, a puff is left at the head's
+**previous** position and height only when that position differs from the newest puff's position. So there is no
+second puff at the start; tick-by-tick table in §8.4. A puff plays frames **125 → 144**, one frame per tick
+(20 ticks), and then disappears. It does not move or loop. The original keeps at most about 30 puffs per Fireball;
+this limit is optional for an engine, because 18 flight ticks never reach it.
 
 **Explosion.** When the flight ends, a 9-frame explosion (177–185, one frame per tick) is placed on the ground at
 the projectile's **last position**. The cause of the end does not matter: stopped by a hit, below the ground on
@@ -132,8 +133,9 @@ Test vectors:
 | Before | Tick | After |
 |---|---|---|
 | model at rest in a melee unit, unpaired, no cell, pause 3 | 1 | pause 2, still pausing, not collected |
-| same | 3 | pause 0, not pausing; collected by the joiner pass of that tick or the next (🟡 within-tick order: count down before the grid pass) |
-| 9 Wolf Riders vs 9 cavalry, 7 riders with pauses 2–7 at the clash | 8 ticks later | every Wolf Rider has been collected (≤ frontage = 3 per tick), and the fight spreads along the front |
+| same | 3 | pause 0, not pausing; not collected yet (that tick's grid pass ran before the countdown) |
+| same | 4 | collected by this tick's joiner pass (§8.1: the pass after the pause reached 0) |
+| 9 Wolf Riders vs 9 cavalry, 7 riders with pauses 2–7 at the clash | 8–10 ticks later | each rider is collected on the tick after its pause reaches 0 (≤ frontage = 3 per tick), so all are in by about tick 8–10, and the fight spreads along the front |
 
 ## 5. Pursuit and buildings (symptoms 5 and 6)
 
