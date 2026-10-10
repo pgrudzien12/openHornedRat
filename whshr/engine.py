@@ -2961,21 +2961,23 @@ class Battle:
     def _resolve_collisions(self, deployment_id: str | None = None) -> None:
         """Push regiments apart (a simplified push-apart; game_rules.md, "Routes, collisions and visibility"), not
         the polygon obstruction routing (`Nav*`). In the battle phase the pass runs for the units whose collision
-        re-check state is on, in identifier order (`_push_apart_pass`); during deployment only the dragged
+        re-check state is on, in identifier order: boundary, scenery and building correction, then `_push_apart_pass`.
+        A unit that has stood still since load has no pass, so nothing moves it (notes/hidden_reserves_off_field.md 0,
+        3; notes/bf003_wolfriders_route.md item 4); during deployment only the dragged
         regiment yields to the regiments it overlaps, so scripted deployments that already overlap (BF001's
         Grudgebringer cavalry and infantry) stay where the script placed them.
         """
         regiments = [self.regiments[key] for key in sorted(self.regiments) if self.regiments[key].active]
         if deployment_id is None:
-            for regiment in regiments:
-                self._correct_boundaries(regiment)
-                self._correct_solid_objects(regiment)
-                self._correct_buildings(regiment)
             for mover in regiments:
                 if mover.collision_recheck:
                     self._recheck_carry.discard(mover.identifier)  # its own pass consumes the state
                     if self.interpreter is None:  # no scripted contact pass consumes the state afterwards
                         mover.collision_recheck = False
+                    if not self._marked(mover):  # notes/script_behaviours.md 2.2: a marked unit has no pass at all
+                        self._correct_boundaries(mover)
+                        self._correct_solid_objects(mover)
+                        self._correct_buildings(mover)
                     self._push_apart_pass(mover, regiments)
             return
         # notes/deployment.md 2: collision correction follows the zone clipping, with no final zone clamp.
@@ -3176,8 +3178,14 @@ class Battle:
                    if boundary.solid or boundary.inverse or boundary.battle_edge)
 
     def _correct_boundaries(self, regiment: Regiment) -> None:
+        """Move the footprint centre halfway towards the nearest legal point of a solid, inverse-solid or BattleEdge
+        boundary (notes/movement_boundaries_route_finding.md). Skipped for a routing unit and for a hidden unit of the
+        enemy or allied army, which may wait in an off-field pocket until its script places it; a hidden player-army
+        unit is still corrected (notes/hidden_reserves_off_field.md 1)."""
         if regiment.routing:
             return  # notes/flight_solid_obstacles.md 4: routing units get no boundary correction of any kind
+        if regiment.hidden and regiment.side is not Side.PLAYER:
+            return
         for boundary in self.navigation_boundaries:
             if not (boundary.solid or boundary.inverse or boundary.battle_edge):
                 continue
@@ -3190,7 +3198,7 @@ class Battle:
             dx = math.trunc((nearest[0] - centre[0]) / 2)
             dy = math.trunc((nearest[1] - centre[1]) / 2)
             self._translate_regiment(regiment, dx, dy)
-            regiment.collision_recheck = True
+            self._carry_recheck(regiment)  # the correction moved it: its next pass corrects again
             if not regiment.pursuing:  # notes/pursuit_map_edge.md 3: the correction only pushes a pursuer
                 self._end_charge_on_obstruction(regiment, "a movement boundary")
 
@@ -3343,6 +3351,7 @@ class Battle:
             push = (radius - distance) / 2
             shift_x, shift_y = ux * push, uy * push
             self._translate_regiment(regiment, shift_x, shift_y)
+            self._carry_recheck(regiment)  # notes/hidden_reserves_off_field.md 0: a push switches re-check on
             centre = centre[0] + shift_x, centre[1] + shift_y
 
     def _reroute_flight(self, regiment: Regiment) -> None:

@@ -116,17 +116,49 @@ class BattleNavigationTests(unittest.TestCase):
     def test_forbidden_centre_is_corrected_halfway_each_tick(self):
         unit = Regiment("u", "U", 330, 200, 0, Side.PLAYER, models=1, ranks=1)
         battle = Battle(500, 500, [unit], boundaries=[square("bnd_SOLID")])
+        unit.collision_recheck = True  # it has just stepped in: a unit standing still since load has no pass
         positions = []
         for _ in range(5):
             battle.tick()
             positions.append(unit.x)
         self.assertEqual(positions, [315, 308, 304, 302, 301])
 
+    def test_a_unit_standing_still_since_load_is_not_corrected(self):
+        # notes/hidden_reserves_off_field.md 0, 3: no collision re-check state, so no pass and no correction.
+        unit = Regiment("u", "U", 330, 200, 0, Side.ENEMY, models=1, ranks=1)
+        battle = Battle(500, 500, [unit], boundaries=[square("bnd_SOLID")])
+        for _ in range(5):
+            battle.tick()
+        self.assertEqual((unit.x, unit.y), (330, 200))
+
+    def test_hidden_enemy_or_allied_units_wait_in_a_solid_pocket_uncorrected(self):
+        # notes/hidden_reserves_off_field.md 1 and 6: the skip covers hidden enemy/allied units only.
+        for side, hidden, corrected in ((Side.ENEMY, True, False), (Side.NEUTRAL, True, False),
+                                        (Side.PLAYER, True, True), (Side.ENEMY, False, True)):
+            with self.subTest(side=side, hidden=hidden):
+                unit = Regiment("u", "U", 330, 200, 0, side, models=1, ranks=1, hidden=hidden)
+                battle = Battle(500, 500, [unit], boundaries=[square("bnd_SOLID")])
+                unit.collision_recheck = True  # e.g. it has just turned
+                battle.tick()
+                self.assertEqual(unit.x != 330, corrected)
+
+    def test_a_revealed_reserve_is_corrected_again(self):
+        unit = Regiment("u", "U", 330, 200, 0, Side.ENEMY, models=1, ranks=1, hidden=True)
+        battle = Battle(500, 500, [unit], boundaries=[square("bnd_SOLID")])
+        unit.collision_recheck = True
+        battle.tick()
+        self.assertEqual(unit.x, 330)
+        unit.hidden = False  # spotted
+        unit.collision_recheck = True
+        battle.tick()
+        self.assertEqual(unit.x, 315)
+
     def test_solid_object_pushes_overlapping_formation(self):
         unit = Regiment("u", "U", 200, 200, 0, Side.PLAYER, models=1, ranks=1)
         obj = {"x": 200, "y": 200, "radius": 30,
                "status": ["os_active", "os_solid"]}
         battle = Battle(500, 500, [unit], objects=[obj])
+        unit.collision_recheck = True  # it has just stepped
         battle.tick()
         self.assertAlmostEqual(abs(unit.x - 200), (30 + unit.bounding_radius()) / 2)
 
@@ -296,6 +328,7 @@ class BattleNavigationTests(unittest.TestCase):
         obj = {"x": 200, "y": 200, "radius": 40,
                "status": ["os_active", "os_solid"]}
         battle = Battle(500, 500, [charger, enemy], objects=[obj])
+        charger.collision_recheck = True  # it has just stepped
         battle.tick()
         self.assertIsNone(charger.attack_target)
         self.assertTrue(any(event.kind == "charge_end" for event in battle.events))
@@ -307,6 +340,7 @@ class BattleNavigationTests(unittest.TestCase):
                            speed_per_tick=0, attack_target="e", charge_started_target="e")
         enemy = Regiment("e", "E", 450, 200, 0, Side.ENEMY, models=1, ranks=1)
         battle = Battle(500, 500, [charger, enemy], boundaries=[square("bnd_SOLID")])
+        charger.collision_recheck = True  # it has just stepped
         battle.tick()
         self.assertIsNone(charger.attack_target)
         self.assertTrue(any(event.kind == "charge_end" for event in battle.events))
