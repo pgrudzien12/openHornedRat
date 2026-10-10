@@ -13,7 +13,7 @@ GOG installation; nothing from the game is in the repo (`extracted/music/` is gi
 | All 40 `.MID` files | ✅ parsed, 0 structural errors (SMF format 1, tempo, lengths, channels, programs) |
 | Which presets come from the SBK and which from the AWE32 ROM | ✅ bank MSB 1 = SBK (every bank-1 program exists in the SBK); everything else = 1 MB GM ROM |
 | GM vs FM variants (`XXXXXXFM.MID`) | ✅ naming rule verified on all files; selection by `MIDI.DLL` (strings) |
-| Playback selection | ✅ Tune names in glue scripts, window records and cutscene data are documented; the runtime currently plays only glue `playmidi` names. Locating every other track is not required. |
+| Playback selection | ✅ | Tune names in glue scripts, window records, cutscene data and native screens are documented; the runtime plays glue `playmidi` plus native debrief and credits tunes. Window-record and cutscene music remain unwired. |
 | Full audio render with original sound | ✅ all 21 GM tracks rendered with FluidSynth (FluidR3_GM + the converted SBK in bank 1) at one uniform gain, no clipped samples; the project owner listened to and confirmed both the SBK stems and the full renders |
 
 ## Summary (ready to paste into `FORMATS.md`)
