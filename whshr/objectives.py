@@ -66,6 +66,11 @@ ITEM_NUMBERS = (
     "ItemSwordOfHeroes", "ItemParryingBlade", "ItemSwordOfMight", "ItemDragonBlade", "ItemArmourOfMeteoricIron",
     "ItemArmourOfTheBeard", "ItemGrudgeBringer", "ItemRockSplitter", "ItemSwordOfElior")
 ITEM_TABLE_BASE = 29  # spells and casting modes take entries 0-28
+
+
+def item_text_id(table_index: int) -> int:
+    """The GMTXT id naming the item with this combined spell/item table index (a K/X record's fourth value)."""
+    return 31000 + table_index - ITEM_TABLE_BASE
 # Section 8: R's a selects the custom end-of-list line of B, C and P.
 CUSTOM_LINES: dict[int, dict[str, int]] = {
     1: {"B": 33026, "C": 33030}, 2: {"B": 33026, "C": 33030}, 6: {"B": 33026, "C": 33030},
