@@ -14,6 +14,10 @@ For Wind Blast, Flamestorm, Tangling Thorn and Da Krunch, see `spell_obstacle_vi
 growth, lasting obstacles, meshes, dust, frame timing and cleanup. Flamestorm's normal fire uses
 `FIRE1–4` meshes; its large 117–120 sprite column is selected by holding Shift at launch.
 
+For Flying Bower, Sapphire Arch and Skitterleap, see `spell_transport_visuals.md`: vortex and
+dust playback, the scaling arch with blue sparkles, and departure-only smoke. The report also
+identifies a Skitterleap overlap case still requiring original-game comparison.
+
 ## 0. Shared model (read this first)
 
 Two kinds of art are used:

@@ -84,8 +84,10 @@ impact explosion and does not return to its five small starting frames after rea
 ### 2.2 Lasting trail
 
 Use the established placement rule: beginning T+5, deposit at the head's **previous tick's**
-position if there is no previous deposit or its distance from the newest deposit is strictly
-greater than 16. At most 30 deposits are retained. The T+55 update can deposit at the final
+position if there is no previous deposit or its distance from the newest trail sprite's
+**previous tick's visual world X/Y**, including that sprite's jitter, is strictly greater than 16.
+This comparison happens before the trail's new jitter is selected for the current tick.
+At most 30 deposits are retained. The T+55 update can deposit at the final
 T+54 head position before the head disappears.
 
 Each deposit creates a radius-16, height-16 obstacle and a sprite. A newly born sprite shows
@@ -241,15 +243,47 @@ height**. From **T+38**, add ground height at the **aim** to it. Do not sample t
 the scattered mesh X/Y. Existing flames retain their birth height until replaced.
 On ground above zero, early flames can consequently lie partly or wholly below terrain.
 
-During the first column, surviving ignition sparks are also removed by independent 50% tests
-in staggered groups of three, with a four-phase round. Eight ignition sparks continue advancing
-towards their normal end; four retain their T+17 frame until removed. Every remaining ignition
-sprite is removed at T+37. Vacant places for mesh flames are replenished in a four-phase round,
-up to two per update; an existing flame reaching its end is replaced immediately.
+### 5.5 Exact ignition overlap and first mesh births
 
-🟡 The precise correspondence between the staggered spark-removal groups and the first mesh
-replenishments is not specified here. The resulting brief overlap should be compared against
-the original before claiming exact first-column particle matching.
+At T+17, the twelve visible sparks are the three births from each of T+14, T+15, T+16 and
+T+17. Identify the first, second and third spark of each group by their creation order.
+All twelve retain their displayed frame during T+18. From T+19, the following rules apply:
+
+| Spark's birth tick | Displayed frame at T+17/T+18 | Subsequent spark behaviour | First mesh successor |
+|---|---|---|---|
+| T+14, first and second | 124 | Each has a 50% early-removal test at T+19, before normal expiry | T+19 if kept by the test; T+20 if removed early |
+| T+14, third | 124 | Holds 124; independent 50% removal tests at T+19, +23, +27, +31, +35 while still present | None |
+| T+15, all three | 123 | Hold 123; independent 50% removal tests at T+20, +24, +28, +32, +36 while still present | None |
+| T+16, first and second | 122 | Show 123 at T+19, 124 at T+20; removal test at T+21 before normal expiry | T+21 regardless of the test result |
+| T+16, third | 122 | Same advancing frames and T+21 test | T+21 if kept; T+22 if removed early |
+| T+17, first | 121 | Show 122, 123, 124 at T+19, +20, +21; removal test at T+22 before normal expiry | T+22 regardless of the test result |
+| T+17, second and third | 121 | Same advancing frames and T+22 test | T+22 if kept; T+23 if removed early |
+
+Each first mesh successor starts one continuing sequence of replacements with the positions,
+random starting phases and lifetimes from §5.4. A successor does **not** inherit the spark's
+position. Once a sequence has begun, its current mesh is replaced on expiry without a blank tick;
+the spark-removal tests do not remove mesh flames.
+
+Within an update, perform the applicable early-removal tests first, then advance surviving
+sparks and existing meshes. Replace naturally expiring particles immediately. First mesh births
+after an early removal occur afterwards, on the tick specified in the table. Thus a spark removed
+early can leave a one-tick gap even though ordinary expiry has no gap. New meshes display their
+randomly selected first phase immediately, without an extra advance on that birth tick.
+
+The mesh population after each update is therefore:
+
+| Tick | Number of mesh flames |
+|---|---|
+| T+18 | 0 |
+| T+19 | 0–2 |
+| T+20 | Exactly 2 |
+| T+21 | 4–5 |
+| T+22 | 6–8 |
+| T+23 onward | Exactly 8 until cancellation |
+
+These are active particle counts, including flames outside the view or below terrain. Up to four
+frozen ignition sprites can overlap the eight meshes after T+23. Remove every remaining ignition
+sprite at T+37, after that tick's normal particle update. No ignition sprite is born after T+17.
 
 After ignition has gone, only the selected column and the recurring mesh flames remain.
 They continue until cancellation, with no natural timeout or final burnout animation.
@@ -259,7 +293,8 @@ They continue until cancellation, with no natural timeout or final burnout anima
 | Before | Action | Expected after |
 |---|---|---|
 | Wind launched at T | Render T+4, then T+5 | Head 383 then 384; first trail sprite 384 appears at T+4's head position |
-| Wind's latest deposit at A; previous head point exactly 16 away | Update trail | No new deposit; existing sprites still advance and jitter |
+| Wind's newest trail sprite was displayed at A; previous head point exactly 16 away | Update trail | No new deposit; existing sprites still advance and jitter |
+| Wind's newest obstacle is at (0,0), its sprite was displayed at (8,0), previous head point is (20,0) | Update trail | No new deposit: measured distance is 12, despite distance 20 from the obstacle |
 | Wind deposit born at U | Render U+3 | Frame 384 again; fixed obstacle unchanged despite sprite jitter |
 | Wind head visible at T+54 | Update T+55 and T+56 | Head gone; possible last deposit at T+55; all trail loops continue |
 | Thorn cast into empty ground | Run through T+6 | Twenty sprites grow through 199–204 and hold 204; obstacle remains |
@@ -273,12 +308,17 @@ They continue until cancellation, with no natural timeout or final burnout anima
 | Shift-selected Flamestorm just finished ignition | Render T+18 and T+19 | Column frame 119 both ticks, at ground−40 then ground−37 |
 | Normal Flamestorm | Render first column | Transparent 595–597 / sparse 598 selected; small meshes provide the fire, not the 117–120 column |
 | Flamestorm at aim ground height 100 | Birth a mesh at T+37, then one at T+38 | Earlier birth height 0…63; later birth height 100…163; X/Y independently scattered |
+| Flamestorm; every early-removal test keeps its spark | Render T+19…T+23 | Mesh counts 2, 2, 5, 8, 8; four frozen sparks remain until T+37 |
+| Flamestorm; every early-removal test removes its spark | Render T+19…T+23 | Mesh counts 0, 2, 4, 6, 8; no ignition sparks remain after T+22 |
+| Third spark born T+16 is removed early at T+21 | Render T+21, then T+22 | That spark vanishes; its mesh successor first appears at T+22 at a new random point |
 | Any active spell in this batch | Dispel successfully | Its art and obstacles disappear immediately; no normal end sequence |
 
 ## 7. Corrections and remaining checks
 
 - Wind Blast uses a five-frame formation followed by a three-frame loop, including a lasting
-  jittering trail; removing the whole effect at flight completion is incorrect.
+  jittering trail; removing the whole effect at flight completion is incorrect. Follow-up research
+  corrects its spacing comparison to use the newest sprite's previous jittered position, rather
+  than the fixed obstacle centre; `spell_area_effects.md` §1.4 is updated accordingly.
 - Tangling Thorn has twenty stationary sprites and a held final frame, not a looping aura on
   each trapped figure.
 - Da Krunch uses one mesh through all stages. Its brown dust is frames 474–479; these are not
@@ -289,6 +329,7 @@ They continue until cancellation, with no natural timeout or final burnout anima
 
 🟡 No original-game runtime capture was made for this batch. Sprite appearance was checked
 against the installed artwork, and the timelines above distinguish drawing from obstacle and
-damage timing. Remaining visual comparisons are Flamestorm's brief spark/mesh overlap,
-mesh material appearance in the original renderer, and camera-dependent occlusion of the
-below-ground first column/flames. These checks do not change the confirmed frame selections.
+damage timing. Flamestorm's previously unspecified spark/mesh overlap is now specified in §5.5.
+Remaining visual comparisons concern mesh material appearance in the original renderer and
+camera-dependent occlusion of the below-ground first column/flames. No claim of pixel-for-pixel
+runtime validation is made.

@@ -98,12 +98,15 @@ From the update of tick **T+5** onward (the first five updates drop nothing), af
 disc** at its **previous tick's** position (the position tested on the tick before, jitter included) when
 
 - the blast has no disc yet, or
-- the last dropped disc is **more than 16** away from that position (`d > 16`; at `d ≤ 16` nothing is dropped);
+- the newest trail sprite's **previous tick's visual world X/Y**, including its visual jitter, is
+  **more than 16** away from that position (`d > 16`; at `d ≤ 16` nothing is dropped);
 
 and the blast has fewer than 30 discs (the original stops adding discs after 30; later parts of a long path get none —
 an engine may keep or drop this cap). Each disc is an area object, radius 16, height 16 (§0). The update of tick T+55
 (after the last step) can still drop one disc at the T+54 position. A typical 20" blast leaves a line of ≈ 25–30 discs
-about 17–20 units apart.
+along the route. The comparison uses the sprite's old jitter position before this tick's new
+trail jitter is selected, so obstacle spacing is not a fixed minimum of 17. The disc itself stays
+at its original deposit point (`spell_obstacle_visuals.md` §2.2).
 
 ### 1.5 The effect never ends by itself (model-changing)
 

@@ -2486,7 +2486,7 @@ Gork, dispel, winds). Durations are tick counters: 180 ticks ≈ 18 s, just unde
 | Fists of Gork | 2 | self | every 4 ticks (45 strikes) the nearest unit of **either side** (not the caster's) whose centre is within 16 (inclusive) of the **fixed aim point**: wound roll at S6, 1 wound, no save; after a first 6 each further consecutive 6 adds a wound; no kill credit | 180 ticks |
 | Mork Save Uz! | 1 | 24" | dispel aura around a unit, 50% every tick | 180 ticks |
 | Warp Lightning | 2 | 24" | bolt: S5, D6 wounds, no save (Doomwheel version fails on 1 in 6) | flight |
-| Skitterleap | 1 | unlimited | the caster's unit is placed at the point 4 ticks after the launch (facing and formation kept, no destination checks); the arc applies, so the AI's escape leap only succeeds in melee | 4 ticks |
+| Skitterleap | 1 | unlimited | ordinary isolated cast: the caster's unit is placed at the point 4 ticks after launch (facing and formation kept, no destination checks); the arc applies, so the AI's escape leap only succeeds in melee. 🟡 Overlap exception: `spell_transport_visuals.md` §4.2 | normally 4 ticks |
 | Pestilent Breath | 1 | 6" | cloud passing through: S3, 1 wound, no save | flight |
 | Madness | 2 | 24" | the unit under the point (must be hostile) **changes side**: player/allied → enemy, enemy → allied (events 0x31/0x32; its new side-mates drop it as a target); the saved side is restored at the end | 180 ticks |
 

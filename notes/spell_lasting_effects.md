@@ -130,6 +130,12 @@ launch check read. Today's engine stub (always false) should become this query.
 
 ## 2. Skitterleap (code 23)
 
+The following four-tick sequence describes an ordinary isolated cast. Presentation is specified
+in `spell_transport_visuals.md` §4: smoke stays at the figures' departure points, and there is no
+arrival animation. 🟡 An overlapping-effect exception may cause an immediate leap and displaced
+effect artwork; the controlled Sapphire Arch/Skitterleap case in that report still needs an
+original-game scene comparison. Do not treat four ticks as an unconditional compatibility rule.
+
 - Range unlimited; the launch **arc applies** (±50° of facing from the caster's centre to the aim point), skipped
   only while the caster is in melee. Aim point = the click, or the AI's escape point (`script_magic.md` §2.2).
 - Launch: the effect's target = the caster's own unit; a 4-frame vanishing particle is started on **every model**
