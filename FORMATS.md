@@ -241,6 +241,12 @@ blue ice and black skulls. Examples:
 - `SPARKLE.PAL`: 2 maps. Frames 0–4 (sparkle) have `kind = 04`, and frames 5–12 (snowman) `14`.
 - `ESHIN.PAL`: 4 maps, `kind` from `04` to `34` (the move, dead, attack and stand animations).
 
+This reconstruction describes the **asset catalogue**. Spell playback can explicitly select a
+different bank: its effective map is the stored upper nibble plus the spell's bank offset, not
+necessarily the catalogue's cumulative wrap count. For example, normal Flamestorm selects
+frames 595–598 with bank 0, hence map **10**, rather than catalogue map 42. See
+`notes/spell_obstacle_visuals.md` §1.1 for the verified selections and §5 for its artwork variants.
+
 `scripts/render_sprites.py` implements the rule (`colormap_indices`).
 
 ### Reference decoder (C pseudocode)
