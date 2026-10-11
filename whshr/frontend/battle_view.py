@@ -22,7 +22,7 @@ from typing import Any
 import pygame
 import zengl
 
-from .. import animation, figure_capture, magic, picking, spell_effects
+from .. import animation, deployment, figure_capture, magic, picking, spell_effects
 from ..battle3d import SPRITE_DEPTH_BIAS
 from ..battle_events import BattleEvent
 from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, bake_mesh, sprite_direction, view_angle
@@ -64,6 +64,7 @@ CLICK_DRAG_THRESHOLD = 4  # pixels; a right button press/release closer than thi
 # Public ranged handoff §5: installed GMCUR groups are Fire 100, default 101, Attack 102, Magic 103.
 BATTLE_CURSOR_GROUPS: dict[str, int] = {"default": 101, "attack": 102, "fire": 100, "magic": 103}
 MISSILE_MESH = {"arrow": "arrows1", "arrow_alt": "arrows2", "bolt": "arrows3", "bomb": "flames1"}
+FLAG_FIRST_FRAME, FLAG_FRAMES = 106, 4  # white pennant frames in GENBATT (notes/deployment_flags.md), one per tick
 # PROVISIONAL (user's choice from reviewing the GENBATT set, not traced; SPEAR1-4 are the Hunting Spear's meshes,
 # notes/spell_visuals.md 0): artillery shots are GENBATT sprites 56-72, one frame per flight tick and holding the
 # last, and frame 73 is a puff where the shot lands, shown for ARTILLERY_PUFF_TICKS.
@@ -237,6 +238,7 @@ class BattleView(SceneView[BattleScene]):
         self.palette = ctx.image((256, 1), "rgba8unorm", b"".join(bytes((*rgb, 255)) for rgb in field.palette))
         self.capacity = max(1, sum(regiment.models for regiment in scene.battle.regiments.values())
                             + len(scene.battle.regiments)
+                            + len(deployment.flag_positions(scene.battle.deployment_regions))
                             + WORLD_EFFECT_RESERVE)
         self.instance_buffer = ctx.buffer(size=self.capacity * INSTANCE.size)
 
@@ -989,6 +991,7 @@ class BattleView(SceneView[BattleScene]):
                     *rect, frame.width / 2, frame.height, selected,
                 )))
         data += self._item_markers()
+        data += self._zone_flags()
         data += self._spell_sprites()
         data += self._artillery_sprites()
         # The original promotes the focused banner in z-order and leaves it promoted after deselecting.
@@ -1114,6 +1117,24 @@ class BattleView(SceneView[BattleScene]):
         frame, rect = sheet.frames[number], _atlas_rect(sheet, number)
         field, data = self.scene.field, bytearray()
         for x, y in objectives.item_marks.values():
+            data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
+                                  *rect, frame.anchor_x, frame.anchor_y, 0.0)
+        return bytes(data)
+
+    def _zone_flags(self) -> bytes:
+        """Waving white flags along the deployment zone perimeter, deployment phase only. Engine design, not the
+        original's spacing: the four white pennant frames of the GENBATT set loop one per battle tick
+        (notes/deployment_flags.md), each flag at its own fixed pseudo-random phase so neighbours are out of sync
+        (deterministic, unlike a draw per flag); the spacing is deployment.FLAG_SPACING. Not modelled: the
+        sinking-away animation on Start."""
+        battle, field = self.scene.battle, self.scene.field
+        sheet = field.ui_sheets.get("genbatt")
+        if getattr(battle, "phase", "battle") != "deployment" or sheet is None or not sheet.rects:
+            return b""
+        data = bytearray()
+        for index, (x, y) in enumerate(deployment.flag_positions(battle.deployment_regions)):
+            number = min(FLAG_FIRST_FRAME + (battle.update_count + (index * 2654435761 >> 7)) % FLAG_FRAMES, len(sheet.frames) - 1)
+            frame, rect = sheet.frames[number], _atlas_rect(sheet, number)
             data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
                                   *rect, frame.anchor_x, frame.anchor_y, 0.0)
         return bytes(data)
