@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 import pygame
 
 from .. import magic, spell_effects
-from ..battlefield import WORLD_PER_MESH, Battlefield, SpriteFrame, SpriteSheet
+from ..battlefield import Battlefield, SpriteFrame, SpriteSheet
 from ..portrait_popup import overlay_frames
 from ..rules import Side
 from .battle_text import display_text
@@ -1086,14 +1086,8 @@ class Hud:
 
     @staticmethod
     def _camera_eye_position(camera: "BattleCamera") -> tuple[float, float]:
-        # whshr.camera.BattleCamera.pan()'s forward (eye-to-target) direction is
-        # (-sin yaw, -cos yaw); the eye sits `distance` back along the opposite direction.
-        yaw = math.radians(camera.yaw)
-        distance = camera.distance * WORLD_PER_MESH
-        return (
-            camera.target_x + distance * math.sin(yaw),
-            camera.target_y + distance * math.cos(yaw),
-        )
+        """The rendered eye's ground position (it moves in while terrain shortens the view)."""
+        return camera.eye_xy()
 
     def release(self) -> None:
         quads = [self.panel_bg, self.portrait_bg_quad, *(quad for quad, _rgba, _x in self._compass_windows.values()),

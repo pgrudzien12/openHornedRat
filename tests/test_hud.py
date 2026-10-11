@@ -5,6 +5,7 @@ the rest of the engine's rendering), so these tests exercise the pure logic that
 gets drawn (panel state, slot layout, hit testing, minimap marker selection) rather than pixel
 output.
 """
+import math
 import struct
 import sys
 import types
@@ -45,6 +46,7 @@ except ModuleNotFoundError:
 from whshr.battle_scene import BattleScene
 from whshr.battle_events import BattleEvent
 from whshr.battlefield import WORLD_PER_MESH
+from whshr.camera import BattleCamera
 from whshr.engine import Battle, Regiment
 from whshr.frontend.battle_view import BattleView
 from whshr.frontend.hud import FIXED_BUTTONS, MINIMAP_RECT, PANEL_RECT, Hud
@@ -700,25 +702,22 @@ class MinimapTests(unittest.TestCase):
         self.assertFalse(hud._shows_banner(enemy))
 
     def test_given_a_camera_at_north_yaw_then_its_eye_is_pulled_back_opposite_its_look_direction(self):
-        # whshr.camera.BattleCamera.pan()'s look (eye-to-target) direction is
-        # (-sin yaw, -cos yaw); the eye sits `distance` back along the opposite direction, so it
-        # must never coincide with the target it looks at (the pre-fix behavior drew the marker
-        # at the target itself).
-        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=180.0, distance=50.0)
-        from whshr.battlefield import WORLD_PER_MESH
+        # The marker is the rendered eye's ground position: behind the target, never on it, pulled in by the pitch.
+        camera = BattleCamera(500.0, 400.0, yaw=180.0, pitch=40.0, distance=50.0)
+        back = 50.0 * WORLD_PER_MESH * math.cos(math.radians(40.0))
 
         eye_x, eye_y = Hud._camera_eye_position(camera)
 
         self.assertAlmostEqual(eye_x, 500.0, places=6)
-        self.assertAlmostEqual(eye_y, 400.0 - 50.0 * WORLD_PER_MESH, places=6)
+        self.assertAlmostEqual(eye_y, 400.0 - back, places=6)
 
     def test_given_a_camera_at_east_yaw_then_its_eye_offsets_along_x(self):
-        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=90.0, distance=50.0)
-        from whshr.battlefield import WORLD_PER_MESH
+        camera = BattleCamera(500.0, 400.0, yaw=90.0, pitch=40.0, distance=50.0)
+        back = 50.0 * WORLD_PER_MESH * math.cos(math.radians(40.0))
 
         eye_x, eye_y = Hud._camera_eye_position(camera)
 
-        self.assertAlmostEqual(eye_x, 500.0 + 50.0 * WORLD_PER_MESH, places=6)
+        self.assertAlmostEqual(eye_x, 500.0 + back, places=6)
         self.assertAlmostEqual(eye_y, 400.0, places=6)
 
     def test_given_a_fighting_player_regiment_then_its_dot_frame_is_the_fighting_friendly_base_plus_facing(self):
@@ -1523,7 +1522,8 @@ class CameraTargetTests(unittest.TestCase):
         hud._icon = lambda frame_index: quad
         calls = []
         hud._draw_map = lambda q, x, y, w=None, h=None, **kw: calls.append((x, y))
-        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=0.0, distance=10.0)
+        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=0.0,
+                                 eye_xy=lambda: (500.0, 400.0 + 10.0 * WORLD_PER_MESH))
 
         hud._draw_camera_target(camera)
 
@@ -1539,7 +1539,8 @@ class CameraTargetTests(unittest.TestCase):
         hud.minimap_layers = {}
         hud.planmap = None
         hud._icon = lambda frame_index: None
-        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=0.0, distance=10.0)
+        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=0.0,
+                                 eye_xy=lambda: (500.0, 400.0 + 10.0 * WORLD_PER_MESH))
         order = []
         hud._draw_camera_target = lambda cam: order.append("target")
         hud._draw_regiment_marker = lambda regiment: order.append("regiment")
@@ -1560,7 +1561,8 @@ class CameraMarkerTests(unittest.TestCase):
         hud._icon = lambda frame_index: quad
         calls = []
         hud._draw_map = lambda q, x, y, w=None, h=None, **kw: calls.append((x, y))
-        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=180.0, distance=600.0)
+        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=180.0,
+                                 eye_xy=lambda: (500.0, 400.0 - 600.0 * WORLD_PER_MESH))
 
         hud._draw_camera_marker(camera)
 
@@ -1586,7 +1588,8 @@ class CameraMarkerTests(unittest.TestCase):
 
         hud._icon = icon
         hud._draw_map = lambda *a, **k: None
-        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=0.0, distance=10.0)
+        camera = SimpleNamespace(target_x=500.0, target_y=400.0, yaw=0.0,
+                                 eye_xy=lambda: (500.0, 400.0 + 10.0 * WORLD_PER_MESH))
 
         hud._draw_camera_marker(camera)
 
