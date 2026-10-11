@@ -22,7 +22,7 @@ from typing import Any
 import pygame
 import zengl
 
-from .. import animation, deployment, figure_capture, magic, picking, spell_effects
+from .. import animation, birds, deployment, figure_capture, magic, picking, spell_effects
 from ..battle3d import SPRITE_DEPTH_BIAS
 from ..battle_events import BattleEvent
 from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, bake_mesh, sprite_direction, view_angle
@@ -994,6 +994,7 @@ class BattleView(SceneView[BattleScene]):
         data += self._zone_flags()
         data += self._spell_sprites()
         data += self._artillery_sprites()
+        data += self._bird_sprites()
         # The original promotes the focused banner in z-order and leaves it promoted after deselecting.
         order: list[str] = getattr(self, "_banner_order", [])  # tests build views without __init__
         identifiers = list(self.scene.battle.regiments)
@@ -1044,6 +1045,24 @@ class BattleView(SceneView[BattleScene]):
             frame, rect = sheet.frames[number], _atlas_rect(sheet, number)
             data += INSTANCE.pack(x / WORLD_PER_MESH, height, y / WORLD_PER_MESH, *rect,
                                   frame.anchor_x, frame.anchor_y, 0.0)
+        return bytes(data)
+
+    def _bird_sprites(self) -> bytes:
+        """The ambient birds from the GENBATT set: frame = first + 8 x wing phase + camera-relative octant, at the bird's
+        height above the terrain under it (notes/battle_birds.md 2). Not modelled: hiding behind scenery (open item)."""
+        field, yaw = self.scene.field, self.camera.yaw
+        sheet = field.ui_sheets.get("genbatt")
+        if sheet is None or not sheet.rects:
+            return b""
+        data = bytearray()
+        for bird in self.scene.battle.birds.birds:
+            number = birds.FIRST_FRAME + 8 * bird.phase + sprite_direction(yaw, bird.heading)
+            if number >= len(sheet.frames) or sheet.rects[number] is None:
+                continue
+            frame, rect = sheet.frames[number], _atlas_rect(sheet, number)
+            data += INSTANCE.pack(bird.x / WORLD_PER_MESH,
+                                  field.ground_height(bird.x, bird.y) + bird.height / WORLD_PER_MESH,
+                                  bird.y / WORLD_PER_MESH, *rect, frame.anchor_x, frame.anchor_y, 0.0)
         return bytes(data)
 
     def _spell_sprites(self) -> bytes:

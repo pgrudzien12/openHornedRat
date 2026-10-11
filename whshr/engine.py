@@ -7,7 +7,7 @@ import random
 from typing import Any, Callable, Literal, cast
 
 from . import animation, battle_grid, behaviour, buildings, combat, deployment, formation, interpreter, map_objects, navigation, npc_merge, ranged, visibility
-from . import magic, objectives as objective_table, spell_effects, steering
+from . import birds as bird_flock, magic, objectives as objective_table, spell_effects, steering
 from . import nodes as node_table
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
@@ -826,6 +826,7 @@ class Battle:
         self.view_rect: tuple[float, float, float, float] | None = None
         self.portrait_popup = PortraitPopup()  # leader portrait shown for reactions (notes/react_portrait.md 3)
         self.rng = random.Random(seed)
+        self.birds = bird_flock.Flock(seed=seed)  # ambient decoration (notes/battle_birds.md)
         self.script_logger = script_logger
         self._warned_blocked_routes: set[tuple[str, TurnKey, str]] = set()
         self.events: list[BattleEvent] = []  # battle events emitted by the most recent tick
@@ -1018,6 +1019,8 @@ class Battle:
                    deploy=bool(mission.get("deploy_troops")), boundaries=source.get("boundaries") or (),
                    objects=source.get("objects") or (), scenery=source.get("scenery") or ())
         battle.swapped_regiments = swapped_whoamis
+        load: View = source.get("load") or {}
+        battle.birds.enabled = not load.get("nobirds")  # [DYNAMIC_LOAD] NoBirds
         battle.npc_regiments = {identifier: whoami for identifier, whoami in written_npcs.items()
                                 if identifier in battle.regiments}
         battle.objective_letters = frozenset(str(entry[0]).upper() for entry in mission.get("objectives") or ()
@@ -2076,6 +2079,7 @@ class Battle:
         self.update_count += 1
         if self.paused:
             return
+        self._step_birds()
         self.portrait_popup.tick()
         if self.result is not None:
             # Remaining missiles and death poses continue after the victory condition is met.
@@ -2952,6 +2956,13 @@ class Battle:
         self.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x34))
         return False
 
+    def _step_birds(self) -> None:
+        """Advance the ambient birds, always (also after the result), and cue their calls (notes/battle_birds.md 3)."""
+        for call in self.birds.tick():
+            self.events.append(BattleEvent(f"sound play {bird_flock.CALL_PACKET}/{call.effect}", "sound", cue="play",
+                                           packet=bird_flock.CALL_PACKET, effect=call.effect,
+                                           position=(call.x, call.y)))
+
     def _step_dying(self, regiment: Regiment) -> None:
         """Count down each dying model's collapse delay, then lay it down as a corpse with a random
         facing (game_rules.md "Figure animation", mechanism 5)."""
@@ -2964,6 +2975,7 @@ class Battle:
             # and the models still collapsing.
             combat.casualty_panic(self, regiment, regiment.models + len(regiment.dying))
             regiment.dying.remove(dying)
+            self.birds.record_death(dying.x, dying.y)  # killed: its death sequence starts (notes/battle_birds.md 0)
             if dying.burns:
                 # Fire/warpfire kills leave the roster's animation and burn as a free figure first.
                 regiment.burning.append(animation.BurningModel(
