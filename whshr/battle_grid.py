@@ -21,6 +21,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from . import formation
+from .rules import may_engage
 
 if TYPE_CHECKING:
     from .engine import Battle, ModelState, Regiment
@@ -224,7 +225,7 @@ def _model(battle: "Battle", owner: CellOwner) -> "ModelState | None":
 
 
 def _owner_outnumbers(owner: "Regiment", members: Sequence["Regiment"]) -> bool:
-    enemies = sum(r.models for r in members if r.camp != owner.camp)
+    enemies = sum(r.models for r in members if may_engage(r, owner))
     return enemies > 0 and owner.models * 2 > enemies * 3
 
 
@@ -245,7 +246,7 @@ def _opponent_unit(regiment: "Regiment", members: Sequence["Regiment"]) -> list[
     """The enemy unit whose models this unit pairs with: its attack target when that unit is on this grid, else
     every enemy unit on it (notes/grid_gap_closing.md 2.1 names "the current opponent unit"; PROVISIONAL: the engine
     keeps no per-unit melee opponent, so a unit without an attack target on the grid takes any enemy unit)."""
-    enemies = [other for other in members if other.camp != regiment.camp and other.active]
+    enemies = [other for other in members if may_engage(other, regiment) and other.active]
     target = next((other for other in enemies if other.identifier == regiment.attack_target), None)
     if target is not None and any(model.cell is not None for model in target.melee_models):
         return [target]

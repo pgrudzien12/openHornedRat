@@ -248,6 +248,34 @@ class PursuitTests(unittest.TestCase):
         self.assertIsNone(winner.attack_target)
         self.assertNotIn("pursuit_start", [e.kind for e in battle.events])
 
+    def test_given_a_neutral_and_a_player_ally_in_the_fight_when_their_enemy_routs_then_the_neutral_pursues(self):
+        # BF010: NPC Dwarfs and the player's cavalry both fought one Clanrat unit. Player and neutral never fight each
+        # other, so the cavalry is no "other enemy" keeping the Dwarfs on the grid; they used to stand idle for good.
+        dwarfs = _regiment("d", 0, 0, Side.NEUTRAL, initiative=5, speed_per_tick=1.0)
+        cavalry = _regiment("c", 12, 0, Side.PLAYER, initiative=5, speed_per_tick=1.0)
+        clanrats = _regiment("e", 0, 12, Side.ENEMY, initiative=5, speed_per_tick=1.0)
+        battle = Battle(1000, 1000, [dwarfs, cavalry, clanrats], seed=0)
+        _join_fight(battle, "g", dwarfs, cavalry, clanrats)
+
+        combat.start_rout(clanrats, battle)
+
+        self.assertEqual(dwarfs.attack_target, "e")
+        self.assertEqual(cavalry.attack_target, "e")
+        self.assertEqual({e.data["regiment"] for e in battle.events if e.kind == "pursuit_start"}, {"d", "c"})
+
+    def test_given_a_neutral_and_a_player_ally_in_the_fight_when_the_enemy_routs_then_nobody_is_left_fighting(self):
+        dwarfs = _regiment("d", 0, 0, Side.NEUTRAL, initiative=5, speed_per_tick=0.0)
+        cavalry = _regiment("c", 12, 0, Side.PLAYER, initiative=5, speed_per_tick=0.0)
+        clanrats = _regiment("e", 0, 12, Side.ENEMY, initiative=5, speed_per_tick=0.0)
+        battle = Battle(1000, 1000, [dwarfs, cavalry, clanrats], seed=0)
+        _join_fight(battle, "g", dwarfs, cavalry, clanrats)
+        clanrats.routing = True
+
+        combat.refresh_melee_state(battle)
+
+        self.assertFalse(dwarfs.in_melee)
+        self.assertFalse(cavalry.in_melee)
+
     def test_given_a_pursuit_order_when_the_winner_leaves_the_fight_then_the_order_survives(self):
         # Leaving a fight must not cancel the unit's order: the pursuit is granted on the tick the
         # last enemy breaks, and `refresh_melee_state` releases the winner on the very next one.
@@ -289,6 +317,19 @@ class PursuitTests(unittest.TestCase):
         combat.start_rout(loser, battle)
 
         self.assertIsNone(archers.attack_target)
+
+    def test_given_missile_troops_when_their_opponent_routs_then_their_script_is_told_the_opponent_is_gone(self):
+        # Their script idles in the melee script until an event arrives; without one they stood still for good.
+        archers = _regiment("a", 0, 0, Side.ENEMY, initiative=5, speed_per_tick=1.0,
+                            missile_code=2, missile_range=720.0)
+        loser = _regiment("l", 0, 12, Side.PLAYER, initiative=5, speed_per_tick=1.0)
+        battle = Battle(1000, 1000, [archers, loser], seed=0)
+        _join_fight(battle, "g", archers, loser)
+
+        combat.start_rout(loser, battle)
+
+        codes = [event.code for event in battle.event_bus.unit_states["a"].event_queue]
+        self.assertIn(combat.OPPONENT_GONE_EVENT, codes)
 
 
 class RoutPauseTests(unittest.TestCase):
