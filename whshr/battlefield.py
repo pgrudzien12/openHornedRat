@@ -211,15 +211,25 @@ class SpriteSheet:
         return start + (phase % self.phases(action)) * DIRECTIONS + direction % DIRECTIONS
 
 
+# Frames whose runtime colour map is not the catalogue's increasing-map reconstruction: the spell selects the frame's
+# stored map nibble plus an explicit bank (notes/spell_obstacle_visuals.md 1.1). Flamestorm's normal column, SPELLS
+# frames 595-598, uses map 10 (nibble 10, bank 0), where the catalogue rule gives 42.
+RUNTIME_COLOUR_MAPS: dict[str, dict[int, int]] = {"SPELLS": {595: 10, 596: 10, 597: 10, 598: 10}}
+
+
 def read_sprite_sheet(name: str, fol: bytes, bop: bytes, colors: bytes = b"") -> SpriteSheet:
-    """Decode every frame of a FOL/BOP pair with its optional 512-byte colour maps."""
+    """Decode every frame of a FOL/BOP pair with its optional 512-byte colour maps (`RUNTIME_COLOUR_MAPS` overrides
+    the catalogue map of the listed frames)."""
     if len(fol) % 16:
         raise ValueError(f"{name}.FOL size is not a multiple of 16 bytes: {len(fol)}")
     records = [struct.unpack_from("<hhhhIB", fol, offset) for offset in range(0, len(fol), 16)]
     if not records:
         raise ValueError(f"{name}.FOL has no frames")
     maps = [colors[offset:offset + 512] for offset in range(0, len(colors), 512)] if len(colors) % 512 == 0 else []
-    map_indices = colormap_indices(records)
+    map_indices = list(colormap_indices(records))
+    for frame, colour_map in RUNTIME_COLOUR_MAPS.get(name.upper(), {}).items():
+        if frame < len(map_indices):
+            map_indices[frame] = colour_map
     offsets = sorted({record[4] for record in records}) + [len(bop)]
     ends = dict(zip(offsets, offsets[1:]))
     frames: list[SpriteFrame] = []
@@ -429,6 +439,6 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
     palette = load_rgb_palette(game.binary_file((script["field"]["palette"] or "standard") + ".PAL"))
     effects = {mesh["name"].split(".")[0].casefold(): mesh for mesh in scenery["meshes"]
                if mesh["name"].casefold().startswith(("arrows", "boltbur", "flames", "fire", "ex", "spear",
-                                                         "light", "wlight", "gaze"))}
+                                                         "light", "wlight", "gaze", "dakrunch"))}
     return Battlefield(script, terrain, vertices, size, layers, palette, atlas_size, atlas, sheets, ui_sheets,
                        sorted(set(missing)), effects, len(ground["textures"]), len(scenery["textures"]))

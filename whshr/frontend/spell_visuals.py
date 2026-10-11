@@ -44,11 +44,13 @@ class Flight:
 
 @dataclass(frozen=True)
 class Sprite:
-    """One sprite to draw: the frame number in the SPELLS set, the ground position and height above it."""
+    """One sprite to draw: the frame number in the SPELLS set, the position and height above the ground; the ground
+    is sampled at `ground_at` when given (a jittered sprite keeps its fixed point's ground), else at the position."""
     frame: int
     x: float
     y: float
     height: float
+    ground_at: tuple[float, float] | None = None
 
 
 @dataclass
@@ -151,13 +153,17 @@ class Shot:
 
 @dataclass(frozen=True)
 class MeshItem:
-    """One effect mesh to draw: its SCENERY.PBX name, ground position, height above the ground and heading vector."""
+    """One effect mesh to draw: its SCENERY.PBX name, ground position, height above the ground and heading vector.
+    The ground is sampled at `ground_at` when given, else at the position; `absolute` makes the height a battle
+    height (no ground added)."""
     name: str
     x: float
     y: float
     height: float
     dx: float
     dy: float
+    ground_at: tuple[float, float] | None = None
+    absolute: bool = False
 
 
 @dataclass(frozen=True)
