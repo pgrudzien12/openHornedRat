@@ -12,7 +12,7 @@ here. Any other family falls back to it (see `family_table`) until its own scrip
 """
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -147,7 +147,9 @@ _WAGON_HELD: dict[str, Any] = dict(sequence=(0,), variant_groups=(0, 32), varian
 WAGONS: ActionTable = {
     STAND: ActionScript("stand", **_WAGON_HELD),
     IDLE: ActionScript("stand", sequence=(0, 0, 1, 1, 2, 2, 3, 3), variant_groups=(0, 32), variant_rule="bit1"),
-    WALK: ActionScript("move", **_WAGON_HELD),
+    # Not the original (game_rules.md: one held frame): the wheels roll while driving, by the owner's request,
+    # using the idle loop's phases.
+    WALK: ActionScript("move", sequence=(0, 0, 1, 1, 2, 2, 3, 3), variant_groups=(0, 32), variant_rule="bit1"),
     FIGHT: ActionScript("attack", **_WAGON_HELD),
     WEAPON_READY: ActionScript("attack", **_WAGON_HELD),
     DEAD: ActionScript("dead", sequence=(0,), loop=False, locks_facing=True, variant_groups=(64, 64),
@@ -155,11 +157,18 @@ WAGONS: ActionTable = {
     SHOOT: ActionScript("stand", **_WAGON_HELD),
 }
 
+# Caravan and war-wagon carts have one look (a single 32-frame group), so both costume slots point at group 0.
+# PROVISIONAL: they follow the wagon's scripts (wheels roll while idle and driving).
+CARTS: ActionTable = {action: replace(script, variant_groups=(0, 0)) if script.variant_groups == (0, 32) else script
+                      for action, script in WAGONS.items()}
+CARTS[DEAD] = ActionScript("dead", sequence=(0,), loop=False, locks_facing=True)
+
 FAMILY_TABLES: dict[str, ActionTable] = {"standard_infantry": STANDARD_INFANTRY, "peasants": PEASANTS, "slaves": SLAVES,
-                 "wagons": WAGONS}
+                 "wagons": WAGONS, "carts": CARTS}
 # Script sprite resource names (casefolded) that select a decoded family; anything else is standard.
 SPRITE_FAMILIES = {"peasant": "peasants", "peasants": "peasants", "ratslave": "slaves", "slave": "slaves",
-                   "slaves": "slaves", "wagon": "wagons"}
+                   "slaves": "slaves", "wagon": "wagons", "caravan": "carts", "mrtwagon": "carts",
+                   "mrtwag": "carts", "packpony": "standard_infantry"}
 WAGON_CLASS = 7  # s_race class RollingStock
 DEFAULT_FAMILY = "standard_infantry"
 

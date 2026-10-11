@@ -1,6 +1,7 @@
 """Block formation layout: model positions relative to the unit position.
 
-Rank sizes and slot offsets follow notes/game_rules.md, "Formations". War machine, monster and wagon layouts are not modelled here.
+Rank sizes and slot offsets follow notes/game_rules.md, "Formations". War machine and monster layouts are not modelled
+here; wagons only differ by their rank spacing.
 """
 
 import math
@@ -12,6 +13,9 @@ Block = tuple[float, float, float, int, int]  # (x, y, direction, models, ranks)
 Frame = tuple[float, float, float, float, float, float]  # centre x/y, half side/forward, cos, sin
 
 MODEL_SPACING = 12.0  # BTS world units between models, sideways and front to back
+# A wagon unit's team and wagon stand this far apart front to back (game_rules.md, "Formations", Wagons).
+WAGON_RANK_SPACING = 22.0
+WAGON_HALF_SPACING = WAGON_RANK_SPACING / 2  # each figure's distance from the unit position (notes/wagon_camera_snap.md 0)
 FULL_TURN = 512
 # BTS world units covered by one troop sprite pixel. Not traced: measured on a BF001 game screenshot, where
 # the model spacing is about 1.43 times the on-screen width of the 18-22 pixel idle frames.
@@ -27,9 +31,12 @@ def rank_sizes(models: int, ranks: int) -> list[int]:
     return [base + (rank < leftover) for rank in range(ranks)]
 
 
-def block_slots(models: int, ranks: int, spacing: float = MODEL_SPACING) -> list[Point]:
-    """Return (side, forward) slot offsets: the front-rank centre is (0, 0) and later ranks stand behind it."""
-    return [((column - (width - 1) / 2) * spacing, -rank * spacing)
+def block_slots(models: int, ranks: int, spacing: float = MODEL_SPACING,
+                rank_spacing: float | None = None) -> list[Point]:
+    """Return (side, forward) slot offsets: the front-rank centre is (0, 0) and later ranks stand behind it,
+    `rank_spacing` (default `spacing`) apart."""
+    depth = spacing if rank_spacing is None else rank_spacing
+    return [((column - (width - 1) / 2) * spacing, -rank * depth)
             for rank, width in enumerate(rank_sizes(models, ranks)) for column in range(width)]
 
 
@@ -198,14 +205,16 @@ def clamp_ranks(models: int, ranks: int) -> int:
     return max(minimum, min(maximum, ranks))
 
 
-def reform_slot_order(models: int, ranks: int, spacing: float = MODEL_SPACING) -> list[Point]:
+def reform_slot_order(models: int, ranks: int, spacing: float = MODEL_SPACING,
+                      rank_spacing: float | None = None) -> list[Point]:
     """Slot offsets in re-slotting search order: front rank first, each rank's columns centre
     outward (game_rules.md, "Formation changes"). Same offsets as `block_slots`, reordered."""
+    depth = spacing if rank_spacing is None else rank_spacing
     order: list[Point] = []
     for rank, width in enumerate(rank_sizes(models, ranks)):
         centre = (width - 1) / 2
         columns = sorted(range(width), key=lambda column: abs(column - centre))
-        order.extend(((column - centre) * spacing, -rank * spacing) for column in columns)
+        order.extend(((column - centre) * spacing, -rank * depth) for column in columns)
     return order
 
 
@@ -219,7 +228,8 @@ def _octagonal_distance(ax: float, ay: float, bx: float, by: float) -> float:
 
 def reform_assignment(x: float, y: float, direction: float | None, models: int, ranks: int,
                       positions: Sequence[Point], leader_index: int | None = None,
-                      spacing: float = MODEL_SPACING, farthest: bool = False) -> list[Point | None]:
+                      spacing: float = MODEL_SPACING, farthest: bool = False,
+                      rank_spacing: float | None = None) -> list[Point | None]:
     """Re-slot every model of a re-forming unit (game_rules.md, "Formation changes"): process the new
     shape's slots front rank first, centre outward; each slot after the first takes the not-yet-placed
     model nearest to it by `_octagonal_distance`, scanning every remaining model and stopping early on
@@ -235,7 +245,7 @@ def reform_assignment(x: float, y: float, direction: float | None, models: int, 
     turned into world targets each tick with `place(x, y, direction, ...)` so they track a moving or
     turning anchor for as long as the re-form is in progress.
     """
-    slot_offsets = reform_slot_order(models, ranks, spacing)
+    slot_offsets = reform_slot_order(models, ranks, spacing, rank_spacing)
     slot_targets = place(x, y, direction, slot_offsets)
     assigned: list[Point | None] = [None] * len(positions)
     remaining = list(range(len(positions)))

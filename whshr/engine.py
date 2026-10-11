@@ -64,12 +64,14 @@ HUD_CLASS_BY_RACE_TYPE: dict[int, str] = {
 }
 
 
-def snap_facing_to_view(direction: float, view_angle: float) -> float:
-    """Round `direction` to the nearest 45 degree step (64 of 512) of a grid offset by where the
-    camera sits inside a 45 degree sector."""
-    step = formation.FULL_TURN / 8
-    offset = view_angle % step
-    return (round((direction - offset) / step) * step + offset) % formation.FULL_TURN
+def wagon_layout_direction(facing: float, view_angle: float | None) -> float:
+    """The direction a two-figure wagon's team and wagon are lined up along (notes/wagon_camera_snap.md 0): the
+    unit's facing rounded to the nearest 45 degree step (64 of 512, an exact half rounding up) of a grid shifted by
+    where the camera sits inside its 45 degree sector. Only figure placement uses it; the facing is never changed.
+    Without a camera (headless) the grid is unshifted."""
+    step = formation.FULL_TURN // 8
+    offset = (view_angle or 0) % step
+    return ((facing - offset + step / 2) // step * step + offset) % formation.FULL_TURN
 
 
 def speed_per_tick(move_stat: float | None, initiative_stat: float | None, k: float = MOVING_FREELY_K) -> float:
@@ -296,6 +298,8 @@ class Regiment:
     # The facing the re-form layout was made at. Re-form slots stay at it while the re-form runs: only a pursuit
     # turns then, and it does not rotate the slots (notes/reform_while_moving.md 5).
     reform_facing: float = 0.0
+    # (facing, view angle) of a two-figure wagon's last figure layout (notes/wagon_camera_snap.md 1)
+    wagon_layout_key: tuple[float, float | None] | None = None
     # notes/reform_while_moving.md 4: a player Move, Face point, Charge or Attack order given while re-forming is
     # held here as (Battle method name, *args) and applied on the first tick after the re-form ends.
     pending_order: tuple[Any, ...] | None = None
@@ -420,9 +424,11 @@ class Regiment:
 
     def _assign_leader(self) -> None:
         """Give a unit with a leader block its leader figure once: the machine in the first slot of a war machine,
-        else the middle model of the front rank (the slot a re-form gives the leader)."""
+        else the middle model of the front rank (the slot a re-form gives the leader). A wagon unit's leader is the
+        wagon itself, the rearmost model: the team (draught animals) leads (notes/game_rules.md, "Wagons")."""
         if self.has_leader and self.leader_uid is None and self.melee_models:
-            centre = 0 if self.hud_class == "art" else (max(1, self.front_rank_models()) - 1) // 2
+            centre = (len(self.melee_models) - 1 if self.is_wagon else 0 if self.hud_class == "art"
+                      else (max(1, self.front_rank_models()) - 1) // 2)
             self.leader_uid = self.melee_models[min(centre, len(self.melee_models) - 1)].uid
 
     @property
@@ -584,11 +590,23 @@ class Regiment:
             return []
         return self.positions
 
+    @property
+    def rank_spacing(self) -> float | None:
+        """Front-to-back slot spacing when it differs from the sideways one: a wagon's team and wagon stand
+        22 units apart (game_rules.md, "Formations")."""
+        return formation.WAGON_RANK_SPACING if self.is_wagon else None
+
+    def slots(self, ranks: int | None = None) -> list[Point]:
+        """The raster slot offsets of this unit's block (`formation.block_slots`) for `ranks` (default: current)."""
+        return formation.block_slots(self.models, self.ranks if ranks is None else ranks,
+                                     rank_spacing=self.rank_spacing)
+
     def model_positions(self, spacing: float = formation.MODEL_SPACING) -> list[Point]:
         """Current per-model positions (BTS world units): seeded in formation, then advanced by `Battle.tick`."""
         if len(self.positions) != self.models:
             self.positions = formation.place(self.x, self.y, self.direction,
-                                              formation.block_slots(self.models, self.ranks, spacing))
+                                              formation.block_slots(self.models, self.ranks, spacing,
+                                                                    self.rank_spacing))
         if len(self.melee_models) != len(self.positions):
             # Reseeding the formation renews every model's identity. Identities are drawn from a
             # counter that never restarts, so a pairing left over from before the reseed can never be
@@ -801,13 +819,12 @@ class Battle:
             {"x": building.x, "y": building.y, "radius": buildings.footprint_radius(building.name), "height": 24.0,
              "status": ["os_active", "os_solid"], "name": building.name, "building": building.identifier}
             for building in self.buildings]
-        # Camera rotation in 1/512 turns, set by the frontend; wagons snap to it (see set_view_angle).
+        # Camera rotation in 1/512 turns, set by the frontend; two-figure wagons line up on it (_wagon_layout).
         self.view_angle: float | None = None
         # Map-aligned (min x, min y, max x, max y) around what the camera shows, set by the frontend
         # (notes/react_portrait.md section 5); None = no camera (headless), then "on screen" = visible to the player.
         self.view_rect: tuple[float, float, float, float] | None = None
         self.portrait_popup = PortraitPopup()  # leader portrait shown for reactions (notes/react_portrait.md 3)
-        self._snapped_view_angle: float | None = None
         self.rng = random.Random(seed)
         self.script_logger = script_logger
         self._warned_blocked_routes: set[tuple[str, TurnKey, str]] = set()
@@ -1222,7 +1239,7 @@ class Battle:
 
     @staticmethod
     def _snap_deployment_layout(regiment: Regiment) -> None:
-        slots = regiment.reform_slots or formation.block_slots(regiment.models, regiment.ranks)
+        slots = regiment.reform_slots or regiment.slots()
         regiment.positions = formation.place(regiment.x, regiment.y, regiment.direction, slots)
         regiment.reforming = False
         regiment.reform_slots = []
@@ -1934,7 +1951,7 @@ class Battle:
         (notes/reform_while_moving.md 2, 6, 12).
         """
         positions = regiment.model_positions()
-        leader_index = regiment.living_leader_index if not regiment.routing else None
+        leader_index = regiment.living_leader_index if not (regiment.routing or regiment.is_wagon) else None
         ranks = max(1, min(regiment.models, ranks)) if regiment.models else 1
         regiment.ranks = ranks
         sizes = formation.rank_sizes(regiment.models, ranks)
@@ -1948,10 +1965,10 @@ class Battle:
             # filled directly (nearest fallback here); wagons use the ordinary nearest search.
             assignment = _slot_offsets(formation.reform_assignment(
                 regiment.x, regiment.y, regiment.direction, regiment.models, ranks, positions,
-                leader_index=leader_index,
+                leader_index=leader_index, rank_spacing=regiment.rank_spacing,
                 farthest=regiment.hud_class == "art" and self.phase != "deployment"))
             raster_index = {offset: index for index, offset in
-                            enumerate(formation.block_slots(regiment.models, ranks))}
+                            enumerate(regiment.slots(ranks))}
             order = sorted(range(len(assignment)), key=lambda i: raster_index[assignment[i]])
             regiment.positions = [positions[i] for i in order]
             regiment.melee_models = [regiment.melee_models[i] for i in order]
@@ -1962,9 +1979,9 @@ class Battle:
         walk_back = walk_back or (regiment.reforming and regiment.reform_walk_back)
         regiment.reform_slots = _slot_offsets(formation.reform_assignment(
             regiment.x, regiment.y, regiment.direction, regiment.models, ranks, positions,
-            leader_index=leader_index))
+            leader_index=leader_index, rank_spacing=regiment.rank_spacing))
         if walk_back and regiment.reform_slots:
-            raster = formation.block_slots(regiment.models, ranks)
+            raster = regiment.slots(ranks)
             raster_index = {offset: index for index, offset in enumerate(raster)}
             order = sorted(range(len(regiment.reform_slots)), key=lambda i: raster_index[regiment.reform_slots[i]])
             regiment.positions = [positions[i] for i in order]
@@ -2025,17 +2042,31 @@ class Battle:
         return best_id
 
     def set_view_angle(self, angle: float) -> None:
-        """Record the camera rotation (1/512 turns). Wagons re-snap their facing to the nearest 45 degree
-        step of a grid offset by the camera's position in its 45 degree sector, only when it changed
-        (game_rules.md "Turning, wheeling and reversing")."""
-        angle = angle % formation.FULL_TURN
-        self.view_angle = angle
-        if angle == self._snapped_view_angle:
-            return
-        self._snapped_view_angle = angle
-        for regiment in self.regiments.values():
-            if regiment.is_wagon:
-                regiment.direction = snap_facing_to_view(regiment.direction, angle)
+        """Record the camera rotation (1/512 turns). Two-figure wagons re-place their figures on the next tick
+        (notes/wagon_camera_snap.md 1); no unit's facing changes."""
+        self.view_angle = angle % formation.FULL_TURN
+
+    def _wagon_layout(self, regiment: Regiment) -> list[Point] | None:
+        """Figure targets of a wagon unit with exactly two figures (notes/wagon_camera_snap.md 0-1): the team
+        WAGON_HALF_SPACING in front of the unit position and the wagon (the leader figure) as far behind, along
+        `wagon_layout_direction`. When the view angle or the facing changed since the last layout, the figures are
+        put straight onto these places, heading the unit's facing; otherwise they are carried by the ordinary
+        catch-up walk toward them. None for any other unit."""
+        if not (regiment.is_wagon and regiment.models == 2 and len(regiment.positions) == 2):
+            return None
+        direction = wagon_layout_direction(regiment.direction, self.view_angle)
+        front, rear = formation.place(regiment.x, regiment.y, direction,
+                                      [(0.0, formation.WAGON_HALF_SPACING), (0.0, -formation.WAGON_HALF_SPACING)])
+        wagon = regiment.living_leader_index
+        targets = [rear, front] if wagon == 0 else [front, rear]
+        key = (regiment.direction, self.view_angle)
+        if key != regiment.wagon_layout_key:
+            regiment.wagon_layout_key = key
+            regiment.positions = list(targets)
+            angle = regiment.direction * math.tau / formation.FULL_TURN
+            for model in regiment.melee_models:
+                model.heading_x, model.heading_y = math.sin(angle), math.cos(angle)
+        return targets
 
     def tick(self, seconds: float = TICK_SECONDS) -> None:
         if seconds <= 0:
@@ -2709,8 +2740,8 @@ class Battle:
         grid walks to that cell instead and is marked `arrived` once it is within
         `battle_grid.ARRIVAL_DISTANCE` of it (game_rules.md 5.8 step 6): only then may it strike.
         """
-        targets = formation.place(regiment.x, regiment.y, regiment.direction,
-                                  formation.block_slots(regiment.models, regiment.ranks))
+        targets = self._wagon_layout(regiment) or formation.place(regiment.x, regiment.y, regiment.direction,
+                                                                  regiment.slots())
         rank_sizes = formation.rank_sizes(regiment.models, regiment.ranks)
         rank_indices = [rank for rank, width in enumerate(rank_sizes)
                         for _ in range(width)]
@@ -2883,7 +2914,7 @@ class Battle:
         if not regiment.reforming:
             return
         raster_index = {offset: index for index, offset in
-                        enumerate(formation.block_slots(regiment.models, regiment.ranks))}
+                        enumerate(regiment.slots())}
         if (len(regiment.reform_slots) == len(regiment.positions)
                 and all(slot in raster_index for slot in regiment.reform_slots)):
             order = sorted(range(len(regiment.reform_slots)), key=lambda i: raster_index[regiment.reform_slots[i]])
@@ -2902,7 +2933,7 @@ class Battle:
         # permutation has done its job, or the very next tick's ordinary catch-up walk would immediately
         # send every model chasing a different slot again.
         raster_index = {offset: index for index, offset in
-                        enumerate(formation.block_slots(regiment.models, regiment.ranks))}
+                        enumerate(regiment.slots())}
         if any(slot not in raster_index for slot in regiment.reform_slots):
             # A casualty during the re-form left slots of the old, larger layout: re-slot the survivors into the
             # current layout from where they stand instead of mapping slots that no longer exist.

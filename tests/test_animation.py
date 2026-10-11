@@ -369,12 +369,13 @@ class CostumeFamilyTests(unittest.TestCase):
         self.assertEqual(len(table[animation.WALK].sequence), 10)
         self.assertEqual(table[animation.WALK].random_entry, 0)
 
-    def test_wagons_alternate_two_looks_and_only_idle_animates(self):
+    def test_wagons_alternate_two_looks_and_their_wheels_roll_when_idle_or_driving(self):
         table = animation.family_table("wagons")
         self.assertEqual({animation.script_group(table[animation.STAND], s) for s in range(4)}, {0, 32})
         self.assertEqual(table[animation.IDLE].sequence, (0, 0, 1, 1, 2, 2, 3, 3))
         self.assertEqual(table[animation.IDLE].random_entry, 0)
-        self.assertEqual(len(table[animation.WALK].sequence), 1)
+        self.assertEqual(table[animation.WALK].sequence, (0, 0, 1, 1, 2, 2, 3, 3))
+        self.assertEqual(len(table[animation.STAND].sequence), 1)
         self.assertEqual({animation.script_group(table[animation.DEAD], s) for s in range(4)}, {64})
 
     def test_stepping_a_peasant_reports_its_costume_group(self):
