@@ -1,8 +1,9 @@
 """The leader figure is drawn and animated with the leader block's own sprite set (notes/leader_figure_sprite.md)."""
+import math
 import unittest
 
 from whshr import animation, combat
-from whshr.engine import Battle, Regiment, has_leader_figure
+from whshr.engine import Battle, Regiment, has_leader_figure, wagon_layout_direction
 from whshr.rules import Side
 
 
@@ -111,3 +112,36 @@ class WagonTeamTests(unittest.TestCase):
             table = animation.family_table(regiment.model_family(regiment.melee_models[1]))
             self.assertEqual(animation.script_group(table[animation.WALK], 29), 0)
             self.assertEqual(animation.script_group(table[animation.WALK], 2), 0)
+
+
+class WagonCameraLayoutTests(unittest.TestCase):
+    """notes/wagon_camera_snap.md 3: the camera only re-places a two-figure wagon's figures."""
+
+    def test_layout_direction_follows_the_camera_shifted_grid(self):
+        for view, expected in ((0, 128), (10, 74), (20, 84), (64, 128)):
+            self.assertEqual(wagon_layout_direction(100, view), expected)
+
+    def test_given_a_driving_wagon_then_the_layout_tilts_but_the_facing_stays(self):
+        expected = {0: 128, 4: 132, 32: 160, 36: 100, 40: 104}
+        for view, direction in expected.items():
+            self.assertEqual(wagon_layout_direction(128, view), direction)
+
+    def test_given_a_turning_camera_then_the_cart_keeps_its_facing_and_drives_as_far_as_with_a_still_camera(self):
+        def drive(rotate: bool) -> tuple[float, float, float]:
+            regiment = Regiment("c", "Horse and cart", 500, 500, 128, Side.PLAYER, models=2, ranks=2,
+                                sprite="PackPony", leader_sprite="Wagon", has_leader=True, unit_class=7)
+            battle = Battle(2000, 2000, [regiment], seed=1995)
+            battle.order_move("c", 700, 500)
+            for tick in range(10):
+                if rotate:
+                    battle.set_view_angle(tick * 4)
+                battle.tick()
+            return regiment.x, regiment.y, regiment.direction
+
+        self.assertEqual(drive(True), drive(False))
+
+    def test_given_a_cart_then_team_and_wagon_stand_22_apart_with_the_team_in_front(self):
+        regiment = cart()
+        team, wagon = regiment.positions
+        self.assertAlmostEqual(math.dist(team, wagon), 22)
+        self.assertLess(team[0], wagon[0])  # facing 384 is -X: the team is further along it

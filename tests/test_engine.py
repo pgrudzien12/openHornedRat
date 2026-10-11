@@ -348,7 +348,9 @@ class CatchUpWalkTests(unittest.TestCase):
                   }]}]}
         battle = Battle.from_script(source)
         regiment = battle.regiments["wagon"]
-        before = list(regiment.model_positions())
+        regiment.model_positions()
+        battle._advance_models(regiment, 1)  # the first wagon layout puts both figures straight onto their places
+        before = list(regiment.positions)
         regiment.y = 100
 
         battle._advance_models(regiment, 1)
@@ -854,6 +856,7 @@ class ReformFormationDifferenceTests(unittest.TestCase):
         battle = self._wagon_battle()
         wagon = battle.regiments["wagon"]
         wagon.model_positions()
+        battle._advance_models(wagon, 1)
         wagon.y = 100
         before = list(wagon.positions)
         battle._advance_models(wagon, 1)
@@ -1373,26 +1376,14 @@ class FormationTurnExceptionTests(unittest.TestCase):
         self.assertNotIn(regiment.direction, (0, 128, 256, 384))  # turning gradually, not snapped
         self.assertEqual(regiment.turn_mode, "halted")
 
-    def test_given_a_wagon_when_the_camera_moves_then_facing_snaps_to_the_camera_relative_grid(self):
+    def test_given_a_wagon_when_the_camera_moves_then_its_facing_is_untouched(self):
         battle, regiment = self._battle(models=2, ranks=1)
         regiment.unit_class = 7
-        regiment.direction = 40
-
-        battle.set_view_angle(10)
-
-        self.assertEqual(regiment.direction, 10)
-        battle.set_view_angle(30)
-        self.assertEqual(regiment.direction, 30)
-
-    def test_given_an_unchanged_view_angle_then_the_wagon_is_not_re_snapped(self):
-        battle, regiment = self._battle(models=2, ranks=1)
-        regiment.unit_class = 7
-        battle.set_view_angle(10)
-        regiment.direction = 40
-
-        battle.set_view_angle(10)
-
-        self.assertEqual(regiment.direction, 40)
+        regiment.direction = 100
+        for angle in (0, 10, 20, 64):
+            battle.set_view_angle(angle)
+            battle.tick()
+            self.assertEqual(regiment.direction, 100)
 
     def test_given_a_non_wagon_when_the_camera_moves_then_its_facing_is_untouched(self):
         battle, regiment = self._battle(models=20, ranks=4)

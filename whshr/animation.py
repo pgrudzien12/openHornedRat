@@ -147,7 +147,9 @@ _WAGON_HELD: dict[str, Any] = dict(sequence=(0,), variant_groups=(0, 32), varian
 WAGONS: ActionTable = {
     STAND: ActionScript("stand", **_WAGON_HELD),
     IDLE: ActionScript("stand", sequence=(0, 0, 1, 1, 2, 2, 3, 3), variant_groups=(0, 32), variant_rule="bit1"),
-    WALK: ActionScript("move", **_WAGON_HELD),
+    # Not the original (game_rules.md: one held frame): the wheels roll while driving, by the owner's request,
+    # using the idle loop's phases.
+    WALK: ActionScript("move", sequence=(0, 0, 1, 1, 2, 2, 3, 3), variant_groups=(0, 32), variant_rule="bit1"),
     FIGHT: ActionScript("attack", **_WAGON_HELD),
     WEAPON_READY: ActionScript("attack", **_WAGON_HELD),
     DEAD: ActionScript("dead", sequence=(0,), loop=False, locks_facing=True, variant_groups=(64, 64),
@@ -156,7 +158,7 @@ WAGONS: ActionTable = {
 }
 
 # Caravan and war-wagon carts have one look (a single 32-frame group), so both costume slots point at group 0.
-# PROVISIONAL: they follow the wagon's scripts (held frame, idle-only wheel loop); wheel-roll while driving is not modelled.
+# PROVISIONAL: they follow the wagon's scripts (wheels roll while idle and driving).
 CARTS: ActionTable = {action: replace(script, variant_groups=(0, 0)) if script.variant_groups == (0, 32) else script
                       for action, script in WAGONS.items()}
 CARTS[DEAD] = ActionScript("dead", sequence=(0,), loop=False, locks_facing=True)

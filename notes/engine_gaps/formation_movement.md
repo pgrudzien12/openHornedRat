@@ -78,7 +78,9 @@ turn-rate/pivot mechanism itself does not.
   hard-code "monster = fast turn".
 - **Units currently re-forming** are skipped by the same guard (don't additionally drag the reference
   point around mid-reform).
-- **Wagons snap facing to 45° steps — relative to the camera, not the world.** The battle update keeps
+- **Wagons snap facing to 45° steps — relative to the camera, not the world.** Superseded detail:
+  `notes/wagon_camera_snap.md` — the snap is a copy used only to place a two-figure wagon's team and
+  wagon (11 units each side of the unit position); the unit's own facing never changes. The battle update keeps
   a global view angle (camera rotation in the same 1/512-turn scale); the wagon layout rounds facing
   to the nearest 45° step of a grid offset by where the camera currently sits inside a 45° sector, and
   is only re-run when the view angle has changed since the last update (skipped outright otherwise).
@@ -126,8 +128,8 @@ Three GitHub tasks (one already existed, #17, now rewritten to the corrected/exp
    machine itself does not.
 2. **Per-formation-type turn differences**: monsters skip the whole pivot/slot/speed-penalty block
    (full-speed on-the-spot turning), but still compute their turn rate `s` from their real footprint
-   (a 5×8 Mole Machine turns as slowly as a ten-wide line); units mid-reform skip it too; wagons snap
-   facing to the nearest 45° step of a *camera-relative* grid, re-run only when the view angle has
+   (a 5×8 Mole Machine turns as slowly as a ten-wide line); units mid-reform skip it too; wagons place
+   their two figures along the nearest 45° step of a *camera-relative* grid (facing unchanged, `wagon_camera_snap.md`), re-run only when the view angle has
    changed, not a world-aligned snap; war machines are unconditionally anchored at set-up (an engine
    rule, not an AI/mission choice) but use the same small-`s` fast-turn formula as anyone else on the
    rare occasions they do turn — cross-reference `notes/engine_gaps/model_movement.md`'s scope

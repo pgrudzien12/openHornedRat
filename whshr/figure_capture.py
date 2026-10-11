@@ -61,7 +61,7 @@ def figure_goals(battle: "Battle", regiment: "Regiment") -> list[tuple[Point, st
         slots = formation.place(regiment.x, regiment.y, regiment.reform_facing, regiment.reform_slots)
         return [(point, "reform") for point in slots]
     slots = formation.place(regiment.x, regiment.y, regiment.direction,
-                            formation.block_slots(regiment.models, regiment.ranks))
+                            regiment.slots())
     busy = regiment.in_melee or regiment.routing or bool(regiment.attack_target) or regiment.moving
     goals: list[tuple[Point, str]] = []
     for index in range(count):
