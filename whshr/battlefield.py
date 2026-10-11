@@ -439,6 +439,6 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
     palette = load_rgb_palette(game.binary_file((script["field"]["palette"] or "standard") + ".PAL"))
     effects = {mesh["name"].split(".")[0].casefold(): mesh for mesh in scenery["meshes"]
                if mesh["name"].casefold().startswith(("arrows", "boltbur", "flames", "fire", "ex", "spear",
-                                                         "light", "wlight", "gaze", "dakrunch"))}
+                                                         "light", "wlight", "gaze", "dakrunch", "sapharch"))}
     return Battlefield(script, terrain, vertices, size, layers, palette, atlas_size, atlas, sheets, ui_sheets,
                        sorted(set(missing)), effects, len(ground["textures"]), len(scenery["textures"]))
