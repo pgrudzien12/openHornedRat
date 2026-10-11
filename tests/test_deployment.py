@@ -683,3 +683,21 @@ class DeploymentBoundaryLoadingTests(unittest.TestCase):
             self.assertEqual(boundary["name"], "ArbitraryName")
             self.assertEqual(boundary["status"], ["bnd_ACTIVE", "bnd_DEPLOYMENT", "bnd_INVSOLID"])
             self.assertEqual(boundary["lines"], [[10, 20, 30, 40]])
+
+
+class DeploymentFlagTests(unittest.TestCase):
+    def test_given_a_square_zone_then_flags_line_its_whole_perimeter_at_the_spacing(self):
+        from whshr.deployment import flag_positions
+        zone = Region(((0, 0, 100, 0), (100, 0, 100, 100), (100, 100, 0, 100), (0, 100, 0, 0)))
+        flags = flag_positions([zone], spacing=50)
+        self.assertEqual(len(flags), 8)
+        self.assertIn((0.0, 0.0), flags)
+        self.assertIn((100.0, 50.0), flags)
+
+    def test_given_an_edge_shorter_than_the_spacing_then_it_still_gets_a_flag_at_its_start(self):
+        from whshr.deployment import flag_positions
+        self.assertEqual(flag_positions([Region(((5, 5, 10, 5),))], spacing=50), [(5.0, 5.0)])
+
+    def test_given_no_zones_then_there_are_no_flags(self):
+        from whshr.deployment import flag_positions
+        self.assertEqual(flag_positions([]), [])

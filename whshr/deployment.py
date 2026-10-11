@@ -58,6 +58,22 @@ def regions(boundaries: Iterable[Mapping[str, Any]]) -> list[Region]:
     return result
 
 
+# Engine design choice (deliberately not the original's spacing): world units between flags along a zone edge.
+FLAG_SPACING = 48.0
+
+
+def flag_positions(zones: Iterable[Region], spacing: float = FLAG_SPACING) -> list[Point]:
+    """Flag poles marking the perimeter of the deployment zones: one at the start of every edge, then every
+    `spacing` world units along it (the end of an edge is the start of the next, so corners get a pole)."""
+    result: list[Point] = []
+    for zone in zones:
+        for x1, y1, x2, y2 in zone.lines:
+            length = math.hypot(x2 - x1, y2 - y1)
+            count = max(1, math.ceil(length / spacing))
+            result.extend((x1 + (x2 - x1) * i / count, y1 + (y2 - y1) * i / count) for i in range(count))
+    return result
+
+
 @dataclass
 class Drag:
     regiment_id: str
