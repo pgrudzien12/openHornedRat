@@ -960,9 +960,10 @@ def _react_to_rout(routed: "Regiment", opponents: Sequence["Regiment"], group_id
             # 127/148 (keep shooting, re-form) instead of the pursuit script. Missile troops stand in
             # for that here, the engine having no unit class.
             # Their script is idling in the melee script, which only an event ends (movement_formation.md
-            # "Left combat"). PROVISIONAL: the engine does not run the scripted 0x0F reaction, so it sends
-            # "opponent gone", whose library handling drops the target and re-forms -- where the shipped
-            # static/shooter reactions end up when they neither pursue nor keep shooting.
+            # "Left combat"). notes/bf010_reserves_and_rout_reactions.md 2: a shooter or wizard that is not
+            # independent sends itself "opponent gone" (drop the target, re-form, restart), as done here.
+            # Not modelled: an independent shooter/wizard hunts on instead (its scripts 127/148), and
+            # artillery re-forms in place without restarting its script; both get the same event here.
             _send_opponent_gone(battle, opponent)
             continue
         opponent.attack_target = routed.identifier

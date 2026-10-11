@@ -54,6 +54,39 @@ class TargetSelectionTests(unittest.TestCase):
         self.assertIsNone(self.enemy.attack_target)
         self.assertEqual(state.cond_flags, 1)
 
+    def test_attack_nearest_enemy_skips_a_marked_unit(self):
+        # BF010: Ilmarin marks himself (SetUnitFlags 256); the Clanrats must go for the Dwarfs, not for him
+        # (notes/bf010_reserves_and_rout_reactions.md 3.1).
+        ilmarin = Regiment("ilmarin", "Ilmarin", 105, 100, 0, Side.NEUTRAL, models=1, ranks=1)
+        dwarfs = Regiment("dwarfs", "Dwarfs", 300, 100, 0, Side.NEUTRAL, models=14, ranks=3)
+        battle = Battle(1000, 1000, [self.enemy, ilmarin, dwarfs], seed=1995)
+        interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        battle.event_bus.unit_states["ilmarin"].unit_flags |= interpreter.LEAVING_BATTLE_FLAG
+        state = battle.event_bus.unit_states["enemy_1"]
+
+        interp.op_AttackNearestEnemy(state, None, [], "enemy_1", 0, None)
+
+        self.assertEqual(picked(state), "dwarfs")
+
+    def test_attack_nearest_enemy_of_a_neutral_unit_never_picks_a_player_unit(self):
+        dwarfs = Regiment("dwarfs", "Dwarfs", 100, 110, 0, Side.NEUTRAL, models=14, ranks=3)
+        self.enemy.x = 600
+        battle = Battle(1000, 1000, [self.near, self.enemy, dwarfs], seed=1995)
+        interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        state = battle.event_bus.unit_states["dwarfs"]
+
+        interp.op_AttackNearestEnemy(state, None, [], "dwarfs", 0, None)
+
+        self.assertEqual(picked(state), "enemy_1")
+
+    def test_attack_nearest_enemy_keeps_an_enemy_already_in_melee(self):
+        self.near.in_melee = True
+        state = self.battle.event_bus.unit_states["enemy_1"]
+
+        self.interp.op_AttackNearestEnemy(state, None, [], "enemy_1", 0, None)
+
+        self.assertEqual(picked(state), "player_near")
+
     def test_attack_nearest_visible_enemy_fails_when_candidates_are_outside_view_cone(self):
         state = self.battle.event_bus.unit_states["enemy_1"]
         self.interp.op_AttackNearestVisibleEnemy(state, None, [], "enemy_1", 0, None)

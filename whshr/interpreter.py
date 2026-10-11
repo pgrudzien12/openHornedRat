@@ -714,10 +714,14 @@ class ScriptInterpreter:
 
     def _nearest_enemy_id(self, regiment: "Regiment", n: int = 1, side: Side | None = None,
                           visible_only: bool = False) -> str | None:
-        """Whole-field nearest search; positive n wraps through eligible units (game_rules.md)."""
+        """Whole-field nearest search; positive n wraps through eligible units (game_rules.md). Candidates are
+        hostile (or of `side`), not hidden, broken, marked or a building; units in melee are kept
+        (notes/bf010_reserves_and_rout_reactions.md 3.1). Hostile is the army split, so a neutral searcher never
+        picks a player unit."""
         candidates = [other for other in self.battle.regiments.values()
                       if other.active and not (other.hidden or other.routing or other.held)
-                      and (other.side == side if side is not None else other.side != regiment.side)]
+                      and other.unit_class not in spell_effects.BUILDING_CLASSES and not self._marked(other)
+                      and (other.side == side if side is not None else self._hostile(regiment, other))]
         if visible_only:
             candidates = [other for other in candidates if visibility.visible(
                 self.battle.formation_centre(regiment), regiment.direction,
@@ -1428,6 +1432,11 @@ class ScriptInterpreter:
     def _hostile(unit: "Regiment", other: "Regiment") -> bool:
         """One is in the enemy army and the other in the player army or on the allied side (part A 0)."""
         return (unit.side == Side.ENEMY) != (other.side == Side.ENEMY)
+
+    def _marked(self, other: "Regiment") -> bool:
+        """Marked by `SetUnitFlags 256` (notes/script_queries.md 1, "marked")."""
+        other_state = self.event_bus.unit_states.get(other.identifier)
+        return other_state is not None and bool(other_state.unit_flags & LEAVING_BATTLE_FLAG)
 
     def _eligible(self, other: "Regiment") -> bool:
         """Active, not hidden, not broken and not leaving the battle (part A 0)."""
