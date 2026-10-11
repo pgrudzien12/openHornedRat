@@ -333,7 +333,8 @@ credited to the caster, **death kind 1 (fire)**. No side test, no exclusion (the
 | unit | `d < footprint + R` (strict) | `d + footprint < R` (footprint entirely inside): **all** models; otherwise `n = max(1, trunc(size × (R − d + footprint) / (2 × footprint)))` |
 | building | `d < footprint + R` | destroyed |
 
-`size` = the unit's current number of models at that test. The fall and the finale shake the screen (presentation).
+`size` = the unit's current number of models at that test. The screen shakes **once**, on the tick after the finale,
+with the impact flash, not during the fall (corrected October 2026, `spell_area_particle_visuals.md` §2.4).
 🟡 Whether consecutive fall ticks kill *new* models depends on when slain models leave the model list: a slain model
 leaves its unit when its death sequence starts (1-tick collapse for kind 1, `game_rules.md` "Death kinds"), so in the
 original the next fall tick may pick the same, already slain models again. Engine recommendation: remove slain models
@@ -341,8 +342,9 @@ before the next tick's effect step, so that every fall tick takes the next `n` l
 
 ### 5.4 After the fall, dispel
 
-A flash and embers follow (≈ 10 + up to 36 ticks, presentation; the effect is still active and dispellable then, with
-no consequence). Effect position = the aim point: **a dispel during the fuse prevents the fall** (and stops further
+A 9-tick flash, then ground bursts that turn into small flames and die down over a 36-step countdown, follow (ending by
+T+9k+55; presentation only, `spell_area_particle_visuals.md` §2.4–2.6). The effect is still active and dispellable then,
+with no consequence. Effect position = the aim point: **a dispel during the fuse prevents the fall** (and stops further
 panic tests); a dispel during the fall stops the remaining fall ticks and the finale.
 
 ---
