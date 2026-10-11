@@ -1,5 +1,10 @@
 # Research request: battle music playback
 
+Resolved by [battle_music.md](battle_music.md). The frontend now starts installed `BATTLE.MID` during
+deployment, polls completion every 2.5 seconds, suspends for ordinary pause or music volume zero, and releases
+the tune on departure. The engine currently supports GM with its shared volume control; an FM selector and
+audible comparison with the original remain outside this implementation.
+
 BF010 was silent during the latest playtest. The user recalls battle music previously. Current BattleView has
 no music start/stop lifecycle. Searches of tracked battle-view history found no prior MIDI playback hook;
 this does not establish what the user heard. GlueView handles PlayMusic/StopMusic with pygame.mixer.music,

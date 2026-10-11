@@ -71,7 +71,7 @@ labels (`Strings`, `Timpani`, `OrchDrums`, …).
 
 | Track | FM file | Tracks | PPQN | BPM | Length s (GM / FM) | Channels (GM) | SBK presets (bank 1) | Where used (strings, see below) |
 |---|---|---|---|---|---|---|---|---|
-| `BATTLE` | `BATTLEFM` | 14 | 384 | 140 | 219.4 / 219.4 | 1,2,4,6,7,9,10,12,14,16 | – | only a bare `battle.mid` string in `GAMEF.DLL` |
+| `BATTLE` | `BATTLEFM` | 14 | 384 | 140 | 219.4 / 219.4 | 1,2,4,6,7,9,10,12,14,16 | – | battlefield, starting during deployment; see [battle_music.md](battle_music.md) |
 | `COMBAT` | `COMBATFM` | 14 | 384 | 140 | 216.0 / 216.0 | 1,2,4–7,9,10,12–14,16 | – | glue: ambush encounters (`playmidi:combat` ×5) |
 | `DEAD` | `DEADFM` | 4 | 384 | 80 | 24.0 / 24.0 | 6,7,10 | – | death cutscenes `DEATH01`, `DEATH02` (GM and FM files are byte-identical) |
 | `DWARF` | `DWARFFM` | 8 | 384 | 100 | 153.6 / 153.6 | 2,3,4,7,10,12,14 | 57 | cutscenes A6, A12, A12B, A18, A18B |
@@ -86,7 +86,7 @@ labels (`Strings`, `Timpani`, `OrchDrums`, …).
 | `SCRIBE` | `SCRIBEFM` | 16 | 384 | 250→100 | 164.2 / 182.4 | 1–8,10–12,14–16 | 52, 54 | glue: caravan screens with Dietrich the scribe (`[MIDI] name:scribe` ×23) |
 | `SIGHTED` | `SIGHTEFM` | 17 | 384 | 100 | 242.4 / 242.4 | 1–10,12–15 | – | glue: `[START]` of every campaign mission script (`playmidi:sighted` ×46) |
 | `SKAVEN` | `SKAVENFM` | 9 | 480 | 80 | 143.6 / 143.6 | 1,2,7–11,14 | – | cutscenes A2, A3, A7, A20, A22, A24 |
-| `TACTICAL` | `TACTICFM` | 11 | 384 | 100 | 134.4 / 122.4 | 2–4,6–8,10–12,14 | 57 | `WHSHR.EXE` next to `TroopWindow` (troop selection / deployment?) |
+| `TACTICAL` | `TACTICFM` | 11 | 384 | 100 | 134.4 / 122.4 | 2–4,6–8,10–12,14 | 57 | troop-selection book ([troop_selection.md](troop_selection.md) §1.3); battlefield deployment uses `BATTLE` |
 | `TENSE` | `TENSEFM` | 21 | 384 | 100 | 134.4 / 134.4 | 1–3,6,7,10,12,14,16 | 54, 57 | not found |
 | `TITLE` | `TITLEFM` | 29 | 384 | 104 | 279.2 / 272.3 | 1–8,10 | 52, 57 | glue: `[MIDI] name:title` on `OptionScreen` (main menu) |
 | `VICTORY` | **none** | 11 | 384 | 140 | 72.0 / – | 2,4,6,7,9–12,14,15 | – | not found |
@@ -114,6 +114,12 @@ CC0 = 0 / CC32 = 1 with program 57, and `TITLE`/`WINTIT` use the same with 60. S
 instrument answered there, which fits the AWE32 selecting banks by CC0 only.
 
 ### How the game picks music (strings only)
+
+The battlefield lifecycle is now established separately in
+[battle_music.md](battle_music.md): `BATTLE` starts on entry to deployment, repeats,
+preserves position across ordinary pause/resume, and stops on departure. Starting
+battle, melee changes and the win/loss decision do not replace or restart it.
+The historical asset-reference inventory below is not the full playback rule.
 
 - **Engine**: `binary\music\%s.mid` in `WHSHR.EXE`/`GAMEF.DLL`. `MIDI.DLL` exports
   `MIDI_InitTune/PlayTune/StopTune/FadeAndDiscard/SetRepeats/SetVolume/UseFM` and logs
