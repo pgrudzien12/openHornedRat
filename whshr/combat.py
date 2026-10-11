@@ -437,7 +437,7 @@ def _fight_has_enemy(battle: "Battle", regiment: "Regiment") -> bool:
     if regiment.melee_group is None:
         return False
     return any(other.active and not other.routing
-               and other.camp != regiment.camp
+               and may_engage(other, regiment)
                and other.melee_group == regiment.melee_group
                for other in battle.regiments.values())
 
@@ -885,7 +885,7 @@ def start_rout(regiment: "Regiment", battle: "Battle", flee_point: formation.Poi
     regiment.flee_x, regiment.flee_y = flee_x, flee_y
     group_id = regiment.melee_group
     opponents = [other for other in battle.regiments.values()
-                 if other.active and other.camp != regiment.camp
+                 if other.active and may_engage(other, regiment)
                  and other.melee_group == group_id and group_id is not None]
     regiment.model_positions()
     for index, model in enumerate(regiment.melee_models):
@@ -949,18 +949,21 @@ def _react_to_rout(routed: "Regiment", opponents: Sequence["Regiment"], group_id
         if opponent.routing or not opponent.active:
             continue
         still_fighting = any(
-            other.active and not other.routing and other.camp != opponent.camp
+            other.active and not other.routing and may_engage(other, opponent)
             and other.melee_group == group_id
             for other in battle.regiments.values())
         if still_fighting:
             continue  # another enemy is still on this grid: keep fighting it, do not pursue
-        if opponent.anchored:
-            continue  # an anchored war machine never pursues
-        if opponent.missile_range:
+        if opponent.anchored or opponent.missile_range:
             # game_rules.md 7.5: which classes decline is encoded in the behaviour scripts and applies
             # to both sides -- artillery never pursues, and shooters and wizards divert to scripts
             # 127/148 (keep shooting, re-form) instead of the pursuit script. Missile troops stand in
             # for that here, the engine having no unit class.
+            # Their script is idling in the melee script, which only an event ends (movement_formation.md
+            # "Left combat"). PROVISIONAL: the engine does not run the scripted 0x0F reaction, so it sends
+            # "opponent gone", whose library handling drops the target and re-forms -- where the shipped
+            # static/shooter reactions end up when they neither pursue nor keep shooting.
+            _send_opponent_gone(battle, opponent)
             continue
         opponent.attack_target = routed.identifier
         opponent.target_x = opponent.target_y = None
