@@ -271,3 +271,19 @@ class TestMissionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FoundItemNameTests(unittest.TestCase):
+    def test_given_a_found_item_then_its_name_is_the_item_text_for_its_table_index(self):
+        scene = DebriefScene(GlueScene("DEBRIEFONLY", campaign_with(BF003_WON)), StartDebrief(1, 7, 1, True))
+        asked = []
+        scene._string = lambda table, text_id, *arguments: asked.append((table, text_id)) or "Sword"
+
+        self.assertEqual(scene._item_name(39), "Sword")
+        self.assertEqual(asked, [("GMTXT", 31010)])  # BF003's pickup: table index 39 is item number 10
+
+    def test_given_an_unnamed_item_then_there_is_no_name(self):
+        scene = DebriefScene(GlueScene("DEBRIEFONLY", campaign_with(BF003_WON)), StartDebrief(1, 7, 1, True))
+        scene._string = lambda table, text_id, *arguments: ""
+
+        self.assertIsNone(scene._item_name(39))

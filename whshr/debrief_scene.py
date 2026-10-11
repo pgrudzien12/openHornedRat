@@ -10,6 +10,7 @@ from .debrief_screen import DebriefScreen
 from .glue import MissionRef
 from .glue_runtime import StartDebrief
 from .glue_scene import GlueScene
+from .objectives import item_text_id
 from .payments import CashTerms
 from .scenes import Quit, Scene, SceneAssets, SceneEvent, Transition
 
@@ -32,7 +33,8 @@ class DebriefScene(Scene):
         terms: CashTerms | None = campaign.mission_cash
         self.screen = DebriefScreen(
             self.effect.mode, report_for(campaign), self.effect.debrief_index, terms, campaign.coffers,
-            self._mission_name_id(), self._string, bonus_counter=campaign.bonus_counter)
+            self._mission_name_id(), self._string, bonus_counter=campaign.bonus_counter,
+            item_name=self._item_name)
         self.glue_scene.require_runtime().apply_evaluation_status(self.screen.evaluation)
         if not self.screen.will_skip() and ("commit", 0) in (self.screen.evaluation.program or ()):
             # The mission-text page (shown first) commits this battle's wounded (notes/casualty_bookkeeping.md 3.4).
@@ -56,6 +58,10 @@ class DebriefScene(Scene):
                     except ValueError:
                         return None
         return None
+
+    def _item_name(self, table_index: int) -> str | None:
+        """The name of a found item for the "have found" line on the mission-text page (``None`` if unnamed)."""
+        return self._string("GMTXT", item_text_id(table_index)) or None
 
     def _string(self, table: str, text_id: int, *arguments: Any) -> str:
         try:
