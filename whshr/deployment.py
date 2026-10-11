@@ -59,7 +59,7 @@ def regions(boundaries: Iterable[Mapping[str, Any]]) -> list[Region]:
 
 
 # Engine design choice (deliberately not the original's spacing): world units between flags along a zone edge.
-FLAG_SPACING = 48.0
+FLAG_SPACING = 96.0
 
 
 def flag_positions(zones: Iterable[Region], spacing: float = FLAG_SPACING) -> list[Point]:
