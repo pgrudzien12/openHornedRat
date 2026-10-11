@@ -54,7 +54,11 @@ STORM_REACH = 80  # C2 1.2 step 1
 STORM_FALLBACK = 576  # C2 1.2 step 2
 GUST_FLIGHT = 54  # C1 1.3
 TRAIL_RADIUS, TRAIL_HEIGHT, TRAIL_SPACING, TRAIL_MAX, TRAIL_START = 16, 16, 16, 30, 5  # C1 1.4
+TRAIL_JITTER = 8  # spell_obstacle_visuals.md 2.2: each trail sprite's offset 8 - (rand mod 16) per axis
 BOWER_LIFT, BOWER_FLIGHT = 19, 54  # C2 2.2: lifted at T+19, lands at T+74
+BOWER_TAKEOFF_WOBBLE, BOWER_DUST_FROM, BOWER_DUST_SPACING, BOWER_DUST_REFERENCE = 4, 20, 8, 30  # transport 2.1-2.2
+BOWER_DUST_LIFE, BOWER_MIN_END = 6, 75  # transport 2.3: the effect ends at T + max(75, L + 6)
+ARCH_SPARKLES, ARCH_SPARKLE_SPREAD, ARCH_SPARKLE_LIFT = 18, 48, 16  # transport 3.2
 ARCH_RELEASE, ARCH_SWALLOW, ARCH_REACH, ARCH_EXPIRY = 20, 161, 48, 900  # C2 3
 FLOCK_STRIKES, FLOCK_END, FLOCK_RADIUS = (10, 18, 26), 38, 32  # C3 3.2
 KRUNCH_FALL, KRUNCH_STAND, KRUNCH_LIFT, KRUNCH_END, KRUNCH_REACH = 9, 10, 47, 57, 32  # C1 4.1
@@ -163,6 +167,12 @@ class Effect:
     leg_clock: int = 0
     previous: tuple[float, float] | None = None  # Wind Blast: last tick's position; Bower: the unit's next centre
     trail: list[tuple[float, float]] = field(default_factory=list[tuple[float, float]])
+    # Wind Blast: each trail sprite's current visual offset from its deposit (spell_obstacle_visuals.md 2.2);
+    # Flying Bower: the tick (elapsed) of each dust deposit (spell_transport_visuals.md 2.2).
+    trail_jitter: list[tuple[int, int]] = field(default_factory=list[tuple[int, int]])
+    trail_births: list[int] = field(default_factory=list[int])
+    # Sapphire Arch: the 18 sparkles, (x, y, height above the ground there) (spell_transport_visuals.md 3.2).
+    particles: list[tuple[float, float, float]] = field(default_factory=list[tuple[float, float, float]])
     saved_side: Side | None = None
     saved_initiative: int = 0
     saved_speed: float = 0.0
@@ -443,14 +453,17 @@ def _start(battle: Battle, effect: Effect, caster: Regiment, origin_model: int, 
             rng.randrange(64)
     elif spell == SAPPHIRE_ARCH:
         effect.timer = LASTING
-        for _ in range(18):  # C2 3.1: 54 particle draws
-            rng.randrange(96)
-            rng.randrange(96)
-            rng.randrange(32)
+        for _ in range(ARCH_SPARKLES):  # C2 3.1: 54 particle draws, the sparkles (spell_transport_visuals.md 3.2)
+            x = effect.aim[0] + ARCH_SPARKLE_SPREAD - rng.randrange(2 * ARCH_SPARKLE_SPREAD)
+            y = effect.aim[1] + ARCH_SPARKLE_SPREAD - rng.randrange(2 * ARCH_SPARKLE_SPREAD)
+            effect.particles.append((x, y, ARCH_SPARKLE_LIFT + rng.randrange(ARCH_SPARKLE_LIFT * 2)))
     elif spell == FLYING_BOWER:
         effect.aim = _nudge(battle, caster, *effect.aim)
         for _ in range(4):  # C2 2.2: the take-off projectile's scatter draws (offsets all 0)
             rng.randrange(2)
+        # spell_transport_visuals.md 2.1: the take-off head flies from the casting figure to the unit's launch centre.
+        effect.start, effect.dest = _origin(caster, origin_model, "origin"), footprint_centre(caster)
+        effect.x, effect.y = effect.start
 
 
 def _origin(caster: Regiment, origin_model: int, kind: str) -> tuple[float, float]:
@@ -1039,7 +1052,8 @@ def _update_flamestorm(battle: Battle, effect: Effect) -> None:
 def _update_wind_blast(battle: Battle, effect: Effect) -> None:
     """Wind Blast (C1 1.3-1.5): a 54-step gust with a 0..7 jitter towards +x/+y each tick, height 0, passing through
     (S3, 1 wound, save, caster's unit excluded), a terminal impact at the destination; from T+5 a trail disc at the
-    previous tick's point when none is within 16 of it (up to 30). Afterwards the effect stays, never ending."""
+    previous tick's point when the newest trail sprite's displayed (jittered) position is more than 16 from it (up to
+    30; spell_area_effects.md 1.4, spell_obstacle_visuals.md 2.2). Afterwards the effect stays, never ending."""
     if effect.flying:
         r = effect.remaining
         sx, sy = effect.start
@@ -1054,11 +1068,21 @@ def _update_wind_blast(battle: Battle, effect: Effect) -> None:
             impact_test(battle, dx, dy, 0, impact, None, messages=True)
             effect.flying = False
     if effect.elapsed >= TRAIL_START and effect.previous is not None and len(effect.trail) < TRAIL_MAX:
-        last = effect.trail[-1] if effect.trail else None
-        if last is None or _d(*last, *effect.previous) > TRAIL_SPACING:
+        if not effect.trail or _d(*_trail_sprite(effect, -1), *effect.previous) > TRAIL_SPACING:
             effect.trail.append(effect.previous)
+            effect.trail_jitter.append((0, 0))
             _add_area(battle, effect, TRAIL_RADIUS, TRAIL_HEIGHT, at=effect.previous)
+    # spell_obstacle_visuals.md 2.2: every update, after the deposit, each trail sprite (oldest first, a new one
+    # included) takes a fresh offset 8 - (rand mod 16) on x then y; these draws share the battle's stream.
+    effect.trail_jitter = [(TRAIL_JITTER - battle.rng.randrange(2 * TRAIL_JITTER),
+                            TRAIL_JITTER - battle.rng.randrange(2 * TRAIL_JITTER)) for _ in effect.trail]
     effect.previous = (effect.x, effect.y) if effect.flying or effect.elapsed <= GUST_FLIGHT else None
+
+
+def _trail_sprite(effect: Effect, index: int) -> tuple[float, float]:
+    """A Wind Blast trail sprite's displayed position: its deposit plus its current jitter."""
+    (x, y), (jx, jy) = effect.trail[index], effect.trail_jitter[index]
+    return x + jx, y + jy
 
 
 def _entangle(battle: Battle, effect: Effect) -> None:
@@ -1216,18 +1240,25 @@ def _nudge(battle: Battle, caster: Regiment, x: float, y: float) -> tuple[float,
 
 
 def _update_bower(battle: Battle, effect: Effect) -> None:
-    """The Flying Bower (C2 2.2): take-off T..T+18 (two wobble draws a step until T+17), lift at T+19 (scattered
-    flight from the unit's centre, fixed step 8, 54 steps; a caster in melee leaves its grid and the other side hears
-    0x0F), the unit following one step behind the projectile with a 0..7 wobble, landing exactly on the aim point at
-    T+74. Lifted: not drawn, cannot engage."""
+    """The Flying Bower (C2 2.2; spell_transport_visuals.md 2): take-off T..T+18, the harmless head flying 18 steps
+    from the casting figure to the unit's launch centre with a 0..3 wobble per axis (two draws a step, T+18 included);
+    lift at T+19 (scattered flight from the unit's centre, fixed step 8, 54 steps; a caster in melee leaves its grid
+    and the other side hears 0x0F), the unit following one step behind the head with a 0..7 wobble, landing exactly
+    on the aim point at T+74. From T+20 to T+74 dust is deposited at the head's previous point (`_bower_dust`). The
+    effect, and the caster's channelling, end at T + max(75, L + 6), L the last deposit's tick. Lifted: not drawn,
+    cannot engage."""
     unit = battle.regiments.get(effect.owner)
     e, rng = effect.elapsed, battle.rng
     if unit is None:
         _end(battle, effect)
         return
-    if e < BOWER_LIFT - 1:
-        rng.randrange(4)
-        rng.randrange(4)
+    if BOWER_DUST_FROM <= e <= BOWER_LIFT + BOWER_FLIGHT:
+        _bower_dust(effect, e)
+    if e < BOWER_LIFT:
+        r = BOWER_LIFT - 1 - e
+        (sx, sy), (dx, dy) = effect.start, effect.dest
+        effect.x = dx + int((sx - dx) * r / (BOWER_LIFT - 1)) + rng.randrange(BOWER_TAKEOFF_WOBBLE)
+        effect.y = dy + int((sy - dy) * r / (BOWER_LIFT - 1)) + rng.randrange(BOWER_TAKEOFF_WOBBLE)
     elif e == BOWER_LIFT:
         start = footprint_centre(unit)
         effect.start, effect.dest = start, _scatter(rng, start, effect.aim, unit.bs, 1, step=8)
@@ -1250,7 +1281,22 @@ def _update_bower(battle: Battle, effect: Effect) -> None:
         table(battle).flying.discard(unit.identifier)
         _sync_lifted(battle, unit)
         effect.flying = False
-        _finish(effect)
+    last = effect.trail_births[-1] if effect.trail_births else 0
+    if e >= max(BOWER_MIN_END, last + BOWER_DUST_LIFE):
+        _end(battle, effect)
+
+
+def _bower_dust(effect: Effect, e: int) -> None:
+    """spell_transport_visuals.md 2.2: dust at the head's previous point (the T+19 point at T+20, the T+73 point at
+    T+74). The first deposit is unconditional; until the thirtieth, a deposit needs trunc(distance) > 8 from the newest
+    one; after it, the thirtieth's point stays the reference for the rest of the flight (no cap on births)."""
+    point = (effect.x, effect.y)
+    if effect.trail:
+        reference = effect.trail[min(len(effect.trail), BOWER_DUST_REFERENCE) - 1]
+        if math.trunc(_d(*reference, *point)) <= BOWER_DUST_SPACING:
+            return
+    effect.trail.append(point)
+    effect.trail_births.append(e)
 
 
 def _bower_step(battle: Battle, effect: Effect) -> None:
@@ -1378,11 +1424,8 @@ def cancel(battle: Battle, effect: Effect) -> None:
 
 
 def _position(battle: Battle, effect: Effect) -> tuple[float, float]:
-    """B 5.1, C2 2.4: a projectile's current position, the aim point for every other effect. PROVISIONAL: during a
-    Flying Bower's take-off its harmless projectile is taken to be at the caster's centre."""
-    if effect.code == FLYING_BOWER and not effect.steps:
-        owner = battle.regiments.get(effect.owner)
-        return footprint_centre(owner) if owner is not None else effect.aim
+    """B 5.1, C2 2.4: a projectile's current position, the aim point for every other effect. A Flying Bower's
+    take-off head is its projectile too (spell_transport_visuals.md 2.1)."""
     return (effect.x, effect.y) if effect.code in PROJECTILE_POSITION else effect.aim
 
 

@@ -40,6 +40,7 @@ from .battle_sound import BattleSounds
 from .ranged_sound import MissileSounds
 from .gpu import Gpu
 from .obstacle_visuals import ObstacleVisuals, obstacle_effects
+from .transport_visuals import TransportVisuals, transport_effects
 from .spell_visuals import (AttachedVisuals, DirectionalSprite, FireballVisuals, Flight, ProjectileVisuals, Sprite,
                             attached_effects, projectile_shots)
 from .scene_view import SceneView
@@ -835,7 +836,7 @@ class BattleView(SceneView[BattleScene]):
         meshes = getattr(field, "effect_meshes", {})
         vertices = array("f")
 
-        def append(name: str, x: float, y: float, z: float, dx: float = 0, dy: float = 1) -> None:
+        def append(name: str, x: float, y: float, z: float, dx: float = 0, dy: float = 1, scale: float = 1.0) -> None:
             mesh = meshes.get(name)
             if mesh is None or len(vertices) // VERTEX_FLOATS >= self.effect_capacity - 512:
                 return
@@ -843,9 +844,9 @@ class BattleView(SceneView[BattleScene]):
             cos, sin = math.cos(angle), math.sin(angle)
 
             def transform(v: Sequence[float]) -> tuple[float, float, float]:
-                return (x / WORLD_PER_MESH + v[0]*cos + v[2]*sin,
-                        z / WORLD_PER_MESH + v[1],
-                        y / WORLD_PER_MESH - v[0]*sin + v[2]*cos)
+                return (x / WORLD_PER_MESH + scale * (v[0]*cos + v[2]*sin),
+                        z / WORLD_PER_MESH + scale * v[1],
+                        y / WORLD_PER_MESH + scale * (-v[0]*sin + v[2]*cos))
 
             def rotate(v: Sequence[float]) -> tuple[float, float, float]:
                 return (v[0]*cos + v[2]*sin, v[1], -v[0]*sin + v[2]*cos)
@@ -865,10 +866,11 @@ class BattleView(SceneView[BattleScene]):
             append(f"ex{frame}", x, y, self.scene.battle.ground_height(x, y))
         if hasattr(self.scene.battle, "spell_effects"):
             # Spell heads and beam segments (notes/spell_visuals.md 0): at their height above the ground, level.
-            for item in [*self._advance_spell_visuals()[1].meshes(), *self._obstacle_visuals().meshes()]:
+            for item in [*self._advance_spell_visuals()[1].meshes(), *self._obstacle_visuals().meshes(),
+                         *self._transport_visuals().meshes()]:
                 ground_x, ground_y = item.ground_at if item.ground_at is not None else (item.x, item.y)
                 base = 0.0 if item.absolute else self.scene.battle.ground_height(ground_x, ground_y)
-                append(item.name, item.x, item.y, base + item.height, item.dx, item.dy)
+                append(item.name, item.x, item.y, base + item.height, item.dx, item.dy, item.scale)
         return vertices
 
     def _instances(self) -> bytes:
@@ -1002,7 +1004,7 @@ class BattleView(SceneView[BattleScene]):
             return b""
         data = bytearray()
         for sprite in [*visuals.sprites(), *projectiles.sprites(), *attached.sprites(),
-                       *self._obstacle_visuals().sprites()]:
+                       *self._obstacle_visuals().sprites(), *self._transport_visuals().sprites()]:
             number = (sprite.first + sprite_direction(self.camera.yaw, sprite.bearing)
                       if isinstance(sprite, DirectionalSprite) else sprite.frame)
             if number >= len(sheet.frames) or sheet.rects[number] is None:
@@ -1027,6 +1029,7 @@ class BattleView(SceneView[BattleScene]):
             attached: AttachedVisuals = self.__dict__.setdefault("_attached_visuals", AttachedVisuals())
             attached.advance(attached_effects(battle))
             self._obstacle_visuals().advance(obstacle_effects(battle))
+            self._transport_visuals().advance(transport_effects(battle))
             memory: dict[int, list[Any]] = self.__dict__.setdefault("_projectile_memory", {})
             shots, storms = projectile_shots(battle.spell_effects.active, memory)
             projectiles.advance(shots)
@@ -1040,6 +1043,9 @@ class BattleView(SceneView[BattleScene]):
 
     def _obstacle_visuals(self) -> ObstacleVisuals:
         return self.__dict__.setdefault("_obstacle_state", ObstacleVisuals())
+
+    def _transport_visuals(self) -> TransportVisuals:
+        return self.__dict__.setdefault("_transport_state", TransportVisuals())
 
     def _item_markers(self) -> bytes:
         """The sparkle over each item still to be picked up (notes/battle_end_objectives.md 12.2): effect set

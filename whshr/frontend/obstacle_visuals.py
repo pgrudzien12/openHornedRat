@@ -6,8 +6,9 @@ the obstacles, the damage); this module owns the artwork's timing, keyed by effe
 tick with the effects still active after that tick's effect update. An effect that is cancelled is simply not seen
 again, so its art goes on that update with no closing sequence (section 1.2). Ages count from the launch tick T.
 
-Random choices here (scatter, jitter, flame phases) are presentation-only: they come from this module's own generator
-and never from the battle's, so a headless replay and a drawn battle stay identical.
+Random choices here (scatter, flame phases) are presentation-only: they come from this module's own generator and never
+from the battle's, so a headless replay and a drawn battle stay identical. Wind Blast's trail jitter is the exception:
+it decides where obstacles drop, so the battle draws it (`spell_effects.Effect.trail_jitter`).
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ SPARK_FIRST, SPARK_FRAMES, SPARKS_PER_TICK, SPARK_SPREAD = 121, 4, 3, 16
 IGNITION_LAST, COLUMN_START, COLUMN_PERIOD, SPARKS_GONE = 17, 18, 19, 37
 COLUMN_NORMAL, COLUMN_SHIFT = 595, 117
 COLUMN_RISE = (-40, -37, -35, -33, -31, -28, -26, -24, -22, -20, -17, -15, -13, -11, -8, -6, -4, -2, 0)
-FLAMES_FROM, FLAMES_MAX, FLAMES_PER_UPDATE, FLAME_HEIGHTS, FLAMES_ON_AIM_GROUND = 19, 8, 2, 64, 38
+FLAMES_FROM, FLAME_HEIGHTS, FLAMES_ON_AIM_GROUND = 19, 64, 38
 CATCH_UP = 64  # at most this many missed ticks are replayed for Flamestorm's particles (only the steady state remains)
 
 OBSTACLE_CODES = frozenset({spell_effects.WIND_BLAST, spell_effects.TANGLING_THORN, spell_effects.DA_KRUNCH,
@@ -58,6 +59,7 @@ class ObstacleSpell:
     gust: Point = (0.0, 0.0)
     trail: tuple[Point, ...] = ()
     caster: Point | None = None
+    trail_jitter: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass
@@ -65,7 +67,8 @@ class _Spark:
     x: float
     y: float
     birth: int
-    frozen: int | None = None  # the frame it keeps once ignition stops advancing it (T+18 on)
+    order: int = 0  # 0, 1, 2: creation order within its birth tick
+    frozen: int | None = None  # the frame it keeps from T+18 (holding sparks keep it to the end)
 
 
 @dataclass
@@ -87,6 +90,7 @@ class _State:
     shift: bool = False  # Flamestorm: the Shift-selected column
     sparks: list[_Spark] = field(default_factory=list[_Spark])
     flames: list[_Flame] = field(default_factory=list[_Flame])
+    successors: dict[int, int] = field(default_factory=dict[int, int])  # tick -> first mesh births scheduled then
 
 
 @dataclass
@@ -98,7 +102,6 @@ class ObstacleVisuals:
     states: dict[int, _State] = field(default_factory=dict[int, _State])
     current: list[ObstacleSpell] = field(default_factory=list[ObstacleSpell])
     shift_casts: set[str] = field(default_factory=set[str])
-    jitter: dict[int, list[Point]] = field(default_factory=dict[int, list[Point]])
 
     def advance(self, seen: Iterable[ObstacleSpell]) -> None:
         self.current = [spell for spell in seen if spell.code in OBSTACLE_CODES]
@@ -134,8 +137,7 @@ class ObstacleVisuals:
                 if age <= WIND_HEAD_LAST:
                     frame = WIND_FORMING + age if age < WIND_LOOP - WIND_FORMING else WIND_LOOP + (age - 5) % 3
                     drawn.append(Sprite(frame, *spell.gust, 0.0))
-                offsets = self.jitter.get(spell.serial, [])
-                for (x, y), birth, (jx, jy) in zip(spell.trail, state.births, offsets):
+                for (x, y), birth, (jx, jy) in zip(spell.trail, state.births, spell.trail_jitter):
                     drawn.append(Sprite(WIND_LOOP + (age - birth) % 3, x + jx, y + jy, 0.0, ground_at=(x, y)))
             elif spell.code == spell_effects.TANGLING_THORN:
                 frame = THORN_FIRST + min(age, THORN_FRAMES - 1)
@@ -169,11 +171,10 @@ class ObstacleVisuals:
                 for _ in range(count)]
 
     def _advance_wind(self, spell: ObstacleSpell, state: _State) -> None:
-        """Section 2.2: a deposit's loop runs from its own birth (the first update it is seen); every displayed update
-        each trail sprite is offset from its fixed point by 8 - (r mod 16) on each axis, never accumulating."""
+        """Section 2.2: a deposit's loop runs from its own birth (the first update it is seen). Its jitter is the
+        battle's (`Effect.trail_jitter`): it decides where the next disc may drop (spell_area_effects.md 1.4)."""
         while len(state.births) < len(spell.trail):
             state.births.append(spell.age)
-        self.jitter[spell.serial] = [(8 - self.rng.randrange(16), 8 - self.rng.randrange(16)) for _ in spell.trail]
 
     def _advance_krunch(self, spell: ObstacleSpell, state: _State) -> None:
         """Section 4.1: the foot faces the caster-centre-to-aim bearing taken at launch, taken again when the lift
@@ -186,37 +187,47 @@ class ObstacleVisuals:
             state.points = self._scatter(spell.aim, THORN_SPREAD, DUST_COUNT)
 
     def _flamestorm_tick(self, spell: ObstacleSpell, state: _State, age: int) -> None:
-        """One tick of Flamestorm's particles (sections 5.2, 5.4).
+        """One tick of Flamestorm's particles (sections 5.2, 5.4, 5.5).
         - T..T+17: sparks live four ticks (121-124); three new ones every tick, at aim + 16 - (r mod 32) per axis.
-        - T+18: the sparks keep their T+17 position and frame.
-        - T+19..T+36: PROVISIONAL (the report leaves the exact hand-over open, 🟡): one group of three sparks per
-          tick, in a four-phase round, is tested; each spark of the group goes with probability 1/2.
-        - T+37: every remaining spark goes.
-        - From T+19 up to eight FIRE1-4 mesh flames: each starts at a random phase and shows the later meshes one per
-          tick; one past FIRE4 is replaced at once at a new point; vacancies fill up to two per update
-          (PROVISIONAL: the report's four-phase replenishment round is not modelled beyond that limit). Births
-          until T+37 take an absolute height 0..63, later ones 0..63 above the ground at the aim."""
+        - T+18: the twelve sparks (born T+14..T+17) keep their position and frame.
+        - From T+19 each spark follows `spark_fate`: early-removal tests first (1/2 each), then the advancing sparks
+          step and expire, existing mesh flames advance (one past FIRE4 is replaced at once at a new point and phase),
+          then the first mesh of each successor sequence is born on its tick. Eight sequences: exactly 8 flames
+          from T+23.
+        - T+37: every remaining spark goes, after that tick's update.
+        Mesh births until T+37 take an absolute height 0..63, later ones 0..63 above the ground at the aim."""
         if age <= IGNITION_LAST:
             state.sparks = [spark for spark in state.sparks if age - spark.birth < SPARK_FRAMES]
-            state.sparks += [_Spark(x, y, age) for x, y in self._scatter(spell.aim, SPARK_SPREAD, SPARKS_PER_TICK)]
-        elif age == COLUMN_START:
+            state.sparks += [_Spark(x, y, age, order)
+                             for order, (x, y) in enumerate(self._scatter(spell.aim, SPARK_SPREAD, SPARKS_PER_TICK))]
+            return
+        if age == COLUMN_START:
             for spark in state.sparks:
                 spark.frozen = SPARK_FIRST + IGNITION_LAST - spark.birth
-        elif age < SPARKS_GONE:
-            group = (age - FLAMES_FROM) % 4
-            state.sparks = [spark for index, spark in enumerate(state.sparks)
-                            if index // 3 != group or self.rng.randrange(2)]
-        else:
-            state.sparks = []
-        if age < FLAMES_FROM:
             return
-        kept: list[_Flame] = []
+        births = state.successors.pop(age, 0)
+        kept: list[_Spark] = []
+        for spark in state.sparks:
+            fate = spark_fate(spark.birth, spark.order)
+            removed = age in fate.tests and self.rng.randrange(2) == 0
+            if fate.advancing:
+                if age == fate.expiry:
+                    successor = fate.successor_kept if not removed else fate.successor_removed
+                    if successor == age:
+                        births += 1
+                    elif successor is not None:
+                        state.successors[successor] = state.successors.get(successor, 0) + 1
+                    continue
+                spark.frozen = SPARK_FIRST + (age - 1) - spark.birth
+            elif removed:
+                continue
+            kept.append(spark)
+        state.sparks = kept if age < SPARKS_GONE else []
+        flames: list[_Flame] = []
         for flame in state.flames:
             flame.phase += 1
-            kept.append(flame if flame.phase <= 4 else self._new_flame(spell.aim, age))
-        state.flames = kept
-        for _ in range(min(FLAMES_PER_UPDATE, FLAMES_MAX - len(state.flames))):
-            state.flames.append(self._new_flame(spell.aim, age))
+            flames.append(flame if flame.phase <= 4 else self._new_flame(spell.aim, age))
+        state.flames = flames + [self._new_flame(spell.aim, age) for _ in range(births)]
 
     def _new_flame(self, aim: Point, age: int) -> _Flame:
         [(x, y)] = self._scatter(aim, SPARK_SPREAD, 1)
@@ -224,13 +235,39 @@ class ObstacleVisuals:
         return _Flame(x, y, z, 1 + self.rng.randrange(4), age >= FLAMES_ON_AIM_GROUND)
 
     def _flamestorm_sprites(self, spell: ObstacleSpell, state: _State) -> list[Sprite]:
-        drawn = [Sprite(spark.frozen if spark.frozen is not None else SPARK_FIRST + spell.age - spark.birth,
+        drawn = [Sprite(spark.frozen if spark.frozen is not None and spell.age >= COLUMN_START
+                        else SPARK_FIRST + spell.age - spark.birth,
                         spark.x, spark.y, 0.0) for spark in state.sparks]
         if spell.age >= COLUMN_START:
             phase, height = column_phase(spell.age)
             base = COLUMN_SHIFT if state.shift else COLUMN_NORMAL
             drawn.append(Sprite(base + phase, *spell.aim, height))
         return drawn
+
+
+@dataclass(frozen=True)
+class SparkFate:
+    """What one of the last twelve ignition sparks does from T+19 (section 5.5): its early-removal test ticks; an
+    advancing spark steps on and expires on `expiry` (its test tick), starting the first mesh of a flame sequence on
+    `successor_kept` / `successor_removed` (None: no sequence); a holding spark keeps its frame until removed."""
+    tests: tuple[int, ...]
+    advancing: bool
+    expiry: int | None = None
+    successor_kept: int | None = None
+    successor_removed: int | None = None
+
+
+def spark_fate(birth: int, order: int) -> SparkFate:
+    """Section 5.5's table, by birth tick (relative to T) and creation order within it."""
+    if birth == 14 and order < 2:
+        return SparkFate((19,), True, 19, 19, 20)
+    if birth == 14:
+        return SparkFate((19, 23, 27, 31, 35), False)
+    if birth == 15:
+        return SparkFate((20, 24, 28, 32, 36), False)
+    if birth == 16:
+        return SparkFate((21,), True, 21, 21, 21 if order < 2 else 22)
+    return SparkFate((22,), True, 22, 22, 22 if order == 0 else 23)
 
 
 def krunch_height(age: int) -> int:
@@ -267,5 +304,5 @@ def obstacle_effects(battle: Battle) -> list[ObstacleSpell]:
         owner = battle.regiments.get(effect.owner)
         caster = spell_effects.footprint_centre(owner) if owner is not None and owner.active else None
         seen.append(ObstacleSpell(effect.serial, effect.code, max(0, effect.elapsed - 1), effect.aim, effect.owner,
-                                  (effect.x, effect.y), tuple(effect.trail), caster))
+                                  (effect.x, effect.y), tuple(effect.trail), caster, tuple(effect.trail_jitter)))
     return seen

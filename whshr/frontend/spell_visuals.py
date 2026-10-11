@@ -155,7 +155,7 @@ class Shot:
 class MeshItem:
     """One effect mesh to draw: its SCENERY.PBX name, ground position, height above the ground and heading vector.
     The ground is sampled at `ground_at` when given, else at the position; `absolute` makes the height a battle
-    height (no ground added)."""
+    height (no ground added); `scale` sizes the mesh uniformly about its origin."""
     name: str
     x: float
     y: float
@@ -164,6 +164,7 @@ class MeshItem:
     dy: float
     ground_at: tuple[float, float] | None = None
     absolute: bool = False
+    scale: float = 1.0  # uniform size about the mesh's own origin (the Sapphire Arch's growth and shrink)
 
 
 @dataclass(frozen=True)

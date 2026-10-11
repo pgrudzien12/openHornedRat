@@ -1,6 +1,7 @@
 """Spells that leave battlefield obstacles (notes/spell_obstacle_visuals.md): Wind Blast, Tangling Thorn, Da Krunch and
 Flamestorm. Vectors follow the report's section 6; frames are SPELLS frame numbers, ages count from the launch tick."""
 
+import random
 import struct
 import unittest
 from unittest import mock
@@ -14,8 +15,9 @@ from whshr.rules import Side
 AIM = (500.0, 500.0)
 
 
-def wind(age: int, trail=(), gust=(510.0, 520.0)) -> ObstacleSpell:
-    return ObstacleSpell(1, spell_effects.WIND_BLAST, age, AIM, "W", gust, tuple(trail))
+def wind(age: int, trail=(), gust=(510.0, 520.0), jitter=None) -> ObstacleSpell:
+    jitter = tuple(jitter) if jitter is not None else tuple((0, 0) for _ in trail)
+    return ObstacleSpell(1, spell_effects.WIND_BLAST, age, AIM, "W", gust, tuple(trail), trail_jitter=jitter)
 
 
 def spell(code: int, age: int, caster=(500.0, 300.0), serial: int = 1) -> ObstacleSpell:
@@ -50,18 +52,12 @@ class WindBlastTests(unittest.TestCase):
             seen.append(visuals.sprites()[-1].frame)
         self.assertEqual(seen, [384, 385, 386, 384])
 
-    def test_given_a_trail_sprite_then_it_jitters_minus_7_to_plus_8_and_keeps_its_deposit_ground(self):
+    def test_given_a_trail_sprite_then_it_is_drawn_at_the_battle_jitter_on_its_deposit_ground(self):
         visuals = ObstacleVisuals()
         deposit = (480.0, 470.0)
-        offsets = set()
-        for age in range(60, 260):
-            visuals.advance([wind(age, trail=[deposit])])
-            sprite = visuals.sprites()[-1]
-            offsets.add((sprite.x - deposit[0], sprite.y - deposit[1]))
-            self.assertEqual(sprite.ground_at, deposit)
-        xs = {dx for dx, _ in offsets}
-        self.assertTrue(xs <= set(range(-7, 9)))
-        self.assertGreater(len(xs), 8)
+        visuals.advance([wind(60, trail=[deposit], jitter=[(-7, 8)])])
+        sprite = visuals.sprites()[-1]
+        self.assertEqual((sprite.x, sprite.y, sprite.ground_at), (473.0, 478.0, deposit))
 
     def test_given_the_head_finished_then_the_trail_stays_and_animates(self):
         visuals = ObstacleVisuals()
@@ -188,6 +184,55 @@ class FlamestormTests(unittest.TestCase):
             self.assertEqual(flame.on_aim_ground, age >= 38)
         later = [mesh for mesh in visuals.meshes()]
         self.assertTrue(all(mesh.ground_at == AIM and not mesh.absolute for mesh in later))
+
+
+class FixedCoin(random.Random):
+    """randrange(2) always returns `coin` (0: an early-removal test removes the spark); other draws return 0."""
+
+    def __init__(self, coin: int):
+        super().__init__(0)
+        self.coin = coin
+
+    def randrange(self, start, stop=None, step=1):
+        return self.coin if start == 2 and stop is None else 0
+
+
+class FlamestormHandOverTests(unittest.TestCase):
+    """Section 5.5: the last twelve ignition sparks hand over to eight mesh-flame sequences."""
+
+    def counts(self, coin: int) -> tuple[list[int], list[int]]:
+        visuals = ObstacleVisuals(rng=FixedCoin(coin))
+        meshes, sparks = [], []
+        for age in range(38):
+            visuals.advance([spell(spell_effects.FLAMESTORM, age)])
+            if 19 <= age <= 23:
+                meshes.append(len(visuals.meshes()))
+            if age in (23, 36, 37):
+                sparks.append(len(visuals.states[1].sparks))
+        return meshes, sparks
+
+    def test_given_every_test_keeps_its_spark_then_meshes_2_2_5_8_8_and_four_frozen_sparks_until_t37(self):
+        self.assertEqual(self.counts(1), ([2, 2, 5, 8, 8], [4, 4, 0]))
+
+    def test_given_every_test_removes_its_spark_then_meshes_0_2_4_6_8_and_no_spark_after_t22(self):
+        self.assertEqual(self.counts(0), ([0, 2, 4, 6, 8], [0, 0, 0]))
+
+    def test_given_eight_sequences_then_exactly_eight_flames_for_good(self):
+        visuals = ObstacleVisuals()
+        for age in range(200):
+            visuals.advance([spell(spell_effects.FLAMESTORM, age)])
+            if age >= 23:
+                self.assertEqual(len(visuals.meshes()), 8)
+
+    def test_given_the_t16_and_t17_sparks_then_they_advance_after_the_freeze(self):
+        visuals = ObstacleVisuals(rng=FixedCoin(1))
+        frames = {}
+        for age in range(21):
+            visuals.advance([spell(spell_effects.FLAMESTORM, age)])
+            frames[age] = sorted(sprite.frame for sprite in visuals.sprites() if 121 <= sprite.frame <= 124)
+        self.assertEqual(frames[18], frames[17])
+        self.assertEqual(frames[19], [122, 122, 122, 123, 123, 123, 123, 123, 123, 124])
+        self.assertEqual(frames[20], [123, 123, 123, 123, 123, 123, 124, 124, 124, 124])
 
 
 class BattleEffectTests(unittest.TestCase):
