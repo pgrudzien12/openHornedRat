@@ -1,0 +1,84 @@
+"""The leader figure is drawn and animated with the leader block's own sprite set (notes/leader_figure_sprite.md)."""
+import unittest
+
+from whshr import animation, combat
+from whshr.engine import Battle, Regiment, has_leader_figure
+from whshr.rules import Side
+
+
+def cavalry(leader_sprite: str | None = "MercCaptain", has_leader: bool = True) -> tuple[Battle, Regiment]:
+    regiment = Regiment("r", "Grudgebringer Cavalry", 500, 500, 0, Side.PLAYER, models=6, ranks=2,
+                        sprite="BorderHorse", leader_sprite=leader_sprite, has_leader=has_leader)
+    battle = Battle(2000, 2000, [regiment], seed=1995)
+    battle.tick()
+    return battle, regiment
+
+
+def leader_index(regiment: Regiment) -> int:
+    index = regiment.living_leader_index
+    assert index is not None
+    return index
+
+
+class LeaderFigureSpriteTests(unittest.TestCase):
+    def test_given_a_leader_block_sprite_when_loaded_then_only_the_leader_figure_uses_it(self):
+        _battle, regiment = cavalry()
+
+        sprites = [regiment.model_sprite(model) for model in regiment.melee_models]
+
+        self.assertEqual(sprites[leader_index(regiment)], "MercCaptain")
+        self.assertEqual(sprites.count("MercCaptain"), 1)
+        self.assertEqual(sprites.count("BorderHorse"), len(sprites) - 1)
+
+    def test_given_no_leader_figure_when_loaded_then_every_figure_uses_the_troop_set(self):
+        _battle, regiment = cavalry(has_leader=False)
+
+        self.assertEqual({regiment.model_sprite(model) for model in regiment.melee_models}, {"BorderHorse"})
+
+    def test_given_a_leader_block_with_a_void_sprite_then_the_unit_has_no_leader_figure(self):
+        self.assertFalse(has_leader_figure({"sprites": "VoidType,0"}))
+        self.assertFalse(has_leader_figure({}))
+        self.assertTrue(has_leader_figure({"sprites": "MercCaptain,0"}))
+
+    def test_given_a_leader_set_of_another_family_then_the_leader_animates_with_its_own_family(self):
+        _battle, regiment = cavalry(leader_sprite="Peasants")
+        leader = regiment.melee_models[leader_index(regiment)]
+        trooper = next(model for model in regiment.melee_models if model is not leader)
+
+        self.assertEqual(regiment.model_family(leader), "peasants")
+        self.assertEqual(regiment.model_family(trooper), animation.DEFAULT_FAMILY)
+
+    def test_given_the_leader_killed_when_it_collapses_then_its_corpse_uses_the_leader_set(self):
+        battle, regiment = cavalry()
+        index = leader_index(regiment)
+
+        combat.kill_models(regiment, [index], battle)
+        for _ in range(40):
+            battle.tick()
+
+        self.assertEqual([corpse.sprite for corpse in regiment.corpses], ["MercCaptain"])
+
+    def test_given_the_leader_dead_then_no_surviving_figure_takes_the_leader_set(self):
+        battle, regiment = cavalry()
+
+        combat.kill_models(regiment, [leader_index(regiment)], battle)
+        for _ in range(40):
+            battle.tick()
+        battle.reform_to_ranks(regiment, 2)
+
+        self.assertIsNone(regiment.living_leader_index)
+        self.assertEqual({regiment.model_sprite(model) for model in regiment.melee_models}, {"BorderHorse"})
+
+    def test_given_a_trooper_killed_then_its_corpse_uses_the_troop_set(self):
+        battle, regiment = cavalry()
+        trooper = next(i for i in range(len(regiment.melee_models)) if i != leader_index(regiment))
+
+        combat.kill_models(regiment, [trooper], battle)
+        for _ in range(40):
+            battle.tick()
+
+        self.assertEqual([corpse.sprite for corpse in regiment.corpses], ["BorderHorse"])
+
+
+if __name__ == "__main__":
+    unittest.main()

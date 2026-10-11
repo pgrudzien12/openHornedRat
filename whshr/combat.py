@@ -208,12 +208,13 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
         if delay > 0:
             regiment.dying.append(animation.DyingModel(
                 *positions[index], model=model, ticks_left=delay, death_kind=death_kind,
-                body=regiment.body_class, burns=regiment.burns_on(death_kind)))
+                body=regiment.model_body_class(model), burns=regiment.model_burns_on(model, death_kind)))
         else:
             # Its death sequence starts now: the casualty check counts it and the models still collapsing.
             immediate_checks.append(len(regiment.positions) + len(regiment.dying))
-            animation.step(model, animation.DEAD, battle.rng, regiment.animation_family)
-            regiment.corpses.append((*positions[index], battle.rng.randrange(animation.FULL_TURN)))
+            animation.step(model, animation.DEAD, battle.rng, regiment.model_family(model))
+            regiment.corpses.append(animation.Corpse(*positions[index], battle.rng.randrange(animation.FULL_TURN),
+                                           regiment.model_sprite(model)))
         dead_opponents[model.uid] = model.opponent
         if grid is not None and model.cell is not None:
             grid.clear(model.cell)
