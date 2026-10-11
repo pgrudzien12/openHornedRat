@@ -235,6 +235,16 @@ class CampaignRosterTests(unittest.TestCase):
         self.assertEqual(campaign.pending_join, set())
         self.assertEqual(campaign.army_units, {2, 5})
 
+    def test_new_recruit_is_appended_without_reordering_existing_book_pages(self):
+        campaign = self._campaign([regiment(21), regiment(2)], [regiment(9, for_hire=True)])
+        campaign.mark_pending_join(9)
+
+        campaign.merge_pending_joins()
+        campaign.merge_pending_joins()
+
+        self.assertEqual([r.whoami for r in campaign.company], [21, 2, 9])
+        self.assertFalse(campaign.company[-1].hired)
+
     def test_given_a_pending_regiment_the_master_roster_lacks_then_it_stays_pending(self):
         campaign = self._campaign([regiment(2)], [regiment(2)])
         campaign.mark_pending_join(33)

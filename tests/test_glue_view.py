@@ -128,6 +128,28 @@ class GlueViewTests(unittest.TestCase):
         self.assertEqual([animator.display_name for animator in view.bitmap_animators.values()],
                          ["CarLampCell5", "CarCandleCell5"])
 
+    def test_speech_hides_existing_hover_hint_and_restores_it_without_mouse_motion(self):
+        from types import SimpleNamespace
+        view = self.view_type.__new__(self.view_type)
+        state = SimpleNamespace(speech_active=True)
+        view.scene = SimpleNamespace(require_runtime=lambda: SimpleNamespace(state=state), font=lambda _: None)
+        old_label = SimpleNamespace(release=unittest.mock.Mock())
+        view.hover_hint = "Coffers"
+        view._drawn_hint = "Coffers"
+        view.hint_label = old_label
+        new_label = SimpleNamespace(set_lines=unittest.mock.Mock())
+        view.gpu = SimpleNamespace(text=unittest.mock.Mock(return_value=new_label))
+
+        with patch("whshr.frontend.glue_view.BitmapFont"):
+            view._refresh_hint()
+            self.assertIsNone(view.hint_label)
+            old_label.release.assert_called_once()
+            state.speech_active = False
+            view._refresh_hint()
+
+        self.assertIs(view.hint_label, new_label)
+        new_label.set_lines.assert_called_once_with(("Coffers",))
+
     def test_caravan_coffers_hint_receives_the_campaign_value(self):
         from whshr.frontend.glue_view import _caravan_hint
         campaign = type("Campaign", (), {"coffers": 500, "hint": lambda self, hint, *args: f"{hint}:{args}"})()
