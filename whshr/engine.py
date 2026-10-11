@@ -648,6 +648,19 @@ class Regiment:
         local_forward = dx * sin + dy * cos
         return abs(local_side) <= half_side and abs(local_forward) <= half_forward
 
+    def rest_action(self) -> int:
+        """The action a model plays once it stands in its slot (notes/script_animation_sound.md 0.1, "rest action"):
+        walk while charging; mark time while a move, turn, flight or pursuit is still under way (early arrivers wait
+        for the slower models); weapon ready facing a target, unless an anchored war machine; else stand still.
+        Not modelled: a timed wait during a move (the report's "not in a timed wait") still marks time."""
+        if self.charging:
+            return animation.WALK
+        if self.moving or self.turn_order_key is not None or self.routing or self.pursuing:
+            return animation.IDLE
+        if (self.attack_target is not None or self.shooting_target is not None) and not self.anchored:
+            return animation.WEAPON_READY
+        return animation.STAND
+
     @property
     def charging(self) -> bool:
         """The named charging state: an attack order's charge or a free charge. A pursuer keeps its pursued unit as
@@ -3019,7 +3032,7 @@ class Battle:
         animation"). The requested action mirrors what the model is currently doing: fighting or
         weapon-ready in melee (paired with an opponent or not), the shoot pose while the regiment
         holds a missile stance and is not still reloading, walking while the model itself has not
-        yet reached its slot (`ModelState.at_rest`), otherwise idling in place. Then the drawn
+        yet reached its slot (`ModelState.at_rest`), otherwise the unit's rest action (`Regiment.rest_action`). Then the drawn
         facing slews toward its action-dependent target (wagons snap; a facing-locked script
         freezes it).
 
@@ -3055,7 +3068,7 @@ class Battle:
             elif not model.at_rest:
                 requested = animation.WALK
             else:
-                requested = animation.IDLE
+                requested = regiment.rest_action()
             animation.step(model, requested, self.rng, regiment.model_family(model))
             self._slew_drawn_facing(regiment, model, wagon)
             if model.fire_event:

@@ -165,13 +165,45 @@ class BattleAnimationWiringTests(unittest.TestCase):
         entries = {model.action_entry for model in regiment.melee_models}
         self.assertGreater(len(entries), 1)
 
-    def test_given_a_regiment_not_moving_when_ticked_then_its_models_play_the_idle_action(self):
+    def test_given_a_regiment_standing_without_a_target_when_ticked_then_its_models_stand_still(self):
         regiment = Regiment("r", "R", 0, 0, 0, Side.PLAYER, models=4, ranks=1)
         battle = Battle(2000, 2000, [regiment], seed=1)
 
-        battle.tick()
+        for _ in range(20):
+            battle.tick()
 
-        self.assertTrue(all(model.action == animation.IDLE for model in regiment.melee_models))
+        self.assertTrue(all(model.action == animation.STAND for model in regiment.melee_models))
+        # Stand still holds one frame, so the whole block shows the same pose (no marking time).
+        self.assertEqual({animation.current(model)[1] for model in regiment.melee_models}, {1})
+
+    def test_given_a_moving_regiment_when_a_model_reaches_its_slot_early_then_it_marks_time(self):
+        regiment = Regiment("r", "R", 0, 0, 0, Side.PLAYER, models=4, ranks=1)
+        regiment.target_x, regiment.target_y = 0, 500
+
+        self.assertEqual(regiment.rest_action(), animation.IDLE)
+
+    def test_given_a_turning_routing_or_pursuing_regiment_then_its_rest_action_marks_time(self):
+        for state in ("routing", "pursuing"):
+            regiment = Regiment("r", "R", 0, 0, 0, Side.PLAYER, models=4, ranks=1)
+            setattr(regiment, state, True)
+            self.assertEqual(regiment.rest_action(), animation.IDLE, state)
+
+    def test_given_a_charging_regiment_then_its_rest_action_is_walk(self):
+        regiment = Regiment("r", "R", 0, 0, 0, Side.PLAYER, models=4, ranks=1)
+        regiment.free_charging = True
+
+        self.assertEqual(regiment.rest_action(), animation.WALK)
+
+    def test_given_a_halted_regiment_with_a_target_then_its_models_hold_weapon_ready(self):
+        regiment = Regiment("r", "R", 0, 0, 0, Side.PLAYER, models=4, ranks=1)
+        regiment.shooting_target = "foe"
+
+        self.assertEqual(regiment.rest_action(), animation.WEAPON_READY)
+
+    def test_given_a_halted_regiment_without_a_target_then_its_rest_action_is_stand(self):
+        regiment = Regiment("r", "R", 0, 0, 0, Side.PLAYER, models=4, ranks=1)
+
+        self.assertEqual(regiment.rest_action(), animation.STAND)
 
     def test_given_an_inactive_regiment_when_ticked_then_its_models_are_not_stepped(self):
         regiment = Regiment("r", "R", 0, 0, 0, Side.PLAYER, models=0, ranks=1)  # destroyed -> inactive
