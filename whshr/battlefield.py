@@ -213,8 +213,11 @@ class SpriteSheet:
 
 # Frames whose runtime colour map is not the catalogue's increasing-map reconstruction: the spell selects the frame's
 # stored map nibble plus an explicit bank (notes/spell_obstacle_visuals.md 1.1). Flamestorm's normal column, SPELLS
-# frames 595-598, uses map 10 (nibble 10, bank 0), where the catalogue rule gives 42.
-RUNTIME_COLOUR_MAPS: dict[str, dict[int, int]] = {"SPELLS": {595: 10, 596: 10, 597: 10, 598: 10}}
+# frames 595-598, uses map 10 (nibble 10, bank 0), where the catalogue rule gives 42; Conflagration's alternative
+# burst, frames 541-549, uses map 3 (nibble 3, no bank; notes/spell_area_particle_visuals.md 2.1), not 35.
+RUNTIME_COLOUR_MAPS: dict[str, dict[int, int]] = {
+    "SPELLS": {**{frame: 10 for frame in range(595, 599)}, **{frame: 3 for frame in range(541, 550)}},
+}
 
 
 def read_sprite_sheet(name: str, fol: bytes, bop: bytes, colors: bytes = b"") -> SpriteSheet:

@@ -61,6 +61,11 @@ BOWER_DUST_LIFE, BOWER_MIN_END = 6, 75  # transport 2.3: the effect ends at T + 
 ARCH_SPARKLES, ARCH_SPARKLE_SPREAD, ARCH_SPARKLE_LIFT = 18, 48, 16  # transport 3.2
 ARCH_RELEASE, ARCH_SWALLOW, ARCH_REACH, ARCH_EXPIRY = 20, 161, 48, 900  # C2 3
 FLOCK_STRIKES, FLOCK_END, FLOCK_RADIUS = (10, 18, 26), 38, 32  # C3 3.2
+FLOCK_BIRDS, FLOCK_BIRD_SPREAD = 20, 32  # spell_area_particle_visuals.md 1.2
+# spell_area_particle_visuals.md 2.4-2.6: after the fall (T+9k..T+9k+9) the flash runs T+9k+10..T+9k+18, bursts are
+# born on T+9k+11..T+9k+19, the dying-down countdown runs 36 steps from T+9k+20 and the effect ends by T+9k+55.
+BURST_PLACES_PER_K, BURSTS_PER_UPDATE, BURST_FRAMES, BURST_FROM, BURST_LAST = 5, 3, 9, 11, 19
+DYING_STEPS, FLAME_PHASES, FLAME_FLICKER, BURST_ALTERNATIVE = 36, 4, 4, 3
 KRUNCH_FALL, KRUNCH_STAND, KRUNCH_LIFT, KRUNCH_END, KRUNCH_REACH = 9, 10, 47, 57, 32  # C1 4.1
 FLAME_START, FLAME_COLUMN, FLAME_RADIUS = 18, 19, 16  # C1 2.3
 THORN_RADIUS, THORN_RELEASE = 32, 64  # C1 3.1, 3.4
@@ -173,9 +178,24 @@ class Effect:
     trail_births: list[int] = field(default_factory=list[int])
     # Sapphire Arch: the 18 sparkles, (x, y, height above the ground there) (spell_transport_visuals.md 3.2).
     particles: list[tuple[float, float, float]] = field(default_factory=list[tuple[float, float, float]])
+    # Conflagration of Doom: its burst places after the fall, None where empty (spell_area_particle_visuals.md 2.5).
+    places: list[BurstPlace | None] = field(default_factory=list["BurstPlace | None"])
     saved_side: Side | None = None
     saved_initiative: int = 0
     saved_speed: float = 0.0
+
+
+@dataclass
+class BurstPlace:
+    """One of a Conflagration's 5k burst places (spell_area_particle_visuals.md 2.5): a burst explosion playing frame
+    `age` (0..8) of its art (`alternative`: frames 541-549, else 177-185), or, once it is done, a small flame mesh
+    `FLAMES<phase>` flickering at `jitter` from its point."""
+    x: float
+    y: float
+    alternative: bool
+    age: int = 0
+    phase: int = 0  # 0 while still a burst, then 1..4
+    jitter: tuple[int, int] = (0, 0)
 
 
 @dataclass
@@ -449,8 +469,10 @@ def _start(battle: Battle, effect: Effect, caster: Regiment, origin_model: int, 
     elif spell == CONFLAGRATION:
         effect.value = 1 + rng.randrange(6)  # C1 5.1: one D6 sets the radius 8k + 8 and the fuse 9k
     elif spell == FLOCK:
-        for _ in range(40):  # C3 3.1: the birds' positions, which matter for replays
-            rng.randrange(64)
+        for _ in range(FLOCK_BIRDS):  # C3 3.1: 40 draws, the birds' positions (spell_area_particle_visuals.md 1.2)
+            x = effect.aim[0] + FLOCK_BIRD_SPREAD - rng.randrange(2 * FLOCK_BIRD_SPREAD)
+            y = effect.aim[1] + FLOCK_BIRD_SPREAD - rng.randrange(2 * FLOCK_BIRD_SPREAD)
+            effect.particles.append((x, y, 0.0))
     elif spell == SAPPHIRE_ARCH:
         effect.timer = LASTING
         for _ in range(ARCH_SPARKLES):  # C2 3.1: 54 particle draws, the sparkles (spell_transport_visuals.md 3.2)
@@ -1122,7 +1144,8 @@ def _update_krunch(battle: Battle, effect: Effect) -> None:
 def _update_conflagration(battle: Battle, effect: Effect) -> None:
     """Conflagration of Doom (C1 5): R = 8k + 8; panic tests on T, T+9 .. T+9(k-1) for every unit whose centre is
     within R (inclusive); a 10-tick fall from T+9k slaying the first max(1, trunc(n (R - d) / R)) models of units
-    whose footprint contains the point, then the finale on its last tick; all fire, credited to the caster."""
+    whose footprint contains the point, then the finale on its last tick; all fire, credited to the caster. Then the
+    flash, ground bursts and dying flames (`_conflagration_embers`); the effect stays active until they are gone."""
     k, e = effect.value, effect.elapsed
     reach = 8 * k + 8
     x, y = effect.aim
@@ -1149,7 +1172,67 @@ def _update_conflagration(battle: Battle, effect: Effect) -> None:
             else:
                 count = max(1, unit.models * (reach - d + fp) // (2 * fp))
             slay(battle, unit, count, animation.DEATH_FIRE, effect.owner)
-        _finish(effect)
+        effect.places = [None] * (BURST_PLACES_PER_K * k)
+    elif e > 9 * k + 9:
+        _conflagration_embers(battle, effect, e - 9 * k)
+
+
+def _conflagration_embers(battle: Battle, effect: Effect, after: int) -> None:
+    """spell_area_particle_visuals.md 2.5-2.7, `after` = ticks since T+9k (11 .. 55). Every draw is the battle's.
+    - Each update first (while dying down) the n = 5k - c removal picks, c the countdown steps left: each picks one
+      of the 5k places, putting out a flame there (a burst or an empty place: nothing).
+    - Then every place steps, in place order: a flame advances FLAMES1-4 and draws its flicker 4 - (r mod 8) on x then
+      y; a burst advances, and one past its 9th frame turns into a flame (start r mod 4, then its flicker).
+    - During the flash's births (after 11..19): one art draw (r mod 3 == 0: frames 541-549), then up to 3 bursts, each
+      at P + R - (r mod 2R) on x then y, R = 8k + 8, in the first empty places. On 19 the flash's removal fills every
+      place still empty, with one more art draw. PROVISIONAL: that fill draws nothing when no place is empty.
+    - The effect ends when the countdown reaches 0 (after 55), or when a dying-down update leaves no sprite."""
+    places, rng = effect.places, battle.rng
+    count, reach = len(places), 8 * effect.value + 8
+    dying = after > BURST_LAST
+    if dying:
+        steps_left = DYING_STEPS - (after - BURST_LAST)
+        if steps_left <= 0:
+            places[:] = [None] * count
+            _end(battle, effect)
+            return
+        for _ in range(count - steps_left):
+            index = rng.randrange(count)
+            place = places[index]
+            if place is not None and place.phase:
+                places[index] = None
+    for place in places:
+        if place is None:
+            continue
+        if place.phase:
+            place.phase = place.phase % FLAME_PHASES + 1
+        else:
+            place.age += 1
+            if place.age < BURST_FRAMES:
+                continue
+            place.phase = 1 + rng.randrange(FLAME_PHASES)
+        place.jitter = (FLAME_FLICKER - rng.randrange(2 * FLAME_FLICKER),
+                        FLAME_FLICKER - rng.randrange(2 * FLAME_FLICKER))
+    if BURST_FROM <= after <= BURST_LAST:
+        _birth_bursts(battle, effect, reach, BURSTS_PER_UPDATE)
+        if after == BURST_LAST and None in places:
+            _birth_bursts(battle, effect, reach, count)
+    if dying and all(place is None for place in places):
+        _end(battle, effect)
+
+
+def _birth_bursts(battle: Battle, effect: Effect, reach: int, limit: int) -> None:
+    """One art draw, then up to `limit` bursts in the first empty places (spell_area_particle_visuals.md 2.5)."""
+    rng = battle.rng
+    alternative = rng.randrange(BURST_ALTERNATIVE) == 0
+    for index, place in enumerate(effect.places):
+        if limit == 0:
+            break
+        if place is None:
+            x = effect.aim[0] + reach - rng.randrange(2 * reach)
+            y = effect.aim[1] + reach - rng.randrange(2 * reach)
+            effect.places[index] = BurstPlace(x, y, alternative)
+            limit -= 1
 
 
 # ===== Channelled, flight, portal and curse spells (C2) =====
