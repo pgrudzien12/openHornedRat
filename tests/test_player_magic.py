@@ -1,7 +1,7 @@
-"""The player's Magic order: the spell click pays and selects, the target click gives the cast order
+"""The player's Magic order: the spell click selects, the target click pays and gives the cast order
 (notes/player_magic_panel.md; notes/spell_lasting_effects.md 0.2, 5.4; notes/script_magic.md 4).
 
-The report's section 10 vectors: wizard W with Lightning (1), Fireball (1), Azure Blades (1), Dispel Magic (1) and
+The report's vectors with its engine behavior override: wizard W with Lightning (1), Fireball (1), Azure Blades (1), Dispel Magic (1) and
 Storm of Shemtek (3), player pool 4."""
 
 import unittest
@@ -31,11 +31,11 @@ class PlayerMagicCase(unittest.TestCase):
 
 
 class SpellClickTests(PlayerMagicCase):
-    def test_clicking_a_targeted_spell_pays_selects_and_waits_for_the_target(self):
+    def test_clicking_a_targeted_spell_selects_without_payment_and_waits_for_the_target(self):
         battle = self.make(power=4)
         spear = magic.SPELL_CODES["amberhuntingspear"]
         self.assertTrue(battle.select_spell("W", spear))
-        self.assertEqual(battle.player_power, 4 - (magic.cost(spear) or 0))
+        self.assertEqual(battle.player_power, 4)
         self.assertTrue(spell_effects.spell_selected(battle, "W", spear))
         self.assertEqual(self.queued(), [])
 
@@ -60,6 +60,7 @@ class SpellClickTests(PlayerMagicCase):
         battle = self.make(power=2)
         flock = magic.SPELL_CODES["amberflockofdoom"]
         battle.select_spell("W", flock)
+        battle.order_cast("W", flock, 100, 500)
         self.assertEqual(battle.player_power, 0)
 
     def test_only_a_player_caster_with_the_spell_may_click_it(self):
@@ -95,13 +96,13 @@ class TargetClickTests(PlayerMagicCase):
             battle.order_cast("W", magic.SPELL_CODES["amberhuntingspear"], 0, 0)
         self.assertEqual(self.queued(), [])
 
-    def test_cancelled_targeting_clears_the_selection_without_a_refund(self):
+    def test_cancelled_targeting_clears_the_selection_without_payment(self):
         battle = self.make(power=4)
         spear = magic.SPELL_CODES["amberhuntingspear"]
         battle.select_spell("W", spear)
         battle.clear_spell_selection("W")
         self.assertFalse(spell_effects.spell_selected(battle, "W", spear))
-        self.assertEqual(battle.player_power, 2)
+        self.assertEqual(battle.player_power, 4)
         self.assertTrue(battle.spell_usable("W", spear))
 
 
@@ -126,36 +127,47 @@ class NoTargetSpellTests(PlayerMagicCase):
 
 
 class ReportVectorTests(PlayerMagicCase):
-    """notes/player_magic_panel.md 10."""
+    """notes/player_magic_panel.md 10, amended by its engine behavior override."""
 
     def setUp(self):
         self.battle = self.make(wizard(spells=VECTOR), power=4)
         self.lightning, self.fireball = magic.SPELL_CODES["celestiallightning"], magic.SPELL_CODES["brightfireball"]
         self.storm = magic.SPELL_CODES["celestialstormofshemtek"]
 
-    def test_clicking_another_targeted_spell_loses_the_first_cost(self):
+    def test_switching_targeted_spells_replaces_selection_without_payment(self):
         battle = self.battle
         battle.select_spell("W", self.lightning)
-        self.assertEqual(battle.player_power, 3)
-        self.assertTrue(battle.spell_usable("W", self.storm))
         battle.select_spell("W", self.fireball)
         self.assertFalse(spell_effects.spell_selected(battle, "W", self.lightning))
         self.assertTrue(spell_effects.spell_selected(battle, "W", self.fireball))
-        self.assertEqual(battle.player_power, 2)
-        self.assertFalse(battle.spell_usable("W", self.storm))
+        self.assertEqual(battle.player_power, 4)
+        self.assertTrue(battle.spell_usable("W", self.storm))
+        with self.assertRaises(ValueError):
+            battle.order_cast("W", self.lightning, 10, 20)
+        self.assertEqual(self.queued(), [])
 
-    def test_ctrl_target_clicks_pay_again_and_keep_targeting(self):
+    def test_ctrl_clicks_pay_per_cast_and_stop_when_the_pool_is_empty(self):
         battle = self.battle
-        battle.select_spell("W", self.fireball)
-        battle.select_spell("W", self.lightning)  # pool 2 now
+        battle.event_bus._power = magic.PowerPools(2, 8)
+        battle.select_spell("W", self.lightning)
         self.assertTrue(battle.order_cast("W", self.lightning, 10, 20, repeat=True))
         self.assertEqual(battle.player_power, 1)
-        self.assertTrue(spell_effects.spell_selected(battle, "W", self.lightning))
-        self.assertTrue(battle.order_cast("W", self.lightning, 30, 40, repeat=True))
+        self.assertFalse(battle.order_cast("W", self.lightning, 30, 40, repeat=True))
         self.assertEqual(battle.player_power, 0)
-        self.assertFalse(battle.order_cast("W", self.lightning, 50, 60, repeat=True))  # pool < cost: a plain click
         self.assertFalse(spell_effects.spell_selected(battle, "W", self.lightning))
-        self.assertEqual([(e.x, e.y) for e in self.queued()], [(10, 20), (30, 40), (50, 60)])
+        with self.assertRaises(ValueError):
+            battle.order_cast("W", self.lightning, 50, 60, repeat=True)
+        self.assertEqual([(e.x, e.y) for e in self.queued()], [(10, 20), (30, 40)])
+
+    def test_power_lost_before_targeting_prevents_an_unpaid_cast(self):
+        battle = self.battle
+        battle.select_spell("W", self.storm)
+        battle.event_bus.power.add(False, -2)
+        with self.assertRaises(ValueError):
+            battle.order_cast("W", self.storm, 100, 500)
+        self.assertEqual(battle.player_power, 2)
+        self.assertEqual(self.queued(), [])
+        self.assertFalse(spell_effects.spell_selected(battle, "W", self.storm))
 
     def test_an_empty_pool_makes_every_row_unusable(self):
         battle = self.battle

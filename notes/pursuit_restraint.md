@@ -6,6 +6,18 @@ Static research; the original was not run. Background, only where cited: `game_r
 "The Leadership test", "Effective Leadership", "Player orders and the command panel"; `pursuit_map_edge.md` (the
 rest of the pursuit update and what ends a pursuit); `reform_while_moving.md` §6 (the Re-group re-form).
 
+## Engine behavior correction (2026-10-11)
+
+The user confirmed that routing enemy and neutral regiments automatically try to rally, explicitly replacing
+this report's player-only automatic flight-rally rule and its existing regression test. At rout start, enable
+rally attempts for every non-player regiment, regardless of Independent. Player units still require Independent
+or the Rally order. Keep the first scheduled check one turn later, subsequent checks three segments apart,
+casualty modifiers, CantRally, nearby-enemy exclusion, and off-field removal unchanged.
+
+This correction concerns **flight rally only**. Pursuit start still disables the shared attempt state, and the
+pursuit-restraint rules below are unchanged. Earlier statements below that AI never enables this state do not
+apply to routing units in the engine.
+
 ## 1. Summary
 
 - A pursuing regiment has a **rally-attempt state** (on/off) and a **scheduled segment** (a segment number 1–10).

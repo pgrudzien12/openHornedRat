@@ -1373,8 +1373,7 @@ class Battle:
         return spell_effects.launch(self, spell, unit, -1, x, y)
 
     # ----------------------------------------------------------------- the player's Magic order
-    # notes/player_magic_panel.md: the cost is paid on the spell click and nothing refunds it; every cancel path
-    # only clears the entry's selected state.
+    # notes/player_magic_panel.md "Engine behavior override": selection is free; each cast order pays once.
 
     @staticmethod
     def can_cast(unit: Regiment) -> bool:
@@ -1419,43 +1418,42 @@ class Battle:
                 and not spell_effects.spell_selected(self, identifier, code))
 
     def clear_spell_selection(self, identifier: str) -> None:
-        """Every cancel path (Back, another command, another unit, another spell row): the caster's selected rows
-        are cleared, Dispel Magic's excepted, and nothing is refunded (player_magic_panel.md 4.1, 5)."""
+        """Clear pending targeting without payment; preserve Dispel Magic's once-per-battle usage latch."""
         unit = self.regiments.get(identifier)
         for code in unit.spells if unit is not None else ():
             spell_effects.deselect_spell(self, identifier, code)
 
     def select_spell(self, identifier: str, code: int) -> bool:
-        """A left click on a usable spell row (player_magic_panel.md 4.1): clear the other selected rows (no refund);
-        Azure Blades and Fists of Gork give the order at once and stay unselected, Dispel Magic gives it at once and
-        stays selected for the battle, any other spell is selected and waits for its target; then pay the cost.
-        Return whether a target click is awaited."""
+        """Replace the pending spell without payment. No-target spells immediately pay and issue their order.
+        Dispel retains its once-per-battle latch. Return whether a target click is awaited."""
         self._require_battle_order()
         if not self.spell_usable(identifier, code):
             raise ValueError("spell is unavailable")
         self.clear_spell_selection(identifier)
         if code != spell_effects.AZURE_BLADES and code != spell_effects.FISTS:
             spell_effects.select_spell(self, identifier, code)
-        self.event_bus.power.add(False, -(magic.cost(code) or 0))
         if code in NO_TARGET_SPELLS:
+            self.event_bus.power.add(False, -(magic.cost(code) or 0))
             unit = self.regiments[identifier]
             self._magic_order(unit, code, unit.x, unit.y)
             return False
         return True
 
     def order_cast(self, identifier: str, code: int, x: float, y: float, repeat: bool = False) -> bool:
-        """The target click of a selected spell (player_magic_panel.md 4.2): the order goes out with the clicked
-        point, nothing is checked here. A `repeat` (Ctrl) click with the cost still in the pool pays again and keeps
-        the spell selected; otherwise the selection is cleared. Return whether targeting goes on."""
+        """Pay once for the selected spell and issue its cast order at the clicked point.
+        Ctrl keeps targeting only if the remaining pool can pay for another cast."""
         self._require_battle_order()
         unit = self.regiments[identifier]
-        if unit.side != Side.PLAYER or not spell_effects.spell_selected(self, identifier, code):
+        if (unit.side != Side.PLAYER or code in NO_TARGET_SPELLS
+                or not spell_effects.spell_selected(self, identifier, code)):
             raise ValueError("spell was not selected")
         cost = magic.cost(code) or 0
+        if cost > self.player_power:
+            spell_effects.deselect_spell(self, identifier, code)
+            raise ValueError("not enough power to cast")
+        self.event_bus.power.add(False, -cost)
         again = repeat and cost <= self.player_power
-        if again:
-            self.event_bus.power.add(False, -cost)
-        else:
+        if not again:
             spell_effects.deselect_spell(self, identifier, code)
         self._magic_order(unit, code, x, y)
         return again

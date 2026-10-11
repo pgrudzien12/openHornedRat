@@ -1,7 +1,7 @@
 """The Magic button, spell list and Magic targeting in the battle HUD and view (notes/player_magic_panel.md).
 
 Given wizard W (Lightning 1, Fireball 1, Azure Blades 1, Dispel Magic 1, Storm of Shemtek 3) focused and idle, player
-pool 4: the report's section 10 vectors, driven through the HUD, the view and the scene."""
+pool 4: the report's vectors and engine behavior override, driven through the HUD, the view and the scene."""
 
 from types import SimpleNamespace
 import unittest
@@ -94,20 +94,20 @@ class MagicButtonTests(MagicPanelCase):
 
 
 class SpellRowTests(MagicPanelCase):
-    def test_clicking_lightning_pays_selects_and_arms_the_wand(self):
+    def test_clicking_lightning_selects_without_payment_and_arms_the_wand(self):
         self._press("magic")
         self.assertEqual(self.click(row_pos(self.hud, 0)), [("select_spell", LIGHTNING)])
-        self.assertEqual(self.battle.player_power, 3)
+        self.assertEqual(self.battle.player_power, 4)
         self.assertEqual(self.view.order_mode, f"spell:{LIGHTNING}")
         self.assertTrue(self.battle.spell_usable("W", STORM))
 
-    def test_then_fireball_loses_lightnings_cost(self):
+    def test_then_fireball_replaces_lightning_without_payment(self):
         self._press("magic")
         self.click(row_pos(self.hud, 0))
         self.click(row_pos(self.hud, 1))
         self.assertFalse(spell_effects.spell_selected(self.battle, "W", LIGHTNING))
-        self.assertEqual((self.battle.player_power, self.view.order_mode), (2, f"spell:{FIREBALL}"))
-        self.assertFalse(self.battle.spell_usable("W", STORM))
+        self.assertEqual((self.battle.player_power, self.view.order_mode), (4, f"spell:{FIREBALL}"))
+        self.assertTrue(self.battle.spell_usable("W", STORM))
 
     def test_a_ground_click_orders_the_spell_and_ends_targeting(self):
         self._press("magic")
@@ -124,21 +124,21 @@ class SpellRowTests(MagicPanelCase):
     def test_ctrl_ground_clicks_repeat_while_the_pool_lasts(self):
         self.battle.event_bus._power = magic.PowerPools(2, 8)
         self._press("magic")
-        self.click(row_pos(self.hud, 1))  # pool 1
+        self.click(row_pos(self.hud, 1))  # selection is free
         for event in self.view._magic_click(self.view.order_mode, (300.0, 600.0), None, True):
             self.scene.handle(event, SimpleNamespace())
-        self.assertEqual((self.battle.player_power, self.view.order_mode), (0, f"spell:{FIREBALL}"))
+        self.assertEqual((self.battle.player_power, self.view.order_mode), (1, f"spell:{FIREBALL}"))
         for event in self.view._magic_click(self.view.order_mode, (310.0, 600.0), None, True):
             self.scene.handle(event, SimpleNamespace())
         self.assertIsNone(self.view.order_mode)
         self.assertEqual(len(self.queued()), 2)
 
-    def test_back_clears_the_selection_without_a_refund_and_keeps_the_list(self):
+    def test_back_clears_the_selection_without_payment_and_keeps_the_list(self):
         self._press("magic")
         self.click(row_pos(self.hud, 1))
         self._press("back")
         self.assertFalse(spell_effects.spell_selected(self.battle, "W", FIREBALL))
-        self.assertEqual(self.battle.player_power, 3)
+        self.assertEqual(self.battle.player_power, 4)
         self.assertIsNone(self.view.order_mode)
         self.assertTrue(self.hud.spell_list_open)
 
@@ -155,6 +155,20 @@ class SpellRowTests(MagicPanelCase):
         self.click(row_pos(self.hud, 2))
         self.assertIsNone(self.view.order_mode)
         self.assertEqual([(e.code, e.x, e.y) for e in self.queued()], [(0x2B, 100, 200)])
+
+    def test_dispel_casts_immediately_and_only_the_targeted_spell_has_a_selection_mark(self):
+        from whshr.frontend.hud import MARK_SELECTED
+
+        self._press("magic")
+        self.click(row_pos(self.hud, 3))
+        self.assertIsNone(self.view.order_mode)
+        self.assertEqual(self.battle.player_power, 3)
+        self.assertEqual([e.parameter for e in self.queued()], [spell_effects.DISPEL_MAGIC])
+        self.click(row_pos(self.hud, 0))
+        wizard = self.battle.regiments["W"]
+        self.assertEqual([code for code in wizard.spells
+                          if MARK_SELECTED in self.hud._spell_marks(wizard, code)], [LIGHTNING])
+        self.assertFalse(self.battle.spell_usable("W", spell_effects.DISPEL_MAGIC))
 
     def test_an_unusable_row_does_nothing(self):
         self.battle.event_bus._power = magic.PowerPools(2, 8)
