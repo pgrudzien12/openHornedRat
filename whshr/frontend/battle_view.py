@@ -64,7 +64,7 @@ CLICK_DRAG_THRESHOLD = 4  # pixels; a right button press/release closer than thi
 # Public ranged handoff §5: installed GMCUR groups are Fire 100, default 101, Attack 102, Magic 103.
 BATTLE_CURSOR_GROUPS: dict[str, int] = {"default": 101, "attack": 102, "fire": 100, "magic": 103}
 MISSILE_MESH = {"arrow": "arrows1", "arrow_alt": "arrows2", "bolt": "arrows3", "bomb": "flames1"}
-FLAG_FIRST_FRAME, FLAG_FRAMES = 114, 4  # PROVISIONAL: white flag frames in GENBATT, awaiting the researcher report
+FLAG_FIRST_FRAME, FLAG_FRAMES = 106, 4  # white pennant frames in GENBATT (notes/deployment_flags.md), one per tick
 # PROVISIONAL (user's choice from reviewing the GENBATT set, not traced; SPEAR1-4 are the Hunting Spear's meshes,
 # notes/spell_visuals.md 0): artillery shots are GENBATT sprites 56-72, one frame per flight tick and holding the
 # last, and frame 73 is a puff where the shot lands, shown for ARTILLERY_PUFF_TICKS.
@@ -1123,15 +1123,17 @@ class BattleView(SceneView[BattleScene]):
 
     def _zone_flags(self) -> bytes:
         """Waving white flags along the deployment zone perimeter, deployment phase only. Engine design, not the
-        original's look: the four white flag frames of the GENBATT set cycle one per two battle ticks, each flag
-        offset by its index so the line ripples; the spacing is deployment.FLAG_SPACING."""
+        original's spacing: the four white pennant frames of the GENBATT set loop one per battle tick
+        (notes/deployment_flags.md), each flag at its own fixed pseudo-random phase so neighbours are out of sync
+        (deterministic, unlike a draw per flag); the spacing is deployment.FLAG_SPACING. Not modelled: the
+        sinking-away animation on Start."""
         battle, field = self.scene.battle, self.scene.field
         sheet = field.ui_sheets.get("genbatt")
         if getattr(battle, "phase", "battle") != "deployment" or sheet is None or not sheet.rects:
             return b""
         data = bytearray()
         for index, (x, y) in enumerate(deployment.flag_positions(battle.deployment_regions)):
-            number = min(FLAG_FIRST_FRAME + (battle.update_count // 2 + index) % FLAG_FRAMES, len(sheet.frames) - 1)
+            number = min(FLAG_FIRST_FRAME + (battle.update_count + (index * 2654435761 >> 7)) % FLAG_FRAMES, len(sheet.frames) - 1)
             frame, rect = sheet.frames[number], _atlas_rect(sheet, number)
             data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
                                   *rect, frame.anchor_x, frame.anchor_y, 0.0)
