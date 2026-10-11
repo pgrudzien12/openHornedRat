@@ -1,5 +1,9 @@
 # Area spells: Wind Blast, Flamestorm, Tangling Thorn, Da Krunch, Conflagration of Doom
 
+Artwork, frame timing, placement and visual cleanup for the first four spells are specified in
+`spell_obstacle_visuals.md`. In particular, Flamestorm's large sprite column is the Shift-selected
+variant; the normal spell uses recurring small flame meshes.
+
 Issue #168, part C1. Companions for request C: `notes/spell_area_effects.md` (C1), `notes/spell_channelled_effects.md` (C2),
 `notes/spell_blades_flock_items.md` (C3).
 Status markers: ✅ established, 🟡 hypothesis, ⬜ unresolved. Companions: `notes/spell_effects.md`
@@ -123,9 +127,10 @@ never ends, **each AI wizard casts Flamestorm at most once** while it lasts (ent
 The caster's previous Flamestorm effects are cancelled. The area object (radius 16, height 80) is placed at the **aim
 point** (no scatter) at once. A held Shift key only changes the graphics.
 
-### 2.2 Growth (ticks T … T+17)
+### 2.2 Ignition (ticks T … T+17)
 
-Flames grow (presentation draws only). **No damage.**
+Three small sparks appear per tick, up to twelve at once, each playing frames 121–124.
+The first column starts at T+18 (`spell_obstacle_visuals.md` §5). **No damage during ignition.**
 
 ### 2.3 Burning (from tick T+18, every tick, forever)
 
@@ -277,8 +282,9 @@ fault; never observed). Engine: treat the lift as harmless (skip its tests) or g
 
 ### 4.4 Dispel and cancel
 
-Effect position = the aim point. Cancelled during T … T+8: no crush at all (the foot vanishes). During the standing
-phase: the area object vanishes early, no lift.
+Effect position = the aim point. Cancellation during descent removes the foot and prevents future crush tests;
+it does **not** undo an earlier crush. Tall objects can already have been hit before T+9 under §4.2's height test.
+During the standing phase, the foot and area object vanish early, with no lift or additional dust.
 
 ---
 

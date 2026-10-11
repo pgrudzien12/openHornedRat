@@ -10,6 +10,10 @@ For Curse of Anraheir, Azure Blades, Ere We Go and Mork Save Uz, see `spell_atta
 per-figure animation, anchors, timing and cleanup. That report also confirms the absence of separate
 effect art for Dispel Magic and Fists of Gork.
 
+For Wind Blast, Flamestorm, Tangling Thorn and Da Krunch, see `spell_obstacle_visuals.md`:
+growth, lasting obstacles, meshes, dust, frame timing and cleanup. Flamestorm's normal fire uses
+`FIRE1–4` meshes; its large 117–120 sprite column is selected by holding Shift at launch.
+
 ## 0. Shared model (read this first)
 
 Two kinds of art are used:
