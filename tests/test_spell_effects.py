@@ -414,6 +414,10 @@ class SpearAndFireballTests(EffectTestCase):
             self.assertEqual(hits, [("E", 6)])
             self.update()
         self.assertEqual(hits, [("E", 6), ("E", 6), ("E", 5), ("E", 4), ("E", 3), ("E", 2), ("E", 1)])
+        strikes = [event for event in self.battle.events if event.kind == "spell_strike"]
+        self.assertEqual(len(strikes), 7)
+        self.assertTrue(all(event.data["spell"] == spell_effects.HUNTING_SPEAR
+                            and event.data["regiment"] == "E" for event in strikes))
         self.assertEqual(self.effects(), [])
 
     def test_hunting_spear_chain_misses_on_raised_ground(self):

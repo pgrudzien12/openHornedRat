@@ -512,11 +512,11 @@ class ScriptInterpreter:
             if state is None:
                 continue
             target_id = attacker.attack_target
-            if target_id is None:
+            if target_id is None or not attacker.active:
                 state.last_attack_target = None
                 continue
             target = self.battle.regiments.get(target_id)
-            if target is None:
+            if target is None or not target.active:
                 continue
             distance = math.hypot(target.x - attacker.x, target.y - attacker.y)
             if distance > attacker.charge_reach:
@@ -3195,7 +3195,7 @@ class ScriptInterpreter:
 
     def _charging(self, unit: "Regiment") -> bool:
         """Charging: running at an attack target, not yet fighting and not pursuing a routing unit."""
-        return unit.attack_target is not None and not unit.in_melee and not self._pursuing(unit)
+        return unit.active and unit.attack_target is not None and not unit.in_melee and not self._pursuing(unit)
 
     def _busy_casting(self, unit: "Regiment", state: UnitScriptState) -> bool:
         """IfCasting's "is casting" (notes/script_animation_sound.md 3.2)."""
