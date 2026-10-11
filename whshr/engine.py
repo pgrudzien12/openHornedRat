@@ -87,6 +87,13 @@ def speed_per_tick(move_stat: float | None, initiative_stat: float | None, k: fl
 DEFAULT_SPEED_PER_TICK = speed_per_tick(None, None)
 
 
+def has_leader_figure(leader: View) -> bool:
+    """A leader block gives the unit a leader figure unless its sprite set is `VoidType` or missing
+    (notes/leader_figure_sprite.md 1)."""
+    sprite = resource_name(leader.get("sprites")) if leader else None
+    return bool(sprite) and (sprite or "").casefold() != "voidtype"
+
+
 @dataclass
 class ModelState:
     """One model's close-combat state on its fight's battle grid (game_rules.md 5.7, whshr.battle_grid).
@@ -170,6 +177,7 @@ class Regiment:
     models: int = 1
     ranks: int = 1
     sprite: str | None = None  # script troop sprite resource, e.g. "ClanRats"
+    leader_sprite: str | None = None  # the leader block's own troop sprite resource (notes/leader_sprites.md)
     banner: str | None = None  # script banner resource
     portrait: str | None = None  # leader portrait resource
     speed_per_tick: float = DEFAULT_SPEED_PER_TICK  # BTS world units per 100 ms tick, moving freely
@@ -336,7 +344,7 @@ class Regiment:
     volley_age: int = 0  # ticks elapsed since the current volley was ordered; drives the resolve window
     reload_ticks: float = 0.0  # ticks remaining before a missile regiment may shoot again
     dying: list[animation.DyingModel] = field(default_factory=list[animation.DyingModel])  # animation.DyingModel entries awaiting their collapse tick
-    corpses: list[tuple[float, float, int]] = field(default_factory=list[tuple[float, float, int]])  # (x, y, direction) of models that have died, for the view
+    corpses: list[animation.Corpse] = field(default_factory=list[animation.Corpse])  # models that have died, for the view
     burning: list[animation.BurningModel] = field(default_factory=list[animation.BurningModel])  # animation.BurningModel: burn sequences in progress (fire/warpfire kills)
     charred: list[tuple[float, float, int, str]] = field(default_factory=list[tuple[float, float, int, str]])  # (x, y, direction, body class) of models that finished burning
 
@@ -497,14 +505,27 @@ class Regiment:
 
     @property
     def animation_family(self) -> str:
+        """The rank-and-file figures' family; a leader figure may differ (`model_family`)."""
         return animation.family_for(self.sprite, self.unit_class)
 
-    @property
-    def body_class(self) -> str:
-        return animation.body_class(self.unit_class, self.sprite)
+    def model_sprite(self, model: ModelState) -> str | None:
+        """The sprite set one figure is drawn and animated with (notes/leader_figure_sprite.md 1-2): the leader
+        figure uses the leader block's set, every other figure the unit's. A dead leader's role is not inherited, so
+        no other figure ever takes the leader set. Read-only: the leader is fixed when the figures are seeded."""
+        if self.leader_sprite and self.leader_model(model):
+            return self.leader_sprite
+        return self.sprite
 
-    def burns_on(self, death_kind: int) -> bool:
-        return animation.burns_on_death(death_kind, self.unit_class, self.sprite)
+    def model_family(self, model: ModelState) -> str:
+        """The animation family of one figure, looked up from its own sprite set (notes/leader_figure_sprite.md 2)."""
+        return animation.family_for(self.model_sprite(model), self.unit_class)
+
+    def model_body_class(self, model: ModelState) -> str:
+        return animation.body_class(self.unit_class, self.model_sprite(model))
+
+    def model_burns_on(self, model: ModelState, death_kind: int) -> bool:
+        """Whether this figure burns: the death script of its own set decides (notes/leader_figure_sprite.md 2)."""
+        return animation.burns_on_death(death_kind, self.unit_class, self.model_sprite(model))
 
     @property
     def is_wagon(self) -> bool:
@@ -940,11 +961,14 @@ class Battle:
                 regiments.append(Regiment(
                     identifier, unit["name"], x, y, direction, side, models=models, ranks=ranks,
                     sprite=resource_name(unit.get("sprites")),
+                    leader_sprite=resource_name(leader.get("sprites")),
                     banner=resource_name(unit.get("banner")),
                     portrait=resource_name(leader.get("portrait")),
                     hidden=bool(unit.get("hidden", False)),
                     whoami=int(position.get("whoami") or 0) & 0xFF,
-                    has_leader=bool(unit.get("leader")),
+                    # A leader block without a sprite set (VoidType) gives no leader figure
+                    # (notes/leader_figure_sprite.md 1).
+                    has_leader=has_leader_figure(leader),
                     spells=magic.spell_codes(unit.get("spells") or ()),
                     items=tuple(str(item) for item in unit.get("items") or ())[:objective_table.ITEM_SLOTS],
                     shooting_code=_shooting_code(unit),
@@ -2903,7 +2927,7 @@ class Battle:
         for dying in list(regiment.dying):
             dying.ticks_left -= 1
             if dying.ticks_left > 0:
-                animation.step(dying.model, dying.model.action, self.rng, regiment.animation_family)
+                animation.step(dying.model, dying.model.action, self.rng, regiment.model_family(dying.model))
                 continue
             # notes/panic_tests.md 1: the model leaves the unit as its death sequence starts; the size counts it
             # and the models still collapsing.
@@ -2914,8 +2938,9 @@ class Battle:
                 regiment.burning.append(animation.BurningModel(
                     dying.x, dying.y, dying.death_kind, dying.body, animation.burn_start(dying.body, self.rng)))
                 continue
-            animation.step(dying.model, animation.DEAD, self.rng, regiment.animation_family)
-            regiment.corpses.append((dying.x, dying.y, self.rng.randrange(animation.FULL_TURN)))
+            animation.step(dying.model, animation.DEAD, self.rng, regiment.model_family(dying.model))
+            regiment.corpses.append(animation.Corpse(dying.x, dying.y, self.rng.randrange(animation.FULL_TURN),
+                                           regiment.model_sprite(dying.model)))
 
     def _step_burning(self, regiment: Regiment) -> None:
         """Age each burning model; when its burn ends it becomes a charred corpse with a random facing,
@@ -2988,7 +3013,7 @@ class Battle:
                 requested = animation.WALK
             else:
                 requested = animation.IDLE
-            animation.step(model, requested, self.rng, regiment.animation_family)
+            animation.step(model, requested, self.rng, regiment.model_family(model))
             self._slew_drawn_facing(regiment, model, wagon)
             if model.fire_event:
                 self.event_bus.animation_event_step(regiment.identifier, model_index)
@@ -3005,7 +3030,7 @@ class Battle:
                     regiment.volley_countdown = None
 
     def _slew_drawn_facing(self, regiment: Regiment, model: ModelState, wagon: bool = False) -> None:
-        if animation.family_table(regiment.animation_family)[model.action].locks_facing:
+        if animation.family_table(regiment.model_family(model))[model.action].locks_facing:
             return
         target = self._drawn_facing_target(regiment, model)
         model.drawn_facing = target if wagon else animation.slew_facing(model.drawn_facing, target)

@@ -672,11 +672,11 @@ class BattleView(SceneView[BattleScene]):
         for regiment in self.scene.battle.regiments.values():
             if not regiment.active or not regiment.visible_to_player:
                 continue
-            sheet = field.sprite_sheet(regiment.sprite)
-            if sheet is None:
-                continue
             for (x, y), model in zip(regiment.seeded_positions(), regiment.melee_models):
-                action, phase = animation.current(model, regiment.animation_family)
+                sheet = field.sprite_sheet(regiment.model_sprite(model))
+                if sheet is None:
+                    continue
+                action, phase = animation.current(model, regiment.model_family(model))
                 facing = regiment.direction if model.drawn_facing is None else model.drawn_facing
                 frame = sheet.frames[sheet.frame_index(action, phase, sprite_direction(yaw, facing))]
                 foot = projection.view(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH)
@@ -926,7 +926,6 @@ class BattleView(SceneView[BattleScene]):
         for regiment in self.scene.battle.regiments.values():
             if not regiment.visible_to_player:
                 continue
-            sheet = field.sprite_sheet(regiment.sprite)
             selected = 1.0 if regiment.identifier == selected_id else 0.0
             # The anchor (regiment.x/y) can visibly outrun the models during a charge (they only
             # ever catch up to it at the unit's base speed, notes/game_rules.md "Formations": models
@@ -935,28 +934,33 @@ class BattleView(SceneView[BattleScene]):
             # not the anchor, or it visibly floats ahead of/behind the block it marks.
             # Read-only: seeding here would draw stagger values in draw order and break replay determinism.
             positions = regiment.seeded_positions() if regiment.active else []
-            if sheet is not None and regiment.active:
-                unit_sheet: SpriteSheet = sheet
+            if regiment.active:
                 # Each model already steps its own action/program counter every tick
-                # (whshr.animation, game_rules.md "Figure animation"); this only reads it.
+                # (whshr.animation, game_rules.md "Figure animation"); this only reads it. Every figure is drawn
+                # with its own sprite set: the leader figure with the leader block's (notes/leader_figure_sprite.md).
                 def draw_model(x: float, y: float, model: Any) -> bytes:
-                    action, phase = animation.current(model, regiment.animation_family)
+                    sheet = field.sprite_sheet(regiment.model_sprite(model))
+                    if sheet is None:
+                        return b""
+                    action, phase = animation.current(model, regiment.model_family(model))
                     facing = regiment.direction if model.drawn_facing is None else model.drawn_facing
-                    index = unit_sheet.frame_index(action, phase, sprite_direction(yaw, facing))
-                    frame, rect = unit_sheet.frames[index], _atlas_rect(unit_sheet, index)
+                    index = sheet.frame_index(action, phase, sprite_direction(yaw, facing))
+                    frame, rect = sheet.frames[index], _atlas_rect(sheet, index)
                     return INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
                                          *rect, frame.anchor_x, frame.anchor_y, selected)
                 for (x, y), model in zip(positions, regiment.melee_models):
                     data += draw_model(x, y, model)
                 for dying in regiment.dying:  # still playing their animation until they collapse
                     data += draw_model(dying.x, dying.y, dying.model)
-            if sheet is not None:
-                # Corpses (game_rules.md, "Panic": models that died stay on the ground where they fell).
-                for x, y, corpse_direction in regiment.corpses:
-                    index = sheet.frame_index("dead", 0, sprite_direction(yaw, corpse_direction))
-                    frame, rect = sheet.frames[index], _atlas_rect(sheet, index)
-                    data += INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
-                                          *rect, frame.anchor_x, frame.anchor_y, 0.0)
+            # Corpses (game_rules.md, "Panic": models that died stay on the ground where they fell), each in its own set.
+            for corpse in regiment.corpses:
+                sheet = field.sprite_sheet(corpse.sprite)
+                if sheet is None:
+                    continue
+                index = sheet.frame_index("dead", 0, sprite_direction(yaw, corpse.direction))
+                frame, rect = sheet.frames[index], _atlas_rect(sheet, index)
+                data += INSTANCE.pack(corpse.x / WORLD_PER_MESH, field.ground_height(corpse.x, corpse.y),
+                                      corpse.y / WORLD_PER_MESH, *rect, frame.anchor_x, frame.anchor_y, 0.0)
             # Burning figures and charred corpses come from the general battle-effects set, addressed by
             # first-frame number (animation.BURN_SEQUENCES). TODO(visual check): the frame-to-group
             # matching is by eye in the source notes (game_rules.md "Figure animation").

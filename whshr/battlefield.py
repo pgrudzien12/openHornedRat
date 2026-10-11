@@ -368,8 +368,10 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
     ui_names = resource_files(game, {"portraits", "banners", "backgrounds", "special", "terrain"})
     sheets: dict[str, SpriteSheet] = {}
     by_base: dict[str, SpriteSheet | None] = {}
-    for unit in script_units(script):
-        resource = resource_name(unit["sprites"]) or ""
+    # A leader block names its own troop sprite set, drawn for the leader figure (notes/leader_sprites.md).
+    troop_resources = [resource_name(sprites) or "" for unit in script_units(script)
+                       for sprites in (unit["sprites"], (unit.get("leader") or {}).get("sprites"))]
+    for resource in troop_resources:
         base = names.get(resource.casefold())
         if base is None:
             continue

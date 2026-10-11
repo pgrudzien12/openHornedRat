@@ -24,6 +24,17 @@ STAND, IDLE, WALK, FIGHT, WEAPON_READY, DEAD, SHOOT = range(1, 8)
 DEATH_ORDINARY, DEATH_FIRE, DEATH_MISSILE, DEATH_WARPFIRE = range(4)
 
 
+@dataclass(frozen=True)
+class Corpse:
+    """A model that has died and lies where it fell, drawn with the dead frames of its own sprite set
+    (notes/leader_figure_sprite.md 2: a leader's corpse uses the leader set)."""
+
+    x: float
+    y: float
+    direction: int
+    sprite: str | None = None  # the figure's troop sprite resource
+
+
 @dataclass
 class DyingModel:
     """A model whose wounds have run out but which keeps playing its animation until it collapses
