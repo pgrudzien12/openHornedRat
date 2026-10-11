@@ -89,13 +89,13 @@ It stays an active unit until its last model is gone. (Close-combat damage goes 
 `casualty_bookkeeping.md`.)
 
 **(7) Wagon behaviour is the class, not the model count.** The layout, the wagon footprint kind (the 0x27
-look-ahead, never moved by a push, the 45° camera-relative facing snap, no reciprocal contact) are all chosen from
+look-ahead, never moved by a push, no reciprocal contact) are all chosen from
 the unit's **class RollingStock**. The footprint kind is fixed when the battle is loaded. Losing a model changes
 none of it. `game_rules.md`'s "units of exactly 2 models" describes the shipped data, not a condition.
 
 | before | event | after |
 |---|---|---|
-| allied horse-and-cart (2 models), crossbow bolt strikes it | one random model takes the hit, dies | 1 model left; still RollingStock: 0x27 look-ahead, never pushed, facing snap, `CheckCollisions` answers as §1 |
+| allied horse-and-cart (2 models), crossbow bolt strikes it | one random model takes the hit, dies | 1 model left; still RollingStock: 0x27 look-ahead, never pushed, `CheckCollisions` answers as §1; no camera-snap layout any more (it needs exactly 2 figures, `wagon_camera_snap.md`) |
 | same, second model killed | – | unit destroyed (removed) as any unit |
 
 🟡 Where the surviving model stands in the 2-slot wagon layout, and whether a lone wagon (team killed) still moves at

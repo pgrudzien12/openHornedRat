@@ -635,7 +635,8 @@ rear rank trailing, converging again once the facing settles.
   does not additionally drag its reference point around.
 - **Wagons** are snapped to **45° steps — but relative to the camera, not to the world** ✅. The battle update
   keeps a global view angle (the camera's rotation converted into the same 1/512 turn scale, with the previous
-  frame's value retained), and the wagon layout rounds the unit's facing to the nearest 45° step **of a grid
+  frame's value retained), and the wagon layout rounds **a copy of** the unit's facing (used only to place its two figures; the
+  unit's facing itself is never changed, `wagon_camera_snap.md`) to the nearest 45° step **of a grid
   offset by where the camera currently sits inside a 45° sector**. The wagon layout is then re-run **only when
   the view angle has changed since the last update** — if the camera has not moved, the re-form is skipped
   outright. The effect is that a wagon always presents one of eight clean aspects *to the viewer* and re-snaps
