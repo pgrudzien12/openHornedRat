@@ -420,9 +420,11 @@ class Regiment:
 
     def _assign_leader(self) -> None:
         """Give a unit with a leader block its leader figure once: the machine in the first slot of a war machine,
-        else the middle model of the front rank (the slot a re-form gives the leader)."""
+        else the middle model of the front rank (the slot a re-form gives the leader). A wagon unit's leader is the
+        wagon itself, the rearmost model: the team (draught animals) leads (notes/game_rules.md, "Wagons")."""
         if self.has_leader and self.leader_uid is None and self.melee_models:
-            centre = 0 if self.hud_class == "art" else (max(1, self.front_rank_models()) - 1) // 2
+            centre = (len(self.melee_models) - 1 if self.is_wagon else 0 if self.hud_class == "art"
+                      else (max(1, self.front_rank_models()) - 1) // 2)
             self.leader_uid = self.melee_models[min(centre, len(self.melee_models) - 1)].uid
 
     @property
@@ -1934,7 +1936,7 @@ class Battle:
         (notes/reform_while_moving.md 2, 6, 12).
         """
         positions = regiment.model_positions()
-        leader_index = regiment.living_leader_index if not regiment.routing else None
+        leader_index = regiment.living_leader_index if not (regiment.routing or regiment.is_wagon) else None
         ranks = max(1, min(regiment.models, ranks)) if regiment.models else 1
         regiment.ranks = ranks
         sizes = formation.rank_sizes(regiment.models, ranks)

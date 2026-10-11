@@ -20,6 +20,13 @@ def leader_index(regiment: Regiment) -> int:
     return index
 
 
+def cart(leader_sprite: str = "Wagon") -> Regiment:
+    regiment = Regiment("c", "Horse and cart", 500, 500, 384, Side.PLAYER, models=2, ranks=2,
+                        sprite="PackPony", leader_sprite=leader_sprite, has_leader=True, unit_class=7)
+    Battle(2000, 2000, [regiment], seed=1995).tick()
+    return regiment
+
+
 class LeaderFigureSpriteTests(unittest.TestCase):
     def test_given_a_leader_block_sprite_when_loaded_then_only_the_leader_figure_uses_it(self):
         _battle, regiment = cavalry()
@@ -82,3 +89,25 @@ class LeaderFigureSpriteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WagonTeamTests(unittest.TestCase):
+    def test_given_a_cart_unit_then_the_wagon_is_the_rear_figure_and_the_team_leads(self):
+        regiment = cart()
+
+        self.assertEqual([regiment.model_sprite(model) for model in regiment.melee_models], ["PackPony", "Wagon"])
+        self.assertEqual(regiment.living_leader_index, 1)
+
+    def test_given_a_cart_unit_then_the_team_animates_as_horses_and_the_wagon_as_a_wagon(self):
+        regiment = cart()
+
+        families = [regiment.model_family(model) for model in regiment.melee_models]
+
+        self.assertEqual(families, ["standard_infantry", "wagons"])
+
+    def test_given_caravan_or_war_wagon_leaders_then_they_use_their_single_look(self):
+        for sprite in ("Caravan", "MrtWagon"):
+            regiment = cart(sprite)
+            table = animation.family_table(regiment.model_family(regiment.melee_models[1]))
+            self.assertEqual(animation.script_group(table[animation.WALK], 29), 0)
+            self.assertEqual(animation.script_group(table[animation.WALK], 2), 0)

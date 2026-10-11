@@ -193,6 +193,8 @@ class SpriteSheet:
 
     def _group(self, action: str) -> tuple[int, int]:
         group = ACTION_GROUPS[action]
+        if len(self.groups) == 3 and action in ("attack", "stand") and self.groups[2][1] >= DIRECTIONS:
+            group = 2  # move, dead, stand sets (pack pony, sheep): the third group is the standing pose
         if group < len(self.groups) and self.groups[group][1] >= DIRECTIONS:
             return self.groups[group]
         # Nonstandard layouts: fall back to the longest group.

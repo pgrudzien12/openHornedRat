@@ -87,3 +87,11 @@ class TextureLayerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ThreeGroupSetTests(unittest.TestCase):
+    def test_given_a_move_dead_stand_set_then_standing_uses_the_third_group(self):
+        sheet = SpriteSheet("PACKPONY", [None] * 72, [(0, 32), (32, 8), (40, 32)])
+
+        self.assertEqual(sheet.frame_index("stand", 0, 3), 43)
+        self.assertEqual(sheet.frame_index("move", 1, 3), 11)
