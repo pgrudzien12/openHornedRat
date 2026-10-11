@@ -125,6 +125,7 @@ class GlueView(NativeScreenView[GlueScene]):
         self._refresh_panel(models, palette)
         self._refresh_missions(models, palette)
         self._refresh_dialogue(_dialogue_state(runtime.state))
+        self._refresh_hint()
 
     def _speech_overlay_frames(self) -> tuple[tuple[str, str], ...]:
         """(bitmap base name, cell name) of every running click-speech overlay: the fingerprint they redraw on."""
@@ -391,7 +392,7 @@ class GlueView(NativeScreenView[GlueScene]):
             self.mission_rows.append((pygame.Rect(x, y, width, height), reference))
 
     def _refresh_hint(self) -> None:
-        hint = self.hover_hint
+        hint = None if self.scene.require_runtime().state.speech_active else self.hover_hint
         if hint == self._drawn_hint:
             return
         if self.hint_label is not None:

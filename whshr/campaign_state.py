@@ -265,7 +265,7 @@ class CampaignState:
         if source is None:
             return False
         joined = with_hired(source, hired)
-        self.company = tuple(sorted((*self.company, joined), key=lambda regiment: regiment.whoami))
+        self.company = (*self.company, joined)
         return True
 
     def _sync_army(self) -> None:
