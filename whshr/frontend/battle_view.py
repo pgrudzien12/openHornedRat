@@ -48,12 +48,16 @@ from .hud import Hud, order_target_hit, select_regiment_hit
 
 Point = tuple[int, int]
 WORLD_EFFECT_RESERVE = 512  # instances kept free for world effects (Fireball heads, puffs, explosions) so banners stay
-SKY = (112, 150, 196)
+BACKGROUND = (0, 0, 0)  # the original battle view has a black background behind the terrain, no sky
 NEAR, FAR = 0.5, 4000.0  # mesh units
 PAN_SPEED = 0.8  # camera distances per second
 ROTATE_SPEED = 90.0  # degrees per second
 TILT_SPEED = 30.0  # degrees per second
 WHEEL_ZOOM = 0.9
+BUTTON_ZOOM_RATE = 0.5  # distance factor per second while a camera zoom button is held
+# The panel's camera buttons, held down: left mouse / right mouse -> (control, sign). Rotate turns the view like Q / E,
+# zoom moves closer / further.
+CAMERA_BUTTONS: dict[str, str] = {"camera_rotate": "rotate", "camera_zoom": "zoom"}
 DRAG_ROTATE = 0.3  # degrees per pixel
 CLICK_DRAG_THRESHOLD = 4  # pixels; a right button press/release closer than this counts as a click
 # Public ranged handoff §5: installed GMCUR groups are Fire 100, default 101, Attack 102, Magic 103.
@@ -196,12 +200,13 @@ SNOW_FURNITURE = frozenset({"d_snwwatchtower", "snwrock1", "snwrock2", "snwrock3
 
 
 class BattleView(SceneView[BattleScene]):
-    background = SKY
+    background = BACKGROUND
 
     def __init__(self, gpu: Gpu, scene: BattleScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
         field, ctx, target = scene.field, gpu.ctx, gpu.target
-        self.initial_camera = BattleCamera.for_battle(field.script, field.ground_height)
+        positions = {identifier: (regiment.x, regiment.y) for identifier, regiment in scene.battle.regiments.items()}
+        self.initial_camera = BattleCamera.for_battle(field.script, field.ground_height, positions)
         if self.options.get("camera"):
             yaw, pitch, distance = self.options["camera"]
             self.initial_camera = replace(self.initial_camera, yaw=yaw % 360, pitch=pitch, distance=distance)
@@ -212,7 +217,8 @@ class BattleView(SceneView[BattleScene]):
         self.order_mode: str | None = None  # a HUD Move/Attack click changes how the next battlefield click is interpreted
         self._drag_surface: str | None = None
         self._drag_pixel: tuple[float, float] | None = None
-        self._right_minimap = False
+        self._right_minimap = False  # the right button went down on the minimap: it steers the look-at point
+        self._camera_hold: tuple[str, int] | None = None  # a held camera button: (control, +1 left / -1 right)
         self.event_log: deque[str] = deque(maxlen=EVENT_LOG_LINES)  # recent whshr.engine.Battle.events, newest last
         self._banner_order: list[str] = []  # promoted selection order; persists after deselect like the original battle view
         self._figure_order: list[str] = []  # hit-stack order; selection promotes a regiment as on the minimap
@@ -305,14 +311,15 @@ class BattleView(SceneView[BattleScene]):
         if event.type == pygame.MOUSEWHEEL:
             camera.zoom(WHEEL_ZOOM ** event.y)
         elif event.type == pygame.MOUSEMOTION and event.buttons[2]:
-            if deploying and getattr(self, "_right_minimap", False):
-                dx, dy = self.hud.minimap_delta(event.rel)
-                camera.set_target(camera.target_x - dx, camera.target_y - dy)
+            if getattr(self, "_right_minimap", False):
+                self._look_at_minimap(event.pos)
+                return ()
+            if getattr(self, "_camera_hold", None) is not None:
                 return ()
             # Drag the ground: one screen pixel at the target covers this many BTS world units.
             height = self.gpu.target.size[1]
-            scale = 2 * camera.distance * math.tan(math.radians(camera.fov) / 2) / height * WORLD_PER_MESH
-            camera.pan(-event.rel[0] * scale, event.rel[1] * scale / math.sin(math.radians(camera.pitch)))
+            scale = 2 * camera.view_distance * math.tan(math.radians(camera.fov) / 2) / height * WORLD_PER_MESH
+            camera.pan(-event.rel[0] * scale, event.rel[1] * scale / math.sin(math.radians(camera.view_pitch)))
         elif event.type == pygame.MOUSEMOTION and event.buttons[1]:
             camera.rotate(event.rel[0] * DRAG_ROTATE)
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_HOME:
@@ -357,6 +364,9 @@ class BattleView(SceneView[BattleScene]):
             action = self.hud.hit_test(event.pos)
             if action is not None:
                 self.hud.set_pressed(action)
+                if action in CAMERA_BUTTONS:
+                    self._camera_hold = (CAMERA_BUTTONS[action], 1)
+                    return ()
                 if action.startswith(("item:", "spell:")):
                     return ()  # item and spell rows commit on release, so their pressed state is visible
                 if action == "scroll_up":
@@ -402,6 +412,7 @@ class BattleView(SceneView[BattleScene]):
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             pressed = self.hud.pressed
             self.hud.set_pressed(None)
+            self._camera_hold = None
             if pressed is not None and pressed.startswith("item:") and self.hud.hit_test(event.pos) == pressed:
                 self.hud.press(pressed)
                 item = pressed[5:]
@@ -411,14 +422,47 @@ class BattleView(SceneView[BattleScene]):
             if pressed is not None and pressed.startswith("spell:") and self.hud.hit_test(event.pos) == pressed:
                 return self._spell_row_click(int(pressed[6:]), self._control_held(event))
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
-            self._right_minimap = deploying and self.hud.minimap_position(event.pos) is not None
+            action = self.hud.hit_test(event.pos)
+            if action in CAMERA_BUTTONS:
+                self.hud.set_pressed(action)
+                self._camera_hold = (CAMERA_BUTTONS[action], -1)
+                self._right_down = None
+                return ()
+            # A right click on the minimap moves the look-at point there; holding the button and dragging keeps it
+            # under the cursor.
+            self._right_minimap = self.hud.minimap_position(event.pos) is not None
+            if self._right_minimap:
+                self._look_at_minimap(event.pos)
             self._right_down = None if self.hud.occupies(event.pos) else event.pos
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 3:
+            self._right_minimap = False
+            if getattr(self, "_camera_hold", None) is not None:
+                self._camera_hold = None
+                self.hud.set_pressed(None)
+                return ()
             start, self._right_down = self._right_down, None
             if (not deploying and start is not None and not self.hud.occupies(event.pos)
                     and math.dist(start, event.pos) <= CLICK_DRAG_THRESHOLD):
                 return self._ground_click(event.pos, direct=True)
         return ()
+
+    def _apply_camera_hold(self, seconds: float) -> None:
+        """A held camera button acts every frame: rotate turns left (left mouse) or right (right mouse) like Q / E;
+        zoom moves closer (left) or further (right), within the camera's distance limits."""
+        hold = getattr(self, "_camera_hold", None)
+        if hold is None:
+            return
+        control, sign = hold
+        if control == "rotate":
+            self.camera.rotate(-sign * ROTATE_SPEED * seconds)
+        else:
+            self.camera.zoom(BUTTON_ZOOM_RATE ** (sign * seconds))
+
+    def _look_at_minimap(self, pixel: Sequence[float]) -> None:
+        """Point the camera at the minimap spot under `pixel` (confined like any other look-at move)."""
+        point = self.hud.minimap_position(pixel)
+        if point is not None:
+            self.camera.set_target(*point)
 
     def _in_magic_mode(self) -> bool:
         return self.order_mode is not None and (self.order_mode == "magic" or self.order_mode.startswith("spell:"))
@@ -754,13 +798,14 @@ class BattleView(SceneView[BattleScene]):
         keys = pygame.key.get_pressed()
         right = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
         forward = (keys[pygame.K_UP] or keys[pygame.K_w]) - (keys[pygame.K_DOWN] or keys[pygame.K_s])
-        step = self.camera.distance * WORLD_PER_MESH * PAN_SPEED * seconds
+        step = self.camera.view_distance * WORLD_PER_MESH * PAN_SPEED * seconds
         if right or forward:
             self.camera.pan(right * step, forward * step)
         if turn := keys[pygame.K_e] - keys[pygame.K_q]:
             self.camera.rotate(turn * ROTATE_SPEED * seconds)
         if tilt := keys[pygame.K_PAGEUP] - keys[pygame.K_PAGEDOWN]:
             self.camera.tilt(tilt * TILT_SPEED * seconds)
+        self._apply_camera_hold(seconds)
         self.scene.battle.set_view_angle(view_angle(self.camera.yaw))
         self._publish_view_rect()
         self._consume_events()
@@ -822,7 +867,7 @@ class BattleView(SceneView[BattleScene]):
         selected = scene.battle.regiments[scene.selected_id].name if scene.selected_id else "-"
         lines = (
             f"battle tick {scene.battle.tick_count}, soldiers {self.soldiers}",
-            f"camera yaw {camera.yaw:.0f} pitch {camera.pitch:.0f} distance {camera.distance:.0f}",
+            f"camera yaw {camera.yaw:.0f} pitch {camera.view_pitch:.0f} distance {camera.view_distance:.0f}",
             f"target {camera.target_x:.0f}, {camera.target_y:.0f}",
             f"selected {selected}",
         ) + tuple(f"F2 capture: saving {scene.battle.regiments[capture.unit_id].name} figure state, "

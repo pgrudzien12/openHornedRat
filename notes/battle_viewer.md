@@ -126,16 +126,30 @@ look about twice as large as in the game screenshot (see `--scenery-scale`).
 
 ## Real-time engine battle view
 
-The engine uses an explicit camera safety choice where the original `CameraEdge`
-limits are not yet measured: active `bnd_CAMEDGE` outlines keep the ground
-look-at point and the camera eye within a camera area. Panning can slide along
-an outline; rotation, tilt, and zoom adjust pitch or distance when the eye
-would cross it. The engine also samples terrain height between the look-at
-point and eye, raising the camera or moving it closer if a ridge would block
-that sightline. This height check does not model occlusion by scenery meshes;
-the CameraEdge constraint keeps the eye away from perimeter scenery where the
-map supplies such an area. These are engine choices, not measured original
-camera rules.
+The engine camera follows these rules. They are the project owner's choices, not measured original camera
+values, except where noted.
+
+- **Start:** look at the first player unit of the marching army, at pitch 40 and distance 40 (mesh units). Without
+  player units, look at the field centre. The original centres on the selected unit when the battle view opens, and
+  no battle-file key, node or deployment area sets this point. The heading is `[FIELD] Camera`; see the 🟡 below.
+- **Look-at point:** confined to the map's active `bnd_CAMEDGE` areas (47 of the 54 battle files have one), sliding
+  along an outline. Without such an area it is confined to the field rectangle. The eye is not confined: it may
+  look in from outside the area.
+- **Distance:** held within 20..70 by the mouse wheel and the panel's zoom button.
+- **Terrain:** while terrain lies between the eye and the look-at point, the rendered pitch rises and then the
+  rendered distance shrinks, just enough to clear it. The chosen pitch and distance are kept, and the rendered view
+  is recomputed from them on every camera change, so the lift ends as soon as the view is clear again. Scenery
+  meshes are not tested.
+- **Background:** black behind the terrain, no sky, as in the original.
+- **Panel buttons:** hold the rotate button (left mouse turns left, right mouse turns right) or the zoom button
+  (left mouse moves closer, right mouse further). While a button is held it shows its pressed frame.
+- **Minimap:** a right click points the camera at that spot, and dragging with the right button keeps the look-at
+  point under the cursor.
+
+🟡 `[FIELD] Camera` is the initial heading. The engine reads it as the view direction clockwise from north (yaw =
+180 + Camera, so BF001's Camera 45 starts looking north-east). A newer reading takes Camera as the bearing from the
+look-at point to the eye, so the view direction would be Camera + 180 (BF001 starting south-west). Checking BF001's
+compass at battle start in the original settles this.
 
 `python3 -m whshr engine <WARFB> --battle BF001` (see `notes/engine_architecture.md`) renders the same
 scene on the GPU from `whshr.battlefield`. The static viewer uses the same placement, shading and

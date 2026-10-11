@@ -17,10 +17,10 @@ class BattleAutoTests(unittest.TestCase):
                 parse_order({"event": event})
 
     def test_given_camera_and_world_coordinates_when_nonfinite_or_out_of_range_then_rejected(self):
-        self.assertEqual(camera_values([450, 45, 120]), (90, 45, 120))
+        self.assertEqual(camera_values([450, 45, 60]), (90, 45, 60))
         self.assertEqual(target_values([10, 20.5]), (10, 20.5))
-        for values in ([0, 0, 120], [0, 45, 0], [float("nan"), 45, 120],
-                       [0, float("inf"), 120], [0, 45, float("nan")]):
+        for values in ([0, 0, 60], [0, 45, 0], [0, 45, 120], [float("nan"), 45, 60],
+                       [0, float("inf"), 60], [0, 45, float("nan")]):
             with self.subTest(camera=values), self.assertRaises(ValueError):
                 camera_values(values)
         with self.assertRaises(ValueError):
