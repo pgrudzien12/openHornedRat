@@ -39,6 +39,7 @@ from .battle_text import display_text, reaction_text
 from .battle_sound import BattleSounds
 from .ranged_sound import MissileSounds
 from .gpu import Gpu
+from .area_particle_visuals import area_effects, area_meshes, area_sprites
 from .obstacle_visuals import ObstacleVisuals, obstacle_effects
 from .transport_visuals import TransportVisuals, transport_effects
 from .spell_visuals import (AttachedVisuals, DirectionalSprite, FireballVisuals, Flight, ProjectileVisuals, Sprite,
@@ -867,7 +868,8 @@ class BattleView(SceneView[BattleScene]):
         if hasattr(self.scene.battle, "spell_effects"):
             # Spell heads and beam segments (notes/spell_visuals.md 0): at their height above the ground, level.
             for item in [*self._advance_spell_visuals()[1].meshes(), *self._obstacle_visuals().meshes(),
-                         *self._transport_visuals().meshes()]:
+                         *self._transport_visuals().meshes(),
+                         *(mesh for spell in area_effects(self.scene.battle) for mesh in area_meshes(spell))]:
                 ground_x, ground_y = item.ground_at if item.ground_at is not None else (item.x, item.y)
                 base = 0.0 if item.absolute else self.scene.battle.ground_height(ground_x, ground_y)
                 append(item.name, item.x, item.y, base + item.height, item.dx, item.dy, item.scale)
@@ -1004,7 +1006,8 @@ class BattleView(SceneView[BattleScene]):
             return b""
         data = bytearray()
         for sprite in [*visuals.sprites(), *projectiles.sprites(), *attached.sprites(),
-                       *self._obstacle_visuals().sprites(), *self._transport_visuals().sprites()]:
+                       *self._obstacle_visuals().sprites(), *self._transport_visuals().sprites(),
+                       *(sprite for spell in area_effects(self.scene.battle) for sprite in area_sprites(spell))]:
             number = (sprite.first + sprite_direction(self.camera.yaw, sprite.bearing)
                       if isinstance(sprite, DirectionalSprite) else sprite.frame)
             if number >= len(sheet.frames) or sheet.rects[number] is None:
