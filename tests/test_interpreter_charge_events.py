@@ -101,6 +101,15 @@ class RaiseChargeEventsTests(unittest.TestCase):
         target_state = self.battle.event_bus.unit_states["target"]
         self.assertEqual(len(target_state.event_queue), 0)
 
+    def test_a_dead_or_departed_charger_cannot_raise_a_charge_event(self):
+        for departed in (False, True):
+            with self.subTest(departed=departed):
+                self.attacker.models = 10 if departed else 0
+                self.attacker.fled = departed
+                self.attacker.attack_target = "target"
+                self.interp.raise_charge_events()
+                self.assertFalse(self.battle.event_bus.unit_states["target"].event_queue)
+
     def test_sustained_charge_does_not_reraise_every_tick(self):
         self.attacker.attack_target = "target"
         self.interp.raise_charge_events()

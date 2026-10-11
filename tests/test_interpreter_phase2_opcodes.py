@@ -335,6 +335,15 @@ class MoraleReactionTests(unittest.TestCase):
         self.interp.op_FearWhenCharged(state, None, [], "target", 0, None)
         self.assertEqual(state.cond_flags, 0)
 
+    def test_a_charge_event_from_a_dead_or_departed_monster_cannot_cause_flight(self):
+        self.charger.psychology = frozenset({"CauseTerror"})
+        for departed in (False, True):
+            with self.subTest(departed=departed):
+                self.charger.models = 10 if departed else 0
+                self.charger.fled = departed
+                state, queued = self._charged()
+                self.assertEqual((state.cond_flags, queued, state.current_target), (0, [], None))
+
     def _charged(self, rng=None):
         """Handle event 0x07 from a charger that is still charging (notes/script_grid_events.md 2)."""
         self.charger.attack_target = "target"

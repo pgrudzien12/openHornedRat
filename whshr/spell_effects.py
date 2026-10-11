@@ -939,7 +939,8 @@ def _spear_step(battle: Battle, effect: Effect) -> None:
     effect.y = dy + int((sy - dy) * r / 9)
     effect.remaining -= 1
     impact = Impact(effect.owner, effect.strength, SPEAR.wound_die, False, False)
-    if impact_test(battle, effect.x, effect.y, SPEAR.launch_height, impact, effect.owner, messages=False):
+    if impact_test(battle, effect.x, effect.y, SPEAR.launch_height, impact, effect.owner,
+                   messages=False, source=effect):
         effect.stopped = True
 
 
@@ -961,7 +962,8 @@ def _update_spear(battle: Battle, effect: Effect) -> None:
             height = battle.ground_height(effect.x, effect.y) + SPEAR.launch_height
             for strength in range(effect.strength, 0, -1):
                 impact_test(battle, effect.x, effect.y, height,
-                            Impact(effect.owner, strength, SPEAR.wound_die, False, False), None, messages=False)
+                            Impact(effect.owner, strength, SPEAR.wound_die, False, False), None,
+                            messages=False, source=effect)
             _end(battle, effect)
             return
         if d == radius:
