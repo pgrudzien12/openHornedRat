@@ -1,5 +1,8 @@
 # Channelled, flight, portal and curse spells: Storm of Shemtek, Flying Bower, Sapphire Arch, Curse of Anraheir
 
+Flying Bower and Sapphire Arch artwork, scaling, frame timing and visual cleanup are specified
+in `spell_transport_visuals.md`. Curse artwork is specified in `spell_attached_visuals.md`.
+
 Issue #168, part C2. Companions for request C: `notes/spell_area_effects.md` (C1), `notes/spell_channelled_effects.md` (C2),
 `notes/spell_blades_flock_items.md` (C3).
 Status markers: ✅ established, 🟡 hypothesis or partly traced,
@@ -168,11 +171,11 @@ The nudged point is the effect's aim point (`spell_effects.md` §1.1) and the la
 | lift | effect step of **T+19** | the flight projectile is created from the unit's centre to the aim point, scattered with the caster's BS and a **fixed step of 8** (offset 0…7 × 8 per axis for BS 3; 4 draws), 54-tick flight, ground-hugging (height 0 above the terrain, never stopped by terrain), passes through everything; it takes its first step at once. The unit is **lifted** (§2.3); if it was in melee it **leaves its grid and event 0x0F** (source = the caster's unit) goes to every unit of the opposite side (`spell_lasting_effects.md` §6); brace is cleared. |
 | flight | T+20 … T+74 | each effect step: the unit's centre (and its map footprint) := the flight projectile's position of the previous step, then the projectile advances one step, with a random wobble of `rand mod 8` added to x and to y (2 draws per step). |
 | landing | effect step of **T+74** | the unit's centre := the **aim point exactly** (fractions cleared), it is put back on the map (§2.3 ends). Facing, formation, model offsets, orders, waypoints, target and flags are **not** changed; no event is sent. |
-| tail | a few ticks after T+74 | the trail particles fade (part A §1.5); then the effect ends. |
+| tail | after T+74 | Dust keeps playing its five-frame sequence. If the last deposit was at T+L, the effect ends at T + max(75, L+6); a T+74 deposit disappears T+79 and the effect ends T+80 (`spell_transport_visuals.md` §2.3). |
 
 The caster is **channelling** from T to the end of the tail (`spell_lasting_effects.md` §6).
 
-Random numbers consumed, in order: launch: 4 scatter draws (all offsets 0) for the take-off; T…T+17: 2 wobble draws
+Random numbers consumed, in order: launch: 4 scatter draws (all offsets 0) for the take-off; T…T+18: 2 wobble draws
 per step (`rand mod 4`); T+19: 4 scatter draws, then 2 wobble draws (`rand mod 8`) per flight step up to T+73.
 
 ### 2.3 What "lifted" means ✅ (consequences 🟡)
@@ -237,6 +240,8 @@ Cost 2, range 24" (576), arc ±50° (skipped in melee), point target, **never ch
 
 - Timer 180. The portal animation uses 18 particles placed at random around the point: **54 random draws** at the
   launch (per particle: `rand mod 96` for x, `rand mod 96` for y, `rand mod 32` for height; matters for replays).
+  These are blue sparkles, frames 558–561, accompanying the growing/shrinking `SAPHARCH` mesh;
+  exact placement and scale timing are in `spell_transport_visuals.md` §3.
 - Effect updates (timer counted down after each update; it is 180 in tick T):
 
 | tick | step |
