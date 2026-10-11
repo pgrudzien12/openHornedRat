@@ -877,9 +877,12 @@ gain of 0.26 to avoid clipping); the bank parts were listened to and confirmed.*
   (generator 55, in cents) were established by pitch measurement. `music_sbk2sf2.py` converts the bank
   to SF2 for FluidSynth; the filter, modulation-envelope and LFO settings are dropped because their
   SF1 units are unknown.
-- Where the tracks play (16 of 21 located): `title` main menu, `generic` campaign map, `sighted` start
+- Where the tracks play (17 of 21 located): `title` main menu, `generic` campaign map, `sighted` start
   of a mission, `combat` ambushes, `scribe` caravan screens, `win`/`lose` debriefings, and one track per
-  race for the cutscenes; `battle`, `forest`, `lookin2`, `tense` and `victory` are not located.
+  race for the cutscenes. `battle` starts on battlefield entry during deployment, repeats, preserves
+  position on ordinary pause/resume, and stops on departure; starting battle, melee changes and
+  win/loss decisions do not restart it ([battle_music.md](notes/battle_music.md)). `forest`,
+  `lookin2`, `tense` and `victory` are not located.
 
 ## Sound effects — `.SFX` and WAV
 

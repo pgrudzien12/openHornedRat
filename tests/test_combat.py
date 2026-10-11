@@ -7,7 +7,7 @@ import math
 import unittest
 from unittest.mock import patch
 
-from whshr import combat, formation, interpreter
+from whshr import combat, formation, interpreter, spell_effects
 from whshr.engine import Battle, Regiment
 from whshr.rules import Side
 
@@ -236,17 +236,23 @@ class PursuitTests(unittest.TestCase):
         self.assertEqual(winner.attack_target, "l")
         self.assertIn("pursuit_start", [e.kind for e in battle.events])
 
-    def test_given_another_enemy_in_the_fight_when_one_routs_then_the_winner_does_not_pursue(self):
-        winner = _regiment("w", 0, 0, Side.PLAYER, initiative=5, speed_per_tick=1.0)
-        loser = _regiment("l", 0, 12, Side.ENEMY, initiative=5, speed_per_tick=1.0)
-        other = _regiment("o", 12, 0, Side.ENEMY, initiative=5, speed_per_tick=1.0)
+    def test_given_another_enemy_in_the_fight_when_one_routs_then_fireball_targets_the_remaining_enemy(self):
+        winner = _regiment("w", 100, 100, Side.PLAYER, has_leader=True, items=("ItemGrudgeBringer",))
+        loser = _regiment("l", 100, 120, Side.ENEMY)
+        other = _regiment("o", 120, 100, Side.ENEMY)
         battle = Battle(1000, 1000, [winner, loser, other], seed=0)
         _join_fight(battle, "g", winner, loser, other)
-
+        winner.attack_target = loser.identifier
+        state = battle.event_bus.unit_states["w"]
+        state.current_target = (loser.identifier, 0)
         combat.start_rout(loser, battle)
-
-        self.assertIsNone(winner.attack_target)
+        self.assertEqual(winner.attack_target, "o")
+        self.assertEqual(state.current_target, ("o", 0))
+        self.assertFalse(winner.pursuing)
         self.assertNotIn("pursuit_start", [e.kind for e in battle.events])
+        self.assertTrue(battle.launch_item(winner, 0x10A, 800, 800))
+        [fireball] = list(spell_effects.table(battle).effects())
+        self.assertEqual(fireball.aim, spell_effects.reference_figure(other))
 
     def test_given_a_neutral_and_a_player_ally_in_the_fight_when_their_enemy_routs_then_the_neutral_pursues(self):
         # BF010: NPC Dwarfs and the player's cavalry both fought one Clanrat unit. Player and neutral never fight each

@@ -995,9 +995,12 @@ class Hud:
         marks: list[int] = []
         if spell_effects.spell_active(self.battle, regiment.identifier, code):
             marks.append(MARK_ACTIVE)
-        if spell_effects.spell_selected(self.battle, regiment.identifier, code):
+        # Dispel's persistent latch means "used this battle", never "awaiting a target".
+        dispel_used = code == spell_effects.DISPEL_MAGIC and spell_effects.dispel_selected(
+            self.battle, regiment.identifier)
+        if not dispel_used and spell_effects.spell_selected(self.battle, regiment.identifier, code):
             marks.append(MARK_SELECTED)
-        if self.battle.spell_cast_ordered(regiment.identifier, code):
+        if dispel_used or self.battle.spell_cast_ordered(regiment.identifier, code):
             marks.append(MARK_CAST_ORDERED)
         return marks
 

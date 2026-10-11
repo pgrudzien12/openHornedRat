@@ -100,6 +100,10 @@ The final pass runs only when the player presses the tent button (§7). Steps:
 
 Letters that are already met, including the deciding letter, are not evaluated again.
 
+For the complete music lifecycle, see [battle_music.md](battle_music.md). `BATTLE`
+already plays during deployment and continues through the win/loss decision or U's
+retreat warning; the stop above belongs to actual departure.
+
 ## 4. The elimination letters A, F, N and Z
 
 ### 4.1 A: eliminate the enemy (flags `0x3`)

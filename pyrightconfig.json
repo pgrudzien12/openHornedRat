@@ -102,6 +102,7 @@
     "whshr/frontend/app.py",
     "whshr/frontend/army_records_view.py",
     "whshr/frontend/battle_view.py",
+    "whshr/frontend/battle_music.py",
     "whshr/frontend/bitmap_font.py",
     "whshr/frontend/briefing_view.py",
     "whshr/frontend/cursors.py",

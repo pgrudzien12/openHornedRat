@@ -37,6 +37,7 @@ from ..scenes import SceneEvent
 from .cursors import GameCursors
 from .battle_text import display_text, reaction_text
 from .battle_sound import BattleSounds
+from .battle_music import BattleMusic
 from .ranged_sound import MissileSounds
 from .gpu import Gpu
 from .area_particle_visuals import area_effects, area_meshes, area_sprites
@@ -285,6 +286,8 @@ class BattleView(SceneView[BattleScene]):
         self.missile_sounds = MissileSounds(installation,
                                             any(str(name).casefold() == "missile" for name in loaded_packets))
         self.battle_sounds = BattleSounds(installation, loaded_packets)
+        self.music = BattleMusic(installation)
+        self.refresh()
         self.cursors = GameCursors(installation, dll="GMCUR.DLL") if installation is not None else None
         self._cursor_mode: str | None = None
         self._set_cursor("default")
@@ -380,8 +383,7 @@ class BattleView(SceneView[BattleScene]):
                     return ()
                 if action in {"next_regiment", "prev_regiment"}:
                     return self._cycle_regiment(1 if action == "next_regiment" else -1)
-                # Another command, Back or Magic again clears a selected spell; nothing is refunded
-                # (notes/player_magic_panel.md 4.1, 5).
+                # Another command, Back or Magic again clears a selected spell without spending power.
                 cleared: tuple[SceneEvent, ...] = (("clear_spells",),) if self._in_magic_mode() else ()
                 order = self.hud.press(action)
                 if order in {"magic_list", "magic_auto"}:
@@ -397,6 +399,9 @@ class BattleView(SceneView[BattleScene]):
                     self._set_cursor(action if action != "face_point" else "move")
                     return cleared + ((("prepare_move",),) if deploying and action == "move" else ())
                 if order is not None:
+                    if order == "leave_battle" and self.scene.battle.can_leave:
+                        # Stop before the scene's final objective evaluation and result bookkeeping (§3).
+                        self.music.release()
                     self.order_mode = None
                     self._set_cursor("default")
                     # Stay on the sub-panel for repeat-friendly formation buttons so the
@@ -472,8 +477,8 @@ class BattleView(SceneView[BattleScene]):
 
     def _spell_row_click(self, code: int, control: bool) -> Sequence[SceneEvent]:
         """A released click on a spell row (notes/player_magic_panel.md 4.1, 7): Ctrl cancels an active spell and
-        does nothing on any other row; a plain click on a usable row pays and selects it, then waits for a target
-        with the wand unless the spell needs none. An unusable row does nothing."""
+        does nothing on any other row; a plain click selects a spell, then waits for a target with the wand.
+        No-target spells cast and pay immediately. An unusable row does nothing."""
         battle, selected = self.scene.battle, self.scene.selected_id
         if selected is None:
             return ()
@@ -502,7 +507,7 @@ class BattleView(SceneView[BattleScene]):
             code = int(mode[6:])
             if point is None:
                 return ()
-            if not (control and self.scene.battle.player_power >= (magic.cost(code) or 0)):
+            if not (control and self.scene.battle.player_power >= 2 * (magic.cost(code) or 0)):
                 self._end_magic_mode()
             caster = self.scene.selected_id
             if code == spell_effects.FLAMESTORM and caster is not None:
@@ -796,7 +801,15 @@ class BattleView(SceneView[BattleScene]):
         # plays yet: which SFX resource is the UI feedback cue is not identified in notes/sfx.md.
         self.event_log.append(f"Cannot {order}!")
 
+    def refresh(self) -> None:
+        """A decided objective keeps playing; only a final result means battlefield departure."""
+        if self.scene.battle.result is not None:
+            self.music.release()
+        else:
+            self.music.update(0.0, paused=self.scene.battle.paused)
+
     def animate(self, seconds: float) -> None:
+        self.music.update(seconds, paused=self.scene.battle.paused)
         self.scene.battle.ctrl_held = bool(pygame.key.get_mods() & pygame.KMOD_CTRL)
         keys = pygame.key.get_pressed()
         right = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
@@ -1197,6 +1210,7 @@ class BattleView(SceneView[BattleScene]):
         self.hud.draw(width, height, self.camera)
 
     def release(self) -> None:
+        self.music.release()
         for resource in (self.mesh, self.effects, self.sprites, self.vertex_buffer, self.effect_buffer,
                          self.instance_buffer, self.camera_buffer,
                          self.textures, self.atlas, self.palette):

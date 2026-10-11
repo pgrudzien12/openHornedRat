@@ -280,11 +280,20 @@ class RallyAttemptStateLifecycleTests(unittest.TestCase):
         combat.start_rout(player, battle)
         self.assertFalse(player.rally_attempt)
 
-    def test_given_an_independent_ai_unit_when_it_routs_then_the_state_stays_off(self):
-        battle, player, enemy = self.melee(independent=False)
-        enemy.independent = True
-        combat.start_rout(enemy, battle)
-        self.assertFalse(enemy.rally_attempt)
+    def test_enemy_and_neutral_units_enable_rally_on_rout_without_independent(self):
+        for side in (Side.ENEMY, Side.NEUTRAL):
+            with self.subTest(side=side):
+                unit = Regiment("u", "U", 1000, 1000, 0, side, models=8, ranks=2, leadership=9)
+                battle = Battle(4000, 4000, [unit])
+                battle.tick_count = boundary_tick(4)
+                combat.start_rout(unit, battle)
+                self.assertTrue(unit.rally_attempt)
+                self.assertEqual(unit.rally_segment, 4)
+                battle.tick_count = boundary_tick(4, turn=1)
+                with patch.object(combat, "_2_to_12", return_value=5):
+                    combat.resolve_rally(battle)
+                self.assertFalse(unit.routing)
+                self.assertEqual([e.data["passed"] for e in battle.events if e.kind == "rally_test"], [True])
 
     def test_given_the_state_on_when_the_pursuit_ends_for_another_reason_then_it_is_off(self):
         battle, p, fugitive = pursuer()

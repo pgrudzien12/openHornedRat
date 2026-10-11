@@ -8,6 +8,20 @@ repeated: `game_rules.md` "Winds of magic and casting" (costs, pool, winds), "Pl
 `battlefield_items.md` (the item list in the same rectangle); `battle_attack_charge_buttons.md` (panel sets);
 `react_portrait.md` (the compass/portrait rectangle); `player_missile_orders.md` §5 (order picking, minimap).
 
+## Engine behavior override (2026-10-11)
+
+The user explicitly requested these engine rules after the BF010 playtest. They supersede this report's
+row-click payment vectors for implementation; the original research findings below are retained as history.
+
+- Selecting a targeted spell replaces the previous pending spell and spends no power. Switching spells,
+  cancelling, or changing the selected unit costs nothing.
+- The target click pays once and queues the cast. Recheck the available pool at that click; insufficient
+  power clears targeting without payment or an order. Existing launch checks and failed-cast costs remain.
+- Ctrl targeting pays for each cast and stays armed only while the remaining pool can afford another cast.
+- No-target spells issue their cast order and pay immediately on the row click.
+- Dispel Magic remains once per battle, but its persistent usage latch is displayed as cast/used, never as
+  awaiting a target. Only the pending targeted spell has the selection mark.
+
 ## 0. Shared state (read this first)
 
 | state | meaning |

@@ -919,11 +919,11 @@ def start_rout(regiment: "Regiment", battle: "Battle", flee_point: formation.Poi
     regiment.melee_touching = frozenset()
     regiment.attack_target = None
     regiment.target_x = regiment.target_y = None
-    # notes/pursuit_restraint.md 2: a rout resets the rally-attempt state, switching it on only for a player
-    # regiment with Independent set, and schedules the first rally attempt one full turn later.
+    # notes/pursuit_restraint.md "Engine behavior correction": AI units rally by default;
+    # player units require Independent or the Rally order. The first check is one full turn later.
     regiment.pursuing = False
     regiment.pursuit_budget = regiment.pursuit_point = None
-    regiment.rally_attempt = regiment.side == Side.PLAYER and regiment.independent
+    regiment.rally_attempt = regiment.side != Side.PLAYER or regiment.independent
     schedule_rally_segment(regiment, battle)
     battle.events.append(BattleEvent(
         f"{regiment.name} routs!", "rout_start",
@@ -949,12 +949,18 @@ def _react_to_rout(routed: "Regiment", opponents: Sequence["Regiment"], group_id
     for opponent in opponents:
         if opponent.routing or not opponent.active:
             continue
-        still_fighting = any(
-            other.active and not other.routing and may_engage(other, opponent)
-            and other.melee_group == group_id
-            for other in battle.regiments.values())
-        if still_fighting:
-            continue  # another enemy is still on this grid: keep fighting it, do not pursue
+        remaining = [other for other in battle.regiments.values()
+                     if other.active and not other.routing and may_engage(other, opponent)
+                     and other.melee_group == group_id]
+        if remaining:
+            state = battle.event_bus.unit_states.get(opponent.identifier)
+            current = state.current_target[0] if state is not None and state.current_target else opponent.attack_target
+            # Preserve an existing live opponent; otherwise choose deterministically within this fight.
+            target = next((other for other in remaining if other.identifier == current), remaining[0])
+            opponent.attack_target = target.identifier
+            if state is not None:
+                state.current_target = (target.identifier, 0)
+            continue
         if opponent.anchored or opponent.missile_range:
             # game_rules.md 7.5: which classes decline is encoded in the behaviour scripts and applies
             # to both sides -- artillery never pursues, and shooters and wizards divert to scripts
@@ -1205,11 +1211,10 @@ def _rally_modifier(regiment: "Regiment") -> int | None:
 
 def resolve_rally(battle: "Battle") -> None:
     """A routing regiment may rally once its scheduled segment has come, its rally-attempt state is on (the
-    player's Rally order, or Independent at the rout) and no enemy is within FLEE_SAFE_DISTANCE (game_rules.md
-    "Rally", notes/pursuit_restraint.md 2). Logs every due rally check, including why it was skipped
+    player's Rally order, Independent at the rout, or an AI regiment) and no enemy is within FLEE_SAFE_DISTANCE
+    (game_rules.md "Rally", notes/pursuit_restraint.md 2). Logs every due rally check, including why it was skipped
     (CantRally, too many casualties, enemy too close); a regiment whose segment has not come yet, or whose
-    rally-attempt state is off, makes no attempt at all (an AI regiment never gets the state on, so it keeps
-    fleeing)."""
+    rally-attempt state is off, makes no attempt at all."""
     for regiment in battle.regiments.values():
         # A regiment that has fled off the field is permanently out (game_rules.md, "Flight"): once
         # `fled`, `active` is false forever, so it must never be offered another rally attempt.
