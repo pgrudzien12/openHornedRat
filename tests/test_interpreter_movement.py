@@ -298,6 +298,14 @@ class ChargeReachTests(MovementTestCase):
         self.target.attack_target = "u"
         self.assertFalse(self.op("IfTargetInChargeReach"))
 
+    def test_target_whose_charge_ended_in_melee_can_be_charged(self):
+        # Joining an ongoing fight: the target keeps its attack target after its own charge connected, but
+        # engagement ended the charge move (game_rules.md "Charge"), so the gate must not treat it as charging.
+        self.monster((130, 0))
+        self.target.attack_target = "u"
+        self.target.in_melee = True
+        self.assertTrue(self.op("IfTargetInChargeReach"))
+
     def block(self, s_rlmv):
         self.build(facing=128, target_at=(200, 0), target_facing=384, s_rlmv=s_rlmv,
                    target_models=32, target_ranks=4)  # 8 wide x 4 deep, facing the charger
