@@ -716,9 +716,37 @@ mission, including `MISSIONBP01WINDOW`, shows just the baked one. The sprites ar
 (pure blue) as the colour key; drawing them without keying that out gives a blue box.
 
 These three are the only `[BITMAP] set:depend=` in all 535 `WND.DLL` resources, so this mechanism exists
-solely for the scroll pile. The cached count is written only when a mission window is added
-(`addobject:res=<window>`) and after every mission-window release — so while the player
-is in the caravan the value is simply the last count taken on the map.
+solely for the scroll pile. The cached count is one campaign-wide value (not per window). It is recounted at
+exactly two moments, each time as "visible missions in the mission list of one window":
+
+1. after **every `addobject:res=<name>`** (any resource, not only mission windows: map marks such as
+   `Mark6Object` recount too), counting the visible missions of the window the object was loaded into (the open window
+   named by the current window name). After a mission window is added to the flow's `MapWindow` that is the new list.
+   **A window without a mission list gives 0.** This happens in practice: several briefings open their own map window
+   (`MapWindowBp10`, `MapWindowBp14`, …, a different window from the flow's `MapWindow`) and add a map mark to it
+   (`BPBrief3`, `BPBrief9`, `BPBrief10`, `BPBrief14`, `BPBrief15`, `REBrief8`, `LBrief3`; also the mission script
+   `SZMission5` before its battle). Each of these sets the count to **0**. Accept or Abort does not restore it
+   (it is not part of the restored window state), so every caravan after such a briefing shows only the baked scroll
+   until the next release or `addobject` recounts;
+2. after every mission-window **release** (§7.5 step 3).
+
+Nothing else writes it: not a row click, not troop selection's Done (it marks only the current mission `MISS` as
+taken; the list record is updated at the release), not `addanimobject` (the tent/trail animations), not
+`replacescript` by itself (only the `addobject` of the new flow script's mission window), not entering a caravan.
+So while the player is in the caravan the value is simply the last count taken on the map. **Saves do not contain
+it and loading does not recount it** (🟡 consequence: after loading a save made in a caravan, the pile shows
+whatever value the running program last had — no scrolls in a freshly started program — until the next
+`addobject` or release; an engine may recount on load instead, a harmless improvement).
+
+Example: `MISSIONBP10WINDOW` offers one mission. Its count (1) is taken when the window is added; the player plays
+it (its briefing `BPBrief10` adds a mark to its own map window, so the count drops to 0 — with one mission this changes
+nothing visible); the after-mission caravan shows only the baked scroll. Leaving the caravan runs the release: the
+recount gives 0, the flow script resumes, adds the next mission window (e.g. three missions) and the count becomes 3,
+visible from the next caravan on.
+
+Example with a visible effect: `MISSIONBP131415WINDOW` offers three missions (count 3, two sprite scrolls). The
+player picks the mission whose briefing is `BPBrief14`; its map mark resets the count to 0. The after-mission caravan
+shows only the baked scroll although two missions remain; leaving it runs the release, which recounts to 2.
 
 ### 7.5 Why the count changes after a mission while you stay in the same place ✅
 
