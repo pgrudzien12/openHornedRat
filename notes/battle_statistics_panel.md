@@ -28,10 +28,14 @@ profile; tabletop M is retained separately from simulation movement speed. The e
 class label and current/initial model count remain on the second unit-information line;
 the exact weapon text shown in the reference is not reproduced yet.
 
-Armour artwork is not implemented. Existing public notes identify six legacy ICON2
-armour images, but do not provide the battle resource/frame mapping for armour codes.
-A separate researcher report is needed with resource, frame, panel position, and code
-mapping (including mounted codes). Useful vectors: unit armour 0/1/2/5/8/13, toggle
-between different troop and leader armour, and select a unit without a leader. For each,
-report before-state, action, and visible after-state. Do not infer armour save semantics
-from the shield visible in the screenshot.
+Armour artwork and subject eligibility now follow `battle_hud_armour.md` §§1–4:
+ICONS 218–223 map the troop/leader armour code, and 224 clears an empty selection.
+The 44×51 source is cropped to its leftmost 42 columns at panel-local (204,116).
+Repaints use current armour; cached textures contain only artwork. The whole panel
+background is drawn first, preventing stale pixels after a subject switch.
+
+Leader view requires a living leader and portrait identity. Enemy units show troop
+information. A lone available leader is shown automatically. Both toggles are hidden
+for these forced views and for empty selection. Names, profiles, portraits and armour
+share the same effective subject. The preference still resets on selection changes.
+Original-game screenshot comparison remains outstanding, as noted in the report.

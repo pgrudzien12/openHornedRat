@@ -228,6 +228,11 @@ SPELL_NAME_TEXT_BASE = 30003  # GMTXT name id = 30003 + spell code (30004 Wind B
 LOG_RECT = (200, 8, 223, 51)
 # Unit info panel: below the log, left of the toggle buttons at (337, 66).
 UNIT_INFO_RECT = (204, 71, 128, 36)
+# notes/battle_hud_armour.md §§1–2: native top-left crop, excluding two right columns.
+ARMOUR_RECT = (204, 116, 42, 51)
+ARMOUR_FRAMES = (218, 219, 220, 221, 222, 223, 223, 223,
+                 218, 219, 220, 221, 222, 223, 223, 223)
+EMPTY_ARMOUR_FRAME = 224
 
 HUD_CLASS_NAMES: dict[str, str] = {
     "inf": "Infantry", "arch": "Archers", "art": "Artillery",
@@ -340,6 +345,7 @@ class Hud:
         self._log_panel: Any = None
         self._unit_info_panel: Any = None
         self._stat_labels: list[Any] = []
+        self._armour_quads: dict[int, ScreenQuad] = {}
 
     def _size(self) -> Size:
         if self._draw_size is None:
@@ -582,8 +588,8 @@ class Hud:
     def press(self, name: str) -> str | None:
         """Apply a clicked command's panel-navigation effect; returns the order to issue, if any."""
         if name in {"toggle_a", "toggle_b"}:
-            if self._regiment(self.selected) is not None:
-                self.leader_mode = not self.leader_mode
+            if self._fixed_button_visible(name):
+                self.leader_mode = name == "toggle_b"
             return None
         if name == "start_battle":
             # The deployment facing sub-panel has no battle counterpart for every class; start on the idle panel.
@@ -660,7 +666,7 @@ class Hud:
             self._unit_info_panel = self.gpu.unit_info((UNIT_INFO_RECT[2], UNIT_INFO_RECT[3]), background=(0, 0, 0, 0))
         class_name = HUD_CLASS_NAMES.get(unit_class or "", unit_class or "")
         regiment = self._regiment(self.selected)
-        if self.leader_mode and regiment is not None:
+        if regiment is not None and self._shows_leader_stats(regiment):
             name = regiment.leader_name or regiment.name
             class_name = ""
             models = max_models = None
@@ -971,16 +977,55 @@ class Hud:
     def _fixed_button_visible(self, name: str) -> bool:
         if name not in {"toggle_a", "toggle_b"}:
             return True
-        return (self._regiment(self.selected) is not None and self.list_kind is None
-                and name == ("toggle_a" if self.leader_mode else "toggle_b"))
+        regiment = self._regiment(self.selected)
+        return (regiment is not None and regiment.side != Side.ENEMY and regiment.models > 1
+                and self._stats_leader_available(regiment) and self.list_kind is None
+                and name == ("toggle_a" if self._shows_leader_stats(regiment) else "toggle_b"))
+
+    @staticmethod
+    def _stats_leader_available(regiment: "Regiment") -> bool:
+        return bool(regiment.portrait) and regiment.living_leader_index is not None
+
+    def _shows_leader_stats(self, regiment: "Regiment") -> bool:
+        # notes/battle_hud_armour.md §3: one subject for name, characteristics, art and armour.
+        return (regiment.side != Side.ENEMY and self._stats_leader_available(regiment)
+                and (regiment.models == 1 or self.leader_mode))
+
+    def armour_frame(self, regiment: "Regiment | None") -> int:
+        if regiment is None:
+            return EMPTY_ARMOUR_FRAME
+        code = regiment.armour
+        if self._shows_leader_stats(regiment) and regiment.leader_armour is not None:
+            code = regiment.leader_armour
+        return ARMOUR_FRAMES[code] if 0 <= code < len(ARMOUR_FRAMES) else EMPTY_ARMOUR_FRAME
+
+    def _armour_quad(self, frame_index: int) -> ScreenQuad | None:
+        if frame_index not in self._armour_quads:
+            if self.icons is None or frame_index >= len(self.icons.frames):
+                return None
+            frame = self.icons.frames[frame_index]
+            width, height = ARMOUR_RECT[2:]
+            if frame.width < width or frame.height < height:
+                return None
+            rgba = frame_rgba(frame, self.field.palette)
+            cropped = b"".join(rgba[y * frame.width * 4:(y * frame.width + width) * 4]
+                               for y in range(height))
+            quad = ScreenQuad(self.gpu, (width, height))
+            quad.write(cropped)
+            self._armour_quads[frame_index] = quad
+        return self._armour_quads[frame_index]
 
     def statistics(self, regiment: "Regiment") -> tuple[int | None, ...]:
         """The nine tabletop characteristics, in the reference's row-major order."""
         names = ("move", "ws", "bs", "strength", "toughness", "wounds", "initiative", "attacks", "leadership")
-        return tuple(getattr(regiment, ("leader_" if self.leader_mode else "") + name) for name in names)
+        prefix = "leader_" if self._shows_leader_stats(regiment) else ""
+        return tuple(getattr(regiment, prefix + name) for name in names)
 
     def _draw_statistics(self, regiment: "Regiment | None") -> None:
-        if regiment is None or self.list_kind is not None:
+        if self.list_kind is not None:
+            return
+        self._draw_panel(self._armour_quad(self.armour_frame(regiment)), *ARMOUR_RECT)
+        if regiment is None:
             return
         # Panel-native positions measured from the user's 640x480 reference. Chrome is
         # already in ICONS 98; only values and the banner/portrait are overlaid here.
@@ -992,7 +1037,7 @@ class Hud:
             label = self._stat_labels[index]
             label.set_lines((f"{name}  {value if value is not None else '–'}",))
             self._draw_panel(label, 253 + index % 3 * 38, 117 + index // 3 * 19)
-        sheet = self._sheet(regiment.portrait if self.leader_mode else regiment.banner)
+        sheet = self._sheet(regiment.portrait if self._shows_leader_stats(regiment) else regiment.banner)
         if sheet is not None and sheet.frames:
             quad = self._sheet_frame_quad(sheet.frames[0])
             self._draw_panel(quad, 369, 68, 72, 104)
@@ -1199,6 +1244,8 @@ class Hud:
             self._log_panel.release()
         if self._unit_info_panel is not None:
             self._unit_info_panel.release()
+        for quad in self._armour_quads.values():
+            quad.release()
         for label in self._stat_labels:
             label.release()
         for labels in self._list_labels:

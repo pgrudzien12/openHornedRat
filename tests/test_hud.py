@@ -78,6 +78,8 @@ def _hud(selected="player", regiments=None, **overrides):
 class PanelStateTests(unittest.TestCase):
     def test_stats_toggle_uses_one_hit_target_and_does_not_change_compass(self):
         hud = _hud()
+        hud.battle.regiments["player"].has_leader = True
+        hud.battle.regiments["player"].portrait = "leader"
         self.assertEqual(hud.hit_test((345, 380)), "toggle_b")
         self.assertTrue(hud._compass_shown())
         self.assertIsNone(hud.press("toggle_b"))
@@ -91,6 +93,7 @@ class PanelStateTests(unittest.TestCase):
 
     def test_leader_profile_and_selection_reset(self):
         regiment = Regiment("player", "Troops", 0, 0, 0, Side.PLAYER,
+                            models=10, has_leader=True, portrait="leader",
                             move=4, ws=3, bs=2, strength=3, toughness=3, wounds=1,
                             initiative=3, attacks=1, leadership=6,
                             leader_move=5, leader_ws=5, leader_bs=4, leader_strength=4,
@@ -108,8 +111,9 @@ class PanelStateTests(unittest.TestCase):
 
     def test_stats_art_switches_banner_to_portrait(self):
         regiment = Regiment("player", "Troops", 0, 0, 0, Side.PLAYER,
-                            banner="banner", portrait="leader")
+                            models=10, has_leader=True, banner="banner", portrait="leader")
         hud = _hud(regiments=[regiment])
+        hud._armour_quad = Mock(return_value="armour")
         hud._stat_labels = [Mock() for _ in range(9)]
         hud._sheet = Mock(return_value=SimpleNamespace(frames=[object()]))
         hud._sheet_frame_quad = Mock(return_value="art")
@@ -124,6 +128,90 @@ class PanelStateTests(unittest.TestCase):
         hud._draw_panel.reset_mock()
         hud._draw_statistics(regiment)
         hud._draw_panel.assert_not_called()
+
+    def test_armour_rating_mapping_includes_mounted_and_blank(self):
+        hud = _hud()
+        regiment = hud.battle.regiments["player"]
+        expected = (218, 219, 220, 221, 222, 223, 223, 223,
+                    218, 219, 220, 221, 222, 223, 223, 223)
+        for code, frame in enumerate(expected):
+            with self.subTest(code=code):
+                regiment.armour = code
+                self.assertEqual(hud.armour_frame(regiment), frame)
+        self.assertEqual(hud.armour_frame(None), 224)
+
+    def test_armour_switch_vectors_and_live_changes(self):
+        regiment = Regiment("player", "Troops", 0, 0, 0, Side.PLAYER,
+                            models=10, has_leader=True, portrait="leader")
+        hud = _hud(regiments=[regiment])
+        for troop, leader, unit_frame, leader_frame in (
+                (1, 4, 219, 222), (10, 13, 220, 223), (8, 9, 218, 219),
+                (5, 6, 223, 223), (0, 0, 218, 218)):
+            with self.subTest(troop=troop, leader=leader):
+                regiment.armour, regiment.leader_armour = troop, leader
+                self.assertEqual(hud.armour_frame(regiment), unit_frame)
+                hud.press("toggle_b")
+                self.assertEqual(hud.armour_frame(regiment), leader_frame)
+                self.assertEqual((regiment.armour, regiment.leader_armour), (troop, leader))
+                hud.press("toggle_a")
+                self.assertEqual(hud.armour_frame(regiment), unit_frame)
+        hud.press("toggle_b")
+        regiment.leader_armour = 4
+        self.assertEqual(hud.armour_frame(regiment), 222)
+        regiment.leader_armour = 5
+        self.assertEqual(hud.armour_frame(regiment), 223)
+
+    def test_armour_subject_boundaries_hide_both_toggles(self):
+        for case in ("missing_portrait", "dead_leader", "single", "enemy", "empty"):
+            with self.subTest(case=case):
+                regiment = Regiment("player", "Troops", 0, 0, 0, Side.PLAYER,
+                                    models=10, has_leader=True, portrait="leader",
+                                    armour=2, leader_armour=4)
+                hud = _hud(regiments=[regiment])
+                hud.leader_mode = True
+                if case == "missing_portrait":
+                    regiment.portrait = None
+                elif case == "dead_leader":
+                    regiment.model_positions()
+                    regiment.leader_uid = -1
+                elif case == "single":
+                    regiment.models = 1
+                    hud.leader_mode = False
+                elif case == "enemy":
+                    regiment.side = Side.ENEMY
+                else:
+                    hud.set_selected(None)
+                subject = hud._regiment(hud.selected)
+                expected = 224 if case == "empty" else 222 if case == "single" else 220
+                self.assertEqual(hud.armour_frame(subject), expected)
+                self.assertFalse(hud._fixed_button_visible("toggle_a"))
+                self.assertFalse(hud._fixed_button_visible("toggle_b"))
+                if subject is not None:
+                    self.assertEqual(hud._shows_leader_stats(subject), case == "single")
+
+    def test_armour_pixels_are_cropped_from_left_and_texture_is_reused(self):
+        hud = _hud()
+        hud._armour_quads = {}
+        hud.gpu = Mock()
+        frame = SimpleNamespace(width=44, height=51)
+        hud.icons = SimpleNamespace(frames=[frame] * 225)
+        # Every column and row differs, exposing rescaling, centred crops, and stride errors.
+        rgba = b"".join(bytes((x, y, 17, 255)) for y in range(51) for x in range(44))
+        expected = b"".join(bytes((x, y, 17, 255)) for y in range(51) for x in range(42))
+        with patch.object(hud_module, "ScreenQuad") as quad_type, \
+                patch.object(hud_module, "frame_rgba", return_value=rgba):
+            quad = hud._armour_quad(219)
+            self.assertIs(hud._armour_quad(219), quad)
+            quad_type.assert_called_once_with(hud.gpu, (42, 51))
+            quad.write.assert_called_once_with(expected)
+
+    def test_empty_selection_draws_blank_armour_at_native_position(self):
+        hud = _hud(selected=None)
+        hud._armour_quad = Mock(return_value="blank")
+        hud._draw_panel = Mock()
+        hud._draw_statistics(None)
+        hud._armour_quad.assert_called_once_with(224)
+        hud._draw_panel.assert_called_once_with("blank", 204, 116, 42, 51)
 
     def test_item_popup_is_painted_after_the_unit_name(self):
         hud = _hud()
