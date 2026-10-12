@@ -10,7 +10,8 @@
 | `loadsfx:` name → `.SFX` file → WAV | ✅ table in `GAMEF.DLL`, all 15 names used by `.BTS` resolve |
 | WAV files (663) | ✅ all valid PCM, statistics below |
 | Listening review | ✅ project owner reviewed effects with their `pitch` applied and the speech files |
-| When the game plays which effect (unit events, spells) | ❌ game code (`GAMEF.DLL`), not investigated |
+| When the game plays which effect: spells | ✅ `notes/spell_sounds.md` (per-spell effect, start, place, stop; Curse loop) |
+| When the game plays which effect: unit events | ❌ game code (`GAMEF.DLL`), not investigated |
 
 ## Where the knowledge comes from
 
@@ -134,7 +135,8 @@ WAVs are `<dir><file name>`. Error message for an unknown name: `sfx type %s not
 - Every campaign battle loads `buttonfx` + `Battle2`, plus at most two mission-specific packets.
 - The race and weapon packets (`spells`, `missile`, `HumBtl`, `OrcBtl`, `DwrfBtl`, `Skaven`, `Monster`)
   appear only in test scripts or nowhere. **Hypothesis:** the game loads them itself, depending on the
-  armies and spells present, and names in `.BTS` just force a load.
+  armies and spells present, and names in `.BTS` just force a load. Confirmed for `spells`: it is loaded whenever a unit lists a
+  spell or magic item or carries a spell-launching special weapon (`notes/spell_sounds.md` §0).
 - `loadsfx` names are written with inconsistent case (`buttonfx`, `missile`); all 15 names resolve
   case-insensitively. No name without a packet.
 
