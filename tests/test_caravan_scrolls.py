@@ -22,6 +22,7 @@ OTHER = ("[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n"
 MAP = "[WINDOW]\n[END]"
 MARK = "[WINDOW]\n[END]"
 FLOW = "[RUN]\n[START]\nopenwindow:res=MAP\nsetcurwindow:res=MAP\naddobject:res=ENVOY\nwaitforrelease:\n[END]"
+BRIEF_FLOW = "[RUN]\n[START]\nopenwindow:res=MAP\nsetcurwindow:res=MAP\naddobject:res=MARK\nwaitforrelease:\n[END]"
 # The three caravan scroll bitmaps and their set:depend values (section 7.4).
 SCROLLS = (RenderBitmap("CarScroll1", animation=(("depend", 4),)),
            RenderBitmap("CarScroll2", animation=(("depend", 3),)),
@@ -29,7 +30,8 @@ SCROLLS = (RenderBitmap("CarScroll1", animation=(("depend", 4),)),
 
 
 def _content() -> GlueContent:
-    return GlueContent.from_data(resources={"ENVOY": ENVOY, "OTHER": OTHER, "MAP": MAP, "MARK": MARK, "FLOW": FLOW})
+    return GlueContent.from_data(resources={"ENVOY": ENVOY, "OTHER": OTHER, "MAP": MAP, "MARK": MARK, "FLOW": FLOW,
+                                              "BRIEF_FLOW": BRIEF_FLOW})
 
 
 def _campaign(window: str = "ENVOY") -> CampaignState:
@@ -114,6 +116,14 @@ class OfferedCountTests(unittest.TestCase):
         campaign.offered_count = 7  # a stale value the next addobject must replace
         runtime._add_object("res=MARK", False, [])  # pyright: ignore[reportPrivateUsage]
         self.assertEqual(campaign.scroll_count, 1)
+
+    def test_an_addobject_into_a_window_without_a_mission_list_sets_the_count_to_zero(self):
+        campaign = _campaign()
+        campaign.offered_count = 3
+        runtime = GlueRuntime(campaign.content, campaign)  # type: ignore[arg-type]
+        runtime.start("BRIEF_FLOW")  # a briefing's own map window with a mark, no [MISSION] records
+
+        self.assertEqual(campaign.scroll_count, 0)
 
     def test_an_animated_object_does_not_retake_the_count(self):
         campaign = _campaign()

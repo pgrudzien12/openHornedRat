@@ -1083,12 +1083,13 @@ class GlueRuntime:
 
     def _recount_offered(self, target: WindowInstance) -> None:
         """Every ``addobject`` retakes the caravan's count of missions on offer from the mission list of the window
-        it loaded into (notes/campaign.md section 7.4). PROVISIONAL: a window without a mission list leaves the
-        count unchanged rather than zeroing it."""
+        it loaded into; a window without one (a briefing's own map with a mark) sets it to 0 (notes/campaign.md
+        section 7.4)."""
         recount = getattr(self.campaign, "recount_offered", None)
+        if recount is None:
+            return
         lists = [name for name in (target.name, *target.objects) if self._has_mission_list(name)]
-        if recount is not None and lists:
-            recount(lists[-1])
+        recount(lists[-1] if lists else target.name)  # a window with no [MISSION] records counts 0
 
     def _has_mission_list(self, name: str) -> bool:
         try:
