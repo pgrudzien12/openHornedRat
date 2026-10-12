@@ -195,7 +195,9 @@ Frames 8/9 are a second spell/rune icon, 10/11 a skull/lightning status icon, an
 arrow over troops; none has a verified formation, withdraw, or rally meaning. Frames 58–63 are a
 wrench and directional arrows, not armour. The six armour icons documented in
 `notes/btp_sprite_leftovers.md` belong to the legacy `ICON2` sheet and must not be indexed through
-`ICONS`.
+`ICONS`. The live HUD instead uses `ICONS` frames **218–223**, with **224** for
+an empty selection; [battle_hud_armour.md](battle_hud_armour.md) specifies all
+foot/mounted codes, unit/leader selection, and the native drawing rectangle.
 
 `python3 scripts/icons_sheet.py <WARFB> extracted/icons_sheet.png --cols=15 --scale=2` renders
 the full labelled contact sheet using `whshr.battlefield.read_sprite_sheet`, the same decode path
