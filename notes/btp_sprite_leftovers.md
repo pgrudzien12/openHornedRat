@@ -132,7 +132,9 @@ the **next** record, read with the wrong record size.
 
 `ICON2` is an older icon set: 31 of 49 frames are **byte-identical** to decoded `ICONS` frames
 (indices 0–13, 35–40, 42–47, 60–64). The others are earlier versions of buttons (60×60, 44×44,
-20×20) or are missing from `ICONS` (the armour icons, 44×52).
+20×20), including legacy armour pictures (44×52). The live battle HUD has a separate
+44×51 armour series at `ICONS` frames 218–223, plus blank frame 224; see
+[battle_hud_armour.md](battle_hud_armour.md) for the rating mapping and placement.
 
 `HALBERD.PAL` is not used by `HALBERD.BOP` (8 bpp in `STANDARD.PAL`). It is the first 64 B of
 `TESTSPR.PAL` (see point 5).
