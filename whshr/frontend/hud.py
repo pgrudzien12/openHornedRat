@@ -16,6 +16,7 @@ orders the engine can actually carry out.
 """
 
 import math
+from dataclasses import dataclass
 from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +24,7 @@ import pygame
 
 from .. import magic, spell_effects
 from ..battlefield import Battlefield, SpriteFrame, SpriteSheet
+from ..objectives import ITEM_NUMBERS
 from ..portrait_popup import overlay_frames
 from ..rules import Side
 from .battle_text import display_text
@@ -209,7 +211,8 @@ WIND_CYCLE_MS, WIND_WARNING_MS = 50000, 40000
 # (notes/player_magic_panel.md 2, battle_compass.md 3).
 POWER_MARKER_FRAME = 107
 POWER_MARKER_POSITIONS = ((34, 63), (40, 58), (47, 54), (55, 52), (63, 52), (71, 54), (78, 58), (84, 63))
-# Spell list rows (notes/player_magic_panel.md 1.1; positions as the item rows, notes/battlefield_items.md).
+# The list area's rows: the focused wizard's spells or the regiment's items, one list with the same look and
+# behaviour (notes/player_magic_panel.md 1.1; positions as the item rows, notes/battlefield_items.md).
 LIST_AREA = (200, 64)
 LIST_ROW_X, LIST_ROW_Y, LIST_ROW_STEP, LIST_ROW_SIZE = 205, 72, 19, (232, 18)
 SPELL_NAME_WIDTH, SPELL_COST_WIDTH = 190, 20
@@ -218,6 +221,9 @@ SPELL_TEXT_COLOR = (0, 0, 0)  # black on the light row frame (playtest: light te
 # Status marks, drawn at the row's left and stepped further left as more apply. PROVISIONAL: the step is the mark's
 # own width.
 MARK_ACTIVE, MARK_SELECTED, MARK_CAST_ORDERED = 210, 209, 208
+ITEM_NAME_WIDTH = LIST_ROW_SIZE[0] - 10  # an item row has no cost: its name takes the row
+ITEM_NAME_TEXT_BASE = 31000  # GMTXT name id = 31000 + item number (31007 Potion of Strength, game_rules.md)
+ACTIVATED_ITEMS = frozenset({"ItemBannerOfWrath", "ItemGrudgeBringer", "ItemPotionOfStrength"})
 SPELL_NAME_TEXT_BASE = 30003  # GMTXT name id = 30003 + spell code (30004 Wind Blast, notes/player_magic_panel.md 1.1)
 
 # Battle log panel: 4-line scrollable message area, left of the scroll arrows (panel-native coords).
@@ -275,7 +281,36 @@ def frame_rgba(frame: SpriteFrame, palette: Sequence[tuple[int, int, int]]) -> b
     return bytes(rgba)
 
 
+@dataclass(frozen=True)
+class ListRow:
+    """One row of the list area, a spell or an item: both draw and answer clicks the same way."""
+    command: str  # "spell:<code>" or "item:<id>", what hit_test() answers and the view acts on
+    name: str
+    cost: str | None  # spells only
+    usable: bool
+    marks: tuple[int, ...]  # ICONS status marks, nearest the row first
+    spent: bool = False  # an item's use is spent this wind or battle: a check at the row's right
+
+
 class Hud:
+    list_kind: str | None = None  # what the list area shows: "spells", "items" or nothing
+
+    @property
+    def spell_list_open(self) -> bool:
+        return self.list_kind == "spells"
+
+    @spell_list_open.setter
+    def spell_list_open(self, value: bool) -> None:
+        self.list_kind = "spells" if value else None if self.list_kind == "spells" else self.list_kind
+
+    @property
+    def item_list_open(self) -> bool:
+        return self.list_kind == "items"
+
+    @item_list_open.setter
+    def item_list_open(self, value: bool) -> None:
+        self.list_kind = "items" if value else None if self.list_kind == "items" else self.list_kind
+
     """Battle chrome built from the installation's ICONS sheet and the field's portrait/plan-map art."""
 
     def __init__(self, gpu: Gpu, field: Battlefield) -> None:
@@ -295,11 +330,8 @@ class Hud:
         self.marker_mode = 0
         self.panel_set = "idle"  # HUD-local sub-panel navigation: idle/move/ranks/facing/attack
         self.pending_order: str | None = None  # "move" or "attack": next battlefield/minimap click issues it
-        self.item_list_open = False
-        self.item_list_owner: str | None = None
-        self.spell_list_open = False  # the list area shows the focused wizard's spells (player_magic_panel.md 1)
-        self._item_labels: list[Any] = []
-        self._spell_labels: list[tuple[Any, Any]] = []
+        self.list_kind = None
+        self._list_labels: list[tuple[Any, Any]] = []
         self._used_item_check: ScreenQuad | None = None
         self._draw_size: Size | None = None
         # Name of the fixed button or command held down, for its pressed art; hit_test()'s return
@@ -419,9 +451,7 @@ class Hud:
         if regiment_id == self.selected:
             return
         self.selected = regiment_id
-        self.item_list_open = False
-        self.item_list_owner = None
-        self.spell_list_open = False
+        self.list_kind = None
         self.panel_set = "idle"
         self.pending_order = None
         if regiment_id is not None:
@@ -523,22 +553,11 @@ class Hud:
         if self._draw_size is None or not self._panel_screen_rect().collidepoint(pos):
             return None
         native = self._native_panel_point(pos)
-        if getattr(self, "item_list_open", False) and getattr(self, "item_list_owner", self.selected) == self.selected:
-            regiment = self._regiment(self.selected)
-            if regiment is not None:
-                for index, item in enumerate(regiment.items[:5]):
-                    if (item in {"ItemBannerOfWrath", "ItemGrudgeBringer", "ItemPotionOfStrength"}
-                            and item not in regiment.used_items
-                            and regiment.living_leader_index is not None
-                            and pygame.Rect(205, 72 + index * 19, 232, 18).collidepoint(native)):
-                        return f"item:{item}"
-        if getattr(self, "spell_list_open", False):
-            regiment = self._regiment(self.selected)
-            for index, code in enumerate(regiment.spells[:5] if regiment is not None else ()):
-                # Every filled row answers: an unusable one does nothing, but Ctrl+click still cancels an active
-                # spell (player_magic_panel.md 1.1, 7); the view decides.
-                if self._list_row_rect(index).collidepoint(native):
-                    return f"spell:{code}"
+        # Every filled row answers, usable or not: an unusable one does nothing, but Ctrl+click still cancels an
+        # active spell (player_magic_panel.md 1.1, 7); the view decides.
+        for index, row in enumerate(self.list_rows(self._regiment(self.selected))):
+            if self._list_row_rect(index).collidepoint(native):
+                return row.command
         for name, rect in self._fixed_button_rects():
             if rect.collidepoint(native):
                 return name
@@ -561,32 +580,28 @@ class Hud:
         if name in {"start_battle", "pause", "leave_battle", "next_regiment", "prev_regiment"}:
             return name
         if name == "items":
-            self.spell_list_open = False  # the item list replaces the spell list (player_magic_panel.md 1)
-            self.item_list_open = not self.item_list_open
-            self.item_list_owner = self.selected if self.item_list_open else None
+            # The item list replaces the spell list (player_magic_panel.md 1); a second press closes it.
+            self.list_kind = None if self.list_kind == "items" else "items"
+            self.pending_order = None
             return None
-        if name.startswith("item:"):
-            self.item_list_open = False
+        if name.startswith(("item:", "spell:")):
             return name
-        if name.startswith("spell:"):
-            return name
-        if name == "back" and self.pending_order == "magic":
-            self.pending_order = None  # Back ends Magic mode; the spell list stays (player_magic_panel.md 5)
+        if name == "back" and self._targeting_from_list():
+            self.pending_order = None  # Back ends the row's targeting; the list stays (player_magic_panel.md 5)
             return None
         if self.battle is not None and self.battle.phase == "deployment" and name not in self.slots().values():
-            self.item_list_open = self.spell_list_open = False
+            self.list_kind = None
             return None
         if name == "magic":
             # The first press shows the spell list; a second press while it is shown enters Magic with no spell
             # (player_magic_panel.md 1, 3). Either way any selected spell is cleared by the caller.
-            self.item_list_open = False
-            if not getattr(self, "spell_list_open", False):
-                self.spell_list_open = True
+            if self.list_kind != "spells":
+                self.list_kind = "spells"
                 self.pending_order = None
                 return "magic_list"
             self.pending_order = "magic"
             return "magic_auto"
-        self.item_list_open = self.spell_list_open = False
+        self.list_kind = None
         if name in SET_ENTRY and (name in DEPLOYMENT_SET_ENTRY
                                   or not (self.battle is not None and self.battle.phase == "deployment")):
             self.panel_set = SET_ENTRY[name]
@@ -600,15 +615,22 @@ class Hud:
         return None
 
     def order_completed(self) -> None:
-        """Called once a pending move/attack order has actually been issued (a ground/minimap click). A Magic
-        order leaves the spell list shown (player_magic_panel.md 3)."""
+        """Called once a pending order has actually been issued (a ground/minimap click). An order from a list
+        row leaves the list shown (player_magic_panel.md 3)."""
         self.pending_order = None
         self.panel_set = "idle"
-        self.item_list_open = False
 
     def enter_magic_targeting(self) -> None:
         """A targeted spell row was clicked: Magic mode with that spell."""
         self.pending_order = "magic"
+
+    def enter_item_targeting(self, item: str) -> None:
+        """A targeted item row was clicked: its selection mark shows until the point is given or cancelled."""
+        self.pending_order = f"item:{item}"
+
+    def _targeting_from_list(self) -> bool:
+        return self.pending_order is not None and (self.pending_order == "magic"
+                                                   or self.pending_order.startswith("item:"))
 
     def _list_row_rect(self, index: int) -> pygame.Rect:
         return pygame.Rect(LIST_ROW_X, LIST_ROW_Y + index * LIST_ROW_STEP, *LIST_ROW_SIZE)
@@ -924,10 +946,9 @@ class Hud:
         if self._unit_info_panel is not None:
             self._draw_panel(self._unit_info_panel, UNIT_INFO_RECT[0], UNIT_INFO_RECT[1],
                              UNIT_INFO_RECT[2], UNIT_INFO_RECT[3])
-        # The item list covers part of the unit-info rectangle; paint it last so the unit name
-        # cannot appear over the popup's rows.
-        self._draw_item_list(regiment)
-        self._draw_spell_list(regiment)
+        # The list covers part of the unit-info rectangle; paint it last so the unit name
+        # cannot appear over its rows.
+        self._draw_list(regiment)
 
     def _draw_fixed_buttons(self) -> None:
         for name, (pos, frames, size) in FIXED_BUTTONS.items():
@@ -961,25 +982,47 @@ class Hud:
             self._draw_panel(quad, sub_x + x, sub_y + y, *SLOT_SIZE,
                              tint=(1, 1, 1, 1) if enabled else (0.4, 0.4, 0.4, 0.85))
 
-    def _draw_item_list(self, regiment: "Regiment | None") -> None:
-        if not self.item_list_open or regiment is None:
-            return
-        if getattr(self, "item_list_owner", self.selected) != self.selected:
-            return
-        self._draw_panel(self._icon(205), 200, 64)
-        for index, item in enumerate(regiment.items[:5]):
-            while len(self._item_labels) <= index:
-                self._item_labels.append(self.gpu.text((240, 18), self.gpu.battle_log_font,
-                                                       background=None, padding=0))
-            label = self._item_labels[index]
-            label.set_lines((item.removeprefix("Item").replace("Of", " of ").replace("The", " the "),))
-            enabled = (item in {"ItemBannerOfWrath", "ItemGrudgeBringer", "ItemPotionOfStrength"}
-                       and item not in regiment.used_items and regiment.living_leader_index is not None)
-            pressed = self.pressed == f"item:{item}" and enabled
-            self._draw_panel(label, 205 + int(pressed), 72 + index * 19 + int(pressed), 232, 18,
-                             tint=(1, 1, 1, 1) if enabled else (0.45, 0.45, 0.45, 0.85))
-            if item in regiment.used_items:
-                self._draw_panel(self._used_item_check_quad(), 420, 74 + index * 19)
+    def list_rows(self, regiment: "Regiment | None") -> list[ListRow]:
+        """The rows the list area shows for the selected regiment: up to five, in file order."""
+        if regiment is None or self.list_kind is None:
+            return []
+        if self.list_kind == "spells":
+            if self.battle is None:
+                return []
+            return [ListRow(f"spell:{code}", self._spell_name(code), str(magic.cost(code)),
+                            self.battle.spell_usable(regiment.identifier, code),
+                            tuple(self._spell_marks(regiment, code)))
+                    for code in regiment.spells[:5]]
+        return [ListRow(f"item:{item}", self._item_name(item), None, self._item_usable(regiment, item),
+                        tuple(self._item_marks(regiment, item)), spent=item in regiment.used_items)
+                for item in regiment.items[:5]]
+
+    def list_row_usable(self, command: str) -> bool:
+        """Whether the selected regiment's shown row for this command is usable."""
+        return any(row.command == command and row.usable for row in self.list_rows(self._regiment(self.selected)))
+
+    @staticmethod
+    def _item_usable(regiment: "Regiment", item: str) -> bool:
+        return (item in ACTIVATED_ITEMS and item not in regiment.used_items
+                and regiment.living_leader_index is not None)
+
+    def _item_marks(self, regiment: "Regiment", item: str) -> list[int]:
+        """An item row's marks as a spell row's: active while the Potion works, selected while the item waits for
+        its point (battlefield_items.md)."""
+        marks: list[int] = []
+        if item == "ItemPotionOfStrength" and regiment.potion_strength:
+            marks.append(MARK_ACTIVE)
+        if self.pending_order == f"item:{item}":
+            marks.append(MARK_SELECTED)
+        return marks
+
+    def _item_name(self, item: str) -> str:
+        """The item's GMTXT name (31000 + its item number, notes/game_rules.md magic item effects), else its id."""
+        texts = self.battle.text_resources if self.battle is not None else {}
+        name = texts.get(ITEM_NAME_TEXT_BASE + ITEM_NUMBERS.index(item)) if item in ITEM_NUMBERS else None
+        if name:
+            return display_text(name)
+        return item.removeprefix("Item").replace("Of", " of ").replace("The", " the ")
 
     def _spell_name(self, code: int) -> str:
         texts = self.battle.text_resources if self.battle is not None else {}
@@ -1004,39 +1047,44 @@ class Hud:
             marks.append(MARK_CAST_ORDERED)
         return marks
 
-    def _draw_spell_list(self, regiment: "Regiment | None") -> None:
-        """The focused wizard's spell list (notes/player_magic_panel.md 1.1): up to five rows in file order, each
-        the name and the cost, raised when usable, with its active/selected/cast-ordered marks."""
-        if not getattr(self, "spell_list_open", False) or regiment is None or self.battle is None:
+    def _draw_list(self, regiment: "Regiment | None") -> None:
+        """The list area (notes/player_magic_panel.md 1.1, battlefield_items.md): each row the name and, for a spell,
+        the cost, raised when usable, with its status marks, and a check once an item is spent."""
+        rows = self.list_rows(regiment)
+        if self.list_kind is None or regiment is None:
             return
         self._draw_panel(self._icon(205), *LIST_AREA)
-        for index, code in enumerate(regiment.spells[:5]):
-            while len(self._spell_labels) <= index:
-                self._spell_labels.append(
-                    (self.gpu.text((SPELL_NAME_WIDTH, 18), self.gpu.battle_log_font, color=SPELL_TEXT_COLOR,
+        for index, row in enumerate(rows):
+            while len(self._list_labels) <= index:
+                self._list_labels.append(
+                    (self.gpu.text((ITEM_NAME_WIDTH, 18), self.gpu.battle_log_font, color=SPELL_TEXT_COLOR,
                                    background=None, padding=0),
                      self.gpu.text((SPELL_COST_WIDTH, 18), self.gpu.battle_log_font, color=SPELL_TEXT_COLOR,
                                    background=None, padding=0)))
-            name_label, cost_label = self._spell_labels[index]
-            text_height = name_label.set_lines((self._spell_name(code),))[1]
-            cost_label.set_lines((str(magic.cost(code)),))
-            usable = self.battle.spell_usable(regiment.identifier, code)
-            pressed = self.pressed == f"spell:{code}"
+            name_label, cost_label = self._list_labels[index]
+            text_height = name_label.set_lines((row.name,))[1]
+            pressed = self.pressed == row.command
             rect = self._list_row_rect(index)
-            self._draw_panel(self._icon(ROW_FRAMES[0] if usable and not pressed else ROW_FRAMES[1]), rect.x, rect.y)
-            tint = (1, 1, 1, 1) if usable else (1, 1, 1, 0.5)  # black text cannot be darkened: fade it instead
+            self._draw_panel(self._icon(ROW_FRAMES[0] if row.usable and not pressed else ROW_FRAMES[1]),
+                             rect.x, rect.y)
+            tint = (1, 1, 1, 1) if row.usable else (1, 1, 1, 0.5)  # black text cannot be darkened: fade it instead
             # The text is centred vertically inside the row frame's border, and follows a held row down by 1 px.
-            text_y = rect.y + (rect.height - text_height) // 2 + int(pressed and usable)
-            text_x = rect.x + 5 + int(pressed and usable)
-            self._draw_panel(name_label, text_x, text_y, SPELL_NAME_WIDTH, 18, tint=tint)
-            self._draw_panel(cost_label, text_x + SPELL_NAME_WIDTH, text_y, SPELL_COST_WIDTH, 18, tint=tint)
+            text_y = rect.y + (rect.height - text_height) // 2 + int(pressed and row.usable)
+            text_x = rect.x + 5 + int(pressed and row.usable)
+            name_width = ITEM_NAME_WIDTH if row.cost is None else SPELL_NAME_WIDTH
+            self._draw_panel(name_label, text_x, text_y, name_width, 18, tint=tint)
+            if row.cost is not None:
+                cost_label.set_lines((row.cost,))
+                self._draw_panel(cost_label, text_x + SPELL_NAME_WIDTH, text_y, SPELL_COST_WIDTH, 18, tint=tint)
             x = rect.x
-            for frame in self._spell_marks(regiment, code):
+            for frame in row.marks:
                 quad = self._icon(frame)
                 if quad is None:
                     continue
                 x -= quad.size[0]
                 self._draw_panel(quad, x, rect.y)
+            if row.spent:
+                self._draw_panel(self._used_item_check_quad(), 420, rect.y + 2)
 
     def _draw_power(self, rx: int, ry: int) -> None:
         """One marker per point of the player's pool along the compass top (notes/player_magic_panel.md 2)."""
@@ -1102,7 +1150,8 @@ class Hud:
             self._log_panel.release()
         if self._unit_info_panel is not None:
             self._unit_info_panel.release()
-        for label in self._item_labels:
-            label.release()
+        for labels in self._list_labels:
+            for label in labels:
+                label.release()
         if self._used_item_check is not None:
             self._used_item_check.release()
