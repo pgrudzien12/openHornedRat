@@ -44,6 +44,9 @@ DISPEL_REACH = 80  # B 5.1
 UNDER_POINT_MIN = 48  # B 0.1
 FISTS_REACH = 16  # B 4
 LASTING = 180  # B 1.3, 3, 4, 5.2; C3 2.1
+# spell_sounds.md 1: the Curse's loop is effect 15 of the `spells` packet (slot 3). PROVISIONAL: played
+# non-positionally by the frontend (the attenuation law and listener point are open, spell_sounds.md 4).
+SPELLS_PACKET, CURSE_LOOP = 3, 15
 SKITTER_FRAMES = 4  # B 2
 WIND_TICKS = 500  # B 7: winds at the start of ticks 501, 1001, ... (first tick = 1) at 10 ticks/s
 RANK_DEPTH = 6  # C3 conventions: the footprint centre lies (ranks - 1) x 6 behind the unit position
@@ -183,6 +186,8 @@ class Effect:
     saved_side: Side | None = None
     saved_initiative: int = 0
     saved_speed: float = 0.0
+    # Loop sounds this effect owns, as (packet, effect index); all stop in its end step (spell_sounds.md 0).
+    sounds: list[tuple[int, int]] = field(default_factory=list[tuple[int, int]])
 
 
 @dataclass
@@ -447,6 +452,7 @@ def _start(battle: Battle, effect: Effect, caster: Regiment, origin_model: int, 
         effect.saved_speed, effect.saved_initiative = target.speed_per_tick, target.initiative
         target.speed_per_tick = target.speed_per_tick / 2
         target.initiative = target.initiative // 2
+        _start_loop(battle, effect, SPELLS_PACKET, CURSE_LOOP, footprint_centre(target))
     elif spell in (MORK_SAVE_UZ, FISTS, DISPEL_MAGIC, AZURE_BLADES):
         effect.timer = LASTING
     elif spell == SKITTERLEAP:
@@ -1290,7 +1296,10 @@ def _update_curse(battle: Battle, effect: Effect) -> None:
     """The Curse of Anraheir (C2 4.2): a mounted target takes a panic test on every tick of segment 10; a failure
     ends the Curse in the same step. No other natural end."""
     target = battle.regiments.get(effect.target or "")
-    if target is None or not target.mount:
+    if target is None:
+        return
+    _move_loops(battle, effect, footprint_centre(target))  # spell_sounds.md 1: the loop follows the target
+    if not target.mount:
         return
     if combat.segment_state(battle.tick_count)[2] != combat.SEGMENTS_PER_TURN:
         return
@@ -1477,6 +1486,7 @@ def _end(battle: Battle, effect: Effect) -> None:
     effects = table(battle)
     effects.remove(effect)
     _remove_areas(battle, effect)
+    _stop_loops(battle, effect)
     target = battle.regiments.get(effect.target) if effect.target is not None else None
     if effect.code == MADNESS and target is not None and effect.saved_side is not None:
         target.side = effect.saved_side
@@ -1499,6 +1509,30 @@ def _end(battle: Battle, effect: Effect) -> None:
         owner = battle.regiments.get(effect.owner)
         if owner is not None:
             _sync_lifted(battle, owner)
+
+
+def _sound_event(battle: Battle, effect: Effect, cue: str, packet: int, index: int,
+                 at: tuple[float, float] | None) -> None:
+    battle.events.append(BattleEvent(f"sound {cue} {packet}/{index}", "sound", regiment=effect.owner, cue=cue,
+                                     packet=packet, effect=index, position=at, handle=f"spell {effect.serial} {packet}/{index}"))
+
+
+def _start_loop(battle: Battle, effect: Effect, packet: int, index: int, at: tuple[float, float]) -> None:
+    """Start a loop sound owned by the effect at a battlefield point (spell_sounds.md 0)."""
+    effect.sounds.append((packet, index))
+    _sound_event(battle, effect, "loop_start", packet, index, at)
+
+
+def _move_loops(battle: Battle, effect: Effect, at: tuple[float, float]) -> None:
+    for packet, index in effect.sounds:
+        _sound_event(battle, effect, "loop_move", packet, index, at)
+
+
+def _stop_loops(battle: Battle, effect: Effect) -> None:
+    """Every end or cancel path stops all of the effect's sounds in the same step (spell_sounds.md 0)."""
+    for packet, index in effect.sounds:
+        _sound_event(battle, effect, "loop_stop", packet, index, None)
+    effect.sounds.clear()
 
 
 def cancel(battle: Battle, effect: Effect) -> None:

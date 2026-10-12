@@ -39,6 +39,8 @@ HANDLES = {"charge_start": "charge", "charge_stop": "charge", "loop_start": "loo
 class Channel(Protocol):
     def get_busy(self) -> bool: ...
     def stop(self) -> None: ...
+    def pause(self) -> None: ...
+    def unpause(self) -> None: ...
     def queue(self, sound: Any) -> None: ...
 
 
@@ -79,7 +81,8 @@ class BattleSounds:
         self.packets: dict[int, list[dict[str, Any]] | None] = {}
         self.sounds: dict[tuple[int, int], Any] = {}
         self.channels: dict[tuple[int, int], Channel] = {}  # the last channel of each non-overlapping effect
-        self.handles: dict[tuple[str, str], Channel] = {}  # (regiment, "charge" | "loop") -> its loop channel
+        self.handles: dict[tuple[str, str], Channel] = {}  # (regiment, "charge" | "loop" | effect) -> loop channel
+        self.paused = False
         self.enabled = installation is not None and self._init_mixer()
 
     @staticmethod
@@ -91,6 +94,17 @@ class BattleSounds:
         except pygame.error:
             return False
 
+    def set_paused(self, paused: bool) -> None:
+        """Pause mutes the running loops without stopping them; resuming continues them (spell_sounds.md 0)."""
+        if paused == self.paused:
+            return
+        self.paused = paused
+        for channel in self.handles.values():
+            if paused:
+                channel.pause()
+            else:
+                channel.unpause()
+
     def handle(self, events: Iterable[Any]) -> None:
         for event in events:
             if getattr(event, "kind", None) == "sound":
@@ -100,7 +114,8 @@ class BattleSounds:
         kind = str(data.get("cue", "play"))
         packet, effect = int(data.get("packet") or 0), int(data.get("effect") or 0)
         handle = HANDLES.get(kind)
-        key = (str(data.get("regiment", "")), handle) if handle else None
+        # A spell effect names its own handle, so two effects of one caster keep separate loops (spell_sounds.md 0).
+        key = (str(data.get("regiment", "")), str(data.get("handle") or handle)) if handle else None
         if kind in ("loop_stop", "charge_stop"):
             channel = self.handles.pop(key, None) if key else None
             if channel is not None:
@@ -122,6 +137,8 @@ class BattleSounds:
         self.channels[(packet, effect)] = channel
         if key is not None:
             self.handles[key] = channel
+            if self.paused:
+                channel.pause()
 
     def _play(self, packet: int, index: int, loop: bool) -> Channel | None:
         effects = self._effects(packet)
