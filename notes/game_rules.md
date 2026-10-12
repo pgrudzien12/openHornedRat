@@ -1244,6 +1244,7 @@ Inside the command panel (coordinates relative to it):
 |---|---|---|
 | Command sub-window (5 button slots) | (492, 0) | 148×175 |
 | Selected-unit readout / compass (alternate) | (72, 0) | 128×177 |
+| Information panel (unit/leader details) | (197, 62) | 246×114 |
 | Message text | (200, 0) | 243×61 |
 | Scroll text | (0, 7) | 223×60 |
 | Spell/item list | (200, 64) | size of ICONS frame 205 |
@@ -1259,8 +1260,12 @@ while the mouse button is held and the command fires on release):
 | (448, 13) | 58/59 | 44×44 | options |
 | (448, 75) | 60/61 | 44×44 | select previous player regiment and centre on it |
 | (448, 121) | 62/63 | 44×44 | select next player regiment |
-| (140, 4) | 64/65 and 66/67 | 32×48 | two toggles in the message area (helmet, masked head; role 🟡) |
+| (337, 66) | 64/65 and 66/67 | 32×48 | alternate unit/leader view buttons inside the information panel |
 | (224, 9) / (224, 34) | 68/69, 70/71 | 20×20 | scroll text up / down |
+
+The armour artwork and unit/leader view rules are specified in
+[battle_hud_armour.md](battle_hud_armour.md): ICONS 218–223, blank 224,
+at command-panel (204, 116), with a 42×51 native crop.
 
 **Command sub-window slots** (relative to it; screen = (492 + x, 304 + y); every button 60×60): TL (7, 11), TR (83, 11),
 BR (83, 109), BL (7, 109), centre (45, 60). Empty slots show the plain panel background.
