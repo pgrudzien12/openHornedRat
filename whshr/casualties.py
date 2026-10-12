@@ -118,7 +118,8 @@ def heal_and_disband(campaign: "CampaignState") -> tuple[list[str], list[str]]:
     A regiment that fought takes its battle result (models on the field plus routed ones); the returning wounded
     are added, but past the original size the regiment is set to full strength and the excess, routed models
     included, is lost.  A regiment then below ``max(1, 20 % of its original size)`` is disbanded unless it is the
-    commander's or a ``keep`` regiment.  ``returning`` is cleared for everyone at the end."""
+    commander's or a ``keep`` regiment.  This battle's wounded (``wounded_last``) are not counted by the test
+    (report 3.10).  ``returning`` is cleared for everyone at the end."""
     healed: list[str] = []
     disbanded: list[str] = []
     updated: list[roster.Regiment] = []

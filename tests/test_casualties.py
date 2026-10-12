@@ -169,6 +169,48 @@ class DisbandTests(unittest.TestCase):
                 casualties.heal_and_disband(campaign)
                 self.assertEqual(any(r.whoami == 5 for r in campaign.company), kept)
 
+    def test_given_many_wounded_of_this_battle_then_they_do_not_save_the_regiment(self):
+        # Report 3.10 (a): 2 left of 20, 18 lost -> 11 wounded; the test reads only the present models.
+        campaign = _campaign(_regiment(5, 20))
+
+        _battle(campaign, u5=(2, 0, 18))
+        self.assertEqual(campaign.wounded_last, {5: 11})
+        _, disbanded = casualties.heal_and_disband(campaign)
+
+        self.assertEqual(disbanded, ["Regiment 5"])
+
+    def test_given_earlier_wounded_returning_then_they_heal_before_the_disband_test(self):
+        # Report 3.10 (d): 2 left plus 3 returning from an earlier battle -> 5, kept.
+        campaign = _campaign(_regiment(5, 20))
+        campaign.wounded_last = {5: 3}
+
+        _battle(campaign, u5=(2, 0, 18))
+        _, disbanded = casualties.heal_and_disband(campaign)
+
+        self.assertEqual(disbanded, [])
+        self.assertEqual(_models(campaign, 5), 5)
+
+    def test_given_routed_models_then_they_count_towards_the_disband_limit(self):
+        # Report 3.10 (e): 2 on the field and 2 routed -> present 4, kept.
+        campaign = _campaign(_regiment(5, 20))
+
+        _battle(campaign, u5=(2, 2, 18))
+        _, disbanded = casualties.heal_and_disband(campaign)
+
+        self.assertEqual(disbanded, [])
+        self.assertEqual(_models(campaign, 5), 4)
+
+    def test_given_the_text_page_commits_this_battles_wounded_then_they_save_the_regiment(self):
+        # Report 3.10 (f): the success page moves the 11 wounded into the returning ones -> 13, kept.
+        campaign = _campaign(_regiment(5, 20))
+
+        _battle(campaign, u5=(2, 0, 18))
+        casualties.commit_wounded(campaign)
+        _, disbanded = casualties.heal_and_disband(campaign)
+
+        self.assertEqual(disbanded, [])
+        self.assertEqual(_models(campaign, 5), 13)
+
     def test_given_a_tiny_regiment_then_the_limit_is_at_least_one_model(self):
         for present, kept in ((0, False), (1, True)):
             with self.subTest(present=present):
