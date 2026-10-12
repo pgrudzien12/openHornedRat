@@ -86,10 +86,7 @@ FIXED_BUTTONS: dict[str, tuple[Point, tuple[int, int], Size]] = {
     "options": ((448, 13), (58, 59), (44, 44)),
     "prev_regiment": ((448, 75), (60, 61), (44, 44)),
     "next_regiment": ((448, 121), (62, 63), (44, 44)),
-    # notes/game_rules.md gives one documented position, (140, 4), for both 32x48 toggles (the
-    # second's x inferred as immediately to the right); moved here to the panel's horizontal
-    # center for a first visual pass at the user's request - adjust freely, this pair is not tied
-    # to any other measurement.
+    # User reference: one shared unit/leader toggle, beside the name field.
     "toggle_a": ((337, 66), (64, 65), (32, 48)),
     "toggle_b": ((337, 66), (66, 67), (32, 48)),
     "scroll_up": ((424, 9), (68, 69), (20, 20)),
@@ -313,6 +310,8 @@ class Hud:
 
     """Battle chrome built from the installation's ICONS sheet and the field's portrait/plan-map art."""
 
+    leader_mode: bool = False
+
     def __init__(self, gpu: Gpu, field: Battlefield) -> None:
         self.gpu, self.field = gpu, field
         self.icons = self._sheet("icons")
@@ -340,6 +339,7 @@ class Hud:
         self._marker_order: list[str] = []
         self._log_panel: Any = None
         self._unit_info_panel: Any = None
+        self._stat_labels: list[Any] = []
 
     def _size(self) -> Size:
         if self._draw_size is None:
@@ -451,6 +451,7 @@ class Hud:
         if regiment_id == self.selected:
             return
         self.selected = regiment_id
+        self.leader_mode = False
         self.list_kind = None
         self.panel_set = "idle"
         self.pending_order = None
@@ -528,7 +529,8 @@ class Hud:
 
     def _fixed_button_rects(self) -> Iterator[tuple[str, pygame.Rect]]:
         for name, (pos, _frames, size) in FIXED_BUTTONS.items():
-            yield name, pygame.Rect(pos[0], pos[1], *size)
+            if self._fixed_button_visible(name):
+                yield name, pygame.Rect(pos[0], pos[1], *size)
         yield self._pause_slot_action(), pygame.Rect(PAUSE_POS[0], PAUSE_POS[1], *PAUSE_SIZE)
 
     def _pause_slot_action(self) -> str:
@@ -579,6 +581,10 @@ class Hud:
 
     def press(self, name: str) -> str | None:
         """Apply a clicked command's panel-navigation effect; returns the order to issue, if any."""
+        if name in {"toggle_a", "toggle_b"}:
+            if self._regiment(self.selected) is not None:
+                self.leader_mode = not self.leader_mode
+            return None
         if name == "start_battle":
             # The deployment facing sub-panel has no battle counterpart for every class; start on the idle panel.
             self.panel_set = "idle"
@@ -653,6 +659,11 @@ class Hud:
         if self._unit_info_panel is None:
             self._unit_info_panel = self.gpu.unit_info((UNIT_INFO_RECT[2], UNIT_INFO_RECT[3]), background=(0, 0, 0, 0))
         class_name = HUD_CLASS_NAMES.get(unit_class or "", unit_class or "")
+        regiment = self._regiment(self.selected)
+        if self.leader_mode and regiment is not None:
+            name = regiment.leader_name or regiment.name
+            class_name = ""
+            models = max_models = None
         self._unit_info_panel.set_info(name, class_name, models, max_models)
 
     # ------------------------------------------------------------------ minimap
@@ -952,12 +963,44 @@ class Hud:
         if self._unit_info_panel is not None:
             self._draw_panel(self._unit_info_panel, UNIT_INFO_RECT[0], UNIT_INFO_RECT[1],
                              UNIT_INFO_RECT[2], UNIT_INFO_RECT[3])
+        self._draw_statistics(regiment)
         # The list covers part of the unit-info rectangle; paint it last so the unit name
         # cannot appear over its rows.
         self._draw_list(regiment)
 
+    def _fixed_button_visible(self, name: str) -> bool:
+        if name not in {"toggle_a", "toggle_b"}:
+            return True
+        return (self._regiment(self.selected) is not None and self.list_kind is None
+                and name == ("toggle_a" if self.leader_mode else "toggle_b"))
+
+    def statistics(self, regiment: "Regiment") -> tuple[int | None, ...]:
+        """The nine tabletop characteristics, in the reference's row-major order."""
+        names = ("move", "ws", "bs", "strength", "toughness", "wounds", "initiative", "attacks", "leadership")
+        return tuple(getattr(regiment, ("leader_" if self.leader_mode else "") + name) for name in names)
+
+    def _draw_statistics(self, regiment: "Regiment | None") -> None:
+        if regiment is None or self.list_kind is not None:
+            return
+        # Panel-native positions measured from the user's 640x480 reference. Chrome is
+        # already in ICONS 98; only values and the banner/portrait are overlaid here.
+        for index, (name, value) in enumerate(zip(("M", "WS", "BS", "S", "T", "W", "I", "A", "Ld"),
+                                                self.statistics(regiment))):
+            if len(self._stat_labels) <= index:
+                self._stat_labels.append(self.gpu.text((34, 16), self.gpu.battle_log_font,
+                                                      color=BLACK, background=None, padding=0))
+            label = self._stat_labels[index]
+            label.set_lines((f"{name}  {value if value is not None else '–'}",))
+            self._draw_panel(label, 253 + index % 3 * 38, 117 + index // 3 * 19)
+        sheet = self._sheet(regiment.portrait if self.leader_mode else regiment.banner)
+        if sheet is not None and sheet.frames:
+            quad = self._sheet_frame_quad(sheet.frames[0])
+            self._draw_panel(quad, 369, 68, 72, 104)
+
     def _draw_fixed_buttons(self) -> None:
         for name, (pos, frames, size) in FIXED_BUTTONS.items():
+            if not self._fixed_button_visible(name):
+                continue
             pressed = self.pressed == name
             quad = self._icon(frames[1] if pressed else frames[0])
             self._draw_panel(quad, pos[0], pos[1], *size)
@@ -1156,6 +1199,8 @@ class Hud:
             self._log_panel.release()
         if self._unit_info_panel is not None:
             self._unit_info_panel.release()
+        for label in self._stat_labels:
+            label.release()
         for labels in self._list_labels:
             for label in labels:
                 label.release()

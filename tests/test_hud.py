@@ -76,6 +76,55 @@ def _hud(selected="player", regiments=None, **overrides):
 
 
 class PanelStateTests(unittest.TestCase):
+    def test_stats_toggle_uses_one_hit_target_and_does_not_change_compass(self):
+        hud = _hud()
+        self.assertEqual(hud.hit_test((345, 380)), "toggle_b")
+        self.assertTrue(hud._compass_shown())
+        self.assertIsNone(hud.press("toggle_b"))
+        self.assertEqual(hud.hit_test((345, 380)), "toggle_a")
+        self.assertTrue(hud._compass_shown())
+        hud.press("toggle_a")
+        self.assertFalse(hud.leader_mode)
+        hud.item_list_open = True
+        self.assertNotIn("toggle_a", dict(hud._fixed_button_rects()))
+        self.assertNotIn("toggle_b", dict(hud._fixed_button_rects()))
+
+    def test_leader_profile_and_selection_reset(self):
+        regiment = Regiment("player", "Troops", 0, 0, 0, Side.PLAYER,
+                            move=4, ws=3, bs=2, strength=3, toughness=3, wounds=1,
+                            initiative=3, attacks=1, leadership=6,
+                            leader_move=5, leader_ws=5, leader_bs=4, leader_strength=4,
+                            leader_toughness=4, leader_wounds=2, leader_initiative=5,
+                            leader_attacks=2, leader_leadership=8)
+        hud = _hud(regiments=[regiment])
+        self.assertEqual(hud.statistics(regiment), (4, 3, 2, 3, 3, 1, 3, 1, 6))
+        hud.press("toggle_b")
+        self.assertEqual(hud.statistics(regiment), (5, 5, 4, 4, 4, 2, 5, 2, 8))
+        hud.set_selected("player")
+        self.assertTrue(hud.leader_mode)
+        hud.set_selected(None)
+        self.assertFalse(hud.leader_mode)
+        self.assertNotIn("toggle_b", dict(hud._fixed_button_rects()))
+
+    def test_stats_art_switches_banner_to_portrait(self):
+        regiment = Regiment("player", "Troops", 0, 0, 0, Side.PLAYER,
+                            banner="banner", portrait="leader")
+        hud = _hud(regiments=[regiment])
+        hud._stat_labels = [Mock() for _ in range(9)]
+        hud._sheet = Mock(return_value=SimpleNamespace(frames=[object()]))
+        hud._sheet_frame_quad = Mock(return_value="art")
+        hud._draw_panel = Mock()
+        hud._draw_statistics(regiment)
+        hud._sheet.assert_called_with("banner")
+        hud.press("toggle_b")
+        hud._draw_statistics(regiment)
+        hud._sheet.assert_called_with("leader")
+        hud._draw_panel.assert_called_with("art", 369, 68, 72, 104)
+        hud.item_list_open = True
+        hud._draw_panel.reset_mock()
+        hud._draw_statistics(regiment)
+        hud._draw_panel.assert_not_called()
+
     def test_item_popup_is_painted_after_the_unit_name(self):
         hud = _hud()
         order = []
@@ -83,6 +132,7 @@ class PanelStateTests(unittest.TestCase):
         hud._log_panel = None
         hud._unit_info_panel = object()
         hud._draw_panel = lambda quad, *args, **kwargs: order.append("unit_info") if quad is hud._unit_info_panel else None
+        hud._draw_statistics = lambda regiment: None
         hud._draw_readout = lambda regiment, camera=None: None
         hud._draw_compass_window = lambda *args: None
         hud._draw_fixed_buttons = lambda: None
