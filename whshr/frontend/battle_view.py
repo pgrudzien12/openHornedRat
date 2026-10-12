@@ -421,14 +421,9 @@ class BattleView(SceneView[BattleScene]):
             pressed = self.hud.pressed
             self.hud.set_pressed(None)
             self._camera_hold = None
-            if pressed is not None and pressed.startswith("item:") and self.hud.hit_test(event.pos) == pressed:
-                self.hud.press(pressed)
-                item = pressed[5:]
-                self.order_mode = pressed if item != "ItemPotionOfStrength" else None
-                self._set_cursor("magic" if self.order_mode else "default")
-                return (("arm_item", item),)
-            if pressed is not None and pressed.startswith("spell:") and self.hud.hit_test(event.pos) == pressed:
-                return self._spell_row_click(int(pressed[6:]), self._control_held(event))
+            if (pressed is not None and pressed.startswith(("item:", "spell:"))
+                    and self.hud.hit_test(event.pos) == pressed):
+                return self._list_row_click(pressed, self._control_held(event))
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
             action = self.hud.hit_test(event.pos)
             if action in CAMERA_BUTTONS:
@@ -474,6 +469,28 @@ class BattleView(SceneView[BattleScene]):
 
     def _in_magic_mode(self) -> bool:
         return self.order_mode is not None and (self.order_mode == "magic" or self.order_mode.startswith("spell:"))
+
+    def _list_row_click(self, command: str, control: bool) -> Sequence[SceneEvent]:
+        """A released click on a list row, a spell's or an item's: both lists behave alike and stay shown."""
+        if command.startswith("spell:"):
+            return self._spell_row_click(int(command[6:]), control)
+        return self._item_row_click(command[5:], control)
+
+    def _item_row_click(self, item: str, control: bool) -> Sequence[SceneEvent]:
+        """A released click on an item row (notes/battlefield_items.md), as on a spell row: an unusable row or a
+        Ctrl+click (an item has no effect to cancel) does nothing; the Potion takes effect at once; Banner of Wrath
+        and Grudgebringer spend their use and wait for a point with the wand."""
+        if control or not self.hud.list_row_usable(f"item:{item}"):
+            return ()
+        if item == "ItemPotionOfStrength":
+            self.order_mode = None
+            self._set_cursor("default")
+            self.hud.order_completed()
+        else:
+            self.order_mode = f"item:{item}"
+            self._set_cursor("magic")
+            self.hud.enter_item_targeting(item)
+        return (("arm_item", item),)
 
     def _spell_row_click(self, code: int, control: bool) -> Sequence[SceneEvent]:
         """A released click on a spell row (notes/player_magic_panel.md 4.1, 7): Ctrl cancels an active spell and

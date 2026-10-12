@@ -88,7 +88,7 @@ class PanelStateTests(unittest.TestCase):
         hud._draw_fixed_buttons = lambda: None
         hud._draw_slots = lambda regiment: None
         hud._draw_minimap = lambda regiment, camera: None
-        hud._draw_item_list = lambda regiment: order.append("items")
+        hud._draw_list = lambda regiment: order.append("items")
 
         hud.draw(640, 480)
 
@@ -102,12 +102,15 @@ class PanelStateTests(unittest.TestCase):
         self.assertEqual(hud.slots()["BR"], "items")
         hud.press("items")
         self.assertEqual(hud.hit_test(_panel_pos(hud, 210, 75)), "item:ItemGrudgeBringer")
-        self.assertIsNone(hud.hit_test(_panel_pos(hud, 210, 94)))  # passive item
+        self.assertTrue(hud.list_row_usable("item:ItemGrudgeBringer"))
+        # Every filled row answers, as a spell row does; a passive or spent one is just not usable.
+        self.assertEqual(hud.hit_test(_panel_pos(hud, 210, 94)), "item:ItemSwordOfMight")
+        self.assertFalse(hud.list_row_usable("item:ItemSwordOfMight"))
         bearer.used_items.add("ItemGrudgeBringer")
-        self.assertIsNone(hud.hit_test(_panel_pos(hud, 210, 75)))
+        self.assertFalse(hud.list_row_usable("item:ItemGrudgeBringer"))
         bearer.used_items.clear()
         self.assertEqual(hud.press("item:ItemGrudgeBringer"), "item:ItemGrudgeBringer")
-        self.assertFalse(hud.item_list_open)
+        self.assertTrue(hud.item_list_open)  # the list stays shown, as the spell list does
 
     def test_grudgebringer_row_reenables_after_the_next_wind(self):
         from whshr import spell_effects
@@ -117,13 +120,12 @@ class PanelStateTests(unittest.TestCase):
         hud = _hud(regiments=[bearer])
         hud.press("attack")
         hud.press("items")
-        point = _panel_pos(hud, 210, 75)
-        self.assertEqual(hud.hit_test(point), "item:ItemGrudgeBringer")
+        self.assertTrue(hud.list_row_usable("item:ItemGrudgeBringer"))
         hud.battle.arm_item("player", "ItemGrudgeBringer")
-        self.assertIsNone(hud.hit_test(point))
+        self.assertFalse(hud.list_row_usable("item:ItemGrudgeBringer"))
         hud.battle.tick_count = spell_effects.WIND_TICKS
         hud.battle.tick()
-        self.assertEqual(hud.hit_test(point), "item:ItemGrudgeBringer")
+        self.assertTrue(hud.list_row_usable("item:ItemGrudgeBringer"))
 
     def test_spent_grudgebringer_does_not_disable_the_items_menu(self):
         bearer = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf",
@@ -135,7 +137,31 @@ class PanelStateTests(unittest.TestCase):
         self.assertTrue(hud._button_enabled("items", bearer))
         hud.press("items")
         self.assertTrue(hud.item_list_open)
-        self.assertIsNone(hud.hit_test(_panel_pos(hud, 210, 75)))
+        self.assertFalse(hud.list_row_usable("item:ItemGrudgeBringer"))
+
+    def test_a_targeted_item_shows_the_selection_mark_like_a_spell_and_the_list_stays(self):
+        bearer = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf",
+                          items=("ItemGrudgeBringer", "ItemPotionOfStrength"), has_leader=True)
+        hud = _hud(regiments=[bearer])
+        hud.press("attack")
+        hud.press("items")
+        hud.battle.arm_item("player", "ItemGrudgeBringer")
+        hud.enter_item_targeting("ItemGrudgeBringer")
+
+        [grudge, potion] = hud.list_rows(bearer)
+        self.assertEqual(grudge.marks, (hud_module.MARK_SELECTED,))
+        self.assertTrue(grudge.spent)
+        self.assertEqual(potion.marks, ())
+        self.assertIsNone(grudge.cost)
+
+        hud.press("back")  # cancels the targeting, keeps the list (and the spent use)
+        self.assertTrue(hud.item_list_open)
+        self.assertEqual(hud.list_rows(bearer)[0].marks, ())
+
+        hud.battle.arm_item("player", "ItemPotionOfStrength")
+        hud.order_completed()
+        self.assertTrue(hud.item_list_open)
+        self.assertEqual(hud.list_rows(bearer)[1].marks, (hud_module.MARK_ACTIVE,))
 
     def test_used_item_has_a_check_on_the_right_until_rearmed(self):
         from whshr import spell_effects
@@ -146,26 +172,28 @@ class PanelStateTests(unittest.TestCase):
         hud = _hud(regiments=[bearer])
         hud.press("attack")
         hud.press("items")
-        hud._item_labels = [Mock() for _ in bearer.items]
-        hud._icon = Mock(return_value=object())
+        hud._list_labels = [(Mock(set_lines=Mock(return_value=(100, 14))), Mock()) for _ in bearer.items]
+        hud._icon = Mock(return_value=Mock(size=(10, 18)))
         check = object()
         hud._used_item_check_quad = Mock(return_value=check)
         draws = []
         hud._draw_panel = lambda quad, *args, **kwargs: draws.append((quad, args))
 
-        hud._draw_item_list(bearer)
+        hud._draw_list(bearer)
         self.assertEqual([args for quad, args in draws if quad is check], [])
 
         hud.battle.arm_item("player", "ItemPotionOfStrength")
         hud.battle.arm_item("player", "ItemGrudgeBringer")
         draws.clear()
-        hud._draw_item_list(bearer)
+        hud._draw_list(bearer)
         self.assertEqual([args for quad, args in draws if quad is check], [(420, 74), (420, 93)])
+        # The active Potion carries the spell rows' active mark, left of its row.
+        hud._icon.assert_any_call(hud_module.MARK_ACTIVE)
 
         hud.battle.tick_count = spell_effects.WIND_TICKS
         hud.battle.tick()
         draws.clear()
-        hud._draw_item_list(bearer)
+        hud._draw_list(bearer)
         self.assertEqual([args for quad, args in draws if quad is check], [(420, 74)])
 
     def test_item_menu_requires_a_living_leader(self):
@@ -850,7 +878,8 @@ class BattleViewHudInputTests(unittest.TestCase):
         world: list[tuple[float, float] | None] = [None]
         hud = self._hud_mock(hit_test=lambda pos: "item:ItemGrudgeBringer",
                              press=lambda name: name, minimap_position=lambda pos: world[0],
-                             minimap_target_at=lambda pos: None)
+                             minimap_target_at=lambda pos: None, list_row_usable=lambda command: True,
+                             enter_item_targeting=Mock())
         view = self._view(hud)
         down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))
         hud.pressed = None
@@ -861,6 +890,7 @@ class BattleViewHudInputTests(unittest.TestCase):
         self.assertEqual(view.events(SimpleNamespace(type=pygame.MOUSEBUTTONUP, button=1, pos=(100, 100))),
                          (("arm_item", "ItemGrudgeBringer"),))
         self.assertEqual(view.order_mode, "item:ItemGrudgeBringer")
+        hud.enter_item_targeting.assert_called_once_with("ItemGrudgeBringer")
         world[0] = (0.0, 400.0)
         self.assertEqual(view._minimap_click((100, 100)), (("item_target", "ItemGrudgeBringer", 0.0, 400.0),))
         self.assertIsNone(view.order_mode)
