@@ -810,6 +810,9 @@ class BattleView(SceneView[BattleScene]):
 
     def animate(self, seconds: float) -> None:
         self.music.update(seconds, paused=self.scene.battle.paused)
+        battle_sounds: BattleSounds | None = getattr(self, "battle_sounds", None)  # tests build views without __init__
+        if battle_sounds is not None:
+            battle_sounds.set_paused(self.scene.battle.paused)
         self.scene.battle.ctrl_held = bool(pygame.key.get_mods() & pygame.KMOD_CTRL)
         keys = pygame.key.get_pressed()
         right = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
