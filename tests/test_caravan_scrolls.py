@@ -20,6 +20,7 @@ OTHER = ("[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n"
          "[MISSION]\nset:res=671\n[END]\n"
          "[MISSION]\nset:res=628\n[END]")
 MAP = "[WINDOW]\n[END]"
+MARK = "[WINDOW]\n[END]"
 FLOW = "[RUN]\n[START]\nopenwindow:res=MAP\nsetcurwindow:res=MAP\naddobject:res=ENVOY\nwaitforrelease:\n[END]"
 # The three caravan scroll bitmaps and their set:depend values (section 7.4).
 SCROLLS = (RenderBitmap("CarScroll1", animation=(("depend", 4),)),
@@ -28,7 +29,7 @@ SCROLLS = (RenderBitmap("CarScroll1", animation=(("depend", 4),)),
 
 
 def _content() -> GlueContent:
-    return GlueContent.from_data(resources={"ENVOY": ENVOY, "OTHER": OTHER, "MAP": MAP, "FLOW": FLOW})
+    return GlueContent.from_data(resources={"ENVOY": ENVOY, "OTHER": OTHER, "MAP": MAP, "MARK": MARK, "FLOW": FLOW})
 
 
 def _campaign(window: str = "ENVOY") -> CampaignState:
@@ -104,6 +105,23 @@ class OfferedCountTests(unittest.TestCase):
         runtime.start("FLOW")
 
         self.assertEqual(campaign.scroll_count, 3)
+
+    def test_any_plain_addobject_retakes_the_count_of_the_list_in_its_window(self):
+        campaign = _campaign()
+        runtime = GlueRuntime(campaign.content, campaign)  # type: ignore[arg-type]
+        runtime.start("FLOW")
+        campaign.mark_mission_taken(MissionRef("ENVOY", 0))
+        campaign.offered_count = 7  # a stale value the next addobject must replace
+        runtime._add_object("res=MARK", False, [])  # pyright: ignore[reportPrivateUsage]
+        self.assertEqual(campaign.scroll_count, 1)
+
+    def test_an_animated_object_does_not_retake_the_count(self):
+        campaign = _campaign()
+        runtime = GlueRuntime(campaign.content, campaign)  # type: ignore[arg-type]
+        runtime.start("FLOW")
+        campaign.offered_count = 7
+        runtime._add_object("res=MARK", True, [])  # pyright: ignore[reportPrivateUsage]
+        self.assertEqual(campaign.scroll_count, 7)
 
     def test_the_cached_count_is_saved_with_the_campaign(self):
         campaign = _campaign()
