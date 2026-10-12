@@ -204,19 +204,25 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
             self._paragraph(self._description(regiment.whoami), 350, description_y, 240)
             self._status_line(regiment)
             return
-        self._center(self._string("BKTXT", 503), 39, BLACK, x=350, width=240)
-        # Regiment currently retains the profile fields needed by selection only;
-        # absent profile data is intentionally not guessed.
-        show_leader = regiment.leader_name and regiment.models == 1
-        profile = regiment.leader_profile if show_leader else regiment.profile
+        # notes/native-windows.md §10.3.4: profiles sit beside their pictures;
+        # only an originally single-model regiment omits the troop block.
+        self._label(self._string("BKTXT", 503), 350, 39, BLACK)
         h = self.body_font.font.height
         y = 39 + 2 * h
-        if show_leader:
-            self._leader_box(350, y, regiment)
-            self._label(regiment.leader_name or "", 350, y + 106, BLACK)
-        else:
+        hero = regiment.leader_name is not None and regiment.orgsize == 1
+        if not hero:
             self._sprite(regiment.banner, (350, y))
-        y += 106 + (h if show_leader else 0)
+            self._statistics_block(regiment.profile, y)
+            y += 116
+        if regiment.leader_name is not None:
+            self._label(regiment.leader_name, 350, y, BLACK)
+            self._leader_box(350, y + h, regiment)
+            self._statistics_block(regiment.leader_profile, y + h)
+        self._status_line(regiment)
+
+    def _statistics_block(self, profile: tuple[int, ...], y: int) -> None:
+        """Nine profile rows aligned with the adjacent banner or leader portrait."""
+        h = self.body_font.font.height
         for index in range(9):
             value = profile[index] if index < len(profile) else "-"
             row_y = y + index * h
