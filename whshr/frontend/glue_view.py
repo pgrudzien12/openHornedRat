@@ -666,7 +666,7 @@ def _dialogue_state(state: GlueRuntimeState) -> tuple[str, tuple[Any, ...]]:
 
 
 def _bitmap_visible(bitmap: RenderBitmap, campaign: CampaignState | None) -> bool:
-    """A ``[BITMAP] set:depend=N`` is drawn when N is 0 or at most the campaign's cached count of missions on
+    """A ``[BITMAP] set:depend=N`` is drawn when N is 0 or at most the campaign's live count of missions on
     offer (the caravan scroll pile, notes/campaign.md section 7.4); without a campaign every bitmap is drawn."""
     depend = dict(bitmap.animation).get("depend")
     if depend is None or campaign is None:

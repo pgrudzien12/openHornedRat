@@ -95,7 +95,7 @@ def campaign_to_dict(campaign: "CampaignState") -> dict[str, Any]:
         "master_prices": {str(regiment.whoami): regiment.row.base_price for regiment in campaign.master},
         "wounded_last": {str(whoami): count for whoami, count in campaign.wounded_last.items()},
         "returning": {str(whoami): count for whoami, count in campaign.returning.items()},
-        "offered_count": campaign.offered_count,
+        "released_missions": [_ref(mission) for mission in sorted(campaign.released_missions)],
     }
 
 
@@ -133,19 +133,30 @@ def restore_campaign(campaign: "CampaignState", data: Mapping[str, Any], *, repa
             "mission_paid": bool(data.get("mission_paid", False)),
             "wounded_last": {int(whoami): int(count) for whoami, count in data.get("wounded_last", {}).items()},
             "returning": {int(whoami): int(count) for whoami, count in data.get("returning", {}).items()},
-            # Older saves have no cached scroll count: None takes it afresh from the restored mission window.
-            "offered_count": None if data.get("offered_count") is None else int(data["offered_count"]),
+            "released_missions": ({_unref(item) for item in data["released_missions"]}
+                                  if "released_missions" in data else None),
         }
         if data.get("master"):
             values["master"] = priced(roster.parse_company(str(data["master"]), rows), "master_prices")
     except (KeyError, TypeError, ValueError, AttributeError) as error:
         raise SaveError(f"damaged save: {error!r}") from error
+    if values["released_missions"] is None:
+        values["released_missions"] = _released_before_tracking(campaign, values)
     for name, value in values.items():  # nothing is touched unless the whole save parsed
         setattr(campaign, name, value)
     company = values["company"]
     if repair_stalled:
         campaign.repair_stalled_flow()  # older saves without a scene chain cannot release through their parked map
     campaign.refresh_speaker([regiment for regiment in company if regiment.whoami in campaign.march_units])
+
+
+def _released_before_tracking(campaign: "CampaignState", values: Mapping[str, Any]) -> set[MissionRef]:
+    """An older save did not record released missions: every taken one counts as released except those of the
+    current window whose name id is not completed yet (the one waiting in an after-mission caravan)."""
+    names = {mission.get("mission_ref"): mission.get("name_id")
+             for mission in campaign.graph["mission_windows"].get(values["mission_window"], ())}
+    return {mission for mission in values["taken_missions"]
+            if mission.window != values["mission_window"] or names.get(mission) in values["completed"]}
 
 
 class SaveStore:

@@ -201,11 +201,9 @@ class CampaignState:
     # latest battle each regiment fought, and the wounded that rejoin at the current debrief's Done.
     wounded_last: dict[int, int] = field(default_factory=dict[int, int])
     returning: dict[int, int] = field(default_factory=dict[int, int])
-    # The cached number of missions on offer that the caravan scroll pile reads (notes/campaign.md section 7.4).
-    # It is taken when a mission window is added and after each release step, never live, so a caravan shows the
-    # count last taken on the map. None until first taken (a fresh campaign or an older save). PROVISIONAL: an
-    # older save made in an after-mission caravan then counts the window with the played mission already taken.
-    offered_count: int | None = None
+    # Missions whose release step has run (complete()), by mission record: a taken mission outside this set was
+    # committed to but is still waiting for its release, i.e. the player is in its after-mission caravan.
+    released_missions: set[MissionRef] = field(default_factory=set[MissionRef])
 
     def __post_init__(self) -> None:
         if not self.flow_history or self.flow_history[-1] != self.flow:
@@ -454,6 +452,11 @@ class CampaignState:
                 return
         raise ValueError(f"flow {self.flow!r} has no mission window at or after step {start}")
 
+    def _window_after(self, flow: str, start: int) -> str | None:
+        """The first mission window ``flow`` adds at or after step ``start``, without moving the campaign there."""
+        steps = self.graph["flow_scripts"].get(flow, ())
+        return next((step["window"] for step in steps[start:] if step["action"] == "add_window"), None)
+
     @property
     def map_portrait_window(self) -> dict[str, Any] | None:
         """The data-defined portrait sub-window opened by the active flow."""
@@ -467,26 +470,51 @@ class CampaignState:
         """The refs of the typed mission ``records`` of one window that are on offer now."""
         return offered_refs(records, self.taken_missions)
 
-    def recount_offered(self, window: str | None = None) -> int:
-        """Take the cached count of missions on offer in ``window`` (default: the current mission window),
-        counted by mission record under the taken flags and the depend gates (notes/campaign.md sections 7.2, 7.4)."""
-        window = self.mission_window if window is None else window
-        records = None
-        if self.content is not None and window is not None:
+    def offered_count(self, window: str | None) -> int:
+        """How many missions ``window`` offers now, by mission record under the taken flags and the depend gates
+        (notes/campaign.md section 7.2); 0 for no window."""
+        if window is None:
+            return 0
+        if self.content is not None:
             try:
                 records = [record for record in self.content.window(window).records if isinstance(record, MissionRecord)]
             except (KeyError, TypeError):
                 records = None
-        if records is not None:
-            self.offered_count = len(self.offered_missions(records))
-        else:
-            self.offered_count = sum(mission.get("mission_ref") not in self.taken_missions for mission in self.missions)
-        return self.offered_count
+            if records is not None:
+                return len(self.offered_missions(records))
+        return sum(mission.get("mission_ref") not in self.taken_missions
+                   for mission in self.graph["mission_windows"].get(window, ()))
+
+    def pending_release(self) -> Mission | None:
+        """The mission of the current window that was committed to but not released yet, if any."""
+        for mission in self.graph["mission_windows"].get(self.mission_window, ()):
+            reference = mission.get("mission_ref")
+            if reference in self.taken_missions and reference not in self.released_missions:
+                return mission
+        return None
+
+    def upcoming_mission_window(self) -> str | None:
+        """The mission window the map will offer once the pending mission (if any) is released, following
+        :meth:`complete`: a ``replacescript`` flow's first window, the flow's next window for ``releaseflag`` or
+        an emptied list, else the current window."""
+        mission = self.pending_release()
+        if mission is None:
+            return self.mission_window
+        replacement = mission.get("replacescript")
+        if replacement:
+            return self._window_after(replacement, 0)
+        if mission.get("releaseflag") or not self._anything_offered():
+            return self._window_after(self.flow, self.flow_step + 1)
+        return self.mission_window
 
     @property
     def scroll_count(self) -> int:
-        """The count the caravan scroll bitmaps' ``set:depend`` compares against (notes/campaign.md section 7.4)."""
-        return self.recount_offered() if self.offered_count is None else self.offered_count
+        """The count the caravan scroll bitmaps' ``set:depend`` compares against (notes/campaign.md section 7.4).
+
+        Deliberately not the original's: it keeps a count taken when a window is added, which goes stale (an
+        after-mission caravan shows the old list, a briefing's own map resets it to 0). The engine counts, live,
+        the missions the map will offer when the player returns to it (user decision)."""
+        return self.offered_count(self.upcoming_mission_window())
 
     def is_mission_taken(self, mission_ref: MissionRef) -> bool:
         """Has this mission already been committed to or finished (so it is no longer offered)?"""
@@ -531,14 +559,13 @@ class CampaignState:
         self.completed.add(mission["name_id"])
         if mission.get("mission_ref") is not None:
             self.taken_missions.add(mission["mission_ref"])
+            self.released_missions.add(mission["mission_ref"])
         replacement = mission.get("replacescript")
         if replacement:
             self.flow = replacement
             self.flow_history.append(replacement)
             self._open_next_window(0)
             return replacement, False
-        if mission.get("mission_ref") is not None:  # the release step recounts the list (notes/campaign.md §7.5)
-            self.recount_offered(mission["mission_ref"].window)
         if mission.get("releaseflag") or not self._anything_offered():
             self._open_next_window(self.flow_step + 1)
             return None, True

@@ -1,4 +1,8 @@
-"""Caravan scroll pile: a cached count of missions on offer, notes/campaign.md sections 7.4-7.6."""
+"""Caravan scroll pile: drawn from the missions the map will offer (notes/campaign.md sections 7.2, 7.4, 7.6).
+
+The engine deliberately does not copy the original's stale cached count (user decision): the pile always shows
+the missions on offer, counted live, in the window the player returns to.
+"""
 import unittest
 
 from whshr.campaign_state import CampaignState
@@ -7,35 +11,57 @@ from whshr.glue import MissionRef
 from whshr.glue_content import GlueContent
 from whshr.glue_render import RenderBitmap
 from whshr.glue_runtime import GlueRuntime
-from whshr.savegame import campaign_to_dict
+from whshr.savegame import campaign_to_dict, restore_campaign
 
-# The section 7.6 "Envoy" shape: 1, 2 (depend on 1), 3 (inactivedepend on 2), 4 (inactivedepend on 2, releases).
+# The section 7.6 "Envoy" shape: 671, 672 (depend 671), 673 (inactivedepend 672), 628 (inactivedepend 672, releases).
 ENVOY = ("[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n"
          "[MISSION]\nset:res=671\n[END]\n"
          "[MISSION]\nset:res=672\nset:depend=671\n[END]\n"
          "[MISSION]\nset:res=673\nset:inactivedepend=672\n[END]\n"
          "[MISSION]\nset:res=628\nset:inactivedepend=672\nset:releaseflag=1\n[END]")
-# Another window reusing name ids 671 and 628, as the shipped windows do.
-OTHER = ("[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n"
-         "[MISSION]\nset:res=671\n[END]\n"
-         "[MISSION]\nset:res=628\n[END]")
+# The next chapter, reusing name ids 671 and 628 as the shipped windows do.
+NEXT = ("[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n"
+        "[MISSION]\nset:res=671\n[END]\n"
+        "[MISSION]\nset:res=628\n[END]")
+# A one-mission chapter and a replacement flow's window.
+SINGLE = "[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n[MISSION]\nset:res=690\n[END]"
+SIDE = ("[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n"
+        "[MISSION]\nset:res=691\n[END]\n[MISSION]\nset:res=692\n[END]\n[MISSION]\nset:res=693\n[END]\n"
+        "[MISSION]\nset:res=694\n[END]")
 MAP = "[WINDOW]\n[END]"
 MARK = "[WINDOW]\n[END]"
-FLOW = "[RUN]\n[START]\nopenwindow:res=MAP\nsetcurwindow:res=MAP\naddobject:res=ENVOY\nwaitforrelease:\n[END]"
+# A briefing that opens its own map window and adds a mark to it (no [MISSION] records).
 BRIEF_FLOW = "[RUN]\n[START]\nopenwindow:res=MAP\nsetcurwindow:res=MAP\naddobject:res=MARK\nwaitforrelease:\n[END]"
-# The three caravan scroll bitmaps and their set:depend values (section 7.4).
 SCROLLS = (RenderBitmap("CarScroll1", animation=(("depend", 4),)),
            RenderBitmap("CarScroll2", animation=(("depend", 3),)),
            RenderBitmap("CarScroll3", animation=(("depend", 2),)))
 
 
-def _content() -> GlueContent:
-    return GlueContent.from_data(resources={"ENVOY": ENVOY, "OTHER": OTHER, "MAP": MAP, "MARK": MARK, "FLOW": FLOW,
-                                              "BRIEF_FLOW": BRIEF_FLOW})
+def _mission(window: str, index: int, name_id: int, **extra: object) -> dict[str, object]:
+    return {"name_id": name_id, "mission_ref": MissionRef(window, index), **extra}
 
 
-def _campaign(window: str = "ENVOY") -> CampaignState:
-    return CampaignState({"flow_scripts": {}, "mission_windows": {}}, mission_window=window, content=_content())
+GRAPH = {
+    "flow_scripts": {
+        "FLOW": [{"action": "add_window", "window": "ENVOY"}, {"action": "add_window", "window": "SINGLE"},
+                 {"action": "add_window", "window": "NEXT"}],
+        "SIDEFLOW": [{"action": "add_window", "window": "SIDE"}],
+    },
+    "mission_windows": {
+        "ENVOY": [_mission("ENVOY", 0, 671), _mission("ENVOY", 1, 672, depend=671),
+                  _mission("ENVOY", 2, 673, inactivedepend=672),
+                  _mission("ENVOY", 3, 628, inactivedepend=672, releaseflag=1)],
+        "SINGLE": [_mission("SINGLE", 0, 690)],
+        "NEXT": [_mission("NEXT", 0, 671), _mission("NEXT", 1, 628)],
+        "SIDE": [_mission("SIDE", i, 691 + i) for i in range(4)],
+    },
+}
+
+
+def _campaign(window: str = "ENVOY", step: int = 0) -> CampaignState:
+    content = GlueContent.from_data(resources={"ENVOY": ENVOY, "NEXT": NEXT, "SINGLE": SINGLE, "SIDE": SIDE,
+                                               "MAP": MAP, "MARK": MARK, "BRIEF_FLOW": BRIEF_FLOW})
+    return CampaignState(GRAPH, flow="FLOW", flow_step=step, mission_window=window, content=content)
 
 
 def _drawn(campaign: object) -> list[str]:
@@ -63,80 +89,80 @@ class ScrollPileTests(unittest.TestCase):
         self.assertEqual(len(_drawn(None)), 3)
 
 
-class OfferedCountTests(unittest.TestCase):
-    def test_worked_example_counts_three_then_one_then_two(self):
+class ScrollCountTests(unittest.TestCase):
+    def test_worked_example_counts_three_then_one_then_two_as_missions_are_released(self):
         campaign = _campaign()
-        self.assertEqual(campaign.recount_offered(), 3)
-        campaign.mark_mission_taken(MissionRef("ENVOY", 0))
-        self.assertEqual(campaign.recount_offered(), 1)
-        campaign.mark_mission_taken(MissionRef("ENVOY", 1))
-        self.assertEqual(campaign.recount_offered(), 2)
-
-    def test_given_a_mission_is_taken_then_the_cached_count_waits_for_the_next_recount(self):
-        campaign = _campaign()
-        campaign.recount_offered()
-        campaign.mark_mission_taken(MissionRef("ENVOY", 0))  # troop selection's Done, before the release
-
         self.assertEqual(campaign.scroll_count, 3)
+        campaign.complete(GRAPH["mission_windows"]["ENVOY"][0])
+        self.assertEqual(campaign.scroll_count, 1)
+        campaign.complete(GRAPH["mission_windows"]["ENVOY"][1])
+        self.assertEqual(campaign.scroll_count, 2)
+
+    def test_given_a_mission_is_picked_but_not_taken_then_it_still_counts(self):
+        campaign = _campaign()
+        campaign.select_mission(MissionRef("ENVOY", 0))
+        self.assertEqual(campaign.scroll_count, 3)
+
+    def test_given_an_after_mission_caravan_with_missions_left_then_the_current_list_is_counted(self):
+        campaign = _campaign()
+        campaign.mark_mission_taken(MissionRef("ENVOY", 0))  # played, not released yet
+        self.assertEqual(campaign.scroll_count, 1)
+
+    def test_given_an_after_mission_caravan_of_a_releasing_mission_then_the_next_chapter_is_counted(self):
+        campaign = _campaign()
+        campaign.mark_mission_taken(MissionRef("ENVOY", 3))  # releaseflag: the flow moves on to SINGLE
+        self.assertEqual(campaign.upcoming_mission_window(), "SINGLE")
+        self.assertEqual(campaign.scroll_count, 1)
+
+    def test_given_the_last_mission_of_a_chapter_was_played_then_the_next_chapter_is_counted(self):
+        campaign = _campaign("SINGLE", step=1)
+        campaign.mark_mission_taken(MissionRef("SINGLE", 0))
+        self.assertEqual(campaign.upcoming_mission_window(), "NEXT")
+        self.assertEqual(campaign.scroll_count, 2)
+
+    def test_given_a_mission_with_a_replacement_flow_then_that_flows_window_is_counted(self):
+        campaign = _campaign("SINGLE", step=1)
+        campaign.graph = {**GRAPH, "mission_windows": {
+            **GRAPH["mission_windows"], "SINGLE": [_mission("SINGLE", 0, 690, replacescript="SIDEFLOW")]}}
+        campaign.mark_mission_taken(MissionRef("SINGLE", 0))
+        self.assertEqual(campaign.scroll_count, 4)
 
     def test_given_the_same_name_id_was_finished_in_another_window_then_this_window_still_counts_it(self):
-        campaign = _campaign("OTHER")
+        campaign = _campaign("NEXT", step=2)
         campaign.completed.update({671, 628})
-        campaign.mark_mission_taken(MissionRef("ENVOY", 0))
-        campaign.mark_mission_taken(MissionRef("ENVOY", 3))
+        campaign.taken_missions.update({MissionRef("ENVOY", 0), MissionRef("ENVOY", 3)})
+        campaign.released_missions.update({MissionRef("ENVOY", 0), MissionRef("ENVOY", 3)})
+        self.assertEqual(campaign.scroll_count, 2)
 
-        self.assertEqual(campaign.recount_offered(), 2)
-
-    def test_given_no_count_was_taken_yet_then_the_current_window_is_counted(self):
-        self.assertEqual(_campaign().scroll_count, 3)
-
-    def test_the_release_step_recounts_the_released_missions_window(self):
+    def test_a_briefing_that_marks_its_own_map_does_not_change_the_count(self):
         campaign = _campaign()
-        campaign.recount_offered()
-        mission = {"name_id": 671, "mission_ref": MissionRef("ENVOY", 0)}
-
-        campaign.complete(mission)
-
-        self.assertEqual(campaign.scroll_count, 1)
-
-    def test_adding_a_mission_window_takes_its_count(self):
-        campaign = _campaign("OTHER")
-        campaign.offered_count = 0
-        runtime = GlueRuntime(campaign.content, campaign)  # type: ignore[arg-type]
-
-        runtime.start("FLOW")
-
+        GlueRuntime(campaign.content, campaign).start("BRIEF_FLOW")  # type: ignore[arg-type]
         self.assertEqual(campaign.scroll_count, 3)
 
-    def test_any_plain_addobject_retakes_the_count_of_the_list_in_its_window(self):
-        campaign = _campaign()
-        runtime = GlueRuntime(campaign.content, campaign)  # type: ignore[arg-type]
-        runtime.start("FLOW")
-        campaign.mark_mission_taken(MissionRef("ENVOY", 0))
-        campaign.offered_count = 7  # a stale value the next addobject must replace
-        runtime._add_object("res=MARK", False, [])  # pyright: ignore[reportPrivateUsage]
-        self.assertEqual(campaign.scroll_count, 1)
 
-    def test_an_addobject_into_a_window_without_a_mission_list_sets_the_count_to_zero(self):
+class ReleasedMissionSaveTests(unittest.TestCase):
+    def test_released_missions_survive_a_save_and_load(self):
         campaign = _campaign()
-        campaign.offered_count = 3
-        runtime = GlueRuntime(campaign.content, campaign)  # type: ignore[arg-type]
-        runtime.start("BRIEF_FLOW")  # a briefing's own map window with a mark, no [MISSION] records
+        campaign.complete(GRAPH["mission_windows"]["ENVOY"][0])
+        campaign.mark_mission_taken(MissionRef("ENVOY", 1))
+        loaded = _campaign()
 
-        self.assertEqual(campaign.scroll_count, 0)
+        restore_campaign(loaded, campaign_to_dict(campaign), repair_stalled=False)
 
-    def test_an_animated_object_does_not_retake_the_count(self):
-        campaign = _campaign()
-        runtime = GlueRuntime(campaign.content, campaign)  # type: ignore[arg-type]
-        runtime.start("FLOW")
-        campaign.offered_count = 7
-        runtime._add_object("res=MARK", True, [])  # pyright: ignore[reportPrivateUsage]
-        self.assertEqual(campaign.scroll_count, 7)
+        self.assertEqual(loaded.released_missions, {MissionRef("ENVOY", 0)})
+        self.assertEqual(loaded.pending_release(), GRAPH["mission_windows"]["ENVOY"][1])
 
-    def test_the_cached_count_is_saved_with_the_campaign(self):
-        campaign = _campaign()
-        campaign.offered_count = 2
-        self.assertEqual(campaign_to_dict(campaign)["offered_count"], 2)
+    def test_an_older_save_treats_the_uncompleted_taken_mission_of_its_window_as_pending(self):
+        campaign = _campaign("SINGLE", step=1)
+        campaign.mark_mission_taken(MissionRef("SINGLE", 0))
+        data = campaign_to_dict(campaign)
+        del data["released_missions"]
+        loaded = _campaign()
+
+        restore_campaign(loaded, data, repair_stalled=False)
+
+        self.assertEqual(loaded.released_missions, set())
+        self.assertEqual(loaded.scroll_count, 2)
 
 
 if __name__ == "__main__":

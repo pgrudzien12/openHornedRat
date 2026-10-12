@@ -1039,8 +1039,6 @@ class GlueRuntime:
             return
         self._clear_pending_requests()
         target.objects.append(name)
-        if not animated:
-            self._recount_offered(target)
         self._select_first_mission()
         effects.append(UpdateWindow(target.name))
         last_bitmap = next((record for record in reversed(definition.records) if isinstance(record, BitmapRecord)), None)
@@ -1080,16 +1078,6 @@ class GlueRuntime:
         frame = self.state.current
         return bool(check and frame is not None and not self.state.call_stack
                     and check(frame.program, self.state.waits_passed))
-
-    def _recount_offered(self, target: WindowInstance) -> None:
-        """Every ``addobject`` retakes the caravan's count of missions on offer from the mission list of the window
-        it loaded into; a window without one (a briefing's own map with a mark) sets it to 0 (notes/campaign.md
-        section 7.4)."""
-        recount = getattr(self.campaign, "recount_offered", None)
-        if recount is None:
-            return
-        lists = [name for name in (target.name, *target.objects) if self._has_mission_list(name)]
-        recount(lists[-1] if lists else target.name)  # a window with no [MISSION] records counts 0
 
     def _has_mission_list(self, name: str) -> bool:
         try:
