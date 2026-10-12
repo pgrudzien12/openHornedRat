@@ -148,13 +148,29 @@ class CompletionTests(unittest.TestCase):
         self.assertEqual(campaign.coffers, 1500)
         self.assertIn("final payment: 1000 crowns", applied)
 
-    def test_given_no_objective_results_when_the_debrief_completes_then_nothing_is_paid_and_it_says_why(self):
+    def test_given_no_objective_results_when_the_completion_needs_a_letter_then_nothing_is_paid_and_it_says_why(self):
         campaign = self._campaign("3,0,1000,0,0,A")
 
         applied, skipped = complete_debrief(campaign, DEBRIEF)
 
-        self.assertEqual((campaign.coffers, applied), (500, []))
+        self.assertEqual(campaign.coffers, 500)
+        self.assertIn("final payment: 0 crowns", applied)
         self.assertTrue(any("no objective results" in text for text in skipped))
+
+    def test_given_a_march_without_a_battle_when_its_summary_debrief_completes_then_the_completion_is_paid(self):
+        campaign = self._campaign("3,0,800,0,0")  # Escort to Wissenheim: no required letter
+
+        applied, _ = complete_debrief(campaign, StartDebrief(1, 7, 9, True))
+
+        self.assertEqual(campaign.coffers, 1300)
+        self.assertIn("final payment: 800 crowns", applied)
+
+    def test_given_an_arrival_march_without_a_battle_when_its_summary_debrief_completes_then_the_arrival_is_paid(self):
+        campaign = self._campaign("5,0,2000,0,M")
+
+        complete_debrief(campaign, StartDebrief(1, 7, 10, True))
+
+        self.assertEqual(campaign.coffers, 2500)
 
     def test_given_no_battle_mode_and_no_battle_when_the_debrief_completes_then_it_counts_as_a_flawless_win(self):
         campaign = self._campaign("6,0,2000,0,M")
@@ -220,7 +236,7 @@ class DebriefSceneTests(PostMissionCaravanTests):
         self.assertEqual((row["kind"], row["amount"], row["coffers"]), ("final", 400, 900))
         self.assertIn(["completion", 400], row["lines"])
 
-    def test_given_a_played_battle_without_results_when_a_debrief_runs_then_the_payment_is_skipped_with_a_diagnostic(self):
+    def test_given_a_debrief_without_battle_results_when_it_runs_then_letter_payments_add_nothing_with_a_diagnostic(self):
         self.context.no_battle = False
         campaign = _campaign()
         campaign.begin_mission(parse_cash("1,100,400,50,25,A"))

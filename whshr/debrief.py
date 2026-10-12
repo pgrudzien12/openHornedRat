@@ -48,8 +48,11 @@ def complete_debrief(campaign: "CampaignState | None", effect: "StartDebrief", l
     With ``flawless`` (no-battle mode) a mission without any battle result counts as a flawless win.
     The final payment is the mission's balance sheet (whshr.payments, notes/campaign.md section 2.5) over the
     objective records of the latest battle: the initial payment was already credited at troop selection, so the
-    payment credited here is the sheet's Total Final Payment. A battle that wrote no objective records (a played
-    battle: the engine does not evaluate objectives yet) skips the payment instead of guessing it. When ``log`` is
+    payment credited here is the sheet's Total Final Payment. A mission that fought no battle (the marches
+    ``BPMission13``, ``BPMission15B``: a movie, then ``debriefwithsummary``) is still paid: its sheet runs over no
+    objective records, so a completion that requires no letter and the "Arrival at ..." lines pay in full and a
+    line that needs a missing objective adds nothing (notes/campaign.md section 2.5, notes/debrief_evaluation.md
+    section 6.1). When ``log`` is
     given a ``payment`` row records the amount and the line items applied and skipped.  Modes 2 and 6 go on to
     apply armour rewards, experience and promotions, then the battle result, returning wounded and disbanding
     (whshr.casualties); mode 6 (a battle without debrief) pays nothing.
@@ -70,16 +73,15 @@ def complete_debrief(campaign: "CampaignState | None", effect: "StartDebrief", l
             # no-battle mode, and the mission fought no battle (a march or summary page): still a perfect win
             payments.store_flawless(campaign)
         if not campaign.objective_results and not campaign.flawless_result:
-            skipped.append("final payment: no objective results from the battle")
-        else:
-            settlement = settle(terms, campaign.objective_results, campaign.bonus_counter)
-            campaign.mission_paid = True
-            campaign.add_cash(settlement.final)
-            applied.append(f"final payment: {settlement.final} crowns")
-            applied.extend(f"{label}: {amount}" for label, amount in settlement.lines if label != "final")
-            skipped.extend(f"final payment line {text}" for text in settlement.skipped)
-            if log is not None:
-                _log_payment(log, "final", settlement.final, campaign, settlement.lines, settlement.skipped)
+            skipped.append("final payment: no objective results from a battle; lines that need one add nothing")
+        settlement = settle(terms, campaign.objective_results, campaign.bonus_counter)
+        campaign.mission_paid = True
+        campaign.add_cash(settlement.final)
+        applied.append(f"final payment: {settlement.final} crowns")
+        applied.extend(f"{label}: {amount}" for label, amount in settlement.lines if label != "final")
+        skipped.extend(f"final payment line {text}" for text in settlement.skipped)
+        if log is not None:
+            _log_payment(log, "final", settlement.final, campaign, settlement.lines, skipped)
     if terms is not None and not applied and effect.mode != 6 and log is not None:
         _log_payment(log, "final", 0, campaign, [], skipped)
     if effect.mode in (2, 6):
