@@ -8,7 +8,8 @@ right-click shortcut below); an enemy regiment only shows its HUD readout/banner
 never orders, since whshr.engine.Battle's player order guards and
 Hud._button_enabled() both refuse commands for a non-player regiment. Right-drag pans the camera;
 a right-button press and release without dragging is instead a direct move/attack shortcut for the
-current selection, bypassing the HUD buttons. Escape deselects.
+current selection, bypassing the HUD buttons. Escape deselects. During deployment, dragging a regiment
+near a view edge pans the camera that way and the regiment keeps following the cursor.
 """
 
 from collections import deque
@@ -61,6 +62,7 @@ BUTTON_ZOOM_RATE = 0.5  # distance factor per second while a camera zoom button 
 # zoom moves closer / further.
 CAMERA_BUTTONS: dict[str, str] = {"camera_rotate": "rotate", "camera_zoom": "zoom"}
 DRAG_ROTATE = 0.3  # degrees per pixel
+EDGE_SCROLL_MARGIN = 0.05  # fraction of the window height: a deployment drag this close to a view edge pans the camera
 CLICK_DRAG_THRESHOLD = 4  # pixels; a right button press/release closer than this counts as a click
 # Public ranged handoff §5: installed GMCUR groups are Fire 100, default 101, Attack 102, Magic 103.
 BATTLE_CURSOR_GROUPS: dict[str, int] = {"default": 101, "attack": 102, "fire": 100, "magic": 103}
@@ -200,6 +202,24 @@ def _atlas_rect(sheet: SpriteSheet, index: int) -> tuple[int, int, int, int]:
 
 # Snow scenery that selects the sparkle marker's second variant (notes/battle_end_objectives.md 12.2).
 SNOW_FURNITURE = frozenset({"d_snwwatchtower", "snwrock1", "snwrock2", "snwrock3", "snwrock4"})
+
+
+def edge_scroll(pixel: Sequence[float], width: float, bottom: float, margin: float) -> tuple[float, float]:
+    """(right, forward) pan strengths in -1..1 for a cursor at *pixel* in a battlefield view spanning x 0..width and
+    y 0..bottom: zero outside the *margin*-pixel band along each edge, growing linearly to 1 at the edge itself (and
+    beyond it, e.g. a cursor over the command panel below *bottom*). Engine design, not the original's: lets a
+    deployment drag carry a regiment past the visible field without letting go of it."""
+    if margin <= 0:
+        return 0.0, 0.0
+
+    def strength(position: float, low: float, high: float) -> float:
+        if position < low + margin:
+            return -min(1.0, (low + margin - position) / margin)
+        if position > high - margin:
+            return min(1.0, (position - (high - margin)) / margin)
+        return 0.0
+
+    return strength(pixel[0], 0.0, width), -strength(pixel[1], 0.0, bottom)
 
 
 class BattleView(SceneView[BattleScene]):
@@ -830,7 +850,8 @@ class BattleView(SceneView[BattleScene]):
         battle_sounds: BattleSounds | None = getattr(self, "battle_sounds", None)  # tests build views without __init__
         if battle_sounds is not None:
             battle_sounds.set_paused(self.scene.battle.paused)
-        self.scene.battle.ctrl_held = bool(pygame.key.get_mods() & pygame.KMOD_CTRL)
+        control = bool(pygame.key.get_mods() & pygame.KMOD_CTRL)
+        self.scene.battle.ctrl_held = control
         keys = pygame.key.get_pressed()
         right = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
         forward = (keys[pygame.K_UP] or keys[pygame.K_w]) - (keys[pygame.K_DOWN] or keys[pygame.K_s])
@@ -842,9 +863,30 @@ class BattleView(SceneView[BattleScene]):
         if tilt := keys[pygame.K_PAGEUP] - keys[pygame.K_PAGEDOWN]:
             self.camera.tilt(tilt * TILT_SPEED * seconds)
         self._apply_camera_hold(seconds)
+        self._edge_scroll_drag(seconds, control)
         self.scene.battle.set_view_angle(view_angle(self.camera.yaw))
         self._publish_view_rect()
         self._consume_events()
+
+    def _edge_scroll_drag(self, seconds: float, rotate: bool = False) -> None:
+        """While a regiment is dragged on the battlefield during deployment, a cursor near a view edge (edge_scroll)
+        pans the camera at up to the keyboard pan speed, and the dragged regiment follows the ground now under the
+        unmoved cursor (*rotate*: Ctrl held, as for a moved cursor). The bottom edge is the command panel's top."""
+        pixel: tuple[float, float] | None = getattr(self, "_drag_pixel", None)  # tests build views without __init__
+        if (getattr(self.scene.battle, "phase", "battle") != "deployment"
+                or getattr(self, "_drag_surface", None) != "main" or pixel is None):
+            return
+        width, height = self.gpu.target.size
+        bottom = self.hud.panel_top()
+        right, forward = edge_scroll(pixel, width, height if bottom is None else bottom, EDGE_SCROLL_MARGIN * height)
+        if not right and not forward:
+            return
+        step = self.camera.view_distance * WORLD_PER_MESH * PAN_SPEED * seconds
+        self.camera.pan(right * step, forward * step)
+        for event in self._drag_events(pixel, rotate):
+            if event[0] == "drag_to":
+                _kind, x, y, rotate = event
+                self.scene.battle.update_deployment_drag(x, y, rotate)
 
     def _consume_events(self) -> None:
         # A battle tick replaces the list, while several rendered frames can share it. Orders may
