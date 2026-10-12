@@ -1039,6 +1039,10 @@ class GlueRuntime:
             return
         self._clear_pending_requests()
         target.objects.append(name)
+        if self._has_mission_list(name):  # adding a mission window takes the caravan's count (notes/campaign.md §7.4)
+            recount = getattr(self.campaign, "recount_offered", None)
+            if recount is not None:
+                recount(name)
         self._select_first_mission()
         effects.append(UpdateWindow(target.name))
         last_bitmap = next((record for record in reversed(definition.records) if isinstance(record, BitmapRecord)), None)

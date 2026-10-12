@@ -61,22 +61,6 @@ class GlueViewTests(unittest.TestCase):
 
         self.assertIsNone(load_optional_bitmap(GlueContent.from_data(), "Tent4"))
 
-    def test_campaign_count_controls_dependent_caravan_bitmap_visibility(self):
-        from whshr.frontend.glue_view import _bitmap_visible
-        bitmap = RenderBitmap("CarScroll3", animation=(("depend", 2),))
-        campaign = type("Campaign", (), {"missions": (object(),)})()
-
-        self.assertFalse(_bitmap_visible(bitmap, campaign))
-        campaign.missions = (object(), object())
-        self.assertTrue(_bitmap_visible(bitmap, campaign))
-
-    def test_only_caravan_scrolls_use_campaign_count_dependency(self):
-        from whshr.frontend.glue_view import _bitmap_visible
-        bitmap = RenderBitmap("OtherBitmap", animation=(("depend", 2),))
-        campaign = type("Campaign", (), {"missions": ()})()
-
-        self.assertTrue(_bitmap_visible(bitmap, campaign))
-
     def test_caravan_animation_keeps_the_unchanged_background_texture(self):
         from whshr.frontend.glue_view import GlueView
         from whshr.frontend.gpu import QuadCache

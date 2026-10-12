@@ -201,6 +201,11 @@ class CampaignState:
     # latest battle each regiment fought, and the wounded that rejoin at the current debrief's Done.
     wounded_last: dict[int, int] = field(default_factory=dict[int, int])
     returning: dict[int, int] = field(default_factory=dict[int, int])
+    # The cached number of missions on offer that the caravan scroll pile reads (notes/campaign.md section 7.4).
+    # It is taken when a mission window is added and after each release step, never live, so a caravan shows the
+    # count last taken on the map. None until first taken (a fresh campaign or an older save). PROVISIONAL: an
+    # older save made in an after-mission caravan then counts the window with the played mission already taken.
+    offered_count: int | None = None
 
     def __post_init__(self) -> None:
         if not self.flow_history or self.flow_history[-1] != self.flow:
@@ -462,6 +467,27 @@ class CampaignState:
         """The refs of the typed mission ``records`` of one window that are on offer now."""
         return offered_refs(records, self.taken_missions)
 
+    def recount_offered(self, window: str | None = None) -> int:
+        """Take the cached count of missions on offer in ``window`` (default: the current mission window),
+        counted by mission record under the taken flags and the depend gates (notes/campaign.md sections 7.2, 7.4)."""
+        window = self.mission_window if window is None else window
+        records = None
+        if self.content is not None and window is not None:
+            try:
+                records = [record for record in self.content.window(window).records if isinstance(record, MissionRecord)]
+            except (KeyError, TypeError):
+                records = None
+        if records is not None:
+            self.offered_count = len(self.offered_missions(records))
+        else:
+            self.offered_count = sum(mission.get("mission_ref") not in self.taken_missions for mission in self.missions)
+        return self.offered_count
+
+    @property
+    def scroll_count(self) -> int:
+        """The count the caravan scroll bitmaps' ``set:depend`` compares against (notes/campaign.md section 7.4)."""
+        return self.recount_offered() if self.offered_count is None else self.offered_count
+
     def is_mission_taken(self, mission_ref: MissionRef) -> bool:
         """Has this mission already been committed to or finished (so it is no longer offered)?"""
         return mission_ref in self.taken_missions
@@ -511,6 +537,8 @@ class CampaignState:
             self.flow_history.append(replacement)
             self._open_next_window(0)
             return replacement, False
+        if mission.get("mission_ref") is not None:  # the release step recounts the list (notes/campaign.md §7.5)
+            self.recount_offered(mission["mission_ref"].window)
         if mission.get("releaseflag") or not self._anything_offered():
             self._open_next_window(self.flow_step + 1)
             return None, True

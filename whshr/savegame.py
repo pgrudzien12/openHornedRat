@@ -95,6 +95,7 @@ def campaign_to_dict(campaign: "CampaignState") -> dict[str, Any]:
         "master_prices": {str(regiment.whoami): regiment.row.base_price for regiment in campaign.master},
         "wounded_last": {str(whoami): count for whoami, count in campaign.wounded_last.items()},
         "returning": {str(whoami): count for whoami, count in campaign.returning.items()},
+        "offered_count": campaign.offered_count,
     }
 
 
@@ -132,6 +133,8 @@ def restore_campaign(campaign: "CampaignState", data: Mapping[str, Any], *, repa
             "mission_paid": bool(data.get("mission_paid", False)),
             "wounded_last": {int(whoami): int(count) for whoami, count in data.get("wounded_last", {}).items()},
             "returning": {int(whoami): int(count) for whoami, count in data.get("returning", {}).items()},
+            # Older saves have no cached scroll count: None takes it afresh from the restored mission window.
+            "offered_count": None if data.get("offered_count") is None else int(data["offered_count"]),
         }
         if data.get("master"):
             values["master"] = priced(roster.parse_company(str(data["master"]), rows), "master_prices")
