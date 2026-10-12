@@ -18,8 +18,15 @@ frames 64–67 (`game_rules.md`, Battle HUD layout).
 ## Implementation choices and remaining facts
 
 Positions are measured from the reference and need an in-game visual check. The unit/leader
-art occupies a 72×104 box at panel-local (369,68). The profile starts at (253,117),
-with columns 38 pixels apart and rows 19 pixels apart.
+art occupies a 72×104 box at panel-local (369,68).
+
+The nine characteristics sit on small parchment cells. These come from **ICONS frame 211**, a
+118×60 3×3 grid, and not from the ICONS 98 background, which has only the bare plate under them.
+Drawn at panel-local (250,112), the frame's border lines up with that plate. Its cells are
+32×13, the first at frame-local (5,4), with columns 38 pixels apart and rows 19 apart. Each
+value is drawn one pixel inside its cell, starting at panel-local (256,117). The engine also
+draws the empty grid when nothing is selected, next to the blank armour tile. That is an
+engine choice: the original's empty-selection panel has not been observed.
 
 The engine defaults to unit mode and resets it when selection changes. This is an engine
 UI choice; the original's persistence across selection changes is not established.

@@ -114,6 +114,7 @@ class PanelStateTests(unittest.TestCase):
                             models=10, has_leader=True, banner="banner", portrait="leader")
         hud = _hud(regiments=[regiment])
         hud._armour_quad = Mock(return_value="armour")
+        hud._icon = Mock(return_value="grid")
         hud._stat_labels = [Mock() for _ in range(9)]
         hud._sheet = Mock(return_value=SimpleNamespace(frames=[object()]))
         hud._sheet_frame_quad = Mock(return_value="art")
@@ -208,10 +209,37 @@ class PanelStateTests(unittest.TestCase):
     def test_empty_selection_draws_blank_armour_at_native_position(self):
         hud = _hud(selected=None)
         hud._armour_quad = Mock(return_value="blank")
+        hud._icon = Mock(return_value="grid")
         hud._draw_panel = Mock()
         hud._draw_statistics(None)
         hud._armour_quad.assert_called_once_with(224)
-        hud._draw_panel.assert_called_once_with("blank", 204, 116, 42, 51)
+        hud._draw_panel.assert_any_call("blank", 204, 116, 42, 51)
+
+    def test_characteristics_sit_in_the_parchment_grid_over_the_plate(self):
+        regiment = Regiment("player", "Troops", 0, 0, 0, Side.PLAYER, models=10)
+        hud = _hud(regiments=[regiment])
+        hud._armour_quad = Mock(return_value="armour")
+        hud._icon = Mock(side_effect=lambda frame: f"icon{frame}")
+        hud._stat_labels = [Mock(name=f"stat{i}") for i in range(9)]
+        hud._draw_panel = Mock()
+        hud._draw_statistics(regiment)
+        hud._draw_panel.assert_any_call("icon211", 250, 112)
+        calls = [call.args for call in hud._draw_panel.call_args_list]
+        grid = calls.index(("icon211", 250, 112))
+        for index, label in enumerate(hud._stat_labels):
+            with self.subTest(index=index):
+                position = calls.index((label, 256 + index % 3 * 38, 117 + index // 3 * 19))
+                # Values are painted over the grid, inside cells 32x13 on a 38x19 pitch from (255, 116).
+                self.assertGreater(position, grid)
+
+    def test_empty_selection_still_shows_the_empty_grid(self):
+        hud = _hud(selected=None)
+        hud._armour_quad = Mock(return_value="blank")
+        hud._icon = Mock(side_effect=lambda frame: f"icon{frame}")
+        hud._draw_panel = Mock()
+        hud._draw_statistics(None)
+        hud._draw_panel.assert_any_call("icon211", 250, 112)
+        self.assertEqual(hud._draw_panel.call_count, 2)
 
     def test_item_popup_is_painted_after_the_unit_name(self):
         hud = _hud()

@@ -233,6 +233,12 @@ ARMOUR_RECT = (204, 116, 42, 51)
 ARMOUR_FRAMES = (218, 219, 220, 221, 222, 223, 223, 223,
                  218, 219, 220, 221, 222, 223, 223, 223)
 EMPTY_ARMOUR_FRAME = 224
+# notes/battle_statistics_panel.md: ICONS 211 is the 3x3 parchment grid behind the nine characteristics,
+# laid exactly over the bare plate in ICONS 98. Its cells are 32x13 on a 38x19 pitch, the first at (5, 4).
+STATS_GRID_FRAME = 211
+STATS_GRID_POS = (250, 112)
+STAT_CELL_ORIGIN = (STATS_GRID_POS[0] + 5, STATS_GRID_POS[1] + 4)
+STAT_CELL_PITCH = (38, 19)
 
 HUD_CLASS_NAMES: dict[str, str] = {
     "inf": "Infantry", "arch": "Archers", "art": "Artillery",
@@ -1025,10 +1031,11 @@ class Hud:
         if self.list_kind is not None:
             return
         self._draw_panel(self._armour_quad(self.armour_frame(regiment)), *ARMOUR_RECT)
+        self._draw_panel(self._icon(STATS_GRID_FRAME), *STATS_GRID_POS)
         if regiment is None:
             return
-        # Panel-native positions measured from the user's 640x480 reference. Chrome is
-        # already in ICONS 98; only values and the banner/portrait are overlaid here.
+        # Each value sits inside its parchment cell; the text baseline was measured from the
+        # user's 640x480 reference.
         for index, (name, value) in enumerate(zip(("M", "WS", "BS", "S", "T", "W", "I", "A", "Ld"),
                                                 self.statistics(regiment))):
             if len(self._stat_labels) <= index:
@@ -1036,7 +1043,8 @@ class Hud:
                                                       color=BLACK, background=None, padding=0))
             label = self._stat_labels[index]
             label.set_lines((f"{name}  {value if value is not None else '–'}",))
-            self._draw_panel(label, 253 + index % 3 * 38, 117 + index // 3 * 19)
+            self._draw_panel(label, STAT_CELL_ORIGIN[0] + 1 + index % 3 * STAT_CELL_PITCH[0],
+                             STAT_CELL_ORIGIN[1] + 1 + index // 3 * STAT_CELL_PITCH[1])
         sheet = self._sheet(regiment.portrait if self._shows_leader_stats(regiment) else regiment.banner)
         if sheet is not None and sheet.frames:
             quad = self._sheet_frame_quad(sheet.frames[0])
