@@ -57,6 +57,19 @@ class SpellTableTests(unittest.TestCase):
         self.assertEqual((magic.cost(535), magic.spell_range(535, random.Random(1))), (1, None))
 
 
+class PowerRollTests(unittest.TestCase):
+    def test_pools_are_rolled_when_the_battle_is_created_not_on_first_read(self):
+        # Given a new battle, its power pools already hold 1-8 each (game_rules.md "Winds of magic"),
+        battle = Battle(5000, 5000, [regiment("P", 0, 0)], seed=1995)
+        pools = battle.event_bus.power
+        self.assertTrue(1 <= pools.player <= 8 and 1 <= pools.enemy <= 8)
+        # and reading them (as the HUD's power readout does every frame) never draws from the battle's random
+        # sequence, so a drawn frame cannot make live play and replay diverge.
+        state = battle.rng.getstate()
+        self.assertEqual(battle.player_power, pools.player)
+        self.assertEqual(battle.rng.getstate(), state)
+
+
 class ItemEventTests(unittest.TestCase):
     def test_item_event_launches_fireball_without_a_wizard_or_power_payment(self):
         bearer = regiment("G", 0, 0, items=("ItemGrudgeBringer",), has_leader=True)

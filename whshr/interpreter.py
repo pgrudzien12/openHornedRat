@@ -205,7 +205,10 @@ class EventBus:
     def __init__(self, battle: "Battle") -> None:
         self.battle = battle
         self.unit_states: dict[str, UnitScriptState] = {}  # {unit_identifier: UnitScriptState}
-        self._power: magic.PowerPools | None = None
+        # Rolled here, when the battle is created (game_rules.md "Winds of magic": set by the battle window's create
+        # handler), never lazily: a first read from the HUD's power readout would draw from the battle's random
+        # sequence at a frame-dependent moment and make live play and replay diverge.
+        self._power = magic.PowerPools.rolled(battle.rng)
 
     def is_live(self, unit_id: str) -> bool:
         """A scripted unit still in the battle: not destroyed, not routed off the field and not removed
@@ -223,9 +226,7 @@ class EventBus:
 
     @property
     def power(self) -> magic.PowerPools:
-        """The battle's power pools, rolled 1-8 each on first use (game_rules.md "Winds of magic")."""
-        if self._power is None:
-            self._power = magic.PowerPools.rolled(self.battle.rng)
+        """The battle's power pools, rolled 1-8 each when the battle is created (game_rules.md "Winds of magic")."""
         return self._power
 
     def animation_event_step(self, unit_id: str, model_index: int = -1) -> None:
