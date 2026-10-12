@@ -314,7 +314,41 @@ Variants (start from "debrief 2 written" unless stated):
 - The troop page's wounded column for the commander's regiment is recomputed from the file after P4's `s_routed + 1`
   (`(lost − 1) × 65 // 100`), which can differ from the roster's `wounded_last − 1`.
 
+### 3.10 Re-check: the disband test counts standing and routed models only (2026-10) ✅
+
+Re-verified on request (a player recollection was that the original also counts the wounded). D5 stands as written:
+
+- The heal step adds only `returning`, i.e. wounded **from an earlier battle** that were moved there by the P2 shift (or
+  by text op `0x1C`). **This battle's wounded (`wounded_last`, set at P3) are not read by the heal or by the disband
+  test.** They are used only by the debrief display (and are kept in the roster).
+- The disband test is exactly `s_size + s_routed < max(1, s_orgsize × 20 // 100)` (integer division), evaluated after
+  the heal, for every army regiment except the commander's (`whoami 2`) and `keep` regiments. No other strength count
+  is used (not the reinforcement window's `wounded`, and not `s_calualties`).
+- A disbanded regiment is dropped from the army file; its roster `wounded_last` survives and only matters if a script
+  brings the regiment back into the army before the next post-battle debrief (§3.8 B4).
+- **No other place removes a regiment for low strength.** The other ways a regiment leaves the army are script or
+  player decisions that do not look at strength: `unitleavemission`, firing in the book, and dropping regiments that
+  are not hired when the army is rebuilt. A regiment at 0 present models that is kept (`keep`, the commander's) stays,
+  shown as "destroyed" and not selectable (`notes/troop_selection.md`). Artillery with fewer than 2 present models is
+  "destroyed" only for display and selection; disbanding uses the same 20 % rule as everyone.
+- Where the wounded **do** show up before they return: the debrief troop page's wounded column, and the reinforcement
+  limit `s_orgsize − (s_size + s_routed + wounded)` (§3.5), which keeps room for them. Neither keeps a regiment alive.
+
+Vectors (mode 2, `s_orgsize` 20 → limit 4, not `keep`, `whoami ≠ 2`, no op `0x1C`, no `Z`):
+
+| Case | After the battle | P3 `wounded_last` | `returning` at D5 | D5 heal → `s_size` | present | Result |
+|---|---|---|---|---|---|---|
+| a | `s_size` 2, `s_routed` 0, lost 18 | 11 | 0 | 2 | 2 | **disbanded** (the 11 wounded never return unless a script brings the regiment back) |
+| b | `s_size` 3, `s_routed` 0, lost 17 | 11 | 0 | 3 | 3 | **disbanded** |
+| c | `s_size` 0, `s_routed` 0, lost 20 | 13 | 0 | 0 | 0 | **disbanded** |
+| d | `s_size` 2, `s_routed` 0, lost 18; 3 returning from the previous battle | 11 | 3 | 5 | 5 | **kept** with `s_size` 5; next post-battle debrief heals +11 (→ 16, capped at 20) |
+| e | `s_size` 2, `s_routed` 2, lost 16 | 10 | 0 | 2 | 4 | **kept**; the 2 routed rejoin at troop selection (→ 4) |
+| f | as (a), with op `0x1C` on the success page (`bf021`) | 11 → moved to `returning` | 11 | 13 | 13 | **kept** with 13 |
+| g | as (a), `keep` regiment | 11 | 0 | 2 | 2 | kept (never disbanded) |
+
 ## 4. Corrections made to other notes
+
+- §3.10 (2026-10 re-check): no correction; the disband test excludes this battle's wounded, as §3.5 D5 says.
 
 - `notes/game_rules.md` field table rows 40–42 (`s_calualties`, `s_routed`, `s_kills`) and §7.2 "Removal without
   death … adds to `s_routed` instead": removal alive adds to **both** `s_calualties` and `s_routed`; `s_kills` counts
