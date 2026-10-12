@@ -22,11 +22,18 @@ RMYI_VA, RMYI_COUNT, RMYI_STRIDE = 0x5B95F0, 39, 0x34
 STARTING_COMPANY = ("SCRIPT", "STRTARMY.MRC")
 MASTER_ROSTER = ("SCRIPT", "MAXARMY.MRC")  # all 38 regiments; the fresh-campaign PLAY.MRC (notes/campaign.md §4.4)
 ALWAYS_FORCED_WHOAMI = 2  # Grudgebringer Cavalry (the commander); notes/campaign.md §2.3, §3.3
+# The campaign `cost` option's default: every static price is scaled by this percentage once, when a new campaign
+# starts (notes/campaign.md §2.1 options, §2.2, §4.5: saved prices are exactly twice the static table).
+COST_PERCENT = 200
 
 
 @dataclass(frozen=True)
 class RosterRow:
-    """One static RMYI record: notes/campaign.md §4.5."""
+    """One static RMYI record: notes/campaign.md §4.5.
+
+    ``base_price`` is the regiment's current price per model (§2.2): the static price already scaled by
+    `COST_PERCENT`, raised later by promotions.
+    """
 
     whoami: int
     keep: bool
@@ -44,8 +51,14 @@ def static_roster(installation: Installation | str | PathLike[str]) -> dict[int,
     for whoami in range(RMYI_COUNT - 1):
         record = image.u32(RMYI_VA + RMYI_STRIDE * whoami, 13)
         rows[whoami] = RosterRow(whoami, keep=bool(record[0]), for_hire=bool(record[1]),
-                                 wizard=bool(record[2]), artillery=bool(record[3]), base_price=record[9])
+                                 wizard=bool(record[2]), artillery=bool(record[3]),
+                                 base_price=scaled_price(record[9]))
     return rows
+
+
+def scaled_price(static_price: int, cost_percent: int = COST_PERCENT) -> int:
+    """The starting price per model of a new campaign: static price x `cost` % (notes/campaign.md §2.2)."""
+    return static_price * cost_percent // 100
 
 
 @dataclass(frozen=True)

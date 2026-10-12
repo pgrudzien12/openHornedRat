@@ -3,7 +3,7 @@ import tempfile
 import unittest
 
 from whshr import script
-from whshr.roster import Regiment, RosterRow, load_company
+from whshr.roster import COST_PERCENT, Regiment, RosterRow, load_company, scaled_price
 from whshr.script import resource_name
 
 MRC = """[MERCARMY]
@@ -67,6 +67,23 @@ class RosterTests(unittest.TestCase):
 
         self.assertEqual(cannons.price, 99)
         self.assertEqual(cannons.retainer, 9)
+
+    def test_given_a_static_price_when_a_campaign_starts_then_it_is_scaled_by_the_default_cost_of_200_percent(self):
+        self.assertEqual(COST_PERCENT, 200)
+        self.assertEqual(scaled_price(8), 16)
+        self.assertEqual(scaled_price(4), 8)
+        self.assertEqual(scaled_price(0), 0)
+
+    def test_given_the_starting_company_at_default_cost_then_the_first_mission_leaves_280_crowns(self):
+        """notes/campaign.md §2.2 worked check: 500 + 100 - (12 x 16 + 16 x 8) = 280."""
+        cavalry_row = RosterRow(2, keep=False, for_hire=False, wizard=False, artillery=False, base_price=scaled_price(8))
+        infantry_row = RosterRow(3, keep=False, for_hire=True, wizard=False, artillery=False, base_price=scaled_price(4))
+        cavalry = Regiment(2, "Cavalry", True, 12, 12, 13, cavalry_row)
+        infantry = Regiment(3, "Infantry", True, 16, 16, 13, infantry_row)
+
+        self.assertEqual((cavalry.price, cavalry.retainer), (192, 19))
+        self.assertEqual((infantry.price, infantry.retainer), (128, 12))
+        self.assertEqual(500 + 100 - cavalry.price - infantry.price, 280)
 
     def test_given_an_artillery_regiment_with_fewer_than_two_models_then_it_is_destroyed(self):
         cannons = Regiment(14, "Cannon Crew", True, 1, 3, 25, self.roster[14])
