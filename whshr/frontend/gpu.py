@@ -283,16 +283,14 @@ class UnitInfoPanel(ScreenQuad):
         if self.background:
             surface.fill(self.background)
         w, h = self.size
-        y = 0
-        line_h = self.normal_font.get_linesize()
-        name_splitted = name.split() if name else []
-        for part in name_splitted:
-            name_surf = self.normal_font.render(part, True, self.color)
-            surface.blit(name_surf, (0, y))
-            y += line_h
-        # if unit_class:
-        #     class_surf = self.normal_font.render(unit_class, True, self.color)
-        #     surface.blit(class_surf, (4, y))
+        if name:
+            name_surf = self.normal_font.render(name, True, self.color)
+            if name_surf.get_width() > w:
+                name_surf = pygame.transform.smoothscale(name_surf, (w, name_surf.get_height()))
+            surface.blit(name_surf, (0, 0))
+        if unit_class:
+            class_surf = self.normal_font.render(unit_class, True, self.color)
+            surface.blit(class_surf, (0, h - class_surf.get_height()))
         if models is not None and max_models is not None:
             cas = f"{models}/{max_models}"
             cas_surf = self.normal_font.render(cas, True, self.color)

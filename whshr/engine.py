@@ -235,6 +235,10 @@ class Regiment:
     whoami: int = 0
     has_leader: bool = False  # the .BTS unit has a leader (character) block: PlayLeaderAnimation's model
     leader_uid: int | None = None  # stable figure identity; never replaced after its death
+    move: int | None = None  # tabletop M, distinct from world-space speed
+    leader_name: str | None = None
+    leader_move: int | None = None
+    leader_bs: int | None = None
     leader_ws: int | None = None
     leader_strength: int | None = None
     leader_attacks: int | None = None
@@ -737,6 +741,10 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
         "ws": int(profile.get("WS", DEFAULT_PROFILE["WS"])),
         "bs": int(profile.get("BS", DEFAULT_PROFILE["BS"])),
         "strength": int(profile.get("S", DEFAULT_PROFILE["S"])),
+        "move": int(profile["M"]) if "M" in profile else None,
+        "leader_name": leader.get("name"),
+        "leader_move": int(leader_profile["M"]) if "M" in leader_profile else None,
+        "leader_bs": int(leader_profile["BS"]) if "BS" in leader_profile else None,
         "leader_ws": int(leader_profile["WS"]) if "WS" in leader_profile else None,
         "leader_strength": int(leader_profile["S"]) if "S" in leader_profile else None,
         "leader_attacks": int(leader_profile["A"]) if "A" in leader_profile else None,
