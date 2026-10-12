@@ -32,6 +32,9 @@ PACKETS: dict[int, tuple[str, tuple[str, ...]]] = {
     15: ("Hiln", ("SPECIAL",)), 16: ("HelpUs", ("SPECIAL",)), 17: ("Peasant", ("SPECIAL",)),
 }
 ALWAYS_LOADED = frozenset(range(3, 10))  # PROVISIONAL, see the module docstring
+# PROVISIONAL engine choice: the original's voice limit is not known (notes/spell_sounds.md 4); a Wind Blast alone
+# can hold 31 loops, so the battle asks for at least this many mixer channels.
+MIXER_CHANNELS = 48
 ROOTS = (("UPDATE", "BINARY", "SOUND"), ("FILE", "BINARY", "SOUND"))
 HANDLES = {"charge_start": "charge", "charge_stop": "charge", "loop_start": "loop", "loop_stop": "loop"}
 
@@ -90,6 +93,8 @@ class BattleSounds:
         try:
             if pygame.mixer.get_init() is None:
                 pygame.mixer.init()
+            if pygame.mixer.get_num_channels() < MIXER_CHANNELS:
+                pygame.mixer.set_num_channels(MIXER_CHANNELS)
             return True
         except pygame.error:
             return False

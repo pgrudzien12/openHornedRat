@@ -1,5 +1,5 @@
-"""Spell sounds: the Curse of Anraheir's loop (notes/spell_sounds.md section 1.1 vectors) and the frontend's
-per-effect loop handles and pause muting (section 0). Set-up as in test_spell_effects: wizard W at (0, 0)."""
+"""Spell sounds: the Curse of Anraheir's loop (notes/spell_sounds.md section 1.1 vectors), the other spells'
+sounds (section 2) and the frontend's per-effect handles and pause muting (section 0). Set-up as in test_spell_effects: wizard W at (0, 0)."""
 
 import unittest
 
@@ -10,7 +10,7 @@ from whshr.rules import Side
 from tests.test_battle_sound import FakeSounds
 from tests.test_spell_effects import EffectTestCase, unit
 
-CURSE_CUE = (spell_effects.SPELLS_PACKET, spell_effects.CURSE_LOOP)
+CURSE_CUE = (spell_effects.SPELLS_PACKET, spell_effects.SFX_CURSE)
 
 
 class CurseLoopTests(EffectTestCase):
@@ -56,7 +56,7 @@ class CurseLoopTests(EffectTestCase):
         self.sounds()
         self.dice(9)
         self.update()
-        self.assertEqual([cue for cue, _, _ in self.sounds()], ["loop_move", "loop_stop"])
+        self.assertEqual([cue for cue, _, _ in self.sounds()], ["loop_stop"])
 
     def test_a_passed_mounted_panic_test_keeps_the_loop(self):
         self.make(unit("A", 0, 300, leadership=7, mount=1))
@@ -152,6 +152,142 @@ class CurseLoopTests(EffectTestCase):
         self.assertEqual(spell_effects.cancel_owned(self.battle, "W", spell_effects.CURSE), 1)
         self.assertEqual([cue for cue, _, _ in self.sounds()], ["loop_stop"])
 
+
+
+class OtherSpellSoundTests(EffectTestCase):
+    """notes/spell_sounds.md section 2: which `spells` effect each spell starts, when and where."""
+
+    def setUp(self):
+        self.radii = {"A": 40}
+
+    def starts(self):
+        """The sounds started since the last call, as (effect index, position)."""
+        start = getattr(self, "seen", 0)
+        self.seen = len(self.battle.events)
+        return [(event.data["effect"], event.data["position"]) for event in self.battle.events[start:]
+                if event.kind == "sound" and event.data["cue"] == "loop_start"]
+
+    def cues(self):
+        start = getattr(self, "seen", 0)
+        self.seen = len(self.battle.events)
+        return [(event.data["cue"], event.data["effect"]) for event in self.battle.events[start:]
+                if event.kind == "sound"]
+
+    def test_launch_sounds_at_the_caster(self):
+        for code, effect in ((spell_effects.LIGHTNING, spell_effects.SFX_THUNDER),
+                             (spell_effects.WARP_LIGHTNING, spell_effects.SFX_THUNDER),
+                             (spell_effects.FIREBALL, spell_effects.SFX_FIREBALL),
+                             (spell_effects.PIERCING, spell_effects.SFX_FIREBALL),
+                             (spell_effects.BURNING_HEAD, spell_effects.SFX_FIREBALL),
+                             (spell_effects.GAZE, spell_effects.SFX_GAZE),
+                             (spell_effects.SKITTERLEAP, spell_effects.SFX_SKITTERLEAP)):
+            with self.subTest(code=code):
+                self.make()
+                self.seen = 0
+                self.launch(code, 0, 400)
+                self.assertEqual(self.starts(), [(effect, (0, 0))])
+
+    def test_launch_sounds_at_the_aim_point(self):
+        for code, effect in ((spell_effects.FLAMESTORM, spell_effects.SFX_FLAMESTORM),
+                             (spell_effects.FLOCK, spell_effects.SFX_FLOCK),
+                             (spell_effects.SAPPHIRE_ARCH, spell_effects.SFX_SPELL)):
+            with self.subTest(code=code):
+                self.make()
+                self.seen = 0
+                self.launch(code, 100, 400)
+                self.assertEqual(self.starts(), [(effect, (100, 400))])
+
+    def test_madness_sounds_at_the_aim_point(self):
+        self.make(unit("A", 500, 500, Side.PLAYER), wizard_side=Side.ENEMY)
+        self.assertTrue(self.launch(spell_effects.MADNESS, 520, 500))
+        self.assertEqual(self.starts(), [(spell_effects.SFX_MADNESS, (520, 500))])
+
+    def test_unit_spells_loop_at_their_target_and_follow_it(self):
+        for code in (spell_effects.AZURE_BLADES, spell_effects.ERE_WE_GO, spell_effects.MORK_SAVE_UZ):
+            with self.subTest(code=code):
+                self.make(unit("A", 0, 300, Side.PLAYER))
+                self.seen = 0
+                self.assertTrue(self.launch(code, 0, 300))
+                self.assertEqual(self.starts(), [(spell_effects.SFX_SPELL, (0, 300))])
+                self.battle.regiments["A"].x = 50
+                self.update()
+                moves = [(event.data["cue"], event.data["position"]) for event in self.battle.events[self.seen:]
+                         if event.kind == "sound"]
+                self.assertEqual(moves, [("loop_move", (50, 300))])
+
+    def test_silent_spells_start_no_sound(self):
+        for code in (spell_effects.STORM, spell_effects.TANGLING_THORN, spell_effects.HUNTING_SPEAR,
+                     spell_effects.DISPEL_MAGIC, spell_effects.FISTS, spell_effects.PESTILENT_BREATH):
+            with self.subTest(code=code):
+                self.make(unit("A", 0, 300))
+                self.seen = 0
+                self.launch(code, 0, 300)
+                self.update(30)
+                self.assertEqual(self.starts(), [])
+
+    def test_a_one_shot_is_stopped_when_its_effect_ends(self):
+        self.make()
+        self.launch(spell_effects.LIGHTNING, 0, 400)
+        self.cues()
+        for _ in range(100):
+            self.update()
+            if not self.effects():
+                break
+        self.assertEqual(self.cues(), [("loop_stop", spell_effects.SFX_THUNDER)])
+
+    def test_the_burning_head_laughs_from_its_first_flight_step_and_carries_the_laugh(self):
+        self.make()
+        self.launch(spell_effects.BURNING_HEAD, 0, 400)
+        self.starts()
+        self.update()
+        effect = self.effects()[0]
+        self.assertEqual(self.starts(), [(spell_effects.SFX_LAUGH, (effect.x, effect.y))])
+        self.update()
+        self.assertEqual(self.cues(), [("loop_move", spell_effects.SFX_LAUGH)])
+
+    def test_wind_blast_starts_wind1_at_launch_and_a_wind2_loop_per_trail_deposit(self):
+        self.make()
+        self.launch(spell_effects.WIND_BLAST, 0, 400)
+        self.assertEqual(self.starts(), [(spell_effects.SFX_WIND1, (0, 0))])
+        self.update(80)
+        effect = self.effects()[0]
+        self.assertGreater(len(effect.trail), 0)
+        self.assertEqual([index for index, _ in self.starts()], [spell_effects.SFX_WIND2] * len(effect.trail))
+        spell_effects.cancel_owned(self.battle, "W", spell_effects.WIND_BLAST)
+        self.assertEqual([cue for cue, _ in self.cues()], ["loop_stop"] * (1 + len(effect.trail)))
+
+    def test_da_krunch_sounds_when_the_foot_stands(self):
+        self.make()
+        self.launch(spell_effects.DA_KRUNCH, 0, 400)
+        self.assertEqual(self.starts(), [])
+        self.update(spell_effects.KRUNCH_STAND)
+        self.assertEqual(self.starts(), [])
+        self.update()
+        self.assertEqual(self.starts(), [(spell_effects.SFX_DA_KRUNCH, (0, 400))])
+
+    def test_conflagration_sounds_when_the_fire_reaches_the_ground(self):
+        self.make()
+        self.dice(2)  # k = 3: the fall ends at T + 9k + 9 = T + 36
+        self.launch(spell_effects.CONFLAGRATION, 0, 400)
+        self.update(36)
+        self.assertEqual(self.starts(), [])
+        self.update()
+        self.assertEqual(self.starts(), [(spell_effects.SFX_DOOM, (0, 400))])
+
+    def test_the_flying_bower_winds_stop_at_the_landing(self):
+        self.radii = {"W": 16}
+        self.make()
+        self.launch(spell_effects.FLYING_BOWER, 0, 900)
+        self.assertEqual(self.starts(), [(spell_effects.SFX_WIND1, (0, 0))])
+        self.update(spell_effects.BOWER_LIFT)
+        self.assertEqual(self.starts(), [])
+        self.update()
+        self.assertEqual([index for index, _ in self.starts()], [spell_effects.SFX_WIND2])
+        self.update(spell_effects.BOWER_FLIGHT)
+        self.assertEqual(self.cues(), [("loop_move", spell_effects.SFX_WIND2)] * spell_effects.BOWER_FLIGHT)
+        self.update()
+        self.assertEqual(self.cues(), [("loop_stop", spell_effects.SFX_WIND1), ("loop_stop", spell_effects.SFX_WIND2)])
+        self.assertTrue(self.effects())
 
 class FakeChannel:
     def __init__(self):

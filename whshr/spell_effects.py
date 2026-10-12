@@ -44,9 +44,12 @@ DISPEL_REACH = 80  # B 5.1
 UNDER_POINT_MIN = 48  # B 0.1
 FISTS_REACH = 16  # B 4
 LASTING = 180  # B 1.3, 3, 4, 5.2; C3 2.1
-# spell_sounds.md 1: the Curse's loop is effect 15 of the `spells` packet (slot 3). PROVISIONAL: played
-# non-positionally by the frontend (the attenuation law and listener point are open, spell_sounds.md 4).
-SPELLS_PACKET, CURSE_LOOP = 3, 15
+# spell_sounds.md 1-2: effect indices of the `spells` packet (slot 3). PROVISIONAL: played non-positionally by the
+# frontend (the attenuation law, the two placement modes and the listener point are open, spell_sounds.md 4).
+SPELLS_PACKET = 3
+SFX_FIREBALL, SFX_LAUGH, SFX_THUNDER, SFX_WIND1, SFX_WIND2, SFX_FLOCK = 0, 1, 2, 3, 4, 6
+SFX_FLAMESTORM, SFX_DA_KRUNCH, SFX_SKITTERLEAP, SFX_DOOM, SFX_GAZE, SFX_MADNESS = 7, 8, 9, 10, 11, 12
+SFX_SPELL, SFX_CURSE = 13, 15
 SKITTER_FRAMES = 4  # B 2
 WIND_TICKS = 500  # B 7: winds at the start of ticks 501, 1001, ... (first tick = 1) at 10 ticks/s
 RANK_DEPTH = 6  # C3 conventions: the footprint centre lies (ranks - 1) x 6 behind the unit position
@@ -127,6 +130,17 @@ GUST = Bolt("origin", 0, 0, False, False, 3, 1, True, False)  # C1 1.3: height 0
 UNIT_TARGET = frozenset({AZURE_BLADES, HUNTING_SPEAR, CURSE, ERE_WE_GO, MORK_SAVE_UZ, MADNESS})  # B 0.1
 REPLACING = frozenset({WIND_BLAST, FLAMESTORM, TANGLING_THORN})  # C1 6 (Curse replaces only with a target, C2 4.1)
 PROJECTILE_POSITION = frozenset({*BOLTS, WIND_BLAST, FLYING_BOWER})  # B 5.1: dispelled where the projectile is
+# spell_sounds.md 2: the sound each spell starts at its launch, and where: the caster's centre, the aim point, or the
+# target's centre (then moved to the target's centre every effect step). Phase sounds are started by the updates;
+# Storm of Shemtek, Tangling Thorn, Hunting Spear, Dispel Magic, Fists of Gork and Pestilent Breath are silent.
+LAUNCH_SOUNDS: dict[int, tuple[int, str]] = {
+    WIND_BLAST: (SFX_WIND1, "caster"), AZURE_BLADES: (SFX_SPELL, "target"), SAPPHIRE_ARCH: (SFX_SPELL, "aim"),
+    LIGHTNING: (SFX_THUNDER, "caster"), PIERCING: (SFX_FIREBALL, "caster"), BURNING_HEAD: (SFX_FIREBALL, "caster"),
+    FLAMESTORM: (SFX_FLAMESTORM, "aim"), FIREBALL: (SFX_FIREBALL, "caster"), FLYING_BOWER: (SFX_WIND1, "caster"),
+    CURSE: (SFX_CURSE, "target"), FLOCK: (SFX_FLOCK, "aim"), GAZE: (SFX_GAZE, "caster"),
+    ERE_WE_GO: (SFX_SPELL, "target"), MORK_SAVE_UZ: (SFX_SPELL, "target"), WARP_LIGHTNING: (SFX_THUNDER, "caster"),
+    SKITTERLEAP: (SFX_SKITTERLEAP, "caster"), MADNESS: (SFX_MADNESS, "aim"),
+}
 
 
 @dataclass
@@ -186,7 +200,7 @@ class Effect:
     saved_side: Side | None = None
     saved_initiative: int = 0
     saved_speed: float = 0.0
-    # Loop sounds this effect owns, as (packet, effect index); all stop in its end step (spell_sounds.md 0).
+    # Sounds this effect has started, as (packet, effect index); all stop in its end step (spell_sounds.md 0).
     sounds: list[tuple[int, int]] = field(default_factory=list[tuple[int, int]])
 
 
@@ -427,8 +441,24 @@ def launch(battle: Battle, code: int, caster: Regiment, origin_model: int, x: fl
     battle.events.append(BattleEvent(f"{caster.name} casts spell {spell}", "spell", regiment=caster.identifier,
                                      spell=spell, x=x, y=y))
     _start(battle, effect, caster, origin_model, target)
+    _launch_sound(battle, effect, caster, target)
     effects.add(effect)
     return True
+
+
+def _launch_sound(battle: Battle, effect: Effect, caster: Regiment, target: Regiment | None) -> None:
+    """spell_sounds.md 2: the launch sound, in the launch step (after the launch state, e.g. the Curse's halving)."""
+    sound = LAUNCH_SOUNDS.get(effect.code)
+    if sound is None:
+        return
+    index, place = sound
+    if place == "target" and target is not None:
+        at = footprint_centre(target)
+    elif place == "aim":
+        at = effect.aim
+    else:
+        at = footprint_centre(caster)
+    _start_sound(battle, effect, index, at)
 
 
 def _start(battle: Battle, effect: Effect, caster: Regiment, origin_model: int, target: Regiment | None) -> None:
@@ -452,7 +482,6 @@ def _start(battle: Battle, effect: Effect, caster: Regiment, origin_model: int, 
         effect.saved_speed, effect.saved_initiative = target.speed_per_tick, target.initiative
         target.speed_per_tick = target.speed_per_tick / 2
         target.initiative = target.initiative // 2
-        _start_loop(battle, effect, SPELLS_PACKET, CURSE_LOOP, footprint_centre(target))
     elif spell in (MORK_SAVE_UZ, FISTS, DISPEL_MAGIC, AZURE_BLADES):
         effect.timer = LASTING
     elif spell == SKITTERLEAP:
@@ -809,6 +838,7 @@ def tick(battle: Battle) -> None:
     for effect in effects.effects():
         if not effect.ended:
             _update(battle, effect)
+            _follow_target(battle, effect)
             effect.elapsed += 1
 
 
@@ -834,6 +864,8 @@ def _update(battle: Battle, effect: Effect) -> None:
     if code in BOLTS:
         if _fly(battle, effect, BOLTS[code]):
             _finish(effect)
+        if code == BURNING_HEAD:
+            _burning_head_laugh(battle, effect)
     elif code in updates:
         updates[code](battle, effect)
     elif code == TANGLING_THORN:
@@ -842,6 +874,14 @@ def _update(battle: Battle, effect: Effect) -> None:
         _end(battle, effect)
     else:
         effect.timer -= 1
+
+
+def _follow_target(battle: Battle, effect: Effect) -> None:
+    """spell_sounds.md 1-2: a target-placed launch sound moves to the target's centre every effect step."""
+    target = battle.regiments.get(effect.target or "")
+    sound = LAUNCH_SOUNDS.get(effect.code)
+    if not effect.ended and target is not None and effect.sounds and sound is not None and sound[1] == "target":
+        _move_sound(battle, effect, 0, footprint_centre(target))
 
 
 def _finish(effect: Effect) -> None:
@@ -907,6 +947,15 @@ def _fly(battle: Battle, effect: Effect, bolt: Bolt) -> bool:
         _log_end(battle, effect, "hit", x, y, height)
         return True
     return False
+
+
+def _burning_head_laugh(battle: Battle, effect: Effect) -> None:
+    """spell_sounds.md 2: the laugh (one-shot) starts at the head on its first flight step and is moved with it on
+    every later one. The engine ignores Shift (spell_effects.md 3.9), so the laugh always plays."""
+    if len(effect.sounds) < 2:
+        _start_sound(battle, effect, SFX_LAUGH, (effect.x, effect.y))
+    else:
+        _move_sound(battle, effect, 1, (effect.x, effect.y))
 
 
 def _log_end(battle: Battle, effect: Effect, reason: str, x: float, y: float, height: float) -> None:
@@ -1102,6 +1151,7 @@ def _update_wind_blast(battle: Battle, effect: Effect) -> None:
             effect.trail.append(effect.previous)
             effect.trail_jitter.append((0, 0))
             _add_area(battle, effect, TRAIL_RADIUS, TRAIL_HEIGHT, at=effect.previous)
+            _start_sound(battle, effect, SFX_WIND2, (effect.x, effect.y))  # spell_sounds.md 2: a new loop per deposit
     # spell_obstacle_visuals.md 2.2: every update, after the deposit, each trail sprite (oldest first, a new one
     # included) takes a fresh offset 8 - (rand mod 16) on x then y; these draws share the battle's stream.
     effect.trail_jitter = [(TRAIL_JITTER - battle.rng.randrange(2 * TRAIL_JITTER),
@@ -1143,6 +1193,7 @@ def _update_krunch(battle: Battle, effect: Effect) -> None:
                 slay(battle, unit, None, animation.DEATH_MISSILE, effect.owner)
     elif e == KRUNCH_STAND:
         _add_area(battle, effect, KRUNCH_REACH, 40)
+        _start_sound(battle, effect, SFX_DA_KRUNCH, effect.aim)  # spell_sounds.md 2: when the foot stands
     elif e == KRUNCH_LIFT:
         _remove_areas(battle, effect)
     elif e >= KRUNCH_END:
@@ -1181,6 +1232,7 @@ def _update_conflagration(battle: Battle, effect: Effect) -> None:
                 count = max(1, unit.models * (reach - d + fp) // (2 * fp))
             slay(battle, unit, count, animation.DEATH_FIRE, effect.owner)
         effect.places = [None] * (BURST_PLACES_PER_K * k)
+        _start_sound(battle, effect, SFX_DOOM, effect.aim)  # spell_sounds.md 2: the fire reaches the ground
     elif e > 9 * k + 9:
         _conflagration_embers(battle, effect, e - 9 * k)
 
@@ -1296,10 +1348,7 @@ def _update_curse(battle: Battle, effect: Effect) -> None:
     """The Curse of Anraheir (C2 4.2): a mounted target takes a panic test on every tick of segment 10; a failure
     ends the Curse in the same step. No other natural end."""
     target = battle.regiments.get(effect.target or "")
-    if target is None:
-        return
-    _move_loops(battle, effect, footprint_centre(target))  # spell_sounds.md 1: the loop follows the target
-    if not target.mount:
+    if target is None or not target.mount:
         return
     if combat.segment_state(battle.tick_count)[2] != combat.SEGMENTS_PER_TURN:
         return
@@ -1367,11 +1416,14 @@ def _update_bower(battle: Battle, effect: Effect) -> None:
                     _queue(battle, other.identifier, EVENT_ROUTED, source=unit.identifier)
         unit.braced = False
         _bower_step(battle, effect)
+        _start_sound(battle, effect, SFX_WIND2, (effect.x, effect.y))  # spell_sounds.md 2: follows the flight
     elif BOWER_LIFT < e < BOWER_LIFT + BOWER_FLIGHT + 1:
         _place_centre(unit, effect.x, effect.y)  # the projectile's position of the previous step
         _bower_step(battle, effect)
+        _move_sound(battle, effect, 1, (effect.x, effect.y))
     elif e == BOWER_LIFT + BOWER_FLIGHT + 1:
         _place_centre(unit, *effect.aim)
+        _stop_sounds(battle, effect)  # spell_sounds.md 2: both winds stop at the landing
         table(battle).flying.discard(unit.identifier)
         _sync_lifted(battle, unit)
         effect.flying = False
@@ -1486,7 +1538,7 @@ def _end(battle: Battle, effect: Effect) -> None:
     effects = table(battle)
     effects.remove(effect)
     _remove_areas(battle, effect)
-    _stop_loops(battle, effect)
+    _stop_sounds(battle, effect)
     target = battle.regiments.get(effect.target) if effect.target is not None else None
     if effect.code == MADNESS and target is not None and effect.saved_side is not None:
         target.side = effect.saved_side
@@ -1511,27 +1563,30 @@ def _end(battle: Battle, effect: Effect) -> None:
             _sync_lifted(battle, owner)
 
 
-def _sound_event(battle: Battle, effect: Effect, cue: str, packet: int, index: int,
-                 at: tuple[float, float] | None) -> None:
+def _sound_event(battle: Battle, effect: Effect, cue: str, ordinal: int, at: tuple[float, float] | None) -> None:
+    packet, index = effect.sounds[ordinal]
     battle.events.append(BattleEvent(f"sound {cue} {packet}/{index}", "sound", regiment=effect.owner, cue=cue,
-                                     packet=packet, effect=index, position=at, handle=f"spell {effect.serial} {packet}/{index}"))
+                                     packet=packet, effect=index, position=at,
+                                     handle=f"spell {effect.serial} {ordinal}"))
 
 
-def _start_loop(battle: Battle, effect: Effect, packet: int, index: int, at: tuple[float, float]) -> None:
-    """Start a loop sound owned by the effect at a battlefield point (spell_sounds.md 0)."""
-    effect.sounds.append((packet, index))
-    _sound_event(battle, effect, "loop_start", packet, index, at)
+def _start_sound(battle: Battle, effect: Effect, index: int, at: tuple[float, float]) -> None:
+    """Start a `spells` packet sound owned by the effect at a battlefield point (spell_sounds.md 0). It is sent as a
+    handled `loop_start` cue: the packet's LOOP flag decides whether it repeats, and the handle lets the end step stop
+    a one-shot that is still playing. Each call is a new copy (Wind Blast's trail loops)."""
+    effect.sounds.append((SPELLS_PACKET, index))
+    _sound_event(battle, effect, "loop_start", len(effect.sounds) - 1, at)
 
 
-def _move_loops(battle: Battle, effect: Effect, at: tuple[float, float]) -> None:
-    for packet, index in effect.sounds:
-        _sound_event(battle, effect, "loop_move", packet, index, at)
+def _move_sound(battle: Battle, effect: Effect, ordinal: int, at: tuple[float, float]) -> None:
+    if ordinal < len(effect.sounds):
+        _sound_event(battle, effect, "loop_move", ordinal, at)
 
 
-def _stop_loops(battle: Battle, effect: Effect) -> None:
+def _stop_sounds(battle: Battle, effect: Effect) -> None:
     """Every end or cancel path stops all of the effect's sounds in the same step (spell_sounds.md 0)."""
-    for packet, index in effect.sounds:
-        _sound_event(battle, effect, "loop_stop", packet, index, None)
+    for ordinal in range(len(effect.sounds)):
+        _sound_event(battle, effect, "loop_stop", ordinal, None)
     effect.sounds.clear()
 
 
