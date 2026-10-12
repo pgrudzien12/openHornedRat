@@ -541,6 +541,12 @@ class Hud:
         for slot, (x, y) in SLOT_POSITIONS.items():
             yield slot, pygame.Rect(sub_x + x, sub_y + y, *SLOT_SIZE)
 
+    def panel_top(self) -> float | None:
+        """Screen y of the command panel's top edge, where the visible battlefield ends; None before the first draw."""
+        if self._draw_size is None:
+            return None
+        return self._panel_screen_origin()[1]
+
     def occupies(self, pos: Sequence[float]) -> bool:
         """Whether *pos* lands on any HUD chrome, including non-actionable pixels."""
         if self._draw_size is None:
