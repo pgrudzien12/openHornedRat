@@ -2078,7 +2078,7 @@ class ScriptInterpreter:
         even when the result is false, the aim point replaces the unit's final waypoint (the only waypoint when none
         is queued) unless the unit is in melee. True only when the unit faces the aim point within 22.5 degrees,
         the line to it is not obstructed by a blocking object or unit (a friendly unit in the way included), the
-        target is not charging, the unit is not charging, in melee, latched or about to re-form, it has exactly one
+        target is not charging (a target already fighting is not, even with its attack target kept), the unit is not charging, in melee, latched or about to re-form, it has exactly one
         waypoint, the aim point is within 12 x s_rlmv of the target's bounding circle and the unit does not stand in
         a blocking boundary region. For a building target the aim point is its centre and the reach is measured from
         its radius (notes/building_units.md 6); the building case does not yet apply the other tests."""
@@ -2103,7 +2103,7 @@ class ScriptInterpreter:
         heading = self._bearing_from_to((unit.x, unit.y), leg)
         waypoint_count = len(unit.waypoints) + (0 if unit.waypoints or unit.target_x is None else 1)
         if (self._fold(heading - unit.direction) >= 32 or charging or unit.in_melee
-                or target.attack_target is not None or state.contact_latch
+                or self._charge_moving(target) or state.contact_latch
                 or state.pending_reform_ranks is not None or waypoint_count != 1
                 or self.battle.path_obstructed(unit, leg, ignore=target.identifier)):
             return state.pc + 1
@@ -3193,6 +3193,12 @@ class ScriptInterpreter:
             self.event_bus.queue_event(unit_id, Event(code=0x0D))
         state.cond_flags = unit.attack_target is None and not unit.in_melee
         return state.pc + 1
+
+    @staticmethod
+    def _charge_moving(unit: "Regiment") -> bool:
+        """Still running a charge (or pursuit) move: an attack target held while not yet fighting. Engagement ends
+        the charge move (game_rules.md "Charge"), so a unit that keeps its attack target in melee is not charging."""
+        return unit.attack_target is not None and not unit.in_melee
 
     def _charging(self, unit: "Regiment") -> bool:
         """Charging: running at an attack target, not yet fighting and not pursuing a routing unit."""
