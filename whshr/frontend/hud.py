@@ -7,8 +7,8 @@ frame of the installation's ICONS sheet (225 frames); nothing here is procedural
 invented by the engine.
 
 Order dispatch: `whshr.engine.Battle` implements move, attack, Fire, halt, ranks, facing,
-Independent, Fight harder, Rally and activated items. Not modelled: whether the Rally button shows the
-rally-attempt state as pressed (notes/pursuit_restraint.md 3, untraced), so it does not. Other panel orders remain disabled until their engine paths exist.
+Independent, Fight harder, Rally and activated items. The Rally hand stays pressed while
+rally attempts are enabled. Other panel orders remain disabled until their engine paths exist.
 Buttons for orders without engine support still render at their documented position and icon (so
 the panel looks and navigates correctly) but are disabled; panel-state *navigation* (which
 sub-panel is shown) is implemented in full, since that is pure UI state independent of which
@@ -1078,6 +1078,7 @@ class Hud:
             enabled = self._button_enabled(command, regiment)
             pressed = (self.pressed == command
                        or command == "independent" and regiment is not None and regiment.independent
+                       or command == "rally" and regiment is not None and regiment.rally_attempt
                        # PROVISIONAL (notes/player_magic_panel.md 4.1): Magic is drawn held while the list is shown
                        or command == "magic" and getattr(self, "spell_list_open", False))
             frame_index = frames[1] if pressed and frames[1] != frames[0] else frames[0]

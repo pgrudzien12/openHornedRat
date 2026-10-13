@@ -142,4 +142,8 @@ off unless stated. "Boundary → n" = the boundary tick on which the segment num
 
 ## 8. Uncertainties
 
-- 🟡 HUD indication of the rally-attempt state (§3).
+- 🟡 Original HUD indication of the rally-attempt state (§3) remains untraced. The engine
+  follows the requested UI behaviour: the open-hand Rally button is raised when attempts
+  are off and stays pressed while they are on, including after mouse release. Clicking it
+  again switches attempts off and raises the button. This displays the existing state;
+  it does not change the Leadership test or its schedule.
