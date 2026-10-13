@@ -454,9 +454,11 @@ def _launch_innate(battle: Battle, unit: Regiment, code: int,
         z0 = z1 = 0.0
         if code == 14:
             from .spell_effects import flying_aim_height
-            # L + line(t), with L=20 and no cast-Fireball arc. Baseline precedes displacement.
+            # User-requested visual path: straight from the elevated origin to target ground
+            # (or a flying target's aim height). Unlike the original's L+A endpoint, no extra
+            # launch elevation is added at the destination. Puffs stay where the head passed.
             z0 = math.floor(battle.ground_height(unit.x, unit.y) + 0.5) + 40
-            z1 = (math.floor(battle.ground_height(x1, y1) + 0.5) + 20
+            z1 = (math.floor(battle.ground_height(x1, y1) + 0.5)
                   + math.trunc(flying_aim_height(battle, *aim)))
         battle.innate_projectiles.append(InnateProjectile(unit.identifier, code, *origin, x1, y1,
                                                         x=origin[0], y=origin[1], z0=z0, z1=z1, z=z0))

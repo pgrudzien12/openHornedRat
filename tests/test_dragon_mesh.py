@@ -255,25 +255,25 @@ class DragonFlameOriginTests(unittest.TestCase):
                 self.assertEqual((flame.x, flame.y), origin)
                 self.assertEqual(flame.z, 40)
 
-    def test_flat_ground_height_runs_from_forty_to_twenty_without_arc(self):
+    def test_flat_ground_height_runs_from_forty_to_ground_without_arc(self):
         from whshr.ranged import _step_innate
         battle = self.launch(341)
         flame = battle.innate_projectiles[0]
-        self.assertEqual((flame.z0, flame.z1, flame.z), (40, 20, 40))
+        self.assertEqual((flame.z0, flame.z1, flame.z), (40, 0, 40))
         previous = flame.z
         for _ in range(9):
             _step_innate(battle)
             self.assertLessEqual(flame.z, previous)
             previous = flame.z
-        self.assertEqual(flame.z, 20)
+        self.assertEqual(flame.z, 0)
 
     def test_height_baseline_samples_unit_before_shift_and_does_not_resample_current_ground(self):
         from whshr.ranged import _step_innate
         battle = self.launch(340, lambda x, y: 7.5 if (x, y) == (1120, 600) else 23.4)
         flame = battle.innate_projectiles[0]
-        self.assertEqual((flame.z0, flame.z1, flame.z), (48, 43, 48))
+        self.assertEqual((flame.z0, flame.z1, flame.z), (48, 23, 48))
         _step_innate(battle)
-        self.assertEqual(flame.z, 47)
+        self.assertEqual(flame.z, 45)
 
     def test_renderer_uses_fireball_sprites_at_absolute_flame_height_instead_of_fire_meshes(self):
         from whshr.frontend.battle_view import BattleView
