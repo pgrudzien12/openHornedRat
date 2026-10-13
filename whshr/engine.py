@@ -2821,7 +2821,13 @@ class Battle:
             # A scattered model walks to its own destination, not its slot (notes/scatter_models_to_node.md:
             # the regiment position and slots do not change), unless the regiment has an order of its own.
             busy = regiment.in_melee or regiment.routing or regiment.attack_target or regiment.moving
-            scatter = model.scatter_target if not busy else None
+            if busy:
+                # The scatter destination is only the model's target in the unit's current layout
+                # (notes/script_spawn_move.md 8.3: stored relative to the unit); an order of the unit's own gives
+                # the model its slot again, so the destination is gone, not merely paused. Kept, it pulled a
+                # BF037 Rat Ogre's figure back across the map to its starting scatter point once its charge ended.
+                model.scatter_target = None
+            scatter = model.scatter_target
             tx, ty = cell if cell is not None else scatter if scatter is not None else slot
             dx, dy = tx - px, ty - py
             distance = math.hypot(dx, dy)
