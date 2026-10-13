@@ -74,12 +74,16 @@ def wagon_layout_direction(facing: float, view_angle: float | None) -> float:
     return ((facing - offset + step / 2) // step * step + offset) % formation.FULL_TURN
 
 
-def speed_per_tick(move_stat: float | None, initiative_stat: float | None, k: float = MOVING_FREELY_K) -> float:
+def speed_per_tick(move_stat: float | None, initiative_stat: float | None, k: float = MOVING_FREELY_K,
+                   neutral: bool = False) -> float:
     """World units a regiment covers in one 100 ms tick (game_rules.md, "Real time and movement"):
-    ``s_rlmv = trunc(4.8 * M + I) / 2``, then ``s_rlmv * k / 16`` units per tick. ``k`` selects the
-    movement mode: 1.8 moving freely, 1.0 closing, 2.5 charging or in melee, 1.5 fleeing.
+    ``s_rlmv = trunc(4.8 * M + I) / 2``, or ``trunc(2.4 * M) + 4`` for a neutral-side unit (game_rules.md
+    "Speed stat"; the BF015/BF017 wagons, M 2, get 8 rather than 4.5), then ``s_rlmv * k / 16`` units per tick.
+    ``k`` selects the movement mode: 1.8 moving freely, 1.0 closing, 2.5 charging or in melee, 1.5 fleeing.
     """
-    if move_stat is None or initiative_stat is None:
+    if neutral and move_stat is not None:
+        s_rlmv = float(math.trunc(2.4 * move_stat) + 4)
+    elif move_stat is None or initiative_stat is None:
         s_rlmv = DEFAULT_S_RLMV
     else:
         s_rlmv = math.trunc(4.8 * move_stat + initiative_stat) / 2
@@ -737,7 +741,8 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
     hud_class = HUD_CLASS_BY_RACE_TYPE.get(side & 0x3F) if side is not None else None
     race = stat_int(fields, "s_race")
     return {
-        "speed_per_tick": speed_per_tick(move_stat, profile.get("I", DEFAULT_PROFILE["I"])),
+        "speed_per_tick": speed_per_tick(move_stat, profile.get("I", DEFAULT_PROFILE["I"]),
+                                         neutral=side is not None and side_of_code(side) == Side.NEUTRAL),
         "ws": int(profile.get("WS", DEFAULT_PROFILE["WS"])),
         "bs": int(profile.get("BS", DEFAULT_PROFILE["BS"])),
         "strength": int(profile.get("S", DEFAULT_PROFILE["S"])),
@@ -3431,6 +3436,12 @@ class Battle:
         regiment.target_x = regiment.target_y = None
         regiment.waypoints.clear()
         self.reform_to_ranks(regiment, regiment.ranks, walk_back=True)  # as Rally (notes/reform_while_moving.md 6)
+
+    def minimap_marker_suppressed(self, regiment: Regiment) -> bool:
+        """Whether script flags keep the regiment's minimap marker off, independently of `hidden`
+        (notes/deployment.md 1.3, "Minimap dots/banners")."""
+        state = self.event_bus.unit_states.get(regiment.identifier)
+        return state is not None and bool(state.unit_flags & interpreter.MINIMAP_MARKER_OFF_FLAGS)
 
     def _marked(self, regiment: Regiment) -> bool:
         state = self.event_bus.unit_states.get(regiment.identifier)

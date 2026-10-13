@@ -50,6 +50,9 @@ CASTING_SEQUENCE_FLAG2 = 2
 WIZARD_CLASS = 5  # s_race class Wizard (game_rules.md section 3)
 TRACK_THREAT = 15  # SetBehaviour code of the standard threat-tracking AI (notes/script_queries.md 12.1)
 CAST_ONLY_TARGET_FLAG = 0x4000000  # SetUnitFlags operand: CastPending drops the target after the cast
+# SetUnitFlags operand bits that hide a unit's minimap marker whatever its hidden flag (notes/deployment.md 1.3);
+# BF015/BF017 script 0 sets 0x30000000 on the waiting relief column and clears it when the unit is placed.
+MINIMAP_MARKER_OFF_FLAGS = 0x20400000
 LEAVING_BATTLE_FLAG = 0x100  # SetUnitFlags 256: the unit is leaving the battle (objective G, game_rules.md R60)
 VIEW_CONE = 71  # +-50 degrees in 1/512 turn, doubled while the looker is in melee (game_rules.md visibility)
 REACT_VIEW_CONE = 85  # ReactToThreat's wider +-60 degrees (notes/threat_events_nodes.md, part A 6)

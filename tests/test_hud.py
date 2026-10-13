@@ -382,6 +382,19 @@ class PanelStateTests(unittest.TestCase):
         self.assertEqual([r.identifier for r in hud._minimap_regiments()], ["player", "ally"])
         self.assertTrue(hud.battle.regiments["player"].hidden)
 
+    def test_given_a_waiting_relief_column_flagged_off_the_map_then_its_marker_returns_once_placed(self):
+        # notes/deployment.md 1.3: script flags 0x20400000 suppress the marker independently of `hidden`;
+        # BF015 script 0 sets 0x30000000 before battle start and clears it when the unit is placed.
+        from whshr.interpreter import UnitScriptState
+        hud = _hud()
+        ally = Regiment("ally", "Ally", 200, 200, 0, Side.NEUTRAL, hidden=True)
+        hud.battle.regiments["ally"] = ally
+        state = UnitScriptState(script_id=0, unit_flags=0x30000000)
+        hud.battle.event_bus.unit_states["ally"] = state
+        self.assertNotIn("ally", [r.identifier for r in hud._minimap_regiments()])
+        state.unit_flags &= ~0x30000000
+        self.assertIn("ally", [r.identifier for r in hud._minimap_regiments()])
+
     def test_given_deployment_then_each_class_has_only_its_documented_controls(self):
         expected = {
             "inf": {"TL": "ranks_up", "TR": "move", "BR": "independent", "BL": "ranks_down", "C": "facing_subset"},
