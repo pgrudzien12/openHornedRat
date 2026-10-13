@@ -499,15 +499,16 @@ class Hud:
             return None, None  # classes with no command buttons at all
         if self.battle is not None and self.battle.casting(regiment.identifier):
             return "casting", unit_class  # empty command slots until the cast resolves (player_magic_panel.md 1)
+        if regiment.routing or regiment.pursuing:
+            # A pursuit retains its attack target and may also retain the charge marker.
+            # Broken/pursuing units use Rally, ahead of charge/melee panels (game_rules.md Battle HUD).
+            return "rally", unit_class
         if (not regiment.in_melee and (regiment.charge_started_target is not None
                 and regiment.charge_started_target == regiment.attack_target
                 or regiment.free_charging and regiment.moving)):
             return "charging", unit_class
         if regiment.in_melee or regiment.braced:
             return ("melee_caster" if self._caster(regiment) else "melee_noncaster"), unit_class
-        if regiment.routing or regiment.pursuing:
-            # Broken and pursuing units use the same Rally command set.
-            return "rally", unit_class
         if self.panel_set == "attack":
             return ("attack_caster" if self._caster(regiment) else "attack_noncaster"), unit_class
         return self.panel_set, unit_class
