@@ -872,12 +872,12 @@ class ScriptInterpreter:
 
     def op_IfSwitchScriptHigh(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """IfSwitchScriptHigh N: request switching to script N at end of tick, overriding any
+        """IfSwitchScriptHigh N: when true, request switching to script N at end of tick, overriding any
         other pending switch this tick (the "high priority" variant per game_rules.md). Unlike the normal
         switches it restarts the requested script even when the unit is already running it."""
-        if operand is not None:
+        if operand is not None and state.cond_flags:
             self._request_switch(state, operand, override=True, high=True)
-        return state.pc + 1
+        return state.pc + 2
 
     def op_IfNotSwitchScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
@@ -4411,15 +4411,21 @@ class ScriptInterpreter:
 
     def op_EnemyRouted(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """EnemyRouted: test if any enemy unit is routing/fleeing."""
-        battle = self.battle
-        regiment = battle.regiments.get(unit_id)
-        if regiment:
-            for other in battle.regiments.values():
-                if other.side != regiment.side and other.active and other.routing:
-                    state.cond_flags = 1
-                    return state.pc + 1
-        state.cond_flags = 0
+        """game_rules.md 'Opcode 0x53 in full': only react to the current target's rout.
+        Scripts choose pursuit or the class-specific alternative; an approacher reports target gone.
+        The grid switch shares TargetGone's unmodelled pairing-mode/direction resets."""
+        unit = self.battle.regiments.get(unit_id)
+        source = state.current_event.source
+        state.cond_flags = False
+        if (unit is None or self._busy_casting(unit, state) or state.current_target is None
+                or source is None or source != state.current_target[0]):
+            return state.pc + 1
+        if unit.in_melee:
+            state.cond_flags = not self._switch_opponent(state, unit, source)
+        elif unit.charging:
+            state.cond_flags = True
+        else:
+            self.event_bus.queue_event(unit_id, Event(code=0x1B, source=source))
         return state.pc + 1
 
     def op_EnemyRoutedStatic(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -4472,11 +4478,12 @@ class ScriptInterpreter:
 
     def op_StartPursuit(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """StartPursuit: chase down a fleeing unit."""
-        if state.current_target:
-            regiment = self.battle.regiments.get(unit_id)
-            if regiment and not regiment.anchored:
-                regiment.attack_target = state.current_target[0]
+        """StartPursuit: enter pursuit movement, ending the charge (runaway_routers_broken.md 1).
+        Anchored or held units cannot start (game_rules.md 'Pursuit')."""
+        regiment = self.battle.regiments.get(unit_id)
+        target = self.battle.regiments.get(state.current_target[0]) if state.current_target else None
+        if regiment is not None and target is not None and not regiment.anchored and not regiment.held:
+            combat.start_pursuit(self.battle, regiment, target)
         return state.pc + 1
 
     def op_ReadyToFire(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,

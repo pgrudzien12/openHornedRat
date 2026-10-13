@@ -227,6 +227,7 @@ class HighPrioritySwitchLockTests(unittest.TestCase):
         player = unit("player", 100, 500, Side.PLAYER)
         battle = Battle(1000, 1000, [player], seed=1995, script_dll=FakeDll(SCRIPTS), script_ids={"player": MAIN})
         state = battle.event_bus.unit_states["player"]
+        state.cond_flags = True
         battle.interpreter.op_IfSwitchScriptHigh(state, APPROACH, [], "player", 0, battle.rng)
         battle.interpreter.op_SwitchScript(state, 163, [], "player", 0, battle.rng)
         self.assertEqual((state.pending_switch, state.pending_switch_high), (APPROACH, True))

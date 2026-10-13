@@ -281,11 +281,19 @@ class SwitchScriptPriorityTests(unittest.TestCase):
         self.assertIsNone(self.interp._take_pending_switch(state))
         self.assertEqual(state.script_id, 7)
 
-    def test_if_switch_script_high_always_overrides(self):
+    def test_if_switch_script_high_overrides_when_true(self):
         state = interpreter.UnitScriptState()
         state.pending_switch = 200
+        state.cond_flags = True
         self.interp.op_IfSwitchScriptHigh(state, 164, [], "t", 0, None)
         self.assertEqual(state.pending_switch, 164)
+
+    def test_if_switch_script_high_preserves_pending_switch_when_false(self):
+        state = interpreter.UnitScriptState()
+        self.interp.op_SwitchScript(state, 200, [], "t", 0, None)
+        self.interp.op_IfSwitchScriptHigh(state, 164, [], "t", 0, None)
+        self.assertEqual(state.pending_switch, 200)
+        self.assertFalse(state.pending_switch_high)
 
     def test_if_not_switch_script_skips_when_already_running_that_script(self):
         state = interpreter.UnitScriptState(script_id=159)

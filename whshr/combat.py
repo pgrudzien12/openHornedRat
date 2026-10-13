@@ -692,9 +692,9 @@ def resolve_contacts(battle: "Battle") -> None:
             fight["grid"] = battle_grid.create(battle, group_id, group)
         battle_grid.update(battle, group_id, fight["grid"], group)
 
-    for regiment, router in left_alone:
+    for regiment, _router in left_alone:
         if not touching[regiment.identifier] and regiment.melee_group is None:
-            _left_alone_after_rout(battle, regiment, router, turn, segment, kept_groups)
+            _left_alone_after_rout(battle, regiment, turn, segment, kept_groups)
 
     for identifier, regiment in by_id.items():
         if not touching[identifier] and regiment.in_melee:
@@ -721,19 +721,11 @@ def resolve_contacts(battle: "Battle") -> None:
             battle.fights.pop(group_id, None)
 
 
-def _left_alone_after_rout(battle: "Battle", regiment: "Regiment", router: "Regiment", turn: int, segment: int,
+def _left_alone_after_rout(battle: "Battle", regiment: "Regiment", turn: int, segment: int,
                            kept_groups: set[str]) -> None:
     """The unit whose engagement partner routed before the grid was built (notes/terror_contact_charge.md 2).
-    The rout's 0x0F reaches it gated on "the router is my current target": then, unless it is busy casting, it
-    pursues the router. Otherwise it stays in melee alone on a grid created this segment, and `resolve_contacts`
-    sends it 0x30 from the next segment on."""
-    interp = battle.interpreter
-    state = battle.event_bus.unit_states.get(regiment.identifier)
-    target = state.current_target[0] if state is not None and state.current_target else None
-    if (target == router.identifier and interp is not None and state is not None
-            and not interp.busy_casting(regiment, state)):
-        _start_pursuit(battle, regiment, router)
-        return
+    Its script handles the queued rout event; until then it stays in melee alone on a grid created this
+    segment. `resolve_contacts` sends it 0x30 from the next segment on."""
     group_id = _new_fight_id(battle)
     fight = _new_fight(turn, segment)
     fight["alone"] = True
@@ -976,23 +968,19 @@ def start_rout(regiment: "Regiment", battle: "Battle", flee_point: formation.Poi
     battle.events.append(BattleEvent(
         f"{regiment.name} routs!", "rout_start",
         regiment=regiment.identifier, x=regiment.x, y=regiment.y, flee_x=flee_x, flee_y=flee_y))
-    _react_to_rout(regiment, opponents, group_id, battle)
+    # terror_contact_charge.md 0.5: notify the whole enemy side after leaving the grid.
+    battle.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x0F, source=regiment.identifier),
+                                 route="enemy")
+    if battle.interpreter is None:
+        _react_to_rout(regiment, opponents, group_id, battle)
 
 
 def _react_to_rout(routed: "Regiment", opponents: Sequence["Regiment"], group_id: str | None,
                    battle: "Battle") -> None:
-    """game_rules.md 7.5: the routed unit's opponents "first look for another opponent in the same
-    fight and switch to it if there is one; otherwise pursue".
+    """Scriptless fallback: switch opponent or pursue (game_rules.md 'Pursuit').
 
-    Without this a victorious unit is simply released from the fight and stands idle until the player
-    orders it somewhere, which is not what the original does.
-
-    The chase budget, edge probe and restraint test run in `Battle._update_pursuits`
-    (notes/pursuit_map_edge.md 2, notes/pursuit_restraint.md 4). Simplifications: no "more attractive
-    target" check (game_rules.md 7.5); the pursuit is an ordinary charge order at the fleeing
-    unit, which `resolve_contacts` will not turn back into close combat while that unit is routing
-    (7.7: "pursuers never engage fleeing units in close combat"). Player missile troops never pursue,
-    standing in for the traced "player artillery, wizards and archers never pursue".
+    With scripts running only the rout broadcast applies; class handlers choose their own reaction.
+    This fallback approximates the artillery/shooter/wizard handlers with anchor and missile checks.
     """
     for opponent in opponents:
         if opponent.routing or not opponent.active:
@@ -1021,10 +1009,10 @@ def _react_to_rout(routed: "Regiment", opponents: Sequence["Regiment"], group_id
             # artillery re-forms in place without restarting its script; both get the same event here.
             _send_opponent_gone(battle, opponent)
             continue
-        _start_pursuit(battle, opponent, routed)
+        start_pursuit(battle, opponent, routed)
 
 
-def _start_pursuit(battle: "Battle", pursuer: "Regiment", routed: "Regiment") -> None:
+def start_pursuit(battle: "Battle", pursuer: "Regiment", routed: "Regiment") -> None:
     """`pursuer` chases the routed unit (game_rules.md 7.5)."""
     pursuer.attack_target = routed.identifier
     pursuer.target_x = pursuer.target_y = None
