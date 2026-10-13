@@ -696,13 +696,29 @@ class ButtonEnabledTests(unittest.TestCase):
 
         self.assertTrue(hud._button_enabled("back", None))
 
-    def test_given_halt_then_it_is_enabled_only_while_moving(self):
+    def test_halt_is_available_for_stationary_units_and_movement(self):
         hud = _hud()
         player = hud.battle.regiments["player"]
 
-        self.assertFalse(hud._button_enabled("halt", player))
+        self.assertTrue(hud._button_enabled("halt", player))
         player.target_x, player.target_y = 500, 500
         self.assertTrue(hud._button_enabled("halt", player))
+
+    def test_stationary_crossbows_can_use_the_attack_panel_hand_to_stop_firing(self):
+        hud = _hud()
+        player = hud.battle.regiments["player"]
+        player.hud_class = "arch"
+        player.missile_range = 720
+        player.missile_code = 2
+        hud.battle.order_fire(player.identifier, "enemy")
+        self.assertFalse(player.moving)
+        hud.press("attack")
+        self.assertEqual(hud.slots()["BL"], "halt")
+        self.assertTrue(hud._button_enabled("halt", player))
+        self.assertEqual(hud.press("halt"), "halt")
+        hud.battle.order_halt(player.identifier)
+        self.assertIsNone(player.shooting_mode)
+        self.assertIsNone(player.shooting_target)
 
     def test_given_an_inactive_or_enemy_regiment_then_orders_are_disabled(self):
         hud = _hud()
@@ -748,8 +764,9 @@ class HitTestAndOccupiesTests(unittest.TestCase):
         self.assertEqual(hud.hit_test(pos), "move")
 
     def test_given_a_disabled_slot_command_then_hit_test_does_not_return_it(self):
-        # Halt is only enabled while moving; the player regiment starts stationary.
+        # Enemy regiments cannot receive player Halt orders.
         hud = _hud()
+        hud.set_selected("enemy")
         hud.press("move")  # move set: BR = halt
         from whshr.frontend.hud import COMMAND_SUBWINDOW, SLOT_POSITIONS, SLOT_SIZE
         x, y = SLOT_POSITIONS["BR"]

@@ -531,7 +531,8 @@ class Hud:
         if name == "magic":
             return regiment.hud_class == "wiz"
         if name == "halt":
-            return regiment.moving
+            # Halt also stops stationary firing loops (notes/player_missile_orders.md 1.1).
+            return True
         if name == "fire":
             return regiment.hud_class in {"arch", "art"} and bool(regiment.missile_range)
         if name == "items":
