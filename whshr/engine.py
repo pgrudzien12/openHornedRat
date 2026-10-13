@@ -131,6 +131,8 @@ class ModelState:
     action_entry: int = 0  # random entry/choice drawn on that reset, whshr.animation.step
     pending_action: int | None = None  # action queued behind a running one-shot script
     drawn_facing: float | None = None  # facing (0-511) the sprite direction is drawn from; None until first set
+    breath_sector: int = 1  # MeshDragon: left/forward/right sector, bf014_dragon_rendering.md §3
+    height_above_ground: float = 0.0  # mesh-model translation in script units
     fire_event: bool = False  # animation reached its fire point on this tick (whshr.animation)
     wounds_taken: int = 0
     # The unit credited with this model when it leaves its regiment, killed or removed alive (identifier, or None):

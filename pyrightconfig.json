@@ -42,6 +42,7 @@
     "whshr/visibility.py",
     "whshr/rules.py",
     "whshr/animation.py",
+    "whshr/dragon_mesh.py",
     "whshr/engine.py",
     "whshr/combat.py",
     "whshr/interpreter.py",

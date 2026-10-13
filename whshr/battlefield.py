@@ -303,6 +303,7 @@ class Battlefield:
     effect_meshes: dict[str, Mesh] = field(default_factory=dict)
     ground_texture_count: int = 0
     scenery_texture_count: int = 0
+    dragon_meshes: dict[int, Mesh] = field(default_factory=dict)
 
     @property
     def width(self) -> int:
@@ -334,6 +335,19 @@ def _sprite_file(game: Installation, bundled: Mapping[str, bytes], filename: str
         if required:
             raise
         return b""
+
+
+def load_dragon_meshes(meshes: Mapping[str, Mesh], furniture: Mapping[str, str]) -> dict[int, Mesh]:
+    """Resolve authored DragonFrame resources without a sprite dependency (§1 of dragon rendering report)."""
+    poses: dict[int, Mesh] = {}
+    for pose in range(1, 5):
+        resource = f"DragonFrame{pose}"
+        name = furniture.get(resource.casefold(), "").casefold()
+        if name not in meshes:
+            # Deliberate host diagnostic; the original failure presentation is unspecified (§5).
+            raise ValueError(f"MeshDragon requires {resource} in SCENERY.PBX")
+        poses[pose] = meshes[name]
+    return poses
 
 
 def load_battlefield(installation: Installation | str | PathLike[str], battle_file: str | PathLike[str],
@@ -453,5 +467,8 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
         door_mesh = meshes.get((furniture.get(door.casefold()) or "").casefold())
         if door_mesh is not None:
             effects[door.casefold()] = door_mesh
+    dragon_meshes: dict[int, Mesh] = {}
+    if any(resource.casefold() == "meshdragon" for resource in troop_resources):
+        dragon_meshes = load_dragon_meshes(meshes, furniture)
     return Battlefield(script, terrain, vertices, size, layers, palette, atlas_size, atlas, sheets, ui_sheets,
-                       sorted(set(missing)), effects, len(ground["textures"]), len(scenery["textures"]))
+                       sorted(set(missing)), effects, len(ground["textures"]), len(scenery["textures"]), dragon_meshes)

@@ -407,12 +407,33 @@ def _visual(code: int) -> str:
             "rock" if code == 8 else "diver" if code == 12 else "bomb")
 
 
+def dragon_breath_sector(bearing: int, facing: float) -> int | None:
+    """Raw, unwrapped front-half-plane test (bf014_dragon_rendering.md §3.1)."""
+    difference = bearing - facing
+    return int((difference + 128) // 85) if -128 < difference < 128 else None
+
+
 def _launch_innate(battle: Battle, unit: Regiment, code: int,
                    origin: tuple[float, float], aim: tuple[float, float] | None = None) -> None:
     if aim is None:
         aim = _aim(battle, unit) if unit.shooting_mode else unit.volley_aim
     if aim is None:
         return
+    if code == 14:
+        dx, dy = aim[0] - unit.x, aim[1] - unit.y
+        bearing = int(256 - 256 * math.atan2(dx, -dy) / math.pi) % 512
+        sector = dragon_breath_sector(bearing, unit.direction)
+        if sector is None:
+            return
+        unit.model_positions()
+        for model in unit.melee_models:
+            if unit.model_family(model) == "mesh_dragon":
+                animation.request_mesh_breath(model, sector, battle.rng)
+        if sector < 3:
+            angle = (unit.direction + (sector - 1) * 64) % 512 * math.tau / 512
+            origin = (unit.x + 72 * math.sin(angle), unit.y + 72 * math.cos(angle))
+        # PROVISIONAL host policy for accepted sector 3: preserve the supplied launch origin. Its
+        # original directional origin is unresolved (§3.1); do not clamp it into sector 2 or reject it.
     count = battle.rng.randint(1, 6) + 3 if code == 14 else battle.rng.randint(1, 6) if code == 15 else 1
     for _ in range(count):
         if len(battle.innate_projectiles) >= 64:
