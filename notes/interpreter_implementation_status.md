@@ -98,7 +98,7 @@ Implementing the bytecode interpreter for issue #3 (epic #1): replacing the plac
 - `SpawnUnit N`: create Night Goblin Fanatics (4 missions use this)
 - `FollowParent`: child unit follows parent
 - `RunAway`: flee behavior
-- `ExcludeFromArmy`: remove from battle without death
+- `ExcludeFromArmy`: add to removal accounting while remaining active; see [exclude_from_army.md](exclude_from_army.md)
 - `RemoveFromBattle`: remove from play
 
 ### Medium Priority (needed for other missions)

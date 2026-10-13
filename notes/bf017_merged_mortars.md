@@ -69,10 +69,11 @@ state follows the ordinary rules for hidden allied units (`hidden_reserves_off_f
 
 ## 6. Consequence for the write-back (pointer)
 
-The write-back of `allied_npc_merge.md` §5 still includes these two NPCs (G is defined and whoami < 50). What is
-written is their **battle-file** state: 2 models and the file's counters, removed by `RemoveFromBattle` at the exit.
-🟡 How the campaign then treats regiments 16/17 (e.g. as "dead or routed" with 0 casualties) follows §5 there and was
-not observed in play.
+**Correction:** the exit script first sets **kept for return**, then runs `ExcludeFromArmy; RemoveFromBattle`.
+G's final cleanup discards kept-for-return RollingStock from removal accounting without reactivating it.
+The exited mortar placeholders therefore reach neither result section and do not overwrite the company's mortar
+regiments with their two-model battle-file state. See [exclude_from_army.md](exclude_from_army.md) for the separate
+exclusion, removal, credit and final-cleanup effects.
 
 ## Correction to existing public notes
 
