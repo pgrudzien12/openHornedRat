@@ -1460,11 +1460,14 @@ class ScriptInterpreter:
         """Class operand = class x 8 as in s_race; 0 means any class (part A 0)."""
         return not class_operand or other.unit_class == class_operand >> 3
 
-    def _sees(self, looker: "Regiment", other: "Regiment", half_cone: int = VIEW_CONE) -> bool:
-        """IsVisible: view cone (doubled in melee), scenery and sight edges, no range."""
+    def _sees(self, looker: "Regiment", other: "Regiment", half_cone: int = VIEW_CONE,
+              facing: float | None = None) -> bool:
+        """IsVisible: view cone (doubled in melee or while re-forming, notes/runaway_routers_broken.md 1.5), scenery
+        and sight edges, no range. `facing` looks in another direction without turning the unit (RunAway)."""
         return visibility.visible(
-            self.battle.formation_centre(looker), looker.direction, self.battle.formation_centre(other),
-            other.bounding_radius(), half_cone * 2 if looker.in_melee else half_cone,
+            self.battle.formation_centre(looker), looker.direction if facing is None else facing,
+            self.battle.formation_centre(other), other.bounding_radius(),
+            half_cone * 2 if looker.in_melee or looker.reforming else half_cone,
             self.battle.boundaries, self.battle.objects)
 
     def _threat_search(self, unit: "Regiment") -> str | None:
@@ -3178,16 +3181,56 @@ class ScriptInterpreter:
 
     def op_RunAway(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """RunAway: cause unit to flee the battlefield.
+        """RunAway (notes/runaway_routers_broken.md 1): one ordinary 256-unit point move away from the threat (else the
+        current target), never a rout. Three looks relative to the unit's facing (rear, right, left) ask whether a
+        hostile, non-hidden unit within the threat range (inclusive) is visible that way, broken ones and the threat
+        included: rear clear -> straight away, else right clear -> 67.5 degrees to that side (-96), else left clear
+        -> +96, else cornered (false). The move is refused (false) while re-forming, anchored, held or leaving the
+        battle; during deployment it is true and nothing moves. No target, threat or state change of its own."""
+        unit = self.battle.regiments.get(unit_id)
+        state.cond_flags = False
+        if unit is None:
+            return state.pc + 1
+        threat_id = state.threat or (state.current_target[0] if state.current_target else None)
+        threat = self.battle.regiments.get(threat_id) if threat_id is not None else None
+        if threat is None:
+            return state.pc + 1
+        away = 256 if (threat.x, threat.y) == (unit.x, unit.y) else self._bearing(threat, unit)
 
-        Similar to rout/panic, unit tries to leave the field.
-        """
-        regiment = self.battle.regiments.get(unit_id)
-        if regiment and not regiment.routing and "CantBreak" not in regiment.psychology:
-            # Trigger routing via combat module (start_rout takes (regiment, battle), not the reverse)
-            from . import combat
-            combat.start_rout(regiment, self.battle)
+        def anyone_seen(turn: int) -> bool:
+            facing = (int(unit.direction) + turn) % 512
+            return any(self._runaway_watcher(unit, other, state.threat_range)
+                       and self._sees(unit, other, facing=facing)
+                       for other in self.battle.regiments.values())
+
+        if not anyone_seen(256):
+            heading = away
+        elif not anyone_seen(128):
+            heading = (away - 96) % 512
+        elif not anyone_seen(384):
+            heading = (away + 96) % 512
+        else:
+            return state.pc + 1  # cornered
+        if (unit.reforming or unit.anchored or unit.held
+                or self.event_bus.unit_states[unit_id].unit_flags & LEAVING_BATTLE_FLAG):
+            return state.pc + 1
+        state.cond_flags = True
+        if self.battle.phase == "deployment":
+            return state.pc + 1
+        goal = (unit.x + math.trunc(256 * math.sin(heading * math.tau / 512)),
+                unit.y + math.trunc(256 * math.cos(heading * math.tau / 512)))
+        self._start_point_move(unit, goal)
         return state.pc + 1
+
+    def _runaway_watcher(self, unit: "Regiment", other: "Regiment", threat_range: int) -> bool:
+        """A unit RunAway's looks count: active, not hidden, not leaving the battle, hostile (the allied/NPC side counts
+        as the player's, as in `_hostile`) and within the threat range, inclusive. Broken units count (notes/runaway_routers_broken.md 1.2)."""
+        if other is unit or not other.active or other.hidden or not self._hostile(unit, other):
+            return False
+        other_state = self.event_bus.unit_states.get(other.identifier)
+        if other_state is not None and other_state.unit_flags & LEAVING_BATTLE_FLAG:
+            return False
+        return self._distance(unit, other) <= threat_range
 
     def op_RoutAllowed(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
@@ -4365,7 +4408,30 @@ class ScriptInterpreter:
 
     def op_EnemyRoutedStatic(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """EnemyRoutedStatic: test if a specific enemy is routing (static check)."""
+        """EnemyRoutedStatic (notes/runaway_routers_broken.md 2.1), the war-machine crew's reaction to 0x0F / 0x09:
+        false unless the event's source is the current target. In melee: true when no hostile unit is on the unit's
+        grid (the source counts while still on it); otherwise the models are unpaired from the source, the first such
+        enemy in unit order becomes the target, false. Not in melee: true while braced. The condition is always
+        written; no busy-casting or broken test, no events. A routing crew has no target, so it never rallies here."""
+        unit = self.battle.regiments.get(unit_id)
+        source = state.current_event.source
+        target = state.current_target[0] if state.current_target else None
+        state.cond_flags = False
+        if unit is None or target is None or source != target:
+            return state.pc + 1
+        if not unit.in_melee:
+            state.cond_flags = unit.braced
+            return state.pc + 1
+        on_grid = [other for other in self.battle.regiments.values()
+                   if other is not unit and other.active and unit.melee_group is not None
+                   and other.melee_group == unit.melee_group and self._hostile(unit, other)]
+        if not on_grid:
+            state.cond_flags = True
+            return state.pc + 1
+        for model in unit.melee_models:
+            if model.opponent is not None and model.opponent[0] == source:
+                model.opponent = None
+        state.current_target = (on_grid[0].identifier, 0)
         return state.pc + 1
 
     def op_IfBreak(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
