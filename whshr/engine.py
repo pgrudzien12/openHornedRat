@@ -7,7 +7,7 @@ import random
 from typing import Any, Callable, Literal, cast
 
 from . import animation, battle_grid, behaviour, buildings, combat, deployment, formation, interpreter, map_objects, navigation, npc_merge, ranged, visibility
-from . import birds as bird_flock, magic, objectives as objective_table, spell_effects, steering
+from . import birds as bird_flock, control_piece as control_pieces, magic, objectives as objective_table, spell_effects, steering
 from . import nodes as node_table
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
@@ -821,7 +821,10 @@ class Battle:
         self.update_count = 0  # monotonic input/replay time, including deployment
         self.phase: Literal["deployment", "battle"] = "deployment" if deploy else "battle"
         self.paused = False
-        self.mission_state = 0  # script choreography, independent of the player-visible phase
+        # The battle state: script choreography, independent of the player-visible phase. A gate-type piece (the
+        # control piece) owns it: it starts it at 1 and answers 2/5 with its animation (notes/bf015_gate_npc_column.md Q1).
+        self.control_piece = control_pieces.from_scenery(scenery)
+        self.mission_state = self.control_piece.initial_state if self.control_piece is not None else 0
         # The objective letters the battle file defines (MISSIONINFO Objective: lines), read by IfObjective.
         self.objective_letters: frozenset[str] = frozenset()
         # The mission's evaluation list (whshr.objectives); None for a mission-less battle, which keeps the flat
@@ -2140,6 +2143,7 @@ class Battle:
         if self.phase == "deployment":
             self._step_deployment_drag()
             self._advance_regiments(scale, seconds)
+            self._step_control_piece()
             return
         combat.refresh_melee_state(self)
         self._advance_regiments(scale, seconds)
@@ -2164,8 +2168,14 @@ class Battle:
         spell_effects.tick(self)  # after units and ordinary missiles (notes/spell_effects.md 1.7)
         if self.objectives is None:
             self._update_result()
+        self._step_control_piece()
         self.refresh_screen_marks()
         self.tick_count += 1
+
+    def _step_control_piece(self) -> None:
+        """The gate's display step, once per tick after the units (notes/bf015_gate_npc_column.md 0, 1.2)."""
+        if self.control_piece is not None:
+            self.mission_state = self.control_piece.step(self.mission_state)
 
     def _advance_regiments(self, scale: float, seconds: float) -> None:
         for regiment in self.regiments.values():
@@ -2531,6 +2541,10 @@ class Battle:
             return False
         dx, dy = steering_target[0] - regiment.x, steering_target[1] - regiment.y
         distance = math.hypot(dx, dy)
+        # The arrival and wheel tests measure to the waypoint even while steering round an obstruction; the steer
+        # point only shortens the re-plan countdown (notes/bf015_gate_npc_column.md Q4: a unit closing on a wagon
+        # ahead must not take the steer point for its destination and halt).
+        waypoint_distance = math.hypot(target[0] - regiment.x, target[1] - regiment.y)
         goal = round(math.atan2(dx, dy) * 512 / math.tau) % 512 if distance > 1e-9 else regiment.direction
         if order_key != regiment.turn_order_key:
             # game_rules.md "Real time and movement": the 90/180 snap only when a move order is issued (every order
@@ -2554,10 +2568,10 @@ class Battle:
             delta = self._turn_delta(regiment.direction, goal)
             current = (regiment.target_x, regiment.target_y)
             follows_last_leg = regiment.route_follows_unit and (not regiment.waypoints or regiment.waypoints == [current])
-            if abs(delta) > 64 and (distance > 32 or follows_last_leg):
+            if abs(delta) > 64 and (waypoint_distance > 32 or follows_last_leg):
                 self._owe_turn(regiment, delta / 2, "halted", 8)
-            elif distance > 32 or follows_last_leg:
-                if abs(delta) >= 11 and distance > 32:
+            elif waypoint_distance > 32 or follows_last_leg:
+                if abs(delta) >= 11 and waypoint_distance > 32:
                     self._owe_turn(regiment, delta, "wheel", 7)
                 elif abs(delta) < 11:
                     regiment.direction = goal  # absorbed
@@ -3436,6 +3450,37 @@ class Battle:
         regiment.target_x = regiment.target_y = None
         regiment.waypoints.clear()
         self.reform_to_ranks(regiment, regiment.ranks, walk_back=True)  # as Rally (notes/reform_while_moving.md 6)
+
+    def place_at(self, regiment: Regiment, x: float, y: float, direction: int) -> None:
+        """PlaceAtNode (notes/bf015_gate_npc_column.md Q2): the unit and its figures are carried to the point at once
+        and every model is snapped onto its slot of the last layout. That layout keeps the arrangement it had for the
+        old facing until a re-layout (BF015 follows with ReformBlock). The snap cancels any re-form; the move ends."""
+        slots = regiment.reform_slots or regiment.slots()
+        old_direction = regiment.direction
+        regiment.model_positions()  # seed, so the snap below keeps the models' identities
+        regiment.x, regiment.y, regiment.direction = x, y, direction
+        regiment.positions = formation.place(x, y, old_direction, slots)
+        regiment.reforming = False
+        regiment.reform_slots = []
+        regiment.target_x = regiment.target_y = None
+        regiment.waypoints.clear()
+        rest = regiment.rest_action()
+        for model in regiment.melee_models:
+            model.at_rest = True
+            model.scatter_target = None
+            model.reform_step = None
+            model.drawn_facing = float(direction)
+            model.own_request = rest
+
+    def teleport_to(self, regiment: Regiment, x: float, y: float, direction: int) -> None:
+        """TeleportToNode (notes/bf015_gate_npc_column.md Q2): the unit moves and takes the node's facing, but its
+        figures keep their world positions and walk to their new slots (none is settled any more)."""
+        regiment.model_positions()
+        regiment.x, regiment.y, regiment.direction = x, y, direction
+        regiment.target_x = regiment.target_y = None
+        regiment.collision_recheck = True
+        for model in regiment.melee_models:
+            model.at_rest = False
 
     def minimap_marker_suppressed(self, regiment: Regiment) -> bool:
         """Whether script flags keep the regiment's minimap marker off, independently of `hidden`

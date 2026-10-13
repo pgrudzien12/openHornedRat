@@ -24,6 +24,7 @@
   "reportOptionalMemberAccess": "none",
   "strict": [
     "whshr/birds.py",
+    "whshr/control_piece.py",
     "whshr/figure_capture.py",
     "whshr/portrait_popup.py",
     "whshr/steering.py",

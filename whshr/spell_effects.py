@@ -265,14 +265,20 @@ def channelling(battle: Battle, unit_id: str) -> bool:
 
 
 def lifted(battle: Battle, unit_id: str) -> bool:
-    """In a Flying Bower flight or inside a Sapphire Arch: not drawn and unable to engage or be engaged; everything
-    else still sees the unit (C2 2.3, 3.2)."""
+    """In a Flying Bower flight or inside a Sapphire Arch, or flagged not shown by its script: not drawn and unable to
+    engage or be engaged; everything else still sees the unit (C2 2.3, 3.2; notes/bf015_gate_npc_column.md Q3)."""
+    from .interpreter import NOT_SHOWN_FLAG  # the interpreter imports this module
     effects = table(battle)
-    return unit_id in effects.flying or unit_id in effects.in_arch
+    state = battle.event_bus.unit_states.get(unit_id)
+    return (unit_id in effects.flying or unit_id in effects.in_arch
+            or (state is not None and bool(state.unit_flags & NOT_SHOWN_FLAG)))
 
 
-def _sync_lifted(battle: Battle, unit: Regiment) -> None:
+def sync_lifted(battle: Battle, unit: Regiment) -> None:
     unit.lifted = lifted(battle, unit.identifier)
+
+
+_sync_lifted = sync_lifted
 
 
 def dispel_selected(battle: Battle, caster: str) -> bool:

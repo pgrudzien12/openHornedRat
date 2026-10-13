@@ -323,21 +323,22 @@ class MovementOpcodeTests(unittest.TestCase):
         self.assertEqual(self.unit.direction, 0)  # unchanged
 
     def test_teleport_to_node_sets_current_node(self):
-        """Test that TeleportToNode sets current node even when the node is unknown."""
+        """An unknown node makes TeleportToNode do nothing (notes/bf015_gate_npc_column.md Q2)."""
         interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
         state = self.battle.event_bus.unit_states["test_1"]
 
         interp.op_TeleportToNode(state, 7, [], "test_1", 0, None)
-        self.assertEqual(state.current_node, 7)
+        self.assertIsNone(state.current_node)
         self.assertEqual(self.unit.x, 100)  # unknown node: position unchanged
 
     def test_place_at_node_sets_node(self):
-        """Test that PlaceAtNode sets the node even when the node is unknown."""
+        """An unknown node makes PlaceAtNode do nothing (notes/bf015_gate_npc_column.md Q2)."""
         interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
         state = self.battle.event_bus.unit_states["test_1"]
 
         interp.op_PlaceAtNode(state, 9, [], "test_1", 0, None)
-        self.assertEqual(state.current_node, 9)
+        self.assertIsNone(state.current_node)
+        self.assertEqual(self.unit.x, 100)
 
 
 class MovementOpcodeWithRealNodesTests(unittest.TestCase):
