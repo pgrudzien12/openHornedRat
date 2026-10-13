@@ -41,6 +41,7 @@ class Flight:
     y: float
     height: float
     ending: bool = False
+    descending_trail: bool = False  # user-requested dragon puff descent; independent of head flight
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ class _Bolt:
     flights: int = 0
     last: tuple[float, float, float] | None = None
     flying: bool = True
+    descending_trail: bool = False
     newest: tuple[float, float] | None = None  # position of the newest puff left, even after it expired
     puffs: list[list[float]] = field(default_factory=list[list[float]])  # x, y, height, age
     explosion: list[float] | None = None  # x, y, age
@@ -82,6 +84,7 @@ class FireballVisuals:
                     bolt.explosion = None
         for flight in flights:
             bolt = self.bolts.setdefault(flight.serial, _Bolt())
+            bolt.descending_trail = flight.descending_trail
             here = (flight.x, flight.y, flight.height)
             previous = here if bolt.last is None else bolt.last  # on the launch tick the previous position is the start
             if bolt.newest is None or previous[:2] != bolt.newest:
@@ -108,7 +111,12 @@ class FireballVisuals:
                 x, y, age = bolt.explosion
                 drawn.append(Sprite(EXPLOSION_FIRST + int(age), x, y, 0.0))
         for bolt in self.bolts.values():
-            drawn += [Sprite(PUFF_FIRST + int(age), x, y, h) for x, y, h, age in bolt.puffs]
+            for x, y, height, age in bolt.puffs:
+                # User preference for dragon breath, rather than an original-game rule: each
+                # fading puff sinks linearly to its own ground over the existing visual lifetime.
+                if bolt.descending_trail and height > 0:
+                    height *= max(0.0, 1 - age / (PUFF_FRAMES - 1))
+                drawn.append(Sprite(PUFF_FIRST + int(age), x, y, height))
         return drawn
 
 
@@ -138,11 +146,12 @@ class DragonFlameFlights:
                 self.next_serial -= 1
             present[key] = serial, projectile
             flights.append(Flight(serial, projectile.x, projectile.y,
-                                 projectile.z - ground_height(projectile.x, projectile.y)))
+                                 projectile.z - ground_height(projectile.x, projectile.y), descending_trail=True))
         for key, (serial, projectile) in self.previous.items():
             if key not in present:
                 flights.append(Flight(serial, projectile.x, projectile.y,
-                                     projectile.z - ground_height(projectile.x, projectile.y), True))
+                                     projectile.z - ground_height(projectile.x, projectile.y), True,
+                                     descending_trail=True))
         self.previous = present
         return flights
 
