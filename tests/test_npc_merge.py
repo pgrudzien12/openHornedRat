@@ -63,6 +63,8 @@ class ArmyMergeTests(unittest.TestCase):
         wagon = battle.regiments["NPC_1st_Mortar_Crew"]
         self.assertEqual((wagon.models, wagon.unit_class, wagon.anchored), (2, 7, False))
         self.assertEqual(wagon.name, "NPC_1st_Mortar_Crew")
+        # Owner's decision: the wagon is not written back, so the company's 4-man crew keeps its strength.
+        self.assertNotIn("NPC_1st_Mortar_Crew", battle.npc_regiments)
 
     def test_given_a_regiment_outside_the_company_then_its_npc_is_deleted_and_story_units_are_untouched(self):
         battle = self.build({4: company_unit(4, 20, "Black Avengers", 150)})

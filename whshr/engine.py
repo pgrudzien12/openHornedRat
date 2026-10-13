@@ -986,7 +986,12 @@ class Battle:
                 used.add(identifier)
                 if forced_side is None and artillery_swap and npc_merge.npc_regiment(unit) is not None:
                     swapped.append(identifier)
-                if forced_side is None and npc_write_back and npc_merge.numbered_regiment(unit) is not None:
+                # Owner's decision, not original parity: a rolling-stock NPC the army merge kept unchanged (the
+                # BF015/BF017 mortar wagons) is not written back, so the company regiment of the same number keeps its
+                # strength and experience (the original probably writes the wagons' 2 models over it,
+                # notes/bf017_merged_mortars.md 6).
+                if (forced_side is None and npc_write_back and npc_merge.numbered_regiment(unit) is not None
+                        and not (army_merge and npc_merge.is_rolling_stock(unit))):
                     written_npcs[identifier] = int(npc_merge.numbered_regiment(unit) or 0)
                 models, ranks = formation.unit_size(unit)
                 leader: View = unit.get("leader") or {}

@@ -52,7 +52,7 @@ def _models(unit: Mapping[str, Any]) -> int:
     return int(stats[2] if len(stats) > 2 else stats[1] if len(stats) > 1 else 1)
 
 
-def _is_rolling_stock(unit: Mapping[str, Any]) -> bool:
+def is_rolling_stock(unit: Mapping[str, Any]) -> bool:
     """Whether the battle file's own unit has class RollingStock (its `s_race`)."""
     fields, _conflicts = stat_fields(unit.get("stats") or {})
     race = stat_int(fields, "s_race")
@@ -73,7 +73,7 @@ def merge_npc(unit: View, marching: Sequence[int] | set[int], company: Mapping[i
     source = company.get(whoami)
     if whoami in marching or source is None or _models(source) <= 0:
         return None
-    if _is_rolling_stock(unit):
+    if is_rolling_stock(unit):
         # Counted but not changed: a wagon in the battle file keeps every file value, whatever the company's
         # regiment is (notes/bf017_merged_mortars.md 1; the BF015/BF017 mortar crews drive out with the column).
         return unit
