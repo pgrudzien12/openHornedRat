@@ -417,6 +417,7 @@ def refresh_braced_state(battle: "Battle") -> None:
 
 
 OPPONENT_GONE_EVENT = 0x19  # game_rules.md event table: "current opponent gone"
+ALONE_ON_GRID_EVENT = 0x30  # alone on a grid (notes/terror_contact_charge.md 0.6, movement_formation.md "Left combat")
 
 
 def _opponent_gone(battle: "Battle", regiment: "Regiment", touched: Iterable[str]) -> bool:
@@ -577,6 +578,7 @@ def resolve_contacts(battle: "Battle") -> None:
                 touching[first.identifier].add(second.identifier)
                 touching[second.identifier].add(first.identifier)
     pending_counter: dict[str, int] = {}
+    left_alone: list[tuple["Regiment", "Regiment"]] = []  # (unit, the partner that routed before the grid existed)
     if battle.interpreter is not None:
         battle.interpreter.raise_wagon_collisions(active)  # before the pass clears the re-check states
         battle.interpreter.raise_contacts(contacts)
@@ -589,6 +591,13 @@ def resolve_contacts(battle: "Battle") -> None:
                 touching[joiner_id].add(owner_id)
                 touching[owner_id].add(joiner_id)
                 pending_counter[joiner_id] = counter
+            else:
+                # notes/terror_contact_charge.md 1: a charger that flees on contact (fear or terror) engages first
+                # and routs in the same handler pass, so its partner is left alone on the new grid.
+                for unit_id, partner_id in ((owner_id, joiner_id), (joiner_id, owner_id)):
+                    partner = battle.regiments.get(partner_id)
+                    if unit_id in by_id and partner is not None and partner.routing:
+                        left_alone.append((by_id[unit_id], partner))
         battle.engage_requests.clear()
 
     for identifier, neighbours in touching.items():
@@ -684,8 +693,20 @@ def resolve_contacts(battle: "Battle") -> None:
             fight["grid"] = battle_grid.create(battle, group_id, group)
         battle_grid.update(battle, group_id, fight["grid"], group)
 
+    for regiment, router in left_alone:
+        if not touching[regiment.identifier] and regiment.melee_group is None:
+            _left_alone_after_rout(battle, regiment, router, turn, segment, kept_groups)
+
     for identifier, regiment in by_id.items():
         if not touching[identifier] and regiment.in_melee:
+            fight = battle.fights.get(regiment.melee_group or "")
+            if fight is not None and fight.get("alone"):
+                # notes/terror_contact_charge.md 0.6: alone on a grid, "alone" (0x30) on every tick whose segment
+                # differs from the grid's creation segment, until the unit's script leaves the grid.
+                kept_groups.add(regiment.melee_group or "")
+                if segment != fight["segment"]:
+                    battle.event_bus.queue_event(identifier, interpreter.Event(code=ALONE_ON_GRID_EVENT), route="self")
+                continue
             gone = _opponent_gone(battle, regiment, old_touching[identifier])
             battle_grid.release(battle, regiment)
             regiment.in_melee = False
@@ -699,6 +720,29 @@ def resolve_contacts(battle: "Battle") -> None:
     for group_id in list(battle.fights):
         if group_id not in kept_groups:
             battle.fights.pop(group_id, None)
+
+
+def _left_alone_after_rout(battle: "Battle", regiment: "Regiment", router: "Regiment", turn: int, segment: int,
+                           kept_groups: set[str]) -> None:
+    """The unit whose engagement partner routed before the grid was built (notes/terror_contact_charge.md 2).
+    The rout's 0x0F reaches it gated on "the router is my current target": then, unless it is busy casting, it
+    pursues the router. Otherwise it stays in melee alone on a grid created this segment, and `resolve_contacts`
+    sends it 0x30 from the next segment on."""
+    interp = battle.interpreter
+    state = battle.event_bus.unit_states.get(regiment.identifier)
+    target = state.current_target[0] if state is not None and state.current_target else None
+    if (target == router.identifier and interp is not None and state is not None
+            and not interp.busy_casting(regiment, state)):
+        _start_pursuit(battle, regiment, router)
+        return
+    group_id = _new_fight_id(battle)
+    fight = _new_fight(turn, segment)
+    fight["alone"] = True
+    battle.fights[group_id] = fight
+    kept_groups.add(group_id)
+    regiment.in_melee = True
+    regiment.melee_group = group_id
+    regiment.melee_touching = frozenset()
 
 
 def resolve_melee(battle: "Battle") -> None:
@@ -973,21 +1017,26 @@ def _react_to_rout(routed: "Regiment", opponents: Sequence["Regiment"], group_id
             # artillery re-forms in place without restarting its script; both get the same event here.
             _send_opponent_gone(battle, opponent)
             continue
-        opponent.attack_target = routed.identifier
-        opponent.target_x = opponent.target_y = None
-        opponent.pursuing = True  # notes/pursuit_map_edge.md: a pursuit, not a charge
-        opponent.free_charging = False  # starting a pursuit ends the charging state (bf003_playtest 5.2)
-        # ... and the contact latch the winner kept from its engagement (bf003_playtest 5.2).
-        if (state := battle.event_bus.unit_states.get(opponent.identifier)) is not None:
-            state.contact_latch = False
-        opponent.pursuit_budget = opponent.pursuit_point = None
-        # notes/pursuit_restraint.md 2: a pursuit start switches the rally-attempt state off (even for an
-        # Independent regiment) and schedules the first possible restraint test one full turn later.
-        opponent.rally_attempt = False
-        schedule_rally_segment(opponent, battle)
-        battle.events.append(BattleEvent(
-            f"{opponent.name} pursues {routed.name}!", "pursuit_start",
-            regiment=opponent.identifier, target=routed.identifier))
+        _start_pursuit(battle, opponent, routed)
+
+
+def _start_pursuit(battle: "Battle", pursuer: "Regiment", routed: "Regiment") -> None:
+    """`pursuer` chases the routed unit (game_rules.md 7.5)."""
+    pursuer.attack_target = routed.identifier
+    pursuer.target_x = pursuer.target_y = None
+    pursuer.pursuing = True  # notes/pursuit_map_edge.md: a pursuit, not a charge
+    pursuer.free_charging = False  # starting a pursuit ends the charging state (bf003_playtest 5.2)
+    # ... and the contact latch the winner kept from its engagement (bf003_playtest 5.2).
+    if (state := battle.event_bus.unit_states.get(pursuer.identifier)) is not None:
+        state.contact_latch = False
+    pursuer.pursuit_budget = pursuer.pursuit_point = None
+    # notes/pursuit_restraint.md 2: a pursuit start switches the rally-attempt state off (even for an
+    # Independent regiment) and schedules the first possible restraint test one full turn later.
+    pursuer.rally_attempt = False
+    schedule_rally_segment(pursuer, battle)
+    battle.events.append(BattleEvent(
+        f"{pursuer.name} pursues {routed.name}!", "pursuit_start",
+        regiment=pursuer.identifier, target=routed.identifier))
 
 
 def resolve_contact_attacks(battle: "Battle") -> None:
