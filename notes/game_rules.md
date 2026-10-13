@@ -2066,7 +2066,10 @@ It is used in three situations:
 2. **Charging a target** (op 0x4E, the attack/approach charge of scripts 105, 158, 159 → 160; the player's Charge
    button uses the straight-ahead op 0x4F instead, 🟡 whether that tests fear): failure → "My men fear the beast!" and the unit halts and re-forms; success starts
    the charge (flag `0x80`) and sends event 0x07 to the target.
-3. **Contact while moving** (unless bit 14 is set): failure → event 0x0D, flight.
+3. **Contact while moving** (unless bit 14 is set): failure → event 0x0D, flight. The contact is still recorded in the
+   same pass, so a charger engages its target first (a grid is built around the causer) and only then flees,
+   leaving the causer alone on the grid until event 0x30 releases it one segment later
+   ([terror_contact_charge.md](terror_contact_charge.md)).
 
 So a failed fear test means flight (when charged or on contact) or a refused charge, whatever the numbers,
 and a terror-causer makes every non-immune unit that it charges or touches flee without a roll. There is no
