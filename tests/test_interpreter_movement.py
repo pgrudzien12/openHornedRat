@@ -173,6 +173,34 @@ class TurnTests(MovementTestCase):
         self.assertTrue(self.op("QuarterTurnToTarget"))
         self.assertEqual(self.unit.direction, 0)
 
+    def test_turn_to_face_target_faces_the_target_point_without_a_target_unit(self):
+        # A ground-click cast keeps no target unit, only the click: the wizard turns to the click.
+        self.build(unit_at=(500, 500), facing=0, with_target=False)
+        self.state.target_point = (600.0, 510.0)  # bearing 119
+        self.assertTrue(self.op("TurnToFaceTarget"))
+        self.assertIsNotNone(self.unit.turn_order_key)
+
+    def test_quarter_turn_faces_the_target_point_without_a_target_unit(self):
+        self.build(unit_at=(500, 500), facing=0, unit_models=20, unit_ranks=4, with_target=False)
+        self.state.target_point = (600.0, 510.0)
+        self.assertTrue(self.op("QuarterTurnToTarget"))
+        self.assertEqual(self.unit.direction, 128)
+
+    def test_a_target_unit_wins_over_the_target_point(self):
+        self.build(facing=0, target_at=(10, 100), unit_models=20, unit_ranks=4)  # unit ahead: bearing 3
+        self.state.target_point = (100.0, 10.0)
+        self.assertFalse(self.op("QuarterTurnToTarget"))
+        self.assertEqual(self.unit.direction, 0)
+
+    def test_turns_do_nothing_without_a_target_or_a_valid_point(self):
+        for point in (None, (-1.0, 300.0)):
+            with self.subTest(point=point):
+                self.build(unit_at=(500, 500), facing=0, unit_models=20, unit_ranks=4, with_target=False)
+                self.state.target_point = point
+                self.assertFalse(self.op("QuarterTurnToTarget"))
+                self.assertFalse(self.op("TurnToFaceTarget"))
+                self.assertEqual(self.unit.direction, 0)
+
     def test_about_face_and_its_refusal_while_reforming(self):
         self.build(facing=0, unit_models=20, unit_ranks=4)
         self.op("AboutFace")

@@ -1946,14 +1946,16 @@ class ScriptInterpreter:
 
     def op_TurnToFaceTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
-        """TurnToFaceTarget: a turn order towards the target; it stops any movement. False when the turn
-        needed is 16 or less, or the unit is fleeing or anchored; true when a turn started."""
-        pair = self._query_pair(state, unit_id)
+        """TurnToFaceTarget: a turn order towards the target, or the target point without a target unit (so a
+        ground-click cast turns the wizard to the click); it stops any movement. False when the turn needed is
+        16 or less, there is nothing to face, or the unit is fleeing or anchored; true when a turn started
+        (movement_formation.md section 3.3)."""
+        face = self._face_point(state, unit_id)
         state.cond_flags = False
-        if pair is None:
+        if face is None:
             return state.pc + 1
-        unit, target = pair
-        goal = self._bearing(unit, target)
+        unit, x, y = face
+        goal = self._bearing_to(unit, x, y)
         if self._fold(goal - unit.direction) <= 16 or unit.routing or unit.anchored:
             return state.pc + 1
         unit.target_x = unit.target_y = None
@@ -1978,14 +1980,15 @@ class ScriptInterpreter:
 
     def op_QuarterTurnToTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
-        """QuarterTurnToTarget: false when the target is within 64 of the facing; otherwise an instant
-        quarter turn (65..192 off) or half turn (more) and true, even if the turn itself was refused."""
-        pair = self._query_pair(state, unit_id)
+        """QuarterTurnToTarget: false when the target (or, without a target unit, the target point) is within
+        64 of the facing; otherwise an instant quarter turn (65..192 off) or half turn (more) and true, even if
+        the turn itself was refused (movement_formation.md section 3.4)."""
+        face = self._face_point(state, unit_id)
         state.cond_flags = False
-        if pair is None:
+        if face is None:
             return state.pc + 1
-        unit, target = pair
-        goal = self._bearing(unit, target)
+        unit, x, y = face
+        goal = self._bearing_to(unit, x, y)
         off = self._fold(goal - unit.direction)
         if off <= 64:
             return state.pc + 1
@@ -2162,6 +2165,24 @@ class ScriptInterpreter:
         target = self.battle.regiments.get(state.current_target[0])
         return (regiment, target) if target is not None else None
 
+    def _face_point(self, state: UnitScriptState, unit_id: str) -> tuple["Regiment", float, float] | None:
+        """The point the turn instructions face: the current target's regiment position, else the target point
+        when both its coordinates are >= 0, else None (nothing to face; movement_formation.md section 3.3)."""
+        unit = self.battle.regiments.get(unit_id)
+        if unit is None:
+            return None
+        target = self.battle.regiments.get(state.current_target[0]) if state.current_target else None
+        if target is not None:
+            return unit, target.x, target.y
+        if state.target_point is not None and min(state.target_point) >= 0:
+            return unit, *state.target_point
+        return None
+
+    @staticmethod
+    def _bearing_to(unit: "Regiment", x: float, y: float) -> int:
+        """Bearing from the unit to a point in 1/512 turn, 0 = +Y, clockwise, truncated."""
+        return int(256 - 256 * math.atan2(x - unit.x, -(y - unit.y)) / math.pi) % 512
+
     @staticmethod
     def _distance(unit: "Regiment", target: "Regiment") -> int:
         """Centre-to-centre Euclidean distance, truncated."""
@@ -2170,7 +2191,7 @@ class ScriptInterpreter:
     @staticmethod
     def _bearing(unit: "Regiment", target: "Regiment") -> int:
         """Bearing from the unit to the target in 1/512 turn, 0 = +Y, clockwise, truncated."""
-        return int(256 - 256 * math.atan2(target.x - unit.x, -(target.y - unit.y)) / math.pi) % 512
+        return ScriptInterpreter._bearing_to(unit, target.x, target.y)
 
     def _in_arc(self, unit: "Regiment", target: "Regiment", half_width: int = 64) -> bool:
         """The circular difference between facing and bearing is strictly below `half_width`."""
