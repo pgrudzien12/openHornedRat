@@ -83,6 +83,11 @@ class InnateProjectile:
     x: float = 0
     y: float = 0
     struck: frozenset[str] = frozenset()
+    # Absolute dragon flame display heights; terrain is sampled before shifting the launch point
+    # (bf014_dragon_rendering.md §3.2). Other innate weapon visuals retain their existing policy.
+    z0: float = 0
+    z1: float = 0
+    z: float = 0
 
 
 def _message(battle: Battle, unit: Regiment, text_id: int) -> None:
@@ -431,9 +436,12 @@ def _launch_innate(battle: Battle, unit: Regiment, code: int,
                 animation.request_mesh_breath(model, sector, battle.rng)
         if sector < 3:
             angle = (unit.direction + (sector - 1) * 64) % 512 * math.tau / 512
-            origin = (unit.x + 72 * math.sin(angle), unit.y + 72 * math.cos(angle))
-        # PROVISIONAL host policy for accepted sector 3: preserve the supplied launch origin. Its
-        # original directional origin is unresolved (§3.1); do not clamp it into sector 2 or reject it.
+            origin = (unit.x + math.floor(72 * math.trunc(256 * math.sin(angle)) / 256),
+                      unit.y + math.floor(72 * math.trunc(256 * math.cos(angle)) / 256))
+        else:
+            # Stable repair of the history-dependent (q,q) defect: q=0. This is a deliberate
+            # deviation, not an original origin rule (bf014_dragon_rendering.md §3.2).
+            origin = (unit.x, unit.y)
     count = battle.rng.randint(1, 6) + 3 if code == 14 else battle.rng.randint(1, 6) if code == 15 else 1
     for _ in range(count):
         if len(battle.innate_projectiles) >= 64:
@@ -443,8 +451,15 @@ def _launch_innate(battle: Battle, unit: Regiment, code: int,
             y1 = aim[1] + battle.rng.randint(-24, 24)
         else:
             x1, y1 = aim
+        z0 = z1 = 0.0
+        if code == 14:
+            from .spell_effects import flying_aim_height
+            # L + line(t), with L=20 and no cast-Fireball arc. Baseline precedes displacement.
+            z0 = math.floor(battle.ground_height(unit.x, unit.y) + 0.5) + 40
+            z1 = (math.floor(battle.ground_height(x1, y1) + 0.5) + 20
+                  + math.trunc(flying_aim_height(battle, *aim)))
         battle.innate_projectiles.append(InnateProjectile(unit.identifier, code, *origin, x1, y1,
-                                                            x=origin[0], y=origin[1]))
+                                                        x=origin[0], y=origin[1], z0=z0, z1=z1, z=z0))
     battle.events.append(BattleEvent("Innate projectiles launched.", "innate_launch",
                                      regiment=unit.identifier, code=code, count=count))
 
@@ -478,6 +493,8 @@ def _step_innate(battle: Battle) -> None:
         t = min(1, p.elapsed / 9)
         p.x = p.x0 + (p.x1-p.x0)*t
         p.y = p.y0 + (p.y1-p.y0)*t
+        if p.code == 14:
+            p.z = math.trunc((p.z0 - p.z1) * max(0, 9 - p.elapsed) / 9) + p.z1
         struck = set(p.struck)
         for unit in battle.regiments.values():
             if unit.identifier == p.source or unit.identifier in struck or not unit.active:

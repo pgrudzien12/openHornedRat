@@ -1058,7 +1058,8 @@ class BattleView(SceneView[BattleScene]):
         for p in self.scene.battle.innate_projectiles:
             family = "fire" if p.code == 14 else "flames" if p.code == 15 else "boltbur"
             append(f"{family}{1 + p.elapsed % 4}", p.x, p.y,
-                   self.scene.battle.ground_height(p.x, p.y) + 8, p.x1-p.x0, p.y1-p.y0)
+                   p.z if p.code == 14 else self.scene.battle.ground_height(p.x, p.y) + 8,
+                   p.x1-p.x0, p.y1-p.y0)
         for x, y, _code, started in self.scene.battle.impact_effects:
             frame = min(8, 1 + self.scene.battle.tick_count - started)
             append(f"ex{frame}", x, y, self.scene.battle.ground_height(x, y))

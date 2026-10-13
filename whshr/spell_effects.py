@@ -540,7 +540,7 @@ def _origin(caster: Regiment, origin_model: int, kind: str) -> tuple[float, floa
     return positions[origin_model] if has_origin else (caster.x, caster.y)
 
 
-def _flying_aim_height(battle: Battle, x: float, y: float) -> float:
+def flying_aim_height(battle: Battle, x: float, y: float) -> float:
     """A 2.1: half the height plus the elevation of a flying unit standing at the point, else none."""
     for unit in battle.regiments.values():
         if unit.active and unit.airborne and _centre_d(unit, x, y) < unit.bounding_radius():
@@ -574,7 +574,7 @@ def _start_projectile(battle: Battle, effect: Effect, start: tuple[float, float]
     dest = (float(math.trunc(dest[0])), float(math.trunc(dest[1])))
     effect.start, effect.dest = start, dest
     effect.x, effect.y = start
-    effect.terminal_height = _flying_aim_height(battle, *dest)
+    effect.terminal_height = flying_aim_height(battle, *dest)
     effect.aim_height = max(effect.terminal_height, float(bolt.aim_floor))
     effect.steps = steps if steps is not None else 1 + _d(*start, *dest) // BEAM_STEP if beam else FIXED_FLIGHT
     effect.remaining = effect.steps
