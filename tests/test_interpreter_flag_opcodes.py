@@ -66,3 +66,36 @@ class FlagOpcodeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WarMachineAnchorFlagTests(unittest.TestCase):
+    """game_rules.md R44: bit 0 of the secondary word anchors war machines, so library 118's `TestUnitFlags2 9; IfNot`
+    skips the threat evasion (`RunAway`) for an anchored machine."""
+
+    def setUp(self):
+        self.machine = Regiment("lobber", "Lobber", 0, 0, 0, Side.ENEMY, models=4, ranks=1, hud_class="art")
+        self.crew = Regiment("boyz", "Boyz", 100, 0, 0, Side.ENEMY, models=5, ranks=1)
+        self.battle = Battle(500, 500, [self.machine, self.crew], seed=1995)
+        self.interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
+        self.interp._should_yield = False
+
+    def flag(self, unit_id, operand=9):
+        state = self.battle.event_bus.unit_states[unit_id]
+        self.interp.op_TestUnitFlags2(state, operand, [], unit_id, 0, None)
+        return bool(state.cond_flags)
+
+    def test_an_anchored_war_machine_reads_bit_0_set(self):
+        self.assertTrue(self.flag("lobber"))
+        self.assertTrue(self.flag("lobber", 1))
+        self.assertEqual(self.battle.event_bus.unit_states["lobber"].unit_flags2, 0)  # not stored, derived
+
+    def test_an_ordinary_unit_or_a_freed_machine_reads_it_clear(self):
+        self.assertFalse(self.flag("boyz"))
+        self.machine.clear_anchor()
+        self.assertFalse(self.flag("lobber"))
+
+    def test_wait_while_the_anchor_bit_holds_a_machine(self):
+        state = self.battle.event_bus.unit_states["lobber"]
+        self.assertEqual(self.interp.op_WaitWhileUnitFlags2(state, 1, [], "lobber", 0, None), state.pc)
+        self.interp._should_yield = False
+        self.assertEqual(self.interp.op_WaitUntilUnitFlags2(state, 1, [], "lobber", 0, None), state.pc + 2)

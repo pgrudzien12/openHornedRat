@@ -55,6 +55,7 @@ VIEW_CONE = 71  # +-50 degrees in 1/512 turn, doubled while the looker is in mel
 REACT_VIEW_CONE = 85  # ReactToThreat's wider +-60 degrees (notes/threat_events_nodes.md, part A 6)
 FEAR_THE_BEAST_REACTION = 5  # React 5, "My men fear the beast!" (game_rules.md event table, reaction texts)
 SHOOTING_SEQUENCE_FLAG2 = 4
+WAR_MACHINE_ANCHOR_FLAG2 = 1  # game_rules.md R44: unit_flags2 bit 0 anchors war machines
 
 
 REPEAT_ENTRY = 0  # tag of a RepeatStart entry on the script stack: (body start, count, tag)
@@ -1009,17 +1010,24 @@ class ScriptInterpreter:
             state.unit_flags2 &= ~operand
         return state.pc + 2
 
+    def _flags2(self, state: UnitScriptState, unit_id: str) -> int:
+        """The secondary word as scripts read it: the stored bits plus bit 0 while the unit is an anchored war machine
+        (game_rules.md R44, "`unit_flags2` bit 0 anchors machines"; library 118 skips its evasion on
+        `TestUnitFlags2 9`). The anchor itself is `Regiment.anchored`, so it clears with the machine's anchor."""
+        unit = self.battle.regiments.get(unit_id)
+        return state.unit_flags2 | (WAR_MACHINE_ANCHOR_FLAG2 if unit is not None and unit.anchored else 0)
+
     def op_TestUnitFlags2(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """TestUnitFlags2 N: the condition result is whether any bit of N is set in the secondary word."""
         if operand is not None:
-            state.cond_flags = (state.unit_flags2 & operand) != 0
+            state.cond_flags = (self._flags2(state, unit_id) & operand) != 0
         return state.pc + 2
 
     def op_WaitUntilUnitFlags2(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """WaitUntilUnitFlags2 N: yield (same PC) until a bit of N is set in the secondary word."""
-        if operand is not None and (state.unit_flags2 & operand):
+        if operand is not None and (self._flags2(state, unit_id) & operand):
             return state.pc + 2
         self._should_yield = True
         return state.pc
@@ -1027,7 +1035,7 @@ class ScriptInterpreter:
     def op_WaitWhileUnitFlags2(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
         """WaitWhileUnitFlags2 N: yield (same PC) while a bit of N is set in the secondary word."""
-        if operand is not None and (state.unit_flags2 & operand):
+        if operand is not None and (self._flags2(state, unit_id) & operand):
             self._should_yield = True
             return state.pc
         return state.pc + 2
