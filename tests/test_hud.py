@@ -76,6 +76,29 @@ def _hud(selected="player", regiments=None, **overrides):
 
 
 class PanelStateTests(unittest.TestCase):
+    def test_hand_stays_pressed_until_rally_attempts_are_toggled_off(self):
+        for state in ("pursuing", "routing"):
+            with self.subTest(state=state):
+                hud = _hud()
+                regiment = hud.battle.regiments["player"]
+                setattr(regiment, state, True)
+                hud._icon = Mock()
+                hud._draw_panel = Mock()
+
+                hud._draw_slots(regiment)
+                hud._icon.assert_called_with(37)
+
+                self.assertEqual(hud.press("rally"), "rally")
+                hud.battle.order_rally(regiment.identifier)
+                hud.set_pressed(None)  # mouse release must preserve the enabled indication
+                hud._draw_slots(regiment)
+                hud._icon.assert_called_with(38)
+                self.assertTrue(getattr(regiment, state))
+
+                hud.battle.order_rally(regiment.identifier)
+                hud._draw_slots(regiment)
+                hud._icon.assert_called_with(37)
+
     def test_stats_toggle_uses_one_hit_target_and_does_not_change_compass(self):
         hud = _hud()
         hud.battle.regiments["player"].has_leader = True
