@@ -65,7 +65,9 @@ For every live NPC with whoami < 50, in unit order:
 | otherwise, the **company** has that regiment | the NPC is **merged** (below) and counted in G's second value |
 | otherwise (not in the company) | the NPC is **deleted** as well. **Correction**: `campaign.md` §3.1 said it is kept |
 
-A wagon-type NPC (rolling stock) found in the company is counted but not changed.
+A wagon-type NPC found in the company is counted but not changed. "Wagon-type" means that the **battle file's own unit**
+has class RollingStock (its `s_race`), whatever the company regiment's class is. The shipped case is the BF015/BF017
+mortar crews (`s_race` 56), which keep their battle-file wagon form ([bf017_merged_mortars.md](bf017_merged_mortars.md)).
 
 **Merged fields (Q4)**:
 
