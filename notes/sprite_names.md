@@ -59,8 +59,9 @@ Notes:
   `Marius`→`CELE`, `Schepke`→`GINF`, `Allor`→`AMBE`, `FlameStrike`→`BRIW`, `lieutenant1`→`MER1`.
 - One file can serve several names: `Peasants` and `Slaves` → `PEASANT`.
 - Case is inconsistent (`WoodElf`, `Ceridan`, `BANSKAv1`, `icons`), so match files case-insensitively.
-- `MeshDragon` and `MoleMachine` have an empty file name, which suggests they are 3D objects
-  (compare the `MoleMachine1..8` furniture).
+- `MeshDragon` and `MoleMachine` have an empty sprite file name. BF014 `MeshDragon` draws one of four textured meshes,
+  without DRAGON sprite attachments; see [bf014_dragon_rendering.md](bf014_dragon_rendering.md).
+  `MoleMachine` is separate (compare the `MoleMachine1..8` furniture).
 - `loadplanmap:MAP001` and `loadportbg:BACK14` take the 8.3 name directly. The table has only the
   placeholders `PlanMap`/`PortBG` → `MAP1`. Hypothesis: the command overwrites the file field
   of the placeholder.

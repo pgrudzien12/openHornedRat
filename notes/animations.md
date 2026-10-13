@@ -285,3 +285,9 @@ python3 scripts/anim_export.py ".../WARFB"      # all 72 directional sets: 274 G
   and add the layout tables above; the old open question "hotspot, direction and frame order" can be closed.
 - Phase 5 / M3 ("animated directional units"): the data side is ready — frame index formula and group
   labels in `anim_export.action_names()`.
+
+### BF014 mesh dragon versus DRAGON sprites
+
+The four-phase DRAGON sheet above belongs to sprite-family `Dragon`. BF014 selects `MeshDragon`, which draws
+four complete textured neck/head mesh poses and does not attach this sheet. Resource bindings, transforms,
+action timing, visibility and missing-asset behaviour: [bf014_dragon_rendering.md](bf014_dragon_rendering.md).
