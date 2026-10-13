@@ -33,6 +33,11 @@ corrected. Static research: the original was not run.
 
 ## 2. Unit states used below
 
+**Correction / qualification:** removal-accounting membership is independent of active battle presence.
+`ExcludeFromArmy` adds an active unit to that accounting without removing it. References below to the removed-unit
+counting pass include such excluded units, even while active. See [exclude_from_army.md](exclude_from_army.md).
+
+
 | state | meaning |
 |---|---|
 | **in battle** | on the battle roster. Includes hidden, not-yet-revealed, routing and departed (crossed the edge, not yet removed) regiments |
