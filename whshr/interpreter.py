@@ -53,6 +53,7 @@ CAST_ONLY_TARGET_FLAG = 0x4000000  # SetUnitFlags operand: CastPending drops the
 LEAVING_BATTLE_FLAG = 0x100  # SetUnitFlags 256: the unit is leaving the battle (objective G, game_rules.md R60)
 VIEW_CONE = 71  # +-50 degrees in 1/512 turn, doubled while the looker is in melee (game_rules.md visibility)
 REACT_VIEW_CONE = 85  # ReactToThreat's wider +-60 degrees (notes/threat_events_nodes.md, part A 6)
+FEAR_THE_BEAST_REACTION = 5  # React 5, "My men fear the beast!" (game_rules.md event table, reaction texts)
 SHOOTING_SEQUENCE_FLAG2 = 4
 
 
@@ -2494,12 +2495,17 @@ class ScriptInterpreter:
 
     def op_ChargeTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """ChargeTarget: issue charge order to the current target.
+        """ChargeTarget: issue charge order to the current target; condition = the charge started.
 
         Refused while braced (game_rules.md "Braced": charge orders are ignored for a scripted unit
         exactly as for a player's own click), matching Battle.order_attack's player-side guard.
+        At a regiment it clears fear-passed and then runs the fear/terror test (notes/terror_contact_charge.md 3):
+        a terror causer, or a failed fear test, refuses the charge with "My men fear the beast!" (React 5) and the
+        unit halts and re-forms, so no charge ever starts at a terror causer; a passed fear test leaves
+        fear-passed on, which skips the contact test later.
         """
         regiment = self.battle.regiments.get(unit_id)
+        state.cond_flags = False
         if regiment and (regiment.braced or regiment.anchored):
             return state.pc + 1
         if regiment and state.current_target:
@@ -2509,10 +2515,20 @@ class ScriptInterpreter:
                 regiment.attack_target = target_id
                 regiment.charge_started_target = None
                 self._hand_over_to_charge(regiment)
-            if target_id in self.battle.regiments:
+                state.cond_flags = True
+            target = self.battle.regiments.get(target_id)
+            if target is not None:
+                state.fear_passed = False  # a new charge clears it (notes/script_grid_events.md 0)
+                if self._hostile(regiment, target) and not self._may_engage(regiment, target, state, rng):
+                    self.react(unit_id, FEAR_THE_BEAST_REACTION)
+                    regiment.target_x = regiment.target_y = None
+                    regiment.attack_target = None
+                    regiment.waypoints.clear()
+                    self.battle.reform_to_ranks(regiment, regiment.ranks)
+                    return state.pc + 1
                 regiment.attack_target = target_id
                 self._hand_over_to_charge(regiment)
-                state.fear_passed = False  # a new charge clears it (notes/script_grid_events.md 0)
+                state.cond_flags = True
                 # Battle.tick() handles the actual charging movement
         return state.pc + 1
 
@@ -3224,6 +3240,10 @@ class ScriptInterpreter:
     def _charging(self, unit: "Regiment") -> bool:
         """Charging: running at an attack target, not yet fighting and not pursuing a routing unit."""
         return unit.active and unit.attack_target is not None and not unit.in_melee and not self._pursuing(unit)
+
+    def busy_casting(self, unit: "Regiment", state: UnitScriptState) -> bool:
+        """IfCasting's "is casting", for the engine's own checks."""
+        return self._busy_casting(unit, state)
 
     def _busy_casting(self, unit: "Regiment", state: UnitScriptState) -> bool:
         """IfCasting's "is casting" (notes/script_animation_sound.md 3.2)."""
