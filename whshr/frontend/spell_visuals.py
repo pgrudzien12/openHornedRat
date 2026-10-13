@@ -15,7 +15,7 @@ of Anraheir, Azure Blades, Ere We Go!, Mork Save Uz!) follow notes/spell_attache
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 import math
 import random
@@ -25,6 +25,7 @@ from .. import spell_effects
 
 if TYPE_CHECKING:
     from ..engine import Battle
+    from ..ranged import InnateProjectile
 
 HEAD_FIRST, HEAD_COUNT = 125, 4
 PUFF_FIRST, PUFF_FRAMES = 125, 20
@@ -109,6 +110,41 @@ class FireballVisuals:
         for bolt in self.bolts.values():
             drawn += [Sprite(PUFF_FIRST + int(age), x, y, h) for x, y, h, age in bolt.puffs]
         return drawn
+
+
+@dataclass
+class DragonFlameFlights:
+    """Feed innate dragon flames into Fireball art, retaining final positions for the ending tick.
+
+    Negative presentation ids cannot collide with spell-effect serials. Holding each projectile until
+    its ending update also prevents Python object-id reuse from joining two unrelated trails.
+    """
+
+    next_serial: int = -1
+    previous: dict[int, tuple[int, InnateProjectile]] = field(default_factory=dict)
+
+    def sample(self, projectiles: Iterable[InnateProjectile],
+               ground_height: Callable[[float, float], float]) -> list[Flight]:
+        present: dict[int, tuple[int, InnateProjectile]] = {}
+        flights: list[Flight] = []
+        for projectile in projectiles:
+            if projectile.code != 14:
+                continue
+            key = id(projectile)
+            if key in self.previous:
+                serial = self.previous[key][0]
+            else:
+                serial = self.next_serial
+                self.next_serial -= 1
+            present[key] = serial, projectile
+            flights.append(Flight(serial, projectile.x, projectile.y,
+                                 projectile.z - ground_height(projectile.x, projectile.y)))
+        for key, (serial, projectile) in self.previous.items():
+            if key not in present:
+                flights.append(Flight(serial, projectile.x, projectile.y,
+                                     projectile.z - ground_height(projectile.x, projectile.y), True))
+        self.previous = present
+        return flights
 
 
 # ===== The other projectile spells (notes/spell_visuals.md) =====

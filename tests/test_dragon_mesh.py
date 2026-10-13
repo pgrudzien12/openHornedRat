@@ -115,6 +115,7 @@ class DragonMeshTests(unittest.TestCase):
         view = BattleView.__new__(BattleView)
         view.scene = SimpleNamespace(field=self.field, battle=self.battle)
         view.camera = SimpleNamespace(yaw=0)
+        view._dragon_view_rect = lambda: None
         view._effect_vertices = lambda: self.geometry()
         projection = Projection(640, 480, 250, 250, 0, 45, 1, 140, 75,
                                 projection='perspective', distance=20, target_height=2)
@@ -274,8 +275,9 @@ class DragonFlameOriginTests(unittest.TestCase):
         _step_innate(battle)
         self.assertEqual(flame.z, 47)
 
-    def test_renderer_uses_absolute_flame_height_instead_of_current_ground_plus_eight(self):
+    def test_renderer_uses_fireball_sprites_at_absolute_flame_height_instead_of_fire_meshes(self):
         from whshr.frontend.battle_view import BattleView
+        from whshr.frontend.spell_visuals import FireballVisuals
         flame = self.launch(341).innate_projectiles[0]
         field = SimpleNamespace(effect_meshes={'fire1': triangle(1)}, ground_texture_count=0,
                                 scenery_texture_count=1, ground_height=lambda x, y: 999)
@@ -284,5 +286,10 @@ class DragonFlameOriginTests(unittest.TestCase):
         view = BattleView.__new__(BattleView)
         view.scene = SimpleNamespace(field=field, battle=battle)
         view.effect_capacity = 65536
-        geometry = view._effect_vertices()
-        self.assertEqual(geometry[1], 5)  # 40 script units / 8, unaffected by ground at displaced origin
+        self.assertFalse(view._effect_vertices())  # FIRE1 must never draw a dragon wall of fire
+        battle.spell_effects = SimpleNamespace(active=[])
+        visuals = FireballVisuals()
+        visuals.advance(view._fireball_flights())
+        sprites = visuals.sprites()
+        self.assertEqual(sprites[0].frame, 125)
+        self.assertEqual(field.ground_height(flame.x, flame.y) + sprites[0].height, 40)

@@ -29,14 +29,14 @@ def transform(x: float, y: float, ground: float, height: float, heading: float) 
     return place, rotate
 
 
-def visible(battle: Battle, unit: Regiment) -> bool:
+def visible(battle: Battle, unit: Regiment, display_rect: tuple[float, float, float, float] | None = None) -> bool:
     """Cull by the reference position, independently of mesh extent and model-update timing (§4)."""
     if not unit.active or not unit.visible_to_player:
         return False
     state = battle.event_bus.unit_states.get(unit.identifier)
     if state is not None and state.unit_flags & interpreter.NOT_SHOWN_FLAG:
         return False
-    rect = battle.view_rect
+    rect = display_rect if display_rect is not None else battle.view_rect
     return rect is None or rect[0] <= unit.x <= rect[2] and rect[1] <= unit.y <= rect[3]
 
 
@@ -51,9 +51,10 @@ def model_vertices(field: Battlefield, unit: Regiment, model: ModelState, x: flo
     return bake_mesh(mesh, field.ground_texture_count, field.scenery_texture_count, place, rotate)
 
 
-def unit_vertices(field: Battlefield, battle: Battle, unit: Regiment) -> array[float]:
+def unit_vertices(field: Battlefield, battle: Battle, unit: Regiment,
+                  display_rect: tuple[float, float, float, float] | None = None) -> array[float]:
     vertices = array('f')
-    if visible(battle, unit):
+    if visible(battle, unit, display_rect):
         for (x, y), model in zip(unit.seeded_positions(), unit.melee_models):
             if (unit.model_sprite(model) or '').casefold() == 'meshdragon':
                 vertices.extend(model_vertices(field, unit, model, x, y))
@@ -64,7 +65,8 @@ def uses_mesh(unit: Regiment) -> bool:
     return any((resource or "").casefold() == "meshdragon" for resource in (unit.sprite, unit.leader_sprite))
 
 
-def append_vertices(field: Battlefield, battle: Battle, vertices: array[float]) -> None:
+def append_vertices(field: Battlefield, battle: Battle, vertices: array[float],
+                    display_rect: tuple[float, float, float, float] | None = None) -> None:
     for unit in battle.regiments.values():
         if uses_mesh(unit):
-            vertices.extend(unit_vertices(field, battle, unit))
+            vertices.extend(unit_vertices(field, battle, unit, display_rect))
