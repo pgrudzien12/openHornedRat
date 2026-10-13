@@ -7,7 +7,9 @@ advanced once per battle tick:
 - head: frames 125..128 cycling one per update from the launch tick, at the bolt's current position and height;
 - trail: a puff at the start point on the launch tick, then one at the previous position each tick the bolt moved; it
   plays frames 125..144, one per tick, then disappears;
-- explosion: frames 177..185 from the ending tick (no head then), on the ground at the last tested position.
+- explosion: frames 177..185 from the ending tick (no head then), on the ground at the last tested position;
+- the ending tick also leaves a closing puff at that position, so the trail runs from the start to the end point
+  (owner's decision; the original's last puff is one step short).
 
 The other projectile spells (Hunting Spear, the Lightning family, Piercing Bolts, the Burning Head, Pestilent
 Breath) follow notes/spell_visuals.md in `ProjectileVisuals` below; the spells drawn on their target's figures (Curse
@@ -90,6 +92,11 @@ class FireballVisuals:
             if flight.ending:
                 bolt.flying = False
                 bolt.explosion = [flight.x, flight.y, 0]
+                if bolt.newest != (flight.x, flight.y):
+                    # Owner's decision, not original parity (bf003_playtest 8.4 stops one step short): the trail
+                    # reaches the flight's end point, where the explosion starts, so it runs origin to target.
+                    bolt.puffs.append([flight.x, flight.y, max(0.0, flight.height), 0])
+                    bolt.newest = (flight.x, flight.y)
             bolt.last = here
             bolt.flights += 1
         self.bolts = {serial: bolt for serial, bolt in self.bolts.items()
