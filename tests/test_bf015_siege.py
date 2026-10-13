@@ -139,6 +139,19 @@ class NotShownFlagTests(unittest.TestCase):
         self.assertFalse(battle.minimap_marker_suppressed(unit))
 
 
+class DeploymentSpottingTests(unittest.TestCase):
+    """Owner's decision: nothing is spotted during deployment; the first spotting pass runs at Start."""
+
+    def test_given_a_hidden_enemy_in_view_when_a_regiment_is_placed_during_deployment_then_it_stays_hidden(self):
+        wolves = Regiment("wolves", "Wolves", 194, 106, 128, Side.PLAYER, models=10, ranks=2)
+        archers = Regiment("archers", "Archers", 600, 106, 384, Side.ENEMY, models=10, ranks=2, hidden=True)
+        battle = Battle(2000, 2240, [wolves, archers], deploy=True)
+        battle.refresh_visibility()
+        self.assertTrue(archers.hidden)
+        battle.start_battle()
+        self.assertFalse(archers.hidden)
+
+
 class SteeringArrivalTests(unittest.TestCase):
     """Q4: the 32-unit arrival test measures to the waypoint, not to the steer point."""
 

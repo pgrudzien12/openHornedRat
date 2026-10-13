@@ -1698,7 +1698,7 @@ class BattleBannerVisibilityTests(unittest.TestCase):
         marker = SpriteFrame(32, 32, 0, 32, bytes(32 * 32))
         banner = SpriteSheet("BANNER", [marker, marker, marker], [],
                              rects=[(0, 0, 32, 32)] * 3)
-        field = SimpleNamespace(
+        field = SimpleNamespace(width=1000, height=800,
             ui_sheets={"banner": banner}, sprite_sheet=lambda resource: None,
             ground_height=lambda x, y: 2.0,
         )
@@ -1716,6 +1716,13 @@ class BattleBannerVisibilityTests(unittest.TestCase):
         self.assertEqual(instance[3:7], (0.0, 0.0, 32.0, 32.0))
         self.assertEqual(instance[7:], (16.0, 32.0, 1.0))
 
+    def test_given_a_unit_parked_off_the_map_then_neither_its_figures_nor_its_banner_are_drawn(self):
+        # Owner's decision: no figure is drawn off the map (BF017 parks a hidden unit past the field's edge).
+        view = self._view_with_banner()
+        regiment = view.scene.battle.regiments["player"]
+        regiment.positions = [(100.0, -40.0)]
+        self.assertEqual(view._instances(), b"")
+
     def test_given_models_lagging_behind_a_charging_anchor_then_the_banner_follows_the_models(self):
         # The anchor (regiment.x/y) can visibly outrun the models during a charge (they only ever
         # catch up to it at the unit's base speed - notes/game_rules.md "Formations": models walk
@@ -1727,7 +1734,7 @@ class BattleBannerVisibilityTests(unittest.TestCase):
         regiment.positions = [(80.0, 180.0), (90.0, 190.0)]  # lagging behind the (100, 200) anchor
         marker = SpriteFrame(32, 32, 0, 32, bytes(32 * 32))
         banner = SpriteSheet("BANNER", [marker, marker, marker], [], rects=[(0, 0, 32, 32)] * 3)
-        field = SimpleNamespace(ui_sheets={"banner": banner}, sprite_sheet=lambda resource: None,
+        field = SimpleNamespace(width=1000, height=800, ui_sheets={"banner": banner}, sprite_sheet=lambda resource: None,
                                ground_height=lambda x, y: 2.0)
         view = BattleView.__new__(BattleView)
         view.scene = SimpleNamespace(field=field, battle=_seeded(Battle(1000, 800, [regiment])), selected_id="player")
@@ -1751,7 +1758,7 @@ class BattleBannerVisibilityTests(unittest.TestCase):
         marker = SpriteFrame(32, 32, 0, 32, bytes(32 * 32))
         player_sheet = SpriteSheet("PLAYER", [marker, marker, marker], [], rects=[(10, 0, 32, 32)] * 3)
         enemy_sheet = SpriteSheet("ENEMY", [marker, marker, marker], [], rects=[(50, 0, 32, 32)] * 3)
-        field = SimpleNamespace(
+        field = SimpleNamespace(width=1000, height=800,
             ui_sheets={"player-banner": player_sheet, "enemy-banner": enemy_sheet},
             sprite_sheet=lambda resource: None, ground_height=lambda x, y: 2.0,
         )

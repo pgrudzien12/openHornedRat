@@ -1091,7 +1091,11 @@ class Battle:
             regiment.screen_mark = rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]
 
     def refresh_visibility(self) -> None:
-        """Reveal individually hidden regiments permanently when another army spots them."""
+        """Reveal individually hidden regiments permanently when another army spots them. Owner's decision, not
+        original parity: nothing is spotted during deployment (selecting or placing a regiment there revealed hidden
+        enemies far beyond the sight edge, BF017); the first pass runs when the battle starts."""
+        if self.phase == "deployment":
+            return
         for target in self.regiments.values():
             if not target.hidden or not target.active:
                 continue

@@ -737,7 +737,7 @@ class BattleView(SceneView[BattleScene]):
                 continue
             for (x, y), model in zip(regiment.seeded_positions(), regiment.melee_models):
                 sheet = field.sprite_sheet(regiment.model_sprite(model))
-                if sheet is None:
+                if sheet is None or not self._on_map(x, y):
                     continue
                 action, phase = animation.current(model, regiment.model_family(model))
                 facing = regiment.direction if model.drawn_facing is None else model.drawn_facing
@@ -1065,6 +1065,12 @@ class BattleView(SceneView[BattleScene]):
                 append(item.name, item.x, item.y, base + item.height, item.dx, item.dy, item.scale)
         return vertices
 
+    def _on_map(self, x: float, y: float) -> bool:
+        """Whether a ground point lies on the battle map. Owner's decision: no figure is drawn or picked off the map
+        (BF015/BF017 park hidden units on and past the very edge)."""
+        field = self.scene.field
+        return 0 <= x <= field.width and 0 <= y <= field.height
+
     def _instances(self) -> bytes:
         field, yaw, selected_id, data = self.scene.field, self.camera.yaw, self.scene.selected_id, bytearray()
         banner_instances: list[tuple[str, bytes]] = []
@@ -1079,13 +1085,14 @@ class BattleView(SceneView[BattleScene]):
             # not the anchor, or it visibly floats ahead of/behind the block it marks.
             # Read-only: seeding here would draw stagger values in draw order and break replay determinism.
             positions = regiment.seeded_positions() if regiment.active else []
+            on_map = [point for point in positions if self._on_map(*point)]
             if regiment.active:
                 # Each model already steps its own action/program counter every tick
                 # (whshr.animation, game_rules.md "Figure animation"); this only reads it. Every figure is drawn
                 # with its own sprite set: the leader figure with the leader block's (notes/leader_figure_sprite.md).
                 def draw_model(x: float, y: float, model: Any) -> bytes:
                     sheet = field.sprite_sheet(regiment.model_sprite(model))
-                    if sheet is None:
+                    if sheet is None or not self._on_map(x, y):
                         return b""
                     action, phase = animation.current(model, regiment.model_family(model))
                     facing = regiment.direction if model.drawn_facing is None else model.drawn_facing
@@ -1100,7 +1107,7 @@ class BattleView(SceneView[BattleScene]):
             # Corpses (game_rules.md, "Panic": models that died stay on the ground where they fell), each in its own set.
             for corpse in regiment.corpses:
                 sheet = field.sprite_sheet(corpse.sprite)
-                if sheet is None:
+                if sheet is None or not self._on_map(corpse.x, corpse.y):
                     continue
                 index = sheet.frame_index(corpse.group, 0, sprite_direction(yaw, corpse.direction))
                 frame, rect = sheet.frames[index], _atlas_rect(sheet, index)
@@ -1114,6 +1121,8 @@ class BattleView(SceneView[BattleScene]):
                 effect_sheet: SpriteSheet = effects
 
                 def draw_effect(x: float, y: float, number: int) -> bytes:
+                    if not self._on_map(x, y):
+                        return b""
                     number = min(number, len(effect_sheet.frames) - 1)
                     frame, rect = effect_sheet.frames[number], _atlas_rect(effect_sheet, number)
                     return INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
@@ -1123,10 +1132,10 @@ class BattleView(SceneView[BattleScene]):
                 for x, y, charred_direction, body in regiment.charred:
                     data += draw_effect(x, y, animation.charred_frame(body, sprite_direction(yaw, charred_direction)))
             banner = field.ui_sheets.get((regiment.banner or "").casefold())
-            if regiment.active and banner is not None and len(banner.frames) > 2 and banner.rects and positions:
+            if regiment.active and banner is not None and len(banner.frames) > 2 and banner.rects and on_map:
                 frame, rect = banner.frames[2], _atlas_rect(banner, 2)
-                center_x = sum(x for x, _ in positions) / len(positions)
-                center_y = sum(y for _, y in positions) / len(positions)
+                center_x = sum(x for x, _ in on_map) / len(on_map)
+                center_y = sum(y for _, y in on_map) / len(on_map)
                 banner_instances.append((regiment.identifier, INSTANCE.pack(
                     center_x / WORLD_PER_MESH,
                     field.ground_height(center_x, center_y) + BANNER_MARKER_RAISE,
