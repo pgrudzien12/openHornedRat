@@ -14,9 +14,8 @@ move), `reform_while_moving.md`, `game_rules.md` "Models chase the unit", "Speed
 
 - **Battle state = the control piece's own state.** Gate pieces animate in the **display step**, which runs once per
   displayed frame. In normal play that is exactly **once per battle tick, right after the tick's unit updates** (the
-  100 ms timer runs the tick and then repaints at once). 🟡 The display step also runs on extra repaints (window
-  exposure) and while the battle is paused, so a gate keeps animating during a pause. An engine should step the gate
-  once per tick, after the units.
+  100 ms timer runs the tick and then repaints at once). **The gate does not animate while the battle is paused**
+  (observed in play). An engine should step the gate once per unpaused tick, after the units.
 - **The gate pieces have no footprint.** Gate and door furniture is visual only: no collision, no route obstacle and
   no sight blocker. Blocking around a gate comes only from the battle file's boundaries, and no gate state changes a
   boundary.
@@ -61,8 +60,7 @@ marker, then one more step reports the end. With T = the tick in which the scrip
 - frame k (k = 0…15) is shown from the end of tick T + 3k. Frame 15 is shown at T + 45.
 - the end of tick T + 49 sets **4**. Scripts read 4 from tick T + 50: **≈ 49 ticks (4.9 s)**.
 - closing is the same with the frames in reverse order. 5 at tick T′ → 6 at the end of T′ → 7 at the end of T′ + 49.
-- 🟡 5 set while opening (state 3) starts the closing at once from its first frame (doors snap fully open, then
-  close). Not used by the shipped scripts.
+- 5 set while the gate is still opening does not happen in the shipped battles (the shut rule needs state 4).
 
 **What the doors do (c).** Each door is attached at a **hinge point** fixed to the gate piece (piece model frame, y up,
 in mesh units; 1 mesh unit = 8 world units, `battle_viewer.md`):
@@ -75,8 +73,9 @@ in mesh units; 1 mesh unit = 8 world units, `battle_viewer.md`):
 Each door's mesh hangs from its hinge with no further offset and **rotates about the vertical axis through its
 hinge**. The two doors rotate in **opposite senses** (mirror images). The angle is **stepped**, not interpolated:
 frame k = k / 63 of a full turn (5.71° per frame). It runs from 0° (closed, frame 0) to 15/63 turn ≈ 85.7° (open,
-frame 15), changing every 3 ticks. 🟡 Which sense is "outward" was not checked by eye; the left door turns by −angle
-and the right by +angle about the up axis in the piece frame.
+frame 15), changing every 3 ticks. **The doors open outward, towards the south of the map** (towards decreasing y,
+into the battlefield below the wall; observed in play). In the piece frame the left door turns by −angle and the
+right by +angle about the up axis.
 
 **(d) Blocking:** none, before or after opening (§0).
 
@@ -220,13 +219,14 @@ an NPC slot keep whatever side code the slot's unit has at creation.
 
 | Unit | M′ | s_rlmv |
 |---|---|---|
-| BF015 wagon (`s_move` M = 2), not marked mounted | 2 | trunc(4.8) + 4 = **8** |
+| BF015 wagon (`s_move` M = 2, `s_armr` 0) | 2 | trunc(4.8) + 4 = **8** |
 | neutral, M′ = 4 | 4 | trunc(9.6) + 4 = 13 |
 | neutral, M′ = 5 | 5 | 12 + 4 = 16 |
 | player/enemy, M′ = 4, I = 3 | — | trunc(19.2 + 3) / 2 = 11 |
 
-🟡 Whether the BF015 wagons count as mounted (their `s_mount` entry names a pony) follows the general mount rule of
-`game_rules.md` "Mounts". Use that rule; if they do, M′ is the mount's M.
+The BF015 wagons are **not** mounted: "mounted" is decided by the armour code (`s_armr` 8–13, `game_rules.md` "Mounts"),
+and the wagons have `s_armr=0` for troops and leader. Their `s_mount` entry does not change M′. So M′ = 2 and
+s_rlmv = 8.
 
 ## Corrections to existing public notes
 
@@ -240,8 +240,4 @@ an NPC slot keep whatever side code the slot's unit has at creation.
 
 ## 🟡 Uncertainties
 
-- Gate animation during a pause and on extra repaints (§0).
-- The outward swing sense of the doors (§1.2).
-- 5 requested while a gate is still opening (§1.2).
-- The Flying Bower carrying quirk (Q3).
-- Whether the BF015 wagons count as mounted (Q5).
+- The Flying Bower carrying quirk (Q3), not observed.
