@@ -53,6 +53,11 @@ Point = tuple[int, int]
 WORLD_EFFECT_RESERVE = 512  # instances kept free for world effects (Fireball heads, puffs, explosions) so banners stay
 BACKGROUND = (0, 0, 0)  # the original battle view has a black background behind the terrain, no sky
 NEAR, FAR = 0.5, 4000.0  # mesh units
+# Engine UX (user request, not from the original): a unit of one figure (wizard, monster, shaman on a mount) is also
+# hit inside a screen circle around its sprite, so selecting it or aiming a spell at it does not need a pixel-exact
+# click. Radius: this fraction of the sprite's larger screen side, but never below the minimum in pixels.
+SINGLE_FIGURE_PICK_FACTOR = 0.75
+SINGLE_FIGURE_PICK_MIN_RADIUS = 24.0  # screen pixels
 PAN_SPEED = 0.8  # camera distances per second
 ROTATE_SPEED = 90.0  # degrees per second
 TILT_SPEED = 30.0  # degrees per second
@@ -673,11 +678,13 @@ class BattleView(SceneView[BattleScene]):
         if (self.order_mode.startswith("item:") and repeat_item
                 and self.scene.battle.event_bus.power.player >= 1):
             return (("item_target", self.order_mode[5:], *target_point),)
-        # Magic: a spell aims at the ground point, never snapped to a unit; with no spell the click picks the
-        # wizard's target like a Fire click (notes/player_magic_panel.md 3, 4.2).
+        # Magic: a spell aims at the ground point (notes/player_magic_panel.md 4.2), except that a click near a
+        # single-figure unit with no unit under the point aims at that figure (_spell_point); with no spell the click
+        # picks the wizard's target like a Fire click (3).
         wizard_target = (building_id if regiment_id is None else regiment_id)
         if self._in_magic_mode():
-            return self._magic_click(self.order_mode, (x, y), wizard_target, repeat_item) or ()
+            return self._magic_click(self.order_mode, self._spell_point((x, y), ground_point, hits), wizard_target,
+                                     repeat_item) or ()
         if self.order_mode == "move" and ground_point is None:
             return ()
         mode, self.order_mode = self.order_mode, None
@@ -700,13 +707,24 @@ class BattleView(SceneView[BattleScene]):
             return (("face_point", x, y),)
         return ()
 
+    def _spell_point(self, point: tuple[float, float], ground_point: tuple[float, float] | None,
+                     hits: list[tuple[Regiment, tuple[float, float]]]) -> tuple[float, float]:
+        """The aim point of a spell click. A unit-target spell needs a unit under the point (notes/spell_effects.md
+        B 0.1); when the ground point has none but the click hit a single-figure unit (its pick circle,
+        _figure_hits), aim at that figure, the topmost one. Otherwise the click point as it is."""
+        if ground_point is not None and spell_effects.unit_under_point(self.scene.battle, *ground_point) is not None:
+            return point
+        return next((figure for regiment, figure in reversed(hits) if len(regiment.melee_models) == 1), point)
+
     def _figure_hits(self, pixel: Sequence[float], projection: Projection) -> list[tuple[Regiment, tuple[float, float]]]:
         """Active regiments under the pixel, bottom to top.
 
         A figure hit uses the same frame, position, foot anchor and scale as the billboard renderer, so a
         transparent sprite pixel is no hit. A unit of two or more figures is also hit inside the screen outline
-        (convex hull) of its figures' sprite rectangles, so a click between its figures selects it; such an
-        outline hit ranks below every figure hit. A single figure stays pixel-exact.
+        (convex hull) of its figures' sprite rectangles, so a click between its figures selects it. A unit of one
+        figure is also hit inside a circle around its sprite (SINGLE_FIGURE_PICK_*). Outline and circle hits rank
+        below every figure hit; a circle hit is hidden by terrain or scenery covering the sprite's centre, not the
+        clicked pixel, so a click on open ground next to the figure still counts.
         """
         field, yaw = self.scene.field, self.camera.yaw
         hits: dict[str, tuple[Regiment, tuple[float, float], float]] = {}
@@ -744,22 +762,42 @@ class BattleView(SceneView[BattleScene]):
                     if prior is None or depth < prior[2]:
                         hits[regiment.identifier] = (regiment, (x, y), depth)
         figure_ids = set(hits)
+        centre_x, centre_y = pixel[0] + 0.5, pixel[1] + 0.5
+        probes: dict[str, tuple[float, float]] = {}  # circle hits: the pixel whose scene depth hides the figure
         for identifier, (regiment, corners, figures, depth) in outlines.items():
-            if identifier in hits or len(figures) < 2:
+            if identifier in hits:
                 continue
-            if picking.inside_convex((pixel[0] + 0.5, pixel[1] + 0.5), picking.convex_hull(corners)):
-                hits[identifier] = (regiment, min(figures)[1], depth)
+            if len(figures) >= 2:
+                if picking.inside_convex((centre_x, centre_y), picking.convex_hull(corners)):
+                    hits[identifier] = (regiment, min(figures)[1], depth)
+                continue
+            xs, ys = [corner[0] for corner in corners], [corner[1] for corner in corners]
+            sprite_x, sprite_y = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+            radius = max(SINGLE_FIGURE_PICK_FACTOR * max(max(xs) - min(xs), max(ys) - min(ys)),
+                         SINGLE_FIGURE_PICK_MIN_RADIUS)
+            if math.hypot(centre_x - sprite_x, centre_y - sprite_y) <= radius:
+                hits[identifier] = (regiment, figures[0][1], depth)
+                probes[identifier] = (sprite_x - 0.5, sprite_y - 0.5)
         if hits:
-            scene_depth = picking.mesh_depth_at(projection, pixel[0], pixel[1], field.vertices,
-                                                field.texture_layers, field.texture_size, NEAR, FAR)
-            if field.effect_meshes:
-                effects_depth = picking.mesh_depth_at(projection, pixel[0], pixel[1], self._effect_vertices(),
-                                                      field.texture_layers, field.texture_size, NEAR, FAR)
-                if effects_depth is not None:
-                    scene_depth = min(scene_depth, effects_depth) if scene_depth is not None else effects_depth
-            if scene_depth is not None:
-                hits = {identifier: hit for identifier, hit in hits.items()
-                        if hit[2] - SPRITE_DEPTH_BIAS < scene_depth}
+            scene_depths: dict[tuple[float, float], float | None] = {}
+
+            def scene_depth_at(at: tuple[float, float]) -> float | None:
+                if at not in scene_depths:
+                    depth = picking.mesh_depth_at(projection, at[0], at[1], field.vertices,
+                                                  field.texture_layers, field.texture_size, NEAR, FAR)
+                    if field.effect_meshes:
+                        effects_depth = picking.mesh_depth_at(projection, at[0], at[1], self._effect_vertices(),
+                                                              field.texture_layers, field.texture_size, NEAR, FAR)
+                        if effects_depth is not None:
+                            depth = min(depth, effects_depth) if depth is not None else effects_depth
+                    scene_depths[at] = depth
+                return scene_depths[at]
+
+            def visible(identifier: str, depth: float) -> bool:
+                scene_depth = scene_depth_at(probes.get(identifier, (float(pixel[0]), float(pixel[1]))))
+                return scene_depth is None or depth - SPRITE_DEPTH_BIAS < scene_depth
+
+            hits = {identifier: hit for identifier, hit in hits.items() if visible(identifier, hit[2])}
         # Equal-depth sprites use a strict depth test: the first emitted regiment owns
         # the pixel. Return hits bottom-to-top, with that regiment last in a tie; outline hits
         # sit below every figure hit.

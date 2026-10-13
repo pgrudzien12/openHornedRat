@@ -1501,22 +1501,69 @@ class FigurePickTests(unittest.TestCase):
         with patch("whshr.frontend.battle_view.picking.pick_ground", return_value=None):
             self.assertEqual(view._ground_click(self._pixel(view, 500, 400)), (("select", "inner"),))
 
-    def test_a_single_figure_stays_pixel_exact(self):
+    def _circle_radius(self, view):
+        """The pick circle of the 3x3 test sprite at (500, 400), in screen pixels."""
+        from whshr.formation import SPRITE_PIXEL_WORLD_UNITS
+        from whshr.frontend.battle_view import SINGLE_FIGURE_PICK_FACTOR, SINGLE_FIGURE_PICK_MIN_RADIUS
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+        depth = projection.view(500 / WORLD_PER_MESH, 0.0, 400 / WORLD_PER_MESH)[2]
+        scale = SPRITE_PIXEL_WORLD_UNITS / WORLD_PER_MESH * projection.focal_length / depth
+        return max(SINGLE_FIGURE_PICK_FACTOR * 3 * scale, SINGLE_FIGURE_PICK_MIN_RADIUS)
+
+    def test_a_single_figure_is_hit_inside_its_pick_circle(self):
+        """Given a one-figure unit whose sprite has a transparent centre, when the click lands on that hole or on open
+        ground just inside the circle around the sprite, the unit is hit at its figure's position; just outside the
+        circle it is not."""
         regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=1)
         view = self._view([regiment], pixels=bytes([1, 1, 1, 1, 0, 1, 1, 1, 1]))
         projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+        centre_x, centre_y = self._pixel(view, 500, 400)
+        radius = self._circle_radius(view)
 
-        self.assertEqual(view._figure_hits(self._pixel(view, 500, 400), projection), [])
-
-    def test_empty_footprint_and_transparent_sprite_pixel_do_not_select(self):
-        regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=1)
-        view = self._view([regiment], pixels=bytes([1, 1, 1, 1, 0, 1, 1, 1, 1]))
-        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
-
-        self.assertEqual(view._figure_hits(self._pixel(view, 500, 400), projection), [])
+        for pixel in ((centre_x, centre_y), (centre_x + radius - 1, centre_y), (centre_x, centre_y + radius - 1)):
+            self.assertEqual([(r.identifier, point) for r, point in view._figure_hits(pixel, projection)],
+                             [("player", (500.0, 400.0))])
+        self.assertEqual(view._figure_hits((centre_x + radius + 1, centre_y), projection), [])
         with patch("whshr.frontend.battle_view.picking.pick_ground",
-                   return_value=(500 / WORLD_PER_MESH, 400 / WORLD_PER_MESH)):
-            self.assertEqual(view._ground_click(self._pixel(view, 500, 400)), ())
+                   return_value=(520 / WORLD_PER_MESH, 380 / WORLD_PER_MESH)):
+            self.assertEqual(view._ground_click((centre_x + radius - 1, centre_y)), (("select", "player"),))
+
+    def test_a_unit_of_several_figures_gets_no_pick_circle(self):
+        regiment = Regiment("player", "Player", 500, 400, 0, Side.PLAYER, models=2)
+        view = self._view([regiment])
+        regiment.positions[:] = [(480, 400), (520, 400)]
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+        centre_x, centre_y = self._pixel(view, 520, 400)
+
+        self.assertEqual(view._figure_hits((centre_x + self._circle_radius(view) - 1, centre_y), projection), [])
+
+    def test_a_figure_hit_ranks_above_a_pick_circle(self):
+        near = Regiment("near", "Near", 500, 400, 0, Side.PLAYER, models=1)
+        far = Regiment("far", "Far", 500, 400, 0, Side.ENEMY, models=1)
+        view = self._view([near, far])
+        near.positions[:] = [(500, 400)]
+        far.positions[:] = [(510, 400)]
+        projection = view.camera.projection(640, 480, 1000, 800, 0.0)
+
+        hits = view._figure_hits(self._pixel(view, 510, 400), projection)
+
+        self.assertEqual([r.identifier for r, _point in hits], ["near", "far"])
+
+    def test_a_spell_click_near_a_single_figure_aims_at_the_figure(self):
+        """Given a Hunting-Spear-like click on open ground beside a lone enemy figure (no unit under the ground point,
+        notes/spell_effects.md B 0.1), the spell aims at the figure; a click whose ground point already has a unit
+        under it keeps that point."""
+        from whshr import spell_effects
+        wizard = Regiment("wizard", "Wizard", 100, 100, 0, Side.PLAYER, models=1)
+        shaman = Regiment("shaman", "Shaman", 500, 400, 0, Side.ENEMY, models=1)
+        view = self._view([wizard, shaman])
+        hits = [(shaman, (500.0, 400.0))]
+        beside = (500.0, 460.0)
+        self.assertIsNone(spell_effects.unit_under_point(view.scene.battle, *beside))
+
+        self.assertEqual(view._spell_point(beside, beside, hits), (500.0, 400.0))
+        self.assertEqual(view._spell_point((505.0, 405.0), (505.0, 405.0), hits), (505.0, 405.0))
+        self.assertEqual(view._spell_point(beside, beside, []), beside)
 
     def test_inactive_and_hidden_enemies_are_not_picked(self):
         destroyed = Regiment("destroyed", "Destroyed", 500, 400, 0, Side.PLAYER, models=0)
