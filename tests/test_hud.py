@@ -542,6 +542,23 @@ class PanelStateTests(unittest.TestCase):
         regiment.pursuing = True
         self.assertEqual(hud.slots(), {"BR": "rally"})
 
+    def test_pursuit_after_a_charge_shows_the_hand_instead_of_an_empty_panel(self):
+        from whshr.combat import start_pursuit
+
+        hud = _hud()
+        regiment = hud.battle.regiments["player"]
+        target = hud.battle.regiments["enemy"]
+        regiment.attack_target = target.identifier
+        regiment.charge_started_target = target.identifier
+        self.assertEqual(hud.panel_state(), ("charging", "inf"))
+
+        target.routing = True
+        start_pursuit(hud.battle, regiment, target)
+
+        self.assertEqual(hud.panel_state(), ("rally", "inf"))
+        self.assertEqual(hud.slots(), {"BR": "rally"})
+        self.assertTrue(hud._button_enabled("rally", regiment))
+
     def test_free_charge_hides_buttons_until_it_ends(self):
         regiment = Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf")
         hud = _hud(regiments=[regiment])
