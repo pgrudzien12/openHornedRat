@@ -860,7 +860,7 @@ The key visibility constants are recorded here for implementers.
   straight ahead sends event 0x27. There is no sub-tick sweep, so fast units can briefly overlap.
 - **Visibility** (`IsVisible`), shared by hidden-unit spotting and "is my target visible" for
   AI shooting and casting: the target must lie within the looker's **view cone** (half-width 71/512 turn =
-  **±50°**, doubled to ±100° while in melee), one of three sample rays towards the target (spread by its
+  **±50°**, doubled to ±100° while in melee or re-forming), one of three sample rays towards the target (spread by its
   footprint) must be free of scenery (`ScanObjectsOnLine`, the missile obstruction test), and the line must not
   cross a **`SightEdge`** boundary (if a battle has none, "No Sight Boundary" and visible). **No range limit and
   no terrain height** anywhere in spotting, shooting or casting line of sight: hills never hide units.
@@ -868,7 +868,8 @@ The key visibility constants are recorded here for implementers.
   `IsVisible` is revealed **permanently** (flag `0x80000` cleared), with event 0x1C to the spotter and 0x1D to the revealed unit (`threat_events_nodes.md`).
 - **AI decisions**: `PickBestTarget` scans all units for the highest `UnitScore`; `DetectThreat`
   spots hidden units, then keeps or re-picks the threat unless braced. `RunAway` (206) is one
-  reactive flee step per behaviour period (±67.5° away from visible enemies), `CircleAroundTarget` (228) one
+  256-unit point move straight away from the threat, or 67.5° to a clear side when an enemy is visible behind;
+  never a rout ([runaway_routers_broken.md](runaway_routers_broken.md)), `CircleAroundTarget` (228) one
   offset move of +11.25°. **There is no army-level AI**: coordination comes only from the "assist a friend who
   attacks" rule (event 0x13, `AIQuery` 9/10) and from mission scripts that assign "attack the n-th nearest
   enemy" targets (opcodes 176–191) to individual units. AI armies are not repositioned at battle start (their
@@ -2114,7 +2115,8 @@ and neither the game nor scripts 151/153 test the player-controlled bit. What th
 scripts **151** (generic) and **153** (melee) do an unconditional `IfSwitchScriptHigh 164`; script **155**
 (wizard) and **156** (shooter) switch to 148 / 127 instead — 127 keeps shooting the target — and only when
 flag `0x8000000` is set, else they just send event 25; script **154** (artillery / static) handles the
-event with the separate opcode 0x54 `EnemyRoutedStatic` and never enters 164 at all. Script 164 itself is
+event with the separate opcode 0x54 `EnemyRoutedStatic` and never enters 164 at all (its rule, and why a routing crew
+never reaches the following `Rally`: [runaway_routers_broken.md](runaway_routers_broken.md) §2). Script 164 itself is
 `LeaveSharedGrid; ReformToScriptRanks; React 3 ("Destroy them!"); Query 1; IfThreatOutweighsWorth;
 SendEventSelfIfTrue 3; YieldIfTrue; StartPursuit`, and `StartPursuit` sets state `0x200`
 and flag `0x8000`, refused if `unit_flags2 & 9`.

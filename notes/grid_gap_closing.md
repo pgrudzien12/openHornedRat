@@ -181,7 +181,7 @@ fire only in these situations:
 
 | Situation | Attacking unit | Victim unit |
 |---|---|---|
-| a charging or pursuing unit's footprint touches a **routing** unit | the charger/pursuer | the routing unit |
+| ~~a charging or pursuing unit's footprint touches a routing unit~~ — corrected: the charger's/pursuer's own pass skips routing footprints; these attacks come from the router's own pass (next row) ([runaway_routers_broken.md](runaway_routers_broken.md) §1A) | — | — |
 | a **broken** unit's footprint, while it moves, touches any enemy unit | that enemy unit (it need not be charging) | the broken unit |
 | behaviour 14 `ThreatInReach` (peasants, sheep; `script_behaviours.md` §1) | every charging or pursuing unit within range, any side | the script's own unit |
 
