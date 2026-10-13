@@ -99,8 +99,9 @@ the end of **every** re-form, which follows every halt).
 #### 1.4 Arrival of an ordinary move
 
 An ordinary move (`move_state 0x2`) re-plans only at intervals: after each plan a countdown of
-`min(2 × d, 150)` is set (`d` = distance to the current waypoint, or the deflected distance while steering round an
-obstruction) and decreased by `s_rlmv` every tick; the next plan happens when it goes negative (or when a turn owed by
+`min(2 × d, 150)` is set (`d` = distance to the current waypoint; while steering round an obstruction the countdown
+uses the steer distance instead, but the `d` tests below always use the distance to the waypoint:
+[bf015_gate_npc_column.md](bf015_gate_npc_column.md) Q4) and decreased by `s_rlmv` every tick; the next plan happens when it goes negative (or when a turn owed by
 the previous plan has finished). At a plan:
 
 - turn needed > 64 → halted turn (`move_state 0x8`), owing **half** the angle; re-plans when done;
