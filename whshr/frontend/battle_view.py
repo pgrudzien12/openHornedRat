@@ -45,8 +45,8 @@ from .gpu import Gpu
 from .area_particle_visuals import area_effects, area_meshes, area_sprites
 from .obstacle_visuals import ObstacleVisuals, obstacle_effects
 from .transport_visuals import TransportVisuals, transport_effects
-from .spell_visuals import (AttachedVisuals, DirectionalSprite, FireballVisuals, Flight, ProjectileVisuals, Sprite,
-                            attached_effects, projectile_shots)
+from .spell_visuals import (AttachedVisuals, DirectionalSprite, DragonFlameFlights, FireballVisuals, Flight,
+                            ProjectileVisuals, Sprite, attached_effects, projectile_shots)
 from .scene_view import SceneView
 from .hud import Hud, order_target_hit, select_regiment_hit
 
@@ -736,7 +736,7 @@ class BattleView(SceneView[BattleScene]):
             if not regiment.active or not regiment.visible_to_player:
                 continue
             if dragon_mesh.uses_mesh(regiment):
-                geometry = dragon_mesh.unit_vertices(field, self.scene.battle, regiment)
+                geometry = dragon_mesh.unit_vertices(field, self.scene.battle, regiment, self._dragon_view_rect())
                 depth = picking.mesh_depth_at(projection, pixel[0], pixel[1], geometry,
                                               field.texture_layers, field.texture_size, NEAR, FAR)
                 if depth is not None:
@@ -973,6 +973,21 @@ class BattleView(SceneView[BattleScene]):
         if battle_sounds is not None:
             battle_sounds.handle(new_events)
 
+    def _dragon_view_rect(self) -> tuple[float, float, float, float] | None:
+        """Conservative display bounds include near ground; preserve the script-reaction box separately."""
+        field = self.scene.field
+        if not getattr(field, "dragon_meshes", {}):
+            return None
+        camera = self.camera
+        width, height = self.gpu.target.size
+        projection = camera.projection(width, height, field.width, field.height,
+                                       field.ground_height(camera.target_x, camera.target_y))
+        rect = picking.view_rect(
+            projection, width, height, (camera.target_x / WORLD_PER_MESH, camera.target_y / WORLD_PER_MESH),
+            lambda x, z: field.ground_height(x * WORLD_PER_MESH, z * WORLD_PER_MESH), include_near=True)
+        return (rect[0] * WORLD_PER_MESH, rect[1] * WORLD_PER_MESH,
+                rect[2] * WORLD_PER_MESH, rect[3] * WORLD_PER_MESH)
+
     def _publish_view_rect(self) -> None:
         """Tell the battle which ground the camera shows (the "on screen" test for enemy reactions)."""
         field, camera = self.scene.field, self.camera
@@ -1051,15 +1066,16 @@ class BattleView(SceneView[BattleScene]):
                       transform, rotate, out=vertices)
 
         self._append_doors(vertices)
-        dragon_mesh.append_vertices(field, self.scene.battle, vertices)
+        dragon_mesh.append_vertices(field, self.scene.battle, vertices, self._dragon_view_rect())
         for p in self.scene.battle.projectiles:
             if p.visual not in ARTILLERY_VISUALS:  # artillery shots are sprites (_artillery_sprites)
                 append(MISSILE_MESH.get(p.visual, "arrows1"), p.x, p.y, p.z, p.x1-p.x0, p.y1-p.y0)
         for p in self.scene.battle.innate_projectiles:
-            family = "fire" if p.code == 14 else "flames" if p.code == 15 else "boltbur"
+            if p.code == 14:  # Dragon breath uses Fireball sprites; FIRE meshes belong to Flamestorm.
+                continue
+            family = "flames" if p.code == 15 else "boltbur"
             append(f"{family}{1 + p.elapsed % 4}", p.x, p.y,
-                   p.z if p.code == 14 else self.scene.battle.ground_height(p.x, p.y) + 8,
-                   p.x1-p.x0, p.y1-p.y0)
+                   self.scene.battle.ground_height(p.x, p.y) + 8, p.x1-p.x0, p.y1-p.y0)
         for x, y, _code, started in self.scene.battle.impact_effects:
             frame = min(8, 1 + self.scene.battle.tick_count - started)
             append(f"ex{frame}", x, y, self.scene.battle.ground_height(x, y))
@@ -1184,6 +1200,8 @@ class BattleView(SceneView[BattleScene]):
                     continue
                 ended.add(effect.serial)
             flights.append(Flight(effect.serial, effect.x, effect.y, max(0.0, effect.height), not flying))
+        dragon: DragonFlameFlights = self.__dict__.setdefault("_dragon_flames", DragonFlameFlights())
+        flights.extend(dragon.sample(battle.innate_projectiles, self.scene.field.ground_height))
         return flights
 
     def _artillery_sprites(self) -> bytes:

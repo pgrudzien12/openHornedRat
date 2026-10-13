@@ -140,16 +140,21 @@ VIEW_MARGIN = 10.0  # mesh units added on every side of the view rectangle (note
 
 
 def view_rect(projection: "Projection", width: int, height: int, camera_ground: tuple[float, float],
-              height_at: HeightAt, margin: float = VIEW_MARGIN) -> tuple[float, float, float, float]:
+              height_at: HeightAt, margin: float = VIEW_MARGIN, *,
+              include_near: bool = False) -> tuple[float, float, float, float]:
     """Map-aligned (min x, min z, max x, max z) box around the camera's ground position and the ground under the
     far (top) screen corners, enlarged by `margin` (notes/react_portrait.md section 5). A corner whose ray never
-    meets the ground is skipped. Mesh-space in and out."""
+    meets the ground is skipped. `include_near` additionally includes bottom corners for conservative rendering.
+    Mesh-space in and out."""
     xs, zs = [camera_ground[0]], [camera_ground[1]]
-    for pixel_x in (0.0, float(width)):
-        ground = pick_ground(projection, pixel_x, 0.0, height_at)
-        if ground is not None:
-            xs.append(ground[0])
-            zs.append(ground[1])
+    # Script reactions use the original far-corner box. Rendering additionally includes the near
+    # corners: ground visible below the camera target must not disappear when the camera pans.
+    for pixel_y in ((0.0, float(height)) if include_near else (0.0,)):
+        for pixel_x in (0.0, float(width)):
+            ground = pick_ground(projection, pixel_x, pixel_y, height_at)
+            if ground is not None:
+                xs.append(ground[0])
+                zs.append(ground[1])
     return min(xs) - margin, min(zs) - margin, max(xs) + margin, max(zs) + margin
 
 
