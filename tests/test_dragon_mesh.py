@@ -203,8 +203,8 @@ class DragonBreathTests(unittest.TestCase):
             self.assertEqual(animation.mesh_dragon_pose(unit.melee_models[0]), pose)
             direction = (384 + (sector - 1) * 64) * math.tau / 512
             for flame in battle.innate_projectiles:
-                self.assertAlmostEqual(flame.x0, 1000 + 72 * math.sin(direction))
-                self.assertAlmostEqual(flame.y0, 1000 + 72 * math.cos(direction))
+                self.assertEqual(flame.x0, 1000 + math.floor(72 * math.trunc(256 * math.sin(direction)) / 256))
+                self.assertEqual(flame.y0, 1000 + math.floor(72 * math.trunc(256 * math.cos(direction)) / 256))
             self.assertEqual(unit.direction, 384)
 
     def test_rejected_wraparound_shot_leaves_prior_sector_and_action_intact(self):
@@ -227,8 +227,62 @@ class DragonBreathTests(unittest.TestCase):
                         sprite='MeshDragon', shooting_code=14, unit_class=1)
         battle = Battle(2000, 2000, [unit])
         angle = 511.5 * math.tau / 512
-        launch_shot(battle, unit, (1000, 1000), (1000 + 200 * math.sin(angle), 1000 + 200 * math.cos(angle)))
+        launch_shot(battle, unit, (900, 800), (1000 + 200 * math.sin(angle), 1000 + 200 * math.cos(angle)))
         self.assertEqual(unit.melee_models[0].breath_sector, 3)
         self.assertEqual(animation.mesh_dragon_pose(unit.melee_models[0]), 2)
         self.assertGreaterEqual(len(battle.innate_projectiles), 4)
         self.assertEqual((battle.innate_projectiles[0].x0, battle.innate_projectiles[0].y0), (1000, 1000))
+
+class DragonFlameOriginTests(unittest.TestCase):
+    def launch(self, bearing, ground=lambda x, y: 0):
+        from whshr.ranged import launch_shot
+        unit = Regiment('d', 'd', 1120, 600, 384, Side.ENEMY, models=1, ranks=1,
+                        sprite='MeshDragon', shooting_code=14, unit_class=1)
+        battle = Battle(2000, 2000, [unit])
+        battle.ground_height = ground
+        angle = (bearing + 0.5) * math.tau / 512
+        aim = (1120 + 200 * math.sin(angle), 600 + 200 * math.cos(angle))
+        launch_shot(battle, unit, (999, 888), aim)
+        return battle
+
+    def test_report_exact_integer_origin_vectors_and_initial_current_positions(self):
+        for bearing, origin in ((340, (1069, 549)), (341, (1048, 600)), (510, (1069, 650))):
+            battle = self.launch(bearing)
+            self.assertGreaterEqual(len(battle.innate_projectiles), 4)
+            for flame in battle.innate_projectiles:
+                self.assertEqual((flame.x0, flame.y0), origin)
+                self.assertEqual((flame.x, flame.y), origin)
+                self.assertEqual(flame.z, 40)
+
+    def test_flat_ground_height_runs_from_forty_to_twenty_without_arc(self):
+        from whshr.ranged import _step_innate
+        battle = self.launch(341)
+        flame = battle.innate_projectiles[0]
+        self.assertEqual((flame.z0, flame.z1, flame.z), (40, 20, 40))
+        previous = flame.z
+        for _ in range(9):
+            _step_innate(battle)
+            self.assertLessEqual(flame.z, previous)
+            previous = flame.z
+        self.assertEqual(flame.z, 20)
+
+    def test_height_baseline_samples_unit_before_shift_and_does_not_resample_current_ground(self):
+        from whshr.ranged import _step_innate
+        battle = self.launch(340, lambda x, y: 7.5 if (x, y) == (1120, 600) else 23.4)
+        flame = battle.innate_projectiles[0]
+        self.assertEqual((flame.z0, flame.z1, flame.z), (48, 43, 48))
+        _step_innate(battle)
+        self.assertEqual(flame.z, 47)
+
+    def test_renderer_uses_absolute_flame_height_instead_of_current_ground_plus_eight(self):
+        from whshr.frontend.battle_view import BattleView
+        flame = self.launch(341).innate_projectiles[0]
+        field = SimpleNamespace(effect_meshes={'fire1': triangle(1)}, ground_texture_count=0,
+                                scenery_texture_count=1, ground_height=lambda x, y: 999)
+        battle = SimpleNamespace(regiments={}, control_piece=None, projectiles=[], innate_projectiles=[flame],
+                                 impact_effects=[], ground_height=lambda x, y: 999)
+        view = BattleView.__new__(BattleView)
+        view.scene = SimpleNamespace(field=field, battle=battle)
+        view.effect_capacity = 65536
+        geometry = view._effect_vertices()
+        self.assertEqual(geometry[1], 5)  # 40 script units / 8, unaffected by ground at displaced origin
