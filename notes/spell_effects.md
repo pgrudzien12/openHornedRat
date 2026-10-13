@@ -335,8 +335,8 @@ object** in object-table order; **each unit is hit at most once per test**.
 
 A unit is struck when `d(point, unit centre) < unit footprint radius` (strict) **and** the height test passes: a
 ground unit if `height ≤ its object height`; a flying unit if `its elevation ≤ height ≤ elevation + object height`.
-(The engine's 24-unit band is an engine choice; the original uses each unit object's own height, 🟡 values not
-tabulated.) With radius 0 there is no blast margin and no `GMTXT 2005`.
+(The engine's 24-unit band is an engine choice; the original's unit objects are all created **16** high (no per-type change found),
+confirmed October 2026, `bf014_dragon_mission_audit.md` §7.2.) With radius 0 there is no blast margin and no `GMTXT 2005`.
 
 ### 4.2 Per struck unit (radius 0)
 

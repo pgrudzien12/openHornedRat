@@ -132,24 +132,17 @@ Test vector (any unit, stack shown as words):
 
 Everything in `spell_effects.md` §2 and §3.4 applies, with the dragon's own numbers:
 
-- **Scatter** (§2.2) with the dragon's BS 6 and the Fireball's range 576: `step = trunc(8 × d / 576)`, offset per
-  axis `(rand mod 5) × (±1) × step`. At the node distances (134–187) the step is 1–2, so up to ±8 more on top of
-  §3.1.
-- **Flight: fixed 18 ticks** (the engine uses 9). It is flat: launch elevation 20 and no arc
-  (`spell_effects.md` §2.1, `bf014_dragon_rendering.md` §3.2). There is one in-flight test per tick, and the
-  flame stops at the first unit, building or solid object it hits. Damage per `game_rules.md` "Special weapons":
-  S8, 1 wound, no save, magical, and **every unit hit routs**. Flames also burn Tangling Thorns (§3.4).
+- **Scatter** (§2.2) with the dragon's BS 6 and the Fireball's range 576, aimed at the spread point (ax, ay);
+  details and draw order in §7.1.
+- **Flight: fixed 18 ticks** (the engine uses 9). It is flat: launch elevation 20 and no arc. One in-flight test
+  per tick; on flat ground the flame flies **over** ground units and normally strikes only where it lands (§7.2).
+  Damage per `game_rules.md` "Special weapons": S8, 1 wound, no save, magical, and **every unit struck receives
+  the rout event**. Flames also burn Tangling Thorns (`spell_effects.md` §3.4).
 - **Visuals per flame**: the Fireball head, its trail of fading puffs and the 9-frame explosion at the end of its
   flight (`bf003_playtest_fireball_grid_pursuit.md` §2, §8.3–8.4). A 7-flame breath therefore shows **7 trails
   and 7 explosions**. Each lasts 18 ticks of flight plus the puff and explosion tails.
 
-Test vectors (dragon (1120, 600), facing 384, aim = node 17 (986, 609), d = 134, step 1):
-
-| Before | Breath | After |
-|---|---|---|
-| draws: 3 (count), then for flame 1: 0, 79, then scatter draws 4, even, 0, odd | special weapon 14 | 7 flames. Flame 1 aim (986 + 39, 609 − 40) = (1025, 569), then scattered by (+4, 0) → (1029, 569). 18-tick flight |
-| aim bearing out of the front half-plane (e.g. facing 384, bearing 256) | special weapon 14 | one draw spent (count), no flame, no pose change |
-| `InArcAndRange 1` fails (bearing 64 or more steps off the facing, or distance 576 or more) | library 110 | `React 14`, **no** breath; the handler still ends with `Restart` (§1.1 quirk) |
+Exact flight, strikes and test vectors: §7.
 
 ## 4. Visibility when the looker stands outside the `SightEdge` area (new)
 
@@ -218,3 +211,100 @@ reveals one.
   Both engine and estimate give "outside".
 - 🟡 Whether a single original breath's flames overlap in screen time with the next breath's (they will at 24-tick
   behaviour-21 intervals: 18 ticks of flight + puff tails).
+
+## 7. One dragon flame, exactly (implementer follow-up)
+
+Shared state for this section: a flame has a **start** (moved, §7.1 step 3), a **destination** (spread point plus
+scatter), a **launch line** of heights, a **remaining-ticks counter r** (18 → 0) and a **struck** flag. Positions
+are world units, flat ground at height 0 unless stated.
+
+### 7.1 Launch, draw order and the scatter distance
+
+Per breath: count draw (§3.1 step 1), then sector test (pose, origin direction). Then **per flame, in this order**:
+
+1. y spread draw, x spread draw (§3.1 step 3) → spread point (ax, ay).
+2. Fireball launch at (ax, ay), innate, from the **dragon's unit position** (no launching model):
+   - aim height A = half the height plus the elevation of a **flying** unit standing at (ax, ay), else 0;
+   - scatter `step = trunc(8 × d / 576)` with **d = the distance from the dragon's unit position to (ax, ay)**
+     (not from the moved start); then x magnitude, x sign, y magnitude, y sign, each `(rand mod 5)` magnitude
+     (BS 6) and sign + for an even draw. Destination = (ax + offx, ay + offy). 🟡 d is the whole-unit distance as
+     for missiles (`game_rules.md` §8.3); at these ranges truncation vs rounding changes nothing for step 0/1/2
+     except exactly at 72, 144, 216 … units;
+   - the launch line starts at **ground(dragon position) + 20** and ends at **ground(destination) + A**;
+   - the Fireball launch sound (`spell_sounds.md`: `SFX_Cast_Fireball`) is played once **per flame** at the
+     dragon's unit position: a breath plays 4–9 overlapping copies (subject to the sound option).
+3. The start is then **moved** by the sector origin offset (`bf014_dragon_rendering.md` §3.2), horizontally only.
+   The launch line, the destination and the scatter are not recomputed.
+
+### 7.2 Flight (each tick, launch tick included)
+
+    r = remaining ticks (18 on the launch tick)
+    position = destination + trunc((start − destination) × r / 18)            per axis, truncation toward zero
+    line     = trunc((line_start − line_end) × r / 18) + line_end
+    height   = 20 + line − ground(position)                                       (no arc)
+    in-flight impact test at (position, height): radius 0, the dragon's own unit excluded, no messages
+    if it struck something: the flame ends here (no terminal impact)
+    elif height < 0 (terrain above the flame): the flame ends here, silently (no terminal impact)
+    elif r = 0: terminal impact at the destination, height 0, nothing excluded, messages on; the flame ends
+    else r −= 1
+
+So there are 19 in-flight tests (r = 18 … 0), the last one at the destination, and the terminal impact follows on
+the same tick. On flat ground the height runs 40 → 20, so the flame is still above ground at r = 0 and **the
+terminal impact always happens** unless something stopped it first.
+
+**What an in-flight test can strike** (`spell_effects.md` §4.1, `map_objects_and_projectiles.md`):
+- a **ground unit** only if `height ≤ its object height`. Every unit's object is **16** high, so on flat ground
+  (height 20–40) a flame **never** strikes a ground unit in flight. Over rising ground the height above the
+  local ground falls (`20 + line − ground`); where it drops to 16 or less, ground units can be struck in flight;
+- a **flying** unit if its elevation ≤ height ≤ elevation + 16;
+- a building or furniture pseudo-unit, or a solid `[OBJECTS]` collision object, under its own height rule (the
+  BF014 rocks have z 64, so a flame passing over one inside its radius is stopped there).
+
+**Terminal impact** at the destination, height 0: strikes every unit (any side, **the dragon included**) whose
+footprint contains the destination (`d < footprint radius`, strict), each at most once.
+
+### 7.3 One strike on one unit (in flight or terminal; the same numbers)
+
+Per `spell_effects.md` §4.2 with S 8, wound die 1, **no armour save**, magical, damage type **fire**:
+- one random model; `D6 ≥ TO_WOUND[8][unit T]` to wound; `MagicResistent` ignores it on an even draw; 1 wound;
+  lethal-only kill credit to the dragon; death kind fire;
+- terminal impact only: the "Direct hit on the %s!" message (`GMTXT 2004`) for each unit struck;
+- then, **whether or not it wounded**, the unit is sent the **rout event (0x0C)** directly. What happens then is
+  the unit's script's rout handling (`RoutAllowed` etc.; `CantBreak` units ignore it). There is no panic test.
+- The Fireball's own cast values (S4, no rout) are **not** used for dragon flames.
+- A strike also burns Tangling Thorns whose cast point is closer than 32 to the impact point.
+
+### 7.4 Several flames
+
+No interaction and no cap that matters: every flame is independent. Two flames striking the same unit make two
+wound rolls (possibly two models) and send two rout events. Flames of one breath never strike each other.
+
+### 7.5 Test vectors
+
+Dragon D at (1120, 600), facing 384, flat ground. Aim = node 17 (986, 609) → sector 1, origin offset (−72, 0).
+
+| Before | Action | After |
+|---|---|---|
+| draws for flame 1: y 0, x 79 | spread | (ax, ay) = (986 + 39, 609 − 40) = (1025, 569) |
+| d(D, (1025, 569)) = trunc(√(95² + 31²)) = 99 | scatter | step = trunc(792 / 576) = 1; draws x 4, even, y 0, odd → destination (1029, 569) |
+| launch tick | start moved | start (1048, 600); line 20 → 0; sound at (1120, 600) |
+
+Per-tick flight of that flame (nothing in the way):
+
+| Tick | r | Position | Height | Test |
+|---|---|---|---|---|
+| 0 (launch) | 18 | (1048, 600) | 40 | in flight |
+| 1 | 17 | (1046, 598) | 38 | in flight |
+| 9 | 9 | (1038, 584) | 30 | in flight |
+| 17 | 1 | (1030, 570) | 21 | in flight |
+| 18 | 0 | (1029, 569) | 20 | in flight, then **terminal impact** at (1029, 569), height 0; explosion on the ground there |
+
+The flame then ends; its puffs keep the head's previous heights (40 … 21) and fade as in the Fireball trail rule.
+
+| Before | Action | After |
+|---|---|---|
+| ground unit U, centre (1038, 584), footprint radius 30 | ticks 0–18 | all ticks 0–18 pass inside U's footprint, at heights 40 → 20 > 16: **not struck** in flight. Destination (1029, 569) is 17.5 from U's centre < 30 → terminal impact strikes U: wound roll at S8, message 2004, rout event to U |
+| same U but centre (1000, 540) | ticks 0–18 | never struck; terminal impact strikes nothing; explosion at (1029, 569) |
+| flying unit F at elevation 20, centre (1046, 598), footprint radius 10 (not over the spread point, so A = 0) | ticks 0–3 inside F at heights 40, 38, 37, 36 | tick 3 (1044, 594): 20 ≤ 36 ≤ 36 → struck in flight: wound roll, rout event to F, no message; flame ends; explosion on the ground under (1044, 594) |
+| destination inside the dragon's own footprint | tick 18 | terminal impact strikes the **dragon** (its own exclusion applies only in flight) |
+| solid object z 64, radius 30, centred on the flight path | first tick inside its radius | stopped there; no terminal impact; explosion on the ground there |
