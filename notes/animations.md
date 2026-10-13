@@ -89,14 +89,14 @@ Example: `ESHIN` = 104 = 8 × 13 columns (4 + 1 + 4 + 4).
 | `32+8` | `GYROCOPT` / `ROCKLOB`, `DDCATPLT` | fly / fire (4 phases), wreck |
 | `8+32` | `DWHEEL` | wreck, move |
 | `8+8` | `IMPCWAG`, `GRTCWAG`, `VOLLYWAG` (nibbles 0,1); `IMPCANON`, `GRTCANON`, `VOLEYGUN` (nibbles 1,2); `FANATIC` | intact + wreck; **nibble 1 is always the wreck**; `FANATIC` = spinning + dead |
-| `8+32+8` (nibbles 1–3) | `MORTAR` | ready, fire with smoke (4 phases), third pose (?) |
+| `8+32+8` (nibbles 1–3) | `MORTAR` | wreck (toppled mortar), firing smoke (4 phases), intact/rest pose ([machine_figure_animation.md](machine_figure_animation.md) §2.4) |
 | `32+32+8` | `WAGON` | covered wagon moving, open cart moving, wreck |
 | `32` | `CARAVAN`, `MRTWAG` (wheels roll), `ILMARIN` (walking figure), `DRAGON` (neck-and-head monster, 4 phases, 128×128) | |
 | `32+8+8+8+8` | `DOOMDIVR` | flying (wing flap in phases 0/2 vs 1/3), then 4 single-frame poses (glide/dive?) |
 | 12 groups | `PEASANT` (312) | 3 characters (A red, B green, C tan) × 4 actions, ordered by action: move A,B,C (0–95), dead A,B,C (96–119), attack? A,B,C (120–215), stand? A,B,C (216–311) |
 
 The group order move → dead → attack → stand → special is kept wherever the actions exist,
-and nibble 1 is dead/wreck in every file except `DWHEEL`, `WAGON`, `MORTAR`, `DOOMDIVR`, `PEASANT`.
+and nibble 1 is dead/wreck in every file except `DWHEEL`, `WAGON`, `DOOMDIVR`, `PEASANT`.
 The cannon files without nibble 0 (`IMPCANON`, `GRTCANON`, `VOLEYGUN`) may be the deployed half of
 the `*WAG` (limbered) files, which have nibble 0 — a hypothesis.
 
@@ -191,7 +191,7 @@ first is smaller); `d13 / d02` = phase 1 vs 3 and 0 vs 2 in 4-phase groups; anch
 | MCCAPT | 104 | 0:32 1:8 2:32 3:32 | move, dead, attack, stand | 3/3 | 0.18 / 0.43 | 0.09 / 0.14 | 0,33 |
 | MCSWORD | 104 | 0:32 1:8 2:32 3:32 | move, dead, attack, stand | 3/3 | 0.31 / 0.39 | 0.18 / 0.35 | 6,18 10,16 13,32 |
 | MERCXBOW | 112 | 0:32 1:8 2:32 3:32 4:8 | move, dead, attack, stand, shoot/cast | 3/3 | 0.29 / 0.39 | 0.16 / 0.31 | 10,16 10,32 |
-| MORTAR | 48 | 1:8 2:32 3:8 | ready, fire, pose? | 1/1 | 0.18 / 0.40 | 0.22 / 0.24 | 4,33 |
+| MORTAR | 48 | 1:8 2:32 3:8 | wreck, fire, rest | 1/1 | 0.18 / 0.40 | 0.22 / 0.24 | 4,33 |
 | MRTWAG | 32 | 0:32 | move | 1/1 | 0.02 / 0.34 | 0.01 / 0.00 | 5,33 |
 | MTDRKS | 104 | 0:32 1:8 2:32 3:32 | move, dead, attack, stand | 3/3 | 0.21 / 0.45 | 0.13 / 0.17 | 0,32 |
 | NLNHLB | 104 | 0:32 1:8 2:32 3:32 | move, dead, attack, stand | 3/3 | 0.33 / 0.41 | 0.17 / 0.35 | 7,16 12,34 |
