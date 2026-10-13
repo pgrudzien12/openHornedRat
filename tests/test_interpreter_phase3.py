@@ -110,14 +110,16 @@ class UnitEffectsTests(unittest.TestCase):
         interp.op_RemoveFromBattle(state, None, [], "test_1", 0, None)
         self.assertTrue(self.unit.fled)
 
-    def test_exclude_from_army_marks_fled(self):
-        """Test that ExcludeFromArmy removes unit from army."""
+    def test_exclude_from_army_preserves_active_unit(self):
+        """Army exclusion lists the unit for accounting without removing it from play."""
         interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
         state = self.battle.event_bus.unit_states["test_1"]
 
         self.assertFalse(self.unit.fled)
         interp.op_ExcludeFromArmy(state, None, [], "test_1", 0, None)
-        self.assertTrue(self.unit.fled)
+        self.assertFalse(self.unit.fled)
+        self.assertTrue(self.unit.active)
+        self.assertTrue(self.unit.listed_for_removal)
 
     def test_halt_and_reform_clears_orders(self):
         """Test that HaltAndReform cancels movement and attack orders."""

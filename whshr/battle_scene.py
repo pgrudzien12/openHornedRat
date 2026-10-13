@@ -451,7 +451,9 @@ class BattleScene(Scene):
         outcomes: dict[int, UnitOutcome] = {}
         for identifier, whoami in self.battle.npc_regiments.items():
             regiment = self.battle.regiments[identifier]
-            if regiment.side != Side.NEUTRAL:  # the writer reads the side at the battle's end (report Q8)
+            if (regiment.side != Side.NEUTRAL
+                    or (not regiment.active and not regiment.listed_for_removal)):
+                # G cleanup discards exited RollingStock placeholders (exclude_from_army.md §4).
                 continue
             fled = regiment.fled
             left = fled or regiment.models == 0
