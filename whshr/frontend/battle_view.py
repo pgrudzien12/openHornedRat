@@ -23,7 +23,7 @@ from typing import Any
 import pygame
 import zengl
 
-from .. import animation, birds, deployment, figure_capture, magic, picking, spell_effects
+from .. import animation, birds, deployment, dragon_mesh, figure_capture, magic, picking, spell_effects
 from ..battle3d import SPRITE_DEPTH_BIAS
 from ..battle_events import BattleEvent
 from ..battlefield import (VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, bake_mesh, scenery_transform,
@@ -735,6 +735,12 @@ class BattleView(SceneView[BattleScene]):
         for regiment in self.scene.battle.regiments.values():
             if not regiment.active or not regiment.visible_to_player:
                 continue
+            if dragon_mesh.uses_mesh(regiment):
+                geometry = dragon_mesh.unit_vertices(field, self.scene.battle, regiment)
+                depth = picking.mesh_depth_at(projection, pixel[0], pixel[1], geometry,
+                                              field.texture_layers, field.texture_size, NEAR, FAR)
+                if depth is not None:
+                    hits[regiment.identifier] = (regiment, (regiment.x, regiment.y), depth)
             for (x, y), model in zip(regiment.seeded_positions(), regiment.melee_models):
                 sheet = field.sprite_sheet(regiment.model_sprite(model))
                 if sheet is None or not self._on_map(x, y):
@@ -786,7 +792,7 @@ class BattleView(SceneView[BattleScene]):
                 if at not in scene_depths:
                     depth = picking.mesh_depth_at(projection, at[0], at[1], field.vertices,
                                                   field.texture_layers, field.texture_size, NEAR, FAR)
-                    if field.effect_meshes:
+                    if field.effect_meshes or getattr(field, "dragon_meshes", {}):
                         effects_depth = picking.mesh_depth_at(projection, at[0], at[1], self._effect_vertices(),
                                                               field.texture_layers, field.texture_size, NEAR, FAR)
                         if effects_depth is not None:
@@ -1045,6 +1051,7 @@ class BattleView(SceneView[BattleScene]):
                       transform, rotate, out=vertices)
 
         self._append_doors(vertices)
+        dragon_mesh.append_vertices(field, self.scene.battle, vertices)
         for p in self.scene.battle.projectiles:
             if p.visual not in ARTILLERY_VISUALS:  # artillery shots are sprites (_artillery_sprites)
                 append(MISSILE_MESH.get(p.visual, "arrows1"), p.x, p.y, p.z, p.x1-p.x0, p.y1-p.y0)

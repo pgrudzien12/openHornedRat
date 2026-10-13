@@ -200,10 +200,43 @@ THROWER = _machine_table(0, 32, _machine_shot(0, (0, 0, 0, 0, 0, 1, 1, 2, 3, 0),
 # Mortar: intact frames 40-47, wreck 0-7, the firing smoke 8-39. Addressed from group 8, so 40 is phase 4.
 MORTAR = _machine_table(40, 0, _machine_shot(8, (4, 4, 4, 4, 0, 1, 1, 2, 3, 3, 4), fire_at=6))
 
+# Mesh pose numbers, not sprite phases (notes/bf014_dragon_rendering.md §3).
+DRAGON_FIGHT = tuple(pose for pose in (1, 2, 1, 3, 1, 4, 1, 2, 1, 4, 1, 3) for _ in range(2))
+MESH_DRAGON: ActionTable = {
+    action: ActionScript("mesh", sequence=(1,))
+    for action in (STAND, IDLE, WALK, WEAPON_READY, DEAD)
+}
+MESH_DRAGON[FIGHT] = ActionScript("mesh", sequence=DRAGON_FIGHT, random_entry=16)
+MESH_DRAGON[SHOOT] = ActionScript("mesh", sequence=(1,) * 10, random_entry=4,
+                                 next_action=STAND, skip_ahead=True, drops_requests=True)
+
+
+def request_mesh_breath(model: "ModelState", sector: int, rng: random.Random) -> None:
+    """An accepted weapon shot requests a one-shot; an already frozen breath is not restarted (§3)."""
+    if not one_shot_running(model, "mesh_dragon"):
+        model.breath_sector = sector
+        _enter(model, MESH_DRAGON, SHOOT, rng)
+        model.pending_action = None
+
+
+def mesh_dragon_pose(model: "ModelState") -> int:
+    """Read the current discrete pose without advancing simulation or drawing randomness."""
+    if model.action == SHOOT and one_shot_running(model, "mesh_dragon"):
+        return (3, 2, 4, 2)[model.breath_sector]
+    if model.action == SHOOT:
+        return 1
+    script = MESH_DRAGON[model.action]
+    # step() has advanced the counter past the update it just displayed; preserve both updates
+    # of each authored fight pose, including the first pair after an action change.
+    return _phase_at(script, max(0, model.action_pc - 1), model.action_entry)
+
+
 FAMILY_TABLES: dict[str, ActionTable] = {"standard_infantry": STANDARD_INFANTRY, "peasants": PEASANTS, "slaves": SLAVES,
-                 "wagons": WAGONS, "carts": CARTS, "gun": GUN, "thrower": THROWER, "mortar": MORTAR}
+                 "mesh_dragon": MESH_DRAGON, "wagons": WAGONS, "carts": CARTS, "gun": GUN,
+                 "thrower": THROWER, "mortar": MORTAR}
 # Script sprite resource names (casefolded) that select a decoded family; anything else is standard.
-SPRITE_FAMILIES = {"peasant": "peasants", "peasants": "peasants", "ratslave": "slaves", "slave": "slaves",
+SPRITE_FAMILIES = {"meshdragon": "mesh_dragon", "peasant": "peasants", "peasants": "peasants",
+                   "ratslave": "slaves", "slave": "slaves",
                    "slaves": "slaves", "wagon": "wagons", "caravan": "carts", "mrtwagon": "carts",
                    "mrtwag": "carts", "packpony": "standard_infantry",
                    # War-machine figures, by the leader block's machine set (notes/machine_figure_animation.md 3).

@@ -143,6 +143,12 @@ engine may choose any fixed order. A projectile therefore moves and tests after 
   Piercing Bolts, Burning Head, Pestilent Breath 16; Fireball arc 0 → 9 → −1 (§3.4); Hunting Spear 8 above the
   ground everywhere (terrain-following).
 
+**Innate dragon flames:** the ordinary cast Fireball row is not its launch-height/arc specification.
+Dragon breath uses launch elevation 20 and no cast-Fireball rise/fall arc (flat-ground effective initial height 40).
+It shifts the horizontal launch point after sampling terrain at the unit, leaving the destination unchanged.
+Exact sector origins, rounding and the defective sector-3 diagonal origin are specified in
+[bf014_dragon_rendering.md §3.2](bf014_dragon_rendering.md#32-flame-origins-normal-sectors-and-the-sector-3-defect).
+
 ### 2.2 Scatter (spell bolts scatter like missiles)
 
 Every bolt spell except Hunting Spear is scattered at launch exactly like a missile (`game_rules.md` §8.3), using the
