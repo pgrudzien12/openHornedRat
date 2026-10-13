@@ -151,6 +151,21 @@ class ScatterFormationStateTests(unittest.TestCase):
         battle.tick()
         self.assertTrue(all(math.hypot(x - 700, y - 600) < 41 for x, y in regiment.model_positions()))
 
+    def test_given_scattered_models_when_the_unit_moves_off_and_halts_then_they_stand_in_formation_there(self):
+        # notes/script_spawn_move.md 8.3: the destination is only the model's target in the current layout; an order
+        # of the unit's own replaces it with the slot. Kept, a BF037 Rat Ogre walked back to its old scatter point.
+        battle = _battle([_node(700, 600, node_id=2, radius=40)],
+                         [_word(SCATTER), 2, _word(0x1A), 400, _word(0x1C), behaviour.END], at=(500, 500))
+        regiment = battle.regiments["Peasants"]
+        battle.tick()
+        regiment.target_x, regiment.target_y = 500.0, 1200.0
+        _settle(battle)
+        for _ in range(600):  # long after the halt and its re-form
+            battle.tick()
+        positions = regiment.model_positions()
+        self.assertTrue(all(math.hypot(x - regiment.x, y - regiment.y) < 40 for x, y in positions))
+        self.assertGreater(regiment.y, 1100)
+
     def test_given_a_bf003_style_patrol_loop_when_it_runs_then_models_keep_wandering_inside_the_circle(self):
         # Scatter; Snap; PushPC; Scatter; SetWait 5; Wait; Loop -- the shape of every BF003 peasant script.
         words = [_word(SCATTER), 2, _word(SNAP), _word(0x06), _word(SCATTER), 2, _word(0x1A), 5,
