@@ -102,14 +102,15 @@ Breathing chooses pose **3** for aim sector 0, pose **2** for sector 1, and pose
 - pose 3: head toward local negative X, mouth open;
 - pose 4: head toward local positive X, mouth open.
 
-The breath weapon derives these sectors from the aim bearing relative to unit facing across its front half-plane.
+The breath weapon derives these sectors from the aim bearing and unit facing; its exact cutoffs and missing
+wraparound are specified in §3.1.
 The outer sectors aim the flame origin approximately 45° to either side; the middle sector aims forward.
 This changes the **whole selected mesh pose**, rather than rotating an attached head or the unit toward each shot.
 Each breath enters at a random offset among four starting positions of a ten-update repeated attack pose, so it
 holds that pose for **7–10 updates**, then displays pose 1. The attack freezes action changes and
 drops competing action requests while the pose is frozen (`script_animation_sound.md` §0.1).
-🟡 The extreme edge of the front firing arc and a new breath during an already-playing breath need scene checks;
-do not assume every repeated breath restarts the visible one-shot.
+🟡 A new breath during an already-playing breath needs a scene check; do not assume every repeated breath
+restarts the visible one-shot. The extreme-arc sector-3 quirk is specified in §3.1.
 
 Flames are **separate Fireball effects** launched by the special weapon, not textures attached to the dragon.
 Their origins are offset **72 script units** from the unit along the chosen forward/side direction. The launcher
@@ -118,6 +119,66 @@ This action does not itself impose a new unit heading or a special yaw lock: the
 still apply. Scripted `FireAtNode` supplies an aim point without needing a current target; ordinary no-target queries and
 failed firing checks do not themselves start a new animation. The node-breath loop and special shooter activation
 are covered by `script_shooting.md`, rather than a renderer-owned animation timer.
+
+
+### 3.1 Exact breath sectors, boundary equality and wraparound
+
+Use the **unit's gameplay facing**, not the smoothed/coarsened mesh heading. Let `b` be the ordinary integer aim
+bearing and `f` the unit facing, each on the 0..511 circle. Bearing conversion from a world-space aim point is
+specified in [target_queries.md](target_queries.md) §0: truncate the converted angle rather than round it.
+One heading step is 360/512 degrees. The table below applies to that **already converted integer bearing**.
+
+For this weapon, the relative difference is **`d = b − f` without circular normalization**. A breath is accepted
+only for **−128 < d < 128**. Both equalities reject it. On acceptance, the sector is the integer quotient of
+`d + 128` divided by **85**, rounded down. This gives the following exact inclusive integer ranges:
+
+| Raw relative difference d | Result | Mesh pose | Flame-origin direction |
+|---|---|---|---|
+| d ≤ −128 | rejected | no new breath animation requested | no flames launched by this attempt |
+| −127..−44 | sector **0** | **3** | unit facing −64 heading steps (−45°), wrapped on the circle |
+| −43..41 | sector **1** | **2** | unit facing |
+| 42..126 | sector **2** | **4** | unit facing +64 heading steps (+45°), wrapped on the circle |
+| **127** | sector **3**, accepted edge quirk | **2** (the default attack-pose choice) | **no defined directional origin**; see below |
+| d ≥ 128 | rejected | no new breath animation requested | no flames launched by this attempt |
+
+Thus equality at **−43** selects sector 1, and equality at **42** selects sector 2. These are not three equal
+60-degree sectors: the divisor and strict endpoint tests leave a one-step sector 3 at +89.296875°.
+Sector 3 still requests the breath animation and launches flames, but it does not establish the flame-origin
+offsets that sectors 0–2 establish. 🟡 Its actual flame trajectories have no established stable expected value;
+original runtime reproduction remains needed. Do not silently describe it as sector 2, a clamped sector or rejection.
+A defensive engine policy for this case must be recorded as a deviation.
+
+**Wraparound matters in two different ways.** Sector selection does **not** wrap the difference: facing 500,
+bearing 20 rejects the breath, even though their shortest circular difference is +32. Facing 10, bearing 500
+likewise rejects despite the shortest difference being −22. By contrast, the flame-origin direction for an
+accepted sector 0 or 2 **does** wrap when subtracting/adding the 64-step side offset. This wrap does not repair
+sector selection. Rejection leaves any previous breath-sector value and animation in place; it does not cancel
+an already-running breath or its previously launched effects.
+
+Boundary test vectors below hold the **integer bearing** fixed, independently of coordinate-to-bearing rounding.
+They assume the special weapon launcher is reached; earlier script/reload/targeting checks can stop the attempt.
+
+| Unit facing f | Aim bearing b | Raw d | Expected launcher result |
+|---|---|---|---|
+| 384 (BF014 authored facing) | 256 | −128 | reject: exact negative arc boundary |
+| 384 | 257 | −127 | sector 0, pose 3, origin direction 320 |
+| 384 | 340 | −44 | last sector-0 bearing |
+| 384 | 341 | −43 | first sector-1 bearing, pose 2, origin direction 384 |
+| 384 | 425 | 41 | last sector-1 bearing |
+| 384 | 426 | 42 | first sector-2 bearing, pose 4, origin direction 448 |
+| 384 | 510 | 126 | last sector-2 bearing |
+| 384 | 511 | 127 | accepted sector 3, pose 2; flame-origin uncertainty above |
+| 256 | 384 | 128 | reject: exact positive arc boundary |
+| 0 | 511 | 511 | reject, even though circular difference is −1 |
+| 511 | 0 | −511 | reject, even though circular difference is +1 |
+| 500 | 20 | −480 | reject, even though circular difference is +32 |
+| 10 | 500 | 490 | reject, even though circular difference is −22 |
+| 10 | 0 | −10 | sector 1; selection itself need not fail near heading zero |
+| 50 | 0 | −50 | sector 0, pose 3, origin direction **498** (side-origin wraps) |
+| 450 | 500 | 50 | sector 2, pose 4, origin direction **2** (side-origin wraps) |
+
+This resolves the earlier report's uncertain front-arc cutoffs. The remaining uncertainty at the edge concerns
+sector 3's flame-origin behaviour, not its acceptance or mesh-pose selection.
 
 ## 4. Hidden, off-field and removed states
 
