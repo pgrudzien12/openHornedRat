@@ -149,9 +149,17 @@ def view_rect(projection: "Projection", width: int, height: int, camera_ground: 
     xs, zs = [camera_ground[0]], [camera_ground[1]]
     # Script reactions use the original far-corner box. Rendering additionally includes the near
     # corners: ground visible below the camera target must not disappear when the camera pans.
+    # A rendering corner that sees the sky (a low pitch) still shows ground up to the horizon in its
+    # direction, so the box reaches the far plane there instead of shrinking to the near corners.
     for pixel_y in ((0.0, float(height)) if include_near else (0.0,)):
         for pixel_x in (0.0, float(width)):
             ground = pick_ground(projection, pixel_x, pixel_y, height_at)
+            if ground is None and include_near:
+                _, (dx, _, dz) = screen_ray(projection, pixel_x, pixel_y)
+                length = math.hypot(dx, dz)
+                if length > 0.0:
+                    ground = (camera_ground[0] + dx / length * DEFAULT_MAX_DISTANCE,
+                              camera_ground[1] + dz / length * DEFAULT_MAX_DISTANCE)
             if ground is not None:
                 xs.append(ground[0])
                 zs.append(ground[1])

@@ -39,6 +39,19 @@ class DragonDisplayBoundsTests(unittest.TestCase):
         self.assertEqual(script[3], 70)
         self.assertGreater(render[3], 75)
 
+    def test_low_pitch_view_keeps_a_distant_on_screen_dragon(self):
+        """At a low pitch the top screen corners see the sky; the drawing box reaches the horizon there."""
+        unit = Regiment('d', 'd', 1120, 600, 384, Side.ENEMY, models=1, ranks=1, sprite='MeshDragon')
+        battle = Battle(1360, 1920, [unit])
+        camera = BattleCamera(300, 1600, yaw=0, pitch=10, distance=40)
+        projection = camera.projection(1280, 800, 1360, 1920, 0)
+        px, py, _ = projection.project(projection.view(1120 / 8, 0, 600 / 8))
+        self.assertTrue(0 <= px <= 1280 and 0 <= py <= 800)
+        script = picking.view_rect(projection, 1280, 800, (300 / 8, 1600 / 8), lambda x, y: 0)
+        render = picking.view_rect(projection, 1280, 800, (300 / 8, 1600 / 8), lambda x, y: 0, include_near=True)
+        self.assertFalse(dragon_mesh.visible(battle, unit, tuple(v * 8 for v in script)))
+        self.assertTrue(dragon_mesh.visible(battle, unit, tuple(v * 8 for v in render)))
+
 
 class DragonFireballArtTests(unittest.TestCase):
     def setUp(self):
