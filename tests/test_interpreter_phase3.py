@@ -255,8 +255,8 @@ class MoraleRoutingTests(unittest.TestCase):
         interp.op_IfRouted(state, None, [], "test_1", 0, None)
         self.assertEqual(state.cond_flags, 1)
 
-    def test_enemy_routed_detects_routing_enemies(self):
-        """Test that EnemyRouted detects enemy units that are routing."""
+    def test_enemy_routed_ignores_an_unrelated_routing_enemy(self):
+        """A rout without the current target as event source does not permit pursuit."""
         interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
         state = self.battle.event_bus.unit_states["test_1"]
 
@@ -267,7 +267,7 @@ class MoraleRoutingTests(unittest.TestCase):
         # Player unit starts routing
         self.player.routing = True
         interp.op_EnemyRouted(state, None, [], "test_1", 0, None)
-        self.assertEqual(state.cond_flags, 1)
+        self.assertEqual(state.cond_flags, 0)
 
     def test_ready_to_fire_checks_reload_state(self):
         """Test that ReadyToFire checks if unit can shoot."""

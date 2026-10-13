@@ -63,6 +63,7 @@ class HighPrioritySwitchLockTests(unittest.TestCase):
     def test_given_a_pending_high_priority_switch_then_a_later_normal_switch_does_not_replace_it(self):
         state = interpreter.UnitScriptState(script_id=3)
         interp = interpreter.ScriptInterpreter(None, None, None)
+        state.cond_flags = True
         interp.op_IfSwitchScriptHigh(state, 105, [], "u", 0, None)
         interp.op_SwitchScript(state, 163, [], "u", 0, None)
         self.assertEqual((state.pending_switch, state.pending_switch_high), (105, True))

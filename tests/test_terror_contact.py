@@ -11,9 +11,10 @@ from whshr.engine import Battle, Regiment
 from whshr.interpreter import FEAR_THE_BEAST_REACTION
 from whshr.rules import Side
 from tests.script_helpers import FakeDll, word
+from tests.test_enemy_routed import SCRIPTS as ROUT_SCRIPTS
 
 MAIN = 100
-SCRIPTS = {MAIN: [word("Wait"), behaviour.END]}
+SCRIPTS = {**ROUT_SCRIPTS, MAIN: [word("Wait"), behaviour.END]}
 
 
 def unit(identifier, x, y, side, direction=128, **kwargs):
@@ -31,6 +32,7 @@ class Case(unittest.TestCase):
         self.interp = self.battle.interpreter
         self.charger_state = self.battle.event_bus.unit_states["cavalry"]
         self.causer_state = self.battle.event_bus.unit_states["wyvern"]
+        self.causer_state.interrupt_script = 151
 
     def charge_target(self):
         self.charger_state.current_target = ("wyvern", 0)
@@ -120,6 +122,8 @@ class FleeingChargerTests(Case):
         self.causer_state.current_target = ("cavalry", 0)
         self.engage_then_rout()
 
+        self.interp.run("wyvern", self.causer_state, 1, self.battle.rng)
+        combat.resolve_contacts(self.battle)
         self.assertTrue(self.causer.pursuing)
         self.assertEqual(self.causer.attack_target, "cavalry")
         self.assertFalse(self.causer.in_melee)
@@ -127,8 +131,10 @@ class FleeingChargerTests(Case):
 
     def test_a_causer_busy_casting_stays_alone_instead_of_pursuing(self):
         self.causer_state.current_target = ("cavalry", 0)
-        with mock.patch.object(type(self.interp), "busy_casting", return_value=True):
-            self.engage_then_rout()
+        self.causer.unit_class = 5
+        self.causer_state.channelling = True
+        self.engage_then_rout()
+        self.interp.run("wyvern", self.causer_state, 1, self.battle.rng)
 
         self.assertFalse(self.causer.pursuing)
         self.assertTrue(self.causer.in_melee)
