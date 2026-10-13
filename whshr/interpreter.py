@@ -2491,7 +2491,7 @@ class ScriptInterpreter:
         the models snap into their slots (notes/bf015_gate_npc_column.md Q2). Completes at once."""
         node = self._node_for_placement(operand)
         regiment = self.battle.regiments.get(unit_id)
-        if node is not None and regiment is not None and not regiment.anchored:
+        if node is not None and regiment is not None:  # no anchor test (notes/bf017_merged_mortars.md 3)
             state.current_node = operand
             self.battle.place_at(regiment, *node)
             state.unit_flags |= ARRIVED_FLAG

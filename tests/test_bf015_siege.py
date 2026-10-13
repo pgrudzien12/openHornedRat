@@ -116,6 +116,13 @@ class NodePlacementTests(unittest.TestCase):
         self.assertEqual(self.unit.positions, before)
         self.assertFalse(any(model.at_rest for model in self.unit.melee_models))
 
+    def test_given_an_anchored_war_machine_then_place_at_node_still_moves_it(self):
+        # notes/bf017_merged_mortars.md 3: no anchor test in PlaceAtNode.
+        self.unit.hud_class = "art"
+        self.assertTrue(self.unit.anchored)
+        self.interp.op_PlaceAtNode(self.state, 0, [], "col", 0, None)
+        self.assertEqual((self.unit.x, self.unit.y), (507, 24))
+
     def test_given_an_inactive_node_then_neither_placement_does_anything(self):
         self.interp.op_PlaceAtNode(self.state, 2, [], "col", 0, None)
         self.interp.op_TeleportToNode(self.state, 2, [], "col", 0, None)
@@ -137,6 +144,19 @@ class NotShownFlagTests(unittest.TestCase):
         interp.op_ClearUnitFlags(state, 0x30000000, [], "col", 0, None)
         self.assertTrue(unit.visible_to_player)
         self.assertFalse(battle.minimap_marker_suppressed(unit))
+
+
+class DeploymentSpottingTests(unittest.TestCase):
+    """Owner's decision: nothing is spotted during deployment; the first spotting pass runs at Start."""
+
+    def test_given_a_hidden_enemy_in_view_when_a_regiment_is_placed_during_deployment_then_it_stays_hidden(self):
+        wolves = Regiment("wolves", "Wolves", 194, 106, 128, Side.PLAYER, models=10, ranks=2)
+        archers = Regiment("archers", "Archers", 600, 106, 384, Side.ENEMY, models=10, ranks=2, hidden=True)
+        battle = Battle(2000, 2240, [wolves, archers], deploy=True)
+        battle.refresh_visibility()
+        self.assertTrue(archers.hidden)
+        battle.start_battle()
+        self.assertFalse(archers.hidden)
 
 
 class SteeringArrivalTests(unittest.TestCase):

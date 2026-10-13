@@ -66,11 +66,13 @@ class AnchorFlagTests(unittest.TestCase):
         battle.tick()
         self.assertEqual((gun.x, gun.y), (100, 100))
 
-    def test_given_an_anchored_gun_then_a_scripted_turn_and_placement_do_nothing(self):
+    def test_given_an_anchored_gun_then_a_scripted_turn_does_nothing_but_placement_still_moves_it(self):
+        # notes/bf017_merged_mortars.md 3: PlaceAtNode has no anchor test.
         battle, gun, foe, interp, state = self._battle()
         interp.op_FaceNode(state, 1, [], "gun", 0, None)
-        interp.op_PlaceAtNode(state, 1, [], "gun", 0, None)
         self.assertEqual((gun.direction, gun.x, gun.y), (0, 100, 100))
+        interp.op_PlaceAtNode(state, 1, [], "gun", 0, None)
+        self.assertEqual((gun.x, gun.y), battle.nodes[1])
 
     def test_given_an_anchored_gun_then_a_victorious_fight_does_not_start_a_pursuit(self):
         battle, gun, foe, *_ = self._battle()

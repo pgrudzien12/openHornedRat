@@ -986,7 +986,12 @@ class Battle:
                 used.add(identifier)
                 if forced_side is None and artillery_swap and npc_merge.npc_regiment(unit) is not None:
                     swapped.append(identifier)
-                if forced_side is None and npc_write_back and npc_merge.numbered_regiment(unit) is not None:
+                # Owner's decision, not original parity: a rolling-stock NPC the army merge kept unchanged (the
+                # BF015/BF017 mortar wagons) is not written back, so the company regiment of the same number keeps its
+                # strength and experience (the original probably writes the wagons' 2 models over it,
+                # notes/bf017_merged_mortars.md 6).
+                if (forced_side is None and npc_write_back and npc_merge.numbered_regiment(unit) is not None
+                        and not (army_merge and npc_merge.is_rolling_stock(unit))):
                     written_npcs[identifier] = int(npc_merge.numbered_regiment(unit) or 0)
                 models, ranks = formation.unit_size(unit)
                 leader: View = unit.get("leader") or {}
@@ -1091,7 +1096,11 @@ class Battle:
             regiment.screen_mark = rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]
 
     def refresh_visibility(self) -> None:
-        """Reveal individually hidden regiments permanently when another army spots them."""
+        """Reveal individually hidden regiments permanently when another army spots them. Owner's decision, not
+        original parity: nothing is spotted during deployment (selecting or placing a regiment there revealed hidden
+        enemies far beyond the sight edge, BF017); the first pass runs when the battle starts."""
+        if self.phase == "deployment":
+            return
         for target in self.regiments.values():
             if not target.hidden or not target.active:
                 continue
