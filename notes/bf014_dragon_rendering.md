@@ -138,14 +138,15 @@ only for **−128 < d < 128**. Both equalities reject it. On acceptance, the sec
 | −127..−44 | sector **0** | **3** | unit facing −64 heading steps (−45°), wrapped on the circle |
 | −43..41 | sector **1** | **2** | unit facing |
 | 42..126 | sector **2** | **4** | unit facing +64 heading steps (+45°), wrapped on the circle |
-| **127** | sector **3**, accepted edge quirk | **2** (the default attack-pose choice) | **no defined directional origin**; see below |
+| **127** | sector **3**, accepted edge quirk | **2** (the default attack-pose choice) | **history-dependent diagonal displacement**; §3.2 |
 | d ≥ 128 | rejected | no new breath animation requested | no flames launched by this attempt |
 
 Thus equality at **−43** selects sector 1, and equality at **42** selects sector 2. These are not three equal
 60-degree sectors: the divisor and strict endpoint tests leave a one-step sector 3 at +89.296875°.
-Sector 3 still requests the breath animation and launches flames, but it does not establish the flame-origin
-offsets that sectors 0–2 establish. 🟡 Its actual flame trajectories have no established stable expected value;
-original runtime reproduction remains needed. Do not silently describe it as sector 2, a clamped sector or rejection.
+Sector 3 still requests the breath animation and launches flames. Its horizontal origin varies with execution
+history outside the described gameplay state; both axes receive the same displacement (§3.2). There is no
+stable directional origin to derive from facing and aim alone. Do not silently describe it as sector 2, a clamped
+sector or rejection.
 A defensive engine policy for this case must be recorded as a deviation.
 
 **Wraparound matters in two different ways.** Sector selection does **not** wrap the difference: facing 500,
@@ -178,7 +179,77 @@ They assume the special weapon launcher is reached; earlier script/reload/target
 | 450 | 500 | 50 | sector 2, pose 4, origin direction **2** (side-origin wraps) |
 
 This resolves the earlier report's uncertain front-arc cutoffs. The remaining uncertainty at the edge concerns
-sector 3's flame-origin behaviour, not its acceptance or mesh-pose selection.
+the concrete sector-3 origins seen in an original battle session, not its acceptance, pose or the diagonal
+relationship described below.
+
+
+### 3.2 Flame origins: normal sectors and the sector-3 defect
+
+**Sectors 0–2.** Every flame starts from the **unit's position**, displaced in the sector's direction; it does not
+start from a transformed mesh vertex, mouth attachment, leader-model position or displayed mesh heading.
+The direction and offset are fixed for all successfully created flames in that breath. The random per-flame aim
+spread changes destinations, not the launch displacement. A failed effect allocation contributes no flame.
+
+For exact horizontal rounding, let `h` be the sector's origin heading from §3.1, wrapped into 0..511:
+
+- the x displacement is `floor(72 × trunc(256 × sin(2πh/512)) / 256)`;
+- the y displacement is `floor(72 × trunc(256 × cos(2πh/512)) / 256)`.
+
+Here `trunc` rounds toward zero; the final `floor` rounds toward negative infinity. The sine/cosine samples
+are the ordinary 512-heading movement samples. Therefore the intended 72-unit radius is subject to integer
+component rounding; do not normalize the rounded vector back to length 72.
+For BF014's authored unit position **(1120,600)** and gameplay facing **384**:
+
+| Sector | Origin heading | Horizontal displacement | Flame start x,y |
+|---|---|---|---|
+| 0 | 320 | (−51, −51) | **(1069,549)** |
+| 1 | 384 | (−72, 0) | **(1048,600)** |
+| 2 | 448 | (−51, +50) | **(1069,650)** |
+
+The unit-position displacement changes both the launch anchor and initial current projectile position. The
+scattered destination remains unchanged, so the subsequent flight converges from the displaced start toward
+that destination. It is not a translation of the entire trajectory including its endpoint. Launch sound placement
+is likewise not a mouth attachment: see `spell_sounds.md`.
+
+**Vertical placement.** Dragon flames use the innate Fireball launch with a **20-script-unit launch elevation**,
+not the ordinary cast Fireball's zero launch elevation. The launch baseline samples terrain at the **undisplaced
+unit position**, then adds 20. The horizontal displacement does not re-sample that baseline at the mouth offset.
+The shared projectile-height rule in `spell_effects.md` §2.1 adds the launch elevation again during display:
+on flat terrain the initial effective height is **40 script units**, and the flight ends at **20 plus its aim
+height**, with no ordinary cast-Fireball rise/fall arc. Over uneven terrain, use the established height rule;
+do not simply snap the flame to the ground at its displaced origin. Mesh pose/head height does not alter this.
+
+**Sector 3.** This is a defective origin case rather than an undocumented fourth direction. At launch its
+horizontal displacement has the form **(q,q)**, where q is a signed integer whose value is not determined by
+unit position, facing, aim, pose, reload, RNG draw for flame count, or a documented persistent breath state.
+It depends on unrelated execution history. All successfully launched flames in that one breath use the **same q**.
+The displacement is in **map x/y**, not the dragon's local coordinates: positive q moves both map coordinates up,
+negative q moves both down. It is neither limited to a 72-unit radius nor forced to zero, and it is not reliably
+the previous valid sector's displacement. Normal sector launches do not establish a persistent “last good mouth
+origin” for this case. It changes only horizontal launch/current position; destination and vertical baseline still
+follow the launch rules above.
+
+The established result is therefore **no gameplay-state-determined origin**, rather than “unknown which of the
+three ordinary origins is selected.” 🟡 Concrete q values and visible flight/collision consequences in an original
+BF014 session remain unobserved. There is no portable exact-parity numeric fixture for this defective case.
+An engine can define a stable repair, but it must label it as a deviation rather than reconstruct an invented
+original rule. In particular, default pose 2 does not prove a forward flame origin.
+
+Additional origin test vectors:
+
+| Before | Action | Expected result |
+|---|---|---|
+| dragon (1120,600), facing 384, integer aim bearing 340 | sector-0 breath | all successful flames start at (1069,549) horizontally; independently spread destinations |
+| same, aim bearing 341 | sector-1 breath | start (1048,600), despite adjacent aim bearings across the cutoff |
+| same, aim bearing 510 | sector-2 breath | start (1069,650); no mesh-mouth query |
+| same, aim bearing 511 | sector-3 breath | pose 2; shared displacement (q,q), no stable numeric q derivable from this before-state |
+| same sector-3 before-state with different unrelated execution history | breathe | origins can differ without a change to facing, aim or pose; all flames within each breath retain the shared diagonal displacement |
+| valid sector-2 breath, then sector-3 breath | breathe again | do not assume sector 3 reuses (−51,+50); its displacement has equal x/y components |
+| unit on flat ground, normal innate dragon breath | first projectile position | initial effective height 40; mesh mouth position does not supply z |
+| unit near a terrain-height change, ordinary sector | launch | baseline sampled at unit position before horizontal shift; shifted ground height does not redefine the launch baseline |
+
+This extends the previous origin statement and distinguishes innate dragon flame height/flight from ordinary
+cast Fireball. No original-game runtime capture accompanies these vectors.
 
 ## 4. Hidden, off-field and removed states
 
