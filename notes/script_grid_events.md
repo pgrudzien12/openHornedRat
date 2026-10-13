@@ -264,6 +264,9 @@ Public: `movement_formation.md` §3.10. Settled here:
 | same, fear-passed on | `CheckCollisions` | no test; cond true |
 | `INVSOLID` object 40° to the right, overlapping | `CheckCollisions` | 0x27 queued to self, cond true |
 
+Outside probe mode the same refusal is followed by the ordinary contact record (0x0B), so the mover engages before it
+flees: see [terror_contact_charge.md](terror_contact_charge.md) for both units' sequences.
+
 Script 166 runs it every 20 ticks after `HaltAndReform` until false, then `Restart`. In the 11 mission handlers of
 §2.2, event 0x27 leads straight to 166.
 
