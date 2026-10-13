@@ -69,7 +69,8 @@ What really keeps the reserves in place is the combination of two facts:
 ## 4. Q4: after `TeleportToNode 3`
 
 **Still hidden.** The teleport moves the regiment centre to node index 3 (920, 540) and sets its facing to the
-node's direction (502). It translates every model by the same offset, so the formation is kept, and builds a new
+node's direction (502). Its models keep their world positions (they are compensated, not carried) and walk to their new slots
+([bf015_gate_npc_column.md](bf015_gate_npc_column.md) Q2; corrected October 2026). It builds a new
 footprint, which switches the collision re-check on. `ReformToScriptRanks` then re-lays out the formation for the
 new facing and script ranks. `ResetModelAnimations` staggers the models' start (`movement_formation.md`), and
 `WaitWhileUnitFlags 8` waits until every model has reached its slot.

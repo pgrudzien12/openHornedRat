@@ -249,8 +249,9 @@ BF014: `N,26,0`, so node index 26. N's own `v1` keeps the node index.
   does nothing.
 - Scripts set states 1, 2 and 5 (BF015, BF017, BF037, BF040). The piece's own animation advances it:
   - opening: 2 → 3 → 4 (open) at the end of its animation;
-  - after 5 (shutting starts), the piece runs its closing animation and the state becomes **7**. 🟡 For one piece
-    type 7 is set when the closing starts, for the other when it ends; which is the siege gate was not traced.
+  - after 5 (shutting starts), the piece runs its closing animation and the state becomes **7**: for the
+    swinging-door gates (`ZhufWallEnt`, `NiteUnderwayEnt`) at the **end** of the closing (6 while closing), for the
+    portcullis at the **start** (6 when closed). Timings and door motion: [bf015_gate_npc_column.md](bf015_gate_npc_column.md) Q1.
 - The game also moves 4 → 5 when a qualifying regiment enters node 14 (`script_behaviours.md` 19/20), and the
   siege Z rule (§4.4) moves 1/7 → 7 and 4 → 5.
 - **H** ("Silent Doors Shut", BF015/BF017) is met at the first segment boundary that sees state 7.
