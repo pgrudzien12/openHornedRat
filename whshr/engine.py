@@ -3001,8 +3001,7 @@ class Battle:
                     dying.x, dying.y, dying.death_kind, dying.body, animation.burn_start(dying.body, self.rng)))
                 continue
             animation.step(dying.model, animation.DEAD, self.rng, regiment.model_family(dying.model))
-            regiment.corpses.append(animation.Corpse(dying.x, dying.y, self.rng.randrange(animation.FULL_TURN),
-                                           regiment.model_sprite(dying.model)))
+            regiment.corpses.append(animation.corpse_of(regiment, dying.model, dying.x, dying.y, self.rng))
 
     def _step_burning(self, regiment: Regiment) -> None:
         """Age each burning model; when its burn ends it becomes a charred corpse with a random facing,
@@ -3017,7 +3016,8 @@ class Battle:
     def _drawn_facing_target(self, regiment: Regiment, model: ModelState) -> float:
         """Facing a model's drawn direction turns toward: the unit's for stand/weapon-ready/shoot, its own
         heading (or its opponent) for walk/fight."""
-        if animation.facing_follows_unit(model.action):
+        if (animation.facing_follows_unit(model.action)
+                or animation.family_table(regiment.model_family(model))[model.action].faces_unit):
             return regiment.direction
         if model.action == animation.FIGHT and model.opponent is not None:
             other = self.regiments.get(model.opponent[0])

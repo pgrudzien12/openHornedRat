@@ -213,8 +213,7 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
             # Its death sequence starts now: the casualty check counts it and the models still collapsing.
             immediate_checks.append(len(regiment.positions) + len(regiment.dying))
             animation.step(model, animation.DEAD, battle.rng, regiment.model_family(model))
-            regiment.corpses.append(animation.Corpse(*positions[index], battle.rng.randrange(animation.FULL_TURN),
-                                           regiment.model_sprite(model)))
+            regiment.corpses.append(animation.corpse_of(regiment, model, *positions[index], battle.rng))
         dead_opponents[model.uid] = model.opponent
         if grid is not None and model.cell is not None:
             grid.clear(model.cell)
@@ -926,6 +925,11 @@ def start_rout(regiment: "Regiment", battle: "Battle", flee_point: formation.Poi
     # opponent" - a one-time bearing, not re-aimed every tick at whichever enemy is momentarily
     # nearest (whshr.engine.Battle._advance_regiments reads this fixed point back every tick).
     # `flee_point` overrides that bearing (a scripted flight along the unit's own facing).
+    if regiment.anchored:
+        # An anchored war machine never starts a rout; its target is still cleared (notes/movement_formation.md 3.7,
+        # notes/runaway_routers_broken.md 0: the crew can rout only once the machine is destroyed).
+        regiment.attack_target = None
+        return
     flee_x, flee_y = flee_point if flee_point is not None else battle.flee_point(regiment)
     regiment.flee_x, regiment.flee_y = flee_x, flee_y
     group_id = regiment.melee_group

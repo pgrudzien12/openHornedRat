@@ -1072,7 +1072,7 @@ class BattleView(SceneView[BattleScene]):
                 sheet = field.sprite_sheet(corpse.sprite)
                 if sheet is None:
                     continue
-                index = sheet.frame_index("dead", 0, sprite_direction(yaw, corpse.direction))
+                index = sheet.frame_index(corpse.group, 0, sprite_direction(yaw, corpse.direction))
                 frame, rect = sheet.frames[index], _atlas_rect(sheet, index)
                 data += INSTANCE.pack(corpse.x / WORLD_PER_MESH, field.ground_height(corpse.x, corpse.y),
                                       corpse.y / WORLD_PER_MESH, *rect, frame.anchor_x, frame.anchor_y, 0.0)
