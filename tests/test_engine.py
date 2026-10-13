@@ -76,6 +76,23 @@ class BattleTests(unittest.TestCase):
         self.assertAlmostEqual(self.player.charge_reach, 12 * (11 + 1))
 
 
+class NeutralSpeedTests(unittest.TestCase):
+    """game_rules.md "Speed stat": a neutral-side unit's speed stat is trunc(2.4 x M) + 4."""
+
+    def _regiment(self, side_code):
+        unit = {"id": "cart", "name": "Cart", "set": {"x": 100, "y": 100},
+                "stats": {"s_side": [side_code, 2, 2, 2]}, "profile": {"M": 2, "I": 0}}
+        source = {"field": {"width": 1000, "height": 1000}, "armies": [{"units": [unit]}], "merc": None}
+        return Battle.from_script(source).regiments["cart"]
+
+    def test_given_a_neutral_wagon_with_m2_when_built_then_its_speed_stat_is_8(self):
+        # BF015's horse-drawn carts: side 64, M 2 -> trunc(4.8) + 4 = 8, not trunc(9.6 + 0) / 2 = 4.5.
+        self.assertAlmostEqual(self._regiment(64).speed_per_tick, 8 * 1.8 / 16)
+
+    def test_given_the_same_stats_on_the_player_side_then_the_ordinary_rule_applies(self):
+        self.assertAlmostEqual(self._regiment(0).speed_per_tick, 4.5 * 1.8 / 16)
+
+
 class LeaderLeadershipTests(unittest.TestCase):
     def test_living_leader_uses_own_ld_then_survivors_use_regiment_ld(self):
         from whshr.engine import _decode_combat_profile

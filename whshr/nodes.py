@@ -23,6 +23,7 @@ class ScriptNode:
     node_id: int = 0  # the entry's own `id` keyword; not unique (nearly every node has id 0)
     radius: int = DEFAULT_RADIUS
     active: bool = True  # carries `ns_active` in its status
+    direction: int = 0  # the entry's `dir` (1/512 turns): the facing PlaceAtNode/TeleportToNode give a unit
 
 
 def from_views(views: Iterable[View]) -> list[ScriptNode]:
@@ -38,7 +39,8 @@ def from_views(views: Iterable[View]) -> list[ScriptNode]:
         radius = view.get("radius")
         status = {str(flag).casefold() for flag in view.get("status") or ()}
         nodes.append(ScriptNode(float(x), float(y), int(view.get("id") or 0),
-                                DEFAULT_RADIUS if radius is None else int(radius), "ns_active" in status))
+                                DEFAULT_RADIUS if radius is None else int(radius), "ns_active" in status,
+                                int(view.get("dir") or 0) % 512))
     return nodes
 
 

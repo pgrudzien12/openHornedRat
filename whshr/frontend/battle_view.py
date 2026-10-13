@@ -26,7 +26,8 @@ import zengl
 from .. import animation, birds, deployment, figure_capture, magic, picking, spell_effects
 from ..battle3d import SPRITE_DEPTH_BIAS
 from ..battle_events import BattleEvent
-from ..battlefield import VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, bake_mesh, sprite_direction, view_angle
+from ..battlefield import (VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, bake_mesh, scenery_transform,
+                           sprite_direction, view_angle)
 from ..camera import BattleCamera
 from ..engine import NO_TARGET_SPELLS, Regiment
 from ..formation import SPRITE_PIXEL_WORLD_UNITS
@@ -991,6 +992,34 @@ class BattleView(SceneView[BattleScene]):
                   and capture.unit_id in scene.battle.regiments)
         return lines + tuple(self.event_log)
 
+    def _append_doors(self, vertices: array[float]) -> None:
+        """The gate's doors at their hinges, swung or lifted by the control piece's animation
+        (notes/bf015_gate_npc_column.md 1.2, 1.3): each door turns about the vertical axis through its hinge."""
+        field = self.scene.field
+        meshes = getattr(field, "effect_meshes", {})
+        piece = getattr(self.scene.battle, "control_piece", None)
+        if piece is None:
+            return
+        item = {"x": piece.x, "y": piece.y, "dir": piece.direction}
+        place, place_normal = scenery_transform(item, field.ground_height(piece.x, piece.y))
+        for door in piece.doors():
+            mesh = meshes.get(door.name.casefold())
+            if mesh is None:
+                continue
+            angle = door.sense * piece.door_turn() * math.tau
+            cos, sin = math.cos(angle), math.sin(angle)
+            hx, hy, hz = door.hinge
+            lift = piece.portcullis_lift() if piece.kind == "portcullis" else 0.0
+
+            def vertex(v: Sequence[float], hx: float = hx, hy: float = hy, hz: float = hz, lift: float = lift,
+                       cos: float = cos, sin: float = sin) -> tuple[float, float, float]:
+                return place((hx + v[0] * cos + v[2] * sin, hy + lift + v[1], hz - v[0] * sin + v[2] * cos))
+
+            def normal(n: Sequence[float], cos: float = cos, sin: float = sin) -> tuple[float, float, float]:
+                return place_normal((n[0] * cos + n[2] * sin, n[1], -n[0] * sin + n[2] * cos))
+
+            bake_mesh(mesh, field.ground_texture_count, field.scenery_texture_count, vertex, normal, out=vertices)
+
     def _effect_vertices(self) -> array[float]:
         """Bake active installed scenery effect meshes at projectile positions each frame."""
         field = self.scene.field
@@ -1015,6 +1044,7 @@ class BattleView(SceneView[BattleScene]):
             bake_mesh(mesh, field.ground_texture_count, field.scenery_texture_count,
                       transform, rotate, out=vertices)
 
+        self._append_doors(vertices)
         for p in self.scene.battle.projectiles:
             if p.visual not in ARTILLERY_VISUALS:  # artillery shots are sprites (_artillery_sprites)
                 append(MISSILE_MESH.get(p.visual, "arrows1"), p.x, p.y, p.z, p.x1-p.x0, p.y1-p.y0)

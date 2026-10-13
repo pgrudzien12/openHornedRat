@@ -50,6 +50,12 @@ CASTING_SEQUENCE_FLAG2 = 2
 WIZARD_CLASS = 5  # s_race class Wizard (game_rules.md section 3)
 TRACK_THREAT = 15  # SetBehaviour code of the standard threat-tracking AI (notes/script_queries.md 12.1)
 CAST_ONLY_TARGET_FLAG = 0x4000000  # SetUnitFlags operand: CastPending drops the target after the cast
+# SetUnitFlags operand bits that hide a unit's minimap marker whatever its hidden flag (notes/deployment.md 1.3);
+# BF015/BF017 script 0 sets 0x30000000 on the waiting relief column and clears it when the unit is placed.
+MINIMAP_MARKER_OFF_FLAGS = 0x20400000
+# SetUnitFlags 0x10000000: not shown and cannot engage or be engaged, the state Flying Bower passengers are in
+# (notes/bf015_gate_npc_column.md Q3; BF015/BF017's relief column waits off the map with it).
+NOT_SHOWN_FLAG = 0x10000000
 LEAVING_BATTLE_FLAG = 0x100  # SetUnitFlags 256: the unit is leaving the battle (objective G, game_rules.md R60)
 VIEW_CONE = 71  # +-50 degrees in 1/512 turn, doubled while the looker is in melee (game_rules.md visibility)
 REACT_VIEW_CONE = 85  # ReactToThreat's wider +-60 degrees (notes/threat_events_nodes.md, part A 6)
@@ -948,6 +954,8 @@ class ScriptInterpreter:
                 regiment = self.battle.regiments.get(unit_id)
                 if regiment is not None:
                     regiment.hidden = True
+            if operand & NOT_SHOWN_FLAG:
+                self._sync_not_shown(unit_id)
         return state.pc + 1
 
     def op_ClearUnitFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -959,7 +967,14 @@ class ScriptInterpreter:
                 regiment = self.battle.regiments.get(unit_id)
                 if regiment is not None:
                     regiment.hidden = False
+            if operand & NOT_SHOWN_FLAG:
+                self._sync_not_shown(unit_id)
         return state.pc + 1
+
+    def _sync_not_shown(self, unit_id: str) -> None:
+        regiment = self.battle.regiments.get(unit_id)
+        if regiment is not None:
+            spell_effects.sync_lifted(self.battle, regiment)
 
     def op_TestUnitFlags(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
@@ -2445,41 +2460,42 @@ class ScriptInterpreter:
                 self.battle.turn_to(regiment, direction)
         return state.pc + 1
 
+    def _node_for_placement(self, operand: int | None) -> tuple[float, float, int] | None:
+        """(x, y, facing) of the node at list position `operand`, or None when it is missing or inactive: both node
+        placements then do nothing (notes/bf015_gate_npc_column.md Q2). A synthetic battle built from a bare `nodes`
+        mapping has no list of its own; its entries are active and face 0."""
+        coords = self.battle.nodes.get(operand) if operand is not None else None
+        if operand is None or coords is None:
+            return None
+        table = self.battle.script_nodes
+        if 0 <= operand < len(table) and (table[operand].x, table[operand].y) == coords:
+            return (coords[0], coords[1], table[operand].direction) if table[operand].active else None
+        return coords[0], coords[1], 0
+
     def op_TeleportToNode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """TeleportToNode N: instantly move to waypoint node N (no travel time).
-
-        Completes immediately, so ARRIVED_FLAG is set right away (no pending_arrival needed).
-        """
-        if operand is not None:
+        """TeleportToNode N: the unit jumps to node N and takes its facing; its figures keep their world positions and
+        walk to the new slots (notes/bf015_gate_npc_column.md Q2). Completes at once, so ARRIVED_FLAG is set."""
+        node = self._node_for_placement(operand)
+        regiment = self.battle.regiments.get(unit_id)
+        if node is not None and regiment is not None:
             state.current_node = operand
-            regiment = self.battle.regiments.get(unit_id)
-            coords = self.battle.nodes.get(operand)
-            if regiment and coords:
-                regiment.x, regiment.y = coords
-                regiment.target_x = regiment.target_y = None
-                state.unit_flags |= ARRIVED_FLAG
-                state.pending_arrival = False
+            self.battle.teleport_to(regiment, *node)
+            state.unit_flags |= ARRIVED_FLAG
+            state.pending_arrival = False
         return state.pc + 1
 
     def op_PlaceAtNode(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """PlaceAtNode N: place unit at node N in formation.
-
-        Same positional effect as TeleportToNode -- "in formation" (re-forming ranks in place) is
-        not separately modeled; the regiment's own formation slots are always recomputed from its
-        current models/ranks/direction (Regiment.model_positions), so there is nothing extra to do.
-        Completes immediately, so ARRIVED_FLAG is set right away.
-        """
-        if operand is not None:
+        """PlaceAtNode N: the unit and its figures are carried to node N at once, facing the node's direction, and
+        the models snap into their slots (notes/bf015_gate_npc_column.md Q2). Completes at once."""
+        node = self._node_for_placement(operand)
+        regiment = self.battle.regiments.get(unit_id)
+        if node is not None and regiment is not None and not regiment.anchored:
             state.current_node = operand
-            regiment = self.battle.regiments.get(unit_id)
-            coords = self.battle.nodes.get(operand)
-            if regiment and coords and not regiment.anchored:
-                regiment.x, regiment.y = coords
-                state.unit_flags |= ARRIVED_FLAG
-                state.pending_arrival = False
-                regiment.target_x = regiment.target_y = None
+            self.battle.place_at(regiment, *node)
+            state.unit_flags |= ARRIVED_FLAG
+            state.pending_arrival = False
         return state.pc + 1
 
     def op_ScatterModelsToNode(self, state: UnitScriptState, operand: int | None, script_words: Words,

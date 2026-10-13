@@ -719,7 +719,8 @@ class Hud:
         order[:] = [identifier for identifier in order if identifier in battle.regiments]
         order.extend(identifier for identifier in identifiers if identifier not in order)
         return [battle.regiments[identifier] for identifier in order
-                if battle.regiments[identifier].active and battle.regiments[identifier].visible_to_player]
+                if battle.regiments[identifier].active and battle.regiments[identifier].visible_to_player
+                and not battle.minimap_marker_suppressed(battle.regiments[identifier])]
 
     def _battle(self) -> "Battle":
         if self.battle is None:
