@@ -2183,8 +2183,8 @@ class ScriptInterpreter:
     def _query_pair(self, state: UnitScriptState, unit_id: str) -> tuple["Regiment", "Regiment"] | None:
         """The unit's regiment and its current target regiment, or None when either is missing.
 
-        The target is always the current target, never the event source. This engine keeps no fire-order
-        target point, so the "no target unit" fallback of InArcAndRange has nothing to fall back to.
+        The target is always the current target, never the event source. Point-capable queries
+        resolve the separate target_point through _face_point instead.
         """
         regiment = self.battle.regiments.get(unit_id)
         if regiment is None or state.current_target is None:
@@ -2247,15 +2247,16 @@ class ScriptInterpreter:
 
     def op_InArcAndRange(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """InArcAndRange: arc first (skipped when the target stands exactly on the unit), then range."""
-        pair = self._query_pair(state, unit_id)
-        if pair is None:
-            state.cond_flags = False
-        else:
-            unit, target = pair
-            on_top = unit.x == target.x and unit.y == target.y
-            state.cond_flags = ((on_top or self._in_arc(unit, target))
-                                and self._distance(unit, target) < self._weapon_range(unit))
+        """Arc first, then range, on the target unit or its point fallback (target_queries.md §§1–2)."""
+        point = self._face_point(state, unit_id)
+        state.cond_flags = False
+        if point is not None:
+            unit, x, y = point
+            on_top = unit.x == x and unit.y == y
+            difference = abs(int(unit.direction) - self._bearing_to(unit, x, y)) % 512
+            in_arc = min(difference, 512 - difference) < 64
+            distance = int(math.hypot(x - unit.x, y - unit.y))
+            state.cond_flags = (on_top or in_arc) and distance < self._weapon_range(unit)
         return state.pc + 2
 
     def op_BrokenTargetInRange(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
