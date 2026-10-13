@@ -326,7 +326,8 @@ def _count_side(objectives: Objectives, regiments: Iterable[Regiment]) -> tuple[
 def _return_kept(battle: Battle) -> None:
     """D and L: every removed, kept-for-return, non-player regiment returns to the battle (section 5)."""
     for regiment in battle.regiments.values():
-        if regiment.fled and regiment.side != Side.PLAYER and kept_for_return(battle, regiment):
+        if regiment.listed_for_removal and regiment.side != Side.PLAYER and kept_for_return(battle, regiment):
+            regiment.removal_accounting = "consumed"
             regiment.fled = False
 
 
@@ -429,7 +430,9 @@ def _enemy_remaining(objectives: Objectives, battle: Battle, start: int, adjust:
     for regiment in _side(battle, Side.ENEMY):
         if regiment.identifier not in objectives.counted:
             continue
-        if removed(regiment) or (adjust and out_of_action(regiment)):
+        if regiment.listed_for_removal:
+            remaining -= 1
+        if adjust and out_of_action(regiment):
             remaining -= 1
     return remaining
 
@@ -461,7 +464,7 @@ def _check_z(objectives: Objectives, battle: Battle, record: Objective) -> bool:
     if remaining <= 0:
         return _siege_z(battle) if allied else True
     for regiment in battle.regiments.values():
-        if regiment.identifier not in objectives.counted or not removed(regiment):
+        if regiment.identifier not in objectives.counted or not regiment.listed_for_removal:
             continue
         if (regiment.side == Side.PLAYER or (allied and regiment.side == Side.NEUTRAL)
                 or kept_for_return(battle, regiment)):
@@ -579,7 +582,7 @@ def _final_d(objectives: Objectives, battle: Battle, record: Objective) -> bool:
 
 def _final_e(objectives: Objectives, battle: Battle, record: Objective) -> bool:
     record.values[3] = sum(r.original_models - r.models for r in _side(battle, Side.ENEMY)
-                           if r.identifier in objectives.counted and removed(r))
+                           if r.identifier in objectives.counted and r.listed_for_removal)
     percent = _percent(record.values[3], record.values[1])
     if percent is None:
         return False
@@ -590,6 +593,11 @@ def _final_e(objectives: Objectives, battle: Battle, record: Objective) -> bool:
 def _final_g(objectives: Objectives, battle: Battle, record: Objective) -> bool:
     """G (debrief_evaluation.md §3.3): met unless the gate (whoami 100) is gone and whoami 2 and 29 remain;
     when met it also sets Z met. PROVISIONAL: "handled by the cleanup pass" is read as removed."""
+    # Exited mortar placeholders stay off the field and are omitted from campaign write-back (§4).
+    for regiment in battle.regiments.values():
+        if (regiment.listed_for_removal and kept_for_return(battle, regiment)
+                and regiment.unit_class == ROLLING_STOCK_CLASS):
+            regiment.removal_accounting = "consumed"
     gate, commander, other = (_find_whoami(battle, w) for w in (100, COMMANDER_WHOAMI, 29))
     breached = (gate is not None and removed(gate) and commander is not None and commander.active
                 and other is not None and other.active)
@@ -632,7 +640,7 @@ def _final_q(objectives: Objectives, battle: Battle, record: Objective) -> bool:
 def _final_v(objectives: Objectives, battle: Battle, record: Objective) -> bool:
     race = [r for r in battle.regiments.values() if r.race == record.a]
     alive = sum(r.models for r in race if r.active)
-    escaped = sum(escaped_models(r) for r in race if r.identifier in objectives.counted and removed(r))
+    escaped = sum(escaped_models(r) for r in race if r.identifier in objectives.counted and r.listed_for_removal)
     record.values[3] = record.values[1] - alive - escaped
     return True
 

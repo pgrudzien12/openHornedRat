@@ -3011,10 +3011,10 @@ class ScriptInterpreter:
 
     def op_ExcludeFromArmy(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """ExcludeFromArmy: exclude unit from army roster (remove without death)."""
+        """List for removal accounting while remaining active (notes/exclude_from_army.md §§1–2)."""
         regiment = self.battle.regiments.get(unit_id)
         if regiment:
-            self.battle.remove_from_play(regiment)  # removed alive: stale credits are paid
+            regiment.removal_accounting = "listed"
         return state.pc + 1
 
     def op_SetThreatRange(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,

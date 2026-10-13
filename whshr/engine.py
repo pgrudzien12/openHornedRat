@@ -323,6 +323,9 @@ class Regiment:
     flee_x: float | None = None
     flee_y: float | None = None
     fled: bool = False  # a routing regiment that has left the battlefield (removed from play)
+    # notes/exclude_from_army.md: ordinary removal follows physical presence; exclusion lists an active
+    # unit, and final objective cleanup can consume membership without reactivating it.
+    removal_accounting: Literal["ordinary", "listed", "consumed"] = "ordinary"
     removal_announced: bool = False  # the "unit removed" broadcast 0x16 went out (notes/unit_removal_broadcast.md 1)
     flight_check_ticks: int = 0
     flight_departed: bool = False
@@ -569,6 +572,11 @@ class Regiment:
     def active(self) -> bool:
         """False once a regiment is out of the fight (all models dead, or routed off the field)."""
         return not self.destroyed and not self.fled
+
+    @property
+    def listed_for_removal(self) -> bool:
+        """Accounting membership is independent of battlefield presence (exclude_from_army.md §1)."""
+        return self.removal_accounting == "listed" or (self.removal_accounting == "ordinary" and not self.active)
 
     def activity_key(self) -> tuple[bool, ...]:
         """The states whose change makes the original re-request the figures' action (halt, move or
@@ -2046,6 +2054,7 @@ class Battle:
                 "ranks": regiment.ranks, "independent": regiment.independent,
                 "hidden": regiment.hidden, "waypoints": [list(point) for point in regiment.waypoints],
                 "walking": regiment.walking, "routing": regiment.routing, "fled": regiment.fled,
+                "removal_accounting": regiment.removal_accounting,
                 "in_melee": regiment.in_melee, "melee_group": regiment.melee_group,
                 "reforming": regiment.reforming,
                 "melee_touching": sorted(regiment.melee_touching),
@@ -3233,6 +3242,7 @@ class Battle:
         """``regiment`` leaves the battle alive (it routed off the map, or a script removed it): it is marked fled,
         keeping its models as routed, and each model pays the kill credit it still carries
         (notes/casualty_bookkeeping.md 2.1)."""
+        regiment.removal_accounting = "listed"
         if regiment.fled:
             return
         regiment.fled = True
