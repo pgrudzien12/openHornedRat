@@ -149,14 +149,14 @@ class NotShownFlagTests(unittest.TestCase):
 class DeploymentSpottingTests(unittest.TestCase):
     """Owner's decision: nothing is spotted during deployment; the first spotting pass runs at Start."""
 
-    def test_given_a_hidden_enemy_in_view_when_a_regiment_is_placed_during_deployment_then_it_stays_hidden(self):
-        wolves = Regiment("wolves", "Wolves", 194, 106, 128, Side.PLAYER, models=10, ranks=2)
-        archers = Regiment("archers", "Archers", 600, 106, 384, Side.ENEMY, models=10, ranks=2, hidden=True)
+    def test_given_a_hidden_regiment_in_enemy_view_during_deployment_then_it_is_spotted_only_at_start(self):
+        wolves = Regiment("wolves", "Wolves", 194, 106, 128, Side.PLAYER, models=10, ranks=2, hidden=True)
+        archers = Regiment("archers", "Archers", 600, 106, 384, Side.ENEMY, models=10, ranks=2)
         battle = Battle(2000, 2240, [wolves, archers], deploy=True)
-        battle.refresh_visibility()
-        self.assertTrue(archers.hidden)
+        battle.tick()
+        self.assertTrue(wolves.hidden)
         battle.start_battle()
-        self.assertFalse(archers.hidden)
+        self.assertFalse(wolves.hidden)
 
 
 class SteeringArrivalTests(unittest.TestCase):

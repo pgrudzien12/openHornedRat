@@ -2798,11 +2798,9 @@ class ScriptInterpreter:
         """Reveal every hidden unit of the opposite army this unit sees; 0x1C to the spotter (source = the
         revealed unit) and 0x1D to the revealed unit (source = the spotter), both checked
         (notes/script_behaviours.md 1.0)."""
-        for other in self.battle.regiments.values():
+        for other in list(self.battle.regiments.values()):
             if other.hidden and other.active and self._hostile(unit, other) and self._sees(unit, other):
-                other.hidden = False
-                self.event_bus.queue_event(unit.identifier, Event(code=0x1C, source=other.identifier), checked=True)
-                self.event_bus.queue_event(other.identifier, Event(code=0x1D, source=unit.identifier), checked=True)
+                self.battle.reveal(other, unit)
 
     def _detect_threat(self, unit: "Regiment", state: UnitScriptState) -> None:
         """Code 11 (notes/script_behaviours.md 1.3): spot; unless braced, a threat that targets this unit (any
