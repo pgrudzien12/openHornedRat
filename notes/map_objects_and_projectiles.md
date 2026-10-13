@@ -92,5 +92,5 @@ does not block. Camera-only → does not block.
 
 - 🟡 The missile aim-line scatter test (`ranged_combat_handoff.md`: +8 spread when "scenery obstructs the aim line")
   was not re-traced here. Treat its object filter as the sight filter until checked.
-- 🟡 Height of **unit** map objects (the "unit object height" 🟡 of `spell_effects.md` §8): a unit's object is
-  created at height 16. Whether it is later set per unit type was not checked.
+- ✅ Height of **unit** map objects: a unit's object is created at height 16; no per-unit-type change was found
+  (October 2026, `bf014_dragon_mission_audit.md` §7.2).

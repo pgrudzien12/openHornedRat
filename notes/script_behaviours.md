@@ -154,6 +154,8 @@ game event sets state 4 is 🟡 (no shipped script writes 4; scripts only set 2)
 
 Consequence: with R = 120, the Dragon breathes at the nearest unit within 120 **including Orcs of its own army**, but
 never at Gotrek (allied side code).
+Every such event ends in the handler's `Restart`, even when the shot is refused, which stalls the dragon's
+node cycle; see `bf014_dragon_mission_audit.md` §1.1.
 
 ## 1.10 Codes 26 and 27 — innate weapons on a reload clock
 
