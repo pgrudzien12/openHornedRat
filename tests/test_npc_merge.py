@@ -52,6 +52,18 @@ class ArmyMergeTests(unittest.TestCase):
         self.assertEqual((avengers.models, avengers.name, avengers.side), (20, "Black Avengers", Side.NEUTRAL))
         self.assertEqual((avengers.x, avengers.y, avengers.whoami), (600, 600, 4))  # position and whoami from the script
 
+    def test_given_a_rolling_stock_npc_in_the_company_then_it_keeps_its_battle_file_wagon_form(self):
+        # notes/bf017_merged_mortars.md 5: the mortar crews' file units are Human RollingStock (s_race 56); the
+        # company's Artillery regiment is counted but nothing is copied, so the wagon is not anchored and drives.
+        mortar = unit("NPC_1st_Mortar_Crew", 16, 2, NPC_SIDE, x=1783, y=1977) | {"name": "NPC_1st_Mortar_Crew"}
+        mortar["stats"] = {"s_side": [NPC_SIDE, 2, 2, 1], "s_mount": [0, 0, 10, 56, 12, 0]}
+        company = {16: company_unit(16, 4, "1st Mortar Crew", 90) | {"stats": {"s_side": [15, 4, 4, 1]}}}
+        battle = self.build(company, npcs=[mortar])
+
+        wagon = battle.regiments["NPC_1st_Mortar_Crew"]
+        self.assertEqual((wagon.models, wagon.unit_class, wagon.anchored), (2, 7, False))
+        self.assertEqual(wagon.name, "NPC_1st_Mortar_Crew")
+
     def test_given_a_regiment_outside_the_company_then_its_npc_is_deleted_and_story_units_are_untouched(self):
         battle = self.build({4: company_unit(4, 20, "Black Avengers", 150)})
 

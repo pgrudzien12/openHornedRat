@@ -116,6 +116,13 @@ class NodePlacementTests(unittest.TestCase):
         self.assertEqual(self.unit.positions, before)
         self.assertFalse(any(model.at_rest for model in self.unit.melee_models))
 
+    def test_given_an_anchored_war_machine_then_place_at_node_still_moves_it(self):
+        # notes/bf017_merged_mortars.md 3: no anchor test in PlaceAtNode.
+        self.unit.hud_class = "art"
+        self.assertTrue(self.unit.anchored)
+        self.interp.op_PlaceAtNode(self.state, 0, [], "col", 0, None)
+        self.assertEqual((self.unit.x, self.unit.y), (507, 24))
+
     def test_given_an_inactive_node_then_neither_placement_does_anything(self):
         self.interp.op_PlaceAtNode(self.state, 2, [], "col", 0, None)
         self.interp.op_TeleportToNode(self.state, 2, [], "col", 0, None)
