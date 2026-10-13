@@ -308,3 +308,44 @@ The flame then ends; its puffs keep the head's previous heights (40 … 21) and 
 | flying unit F at elevation 20, centre (1046, 598), footprint radius 10 (not over the spread point, so A = 0) | ticks 0–3 inside F at heights 40, 38, 37, 36 | tick 3 (1044, 594): 20 ≤ 36 ≤ 36 → struck in flight: wound roll, rout event to F, no message; flame ends; explosion on the ground under (1044, 594) |
 | destination inside the dragon's own footprint | tick 18 | terminal impact strikes the **dragon** (its own exclusion applies only in flight) |
 | solid object z 64, radius 30, centred on the flight path | first tick inside its radius | stopped there; no terminal impact; explosion on the ground there |
+
+## 8. Who spots hidden units, and when (implementer follow-up)
+
+A **spotting pass** by a looker reveals every hidden unit of the **other army** that it can see
+(`game_rules.md` "Routes, collisions and visibility"). "Other army" means the enemy army against the player army
+**plus the allied side**: an enemy-army looker reveals hidden player and allied units, and a player or allied looker
+reveals hidden enemy units. The looker's own state (hidden, broken, in melee, braced) is not tested.
+
+Spotting passes happen only on these occasions:
+
+1. **Once, when the battle starts** (the player ends deployment). **Every enemy-army unit** makes one pass, hidden
+   ones included. Player-army and allied units do not take part in this pass.
+2. **During the battle, only from periodic behaviours**: each due run of behaviour 11, 12, 13, 15, 16, 19 or 20
+   makes one pass at the start of that run, at the behaviour's own period (`script_behaviours.md` §1.0–§1.1;
+   `deployment.md` §5.3 for the scheduling; never during deployment).
+
+Nothing else spots, so:
+- A unit with **no periodic behaviour**, or with one of the others (0, 14, 21, 26, 27, …), never spots during the
+  battle. BF014's dragon (behaviour 21) and Gotrek (behaviour 15) differ here: Gotrek spots, the dragon only takes
+  part in the battle-start pass.
+- Spotting is **not** run every tick, and not by every unit.
+- The revealing paths in the other direction are separate: firing, launching an effect and a few script opcodes
+  clear a unit's own hidden state (`script_shooting.md` §1.2, `spell_effects.md` §1.5).
+
+Consequences in BF014:
+- At the start, the four orcs and the dragon each make one pass. The orcs look from just inside the `SightEdge`
+  (§4.1), facing north, with no range limit. They reveal every player regiment in their ±50° cones that no
+  scenery hides. Depending on deployment, that can be much of the player army **at tick 0, in the original too**.
+- Afterwards each orc spots again only every 29–33 ticks (its behaviour-15 period). The dragon never spots again.
+
+🟡 Separate, not detailed here: during deployment, a player unit that is placed or picked up is set hidden unless
+some non-hidden enemy-army unit can see it.
+
+| Before | Event | After |
+|---|---|---|
+| deployment; hidden player unit P in front of hidden orc O (cone and line clear) | player ends deployment | O's battle-start pass reveals P (0x1C to O, 0x1D to P) |
+| battle running; P hidden, O's behaviour 15 next due in 20 ticks | 19 ticks pass | P stays hidden |
+| same | the 20th tick (O's periodic run) | P revealed |
+| hidden enemy E in view of the player unit U running library 100 (behaviour 11, period 30) | U's periodic run | E revealed |
+| hidden player unit in view of the BF014 dragon (behaviour 21) during the battle | any number of ticks | stays hidden (behaviour 21 does not spot) |
+

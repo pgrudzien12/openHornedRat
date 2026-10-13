@@ -867,7 +867,8 @@ The key visibility constants are recorded here for implementers.
   edge point moved inward by 1.1 × its distance outside; the target is never moved, so a target outside the area
   is not visible (corrected October 2026, `bf014_dragon_mission_audit.md` §4). **No range limit and
   no terrain height** anywhere in spotting, shooting or casting line of sight: hills never hide units.
-- **Hidden units** (`SpotHiddenUnits`, run by threat detection): each hidden enemy that passes
+- **Hidden units** (`SpotHiddenUnits`, run once by every enemy-army unit when the battle starts, then only by the
+  periodic behaviours 11–13, 15, 16, 19, 20; `bf014_dragon_mission_audit.md` §8): each hidden enemy that passes
   `IsVisible` is revealed **permanently** (flag `0x80000` cleared), with event 0x1C to the spotter and 0x1D to the revealed unit (`threat_events_nodes.md`).
 - **AI decisions**: `PickBestTarget` scans all units for the highest `UnitScore`; `DetectThreat`
   spots hidden units, then keeps or re-picks the threat unless braced. `RunAway` (206) is one
