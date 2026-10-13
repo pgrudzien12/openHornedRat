@@ -33,6 +33,7 @@ class Corpse:
     y: float
     direction: int
     sprite: str | None = None  # the figure's troop sprite resource
+    group: str | int = "dead"  # the dead script's group: a name, or a first-frame number (machine wrecks)
 
 
 @dataclass
@@ -68,10 +69,14 @@ class ActionScript:
     ``groups[stagger % 3]`` (three variants), rule "bit1" picks ``groups[(stagger >> 1) & 1]`` (two
     variants) -- instead of the single `group`. Peasants, Slaves and Wagons use it (below); when
     `variant_groups` holds ints they are first-frame numbers within the sprite file rather than names.
-    `locks_facing` freezes the drawn facing while the script plays (the corpse script).
+    `locks_facing` freezes the drawn facing while the script plays (the corpse script). War-machine scripts
+    (notes/machine_figure_animation.md 0.3-0.4) set `faces_unit` (the figure always turns to the unit's facing, even
+    while fighting or walking), `drops_requests` (a request arriving during the one-shot is dropped, not queued)
+    and, on the dead script, `keeps_facing` (the wreck keeps the facing it had instead of a random one). A group may
+    be a first-frame number in the sprite file instead of a name.
     """
 
-    group: str  # matches whshr.battlefield.ACTION_GROUPS
+    group: str | int  # a name from whshr.battlefield.ACTION_GROUPS, or a first-frame number
     sequence: tuple[int, ...] = ()
     loop: bool = True
     random_entry: int = 0
@@ -84,6 +89,9 @@ class ActionScript:
     locks_facing: bool = False
     fire_at: int | None = None  # script step (counting the random entry skip) that posts the fire event
     skip_ahead: bool = False  # the random entry skips ahead in ONE fixed-length program (bigger skip = sooner end)
+    faces_unit: bool = False
+    drops_requests: bool = False
+    keeps_facing: bool = False
 
 
 # Standard infantry (notes/game_rules.md "Figure animation" table). Sprite groups per
@@ -163,12 +171,45 @@ CARTS: ActionTable = {action: replace(script, variant_groups=(0, 0)) if script.v
                       for action, script in WAGONS.items()}
 CARTS[DEAD] = ActionScript("dead", sequence=(0,), loop=False, locks_facing=True)
 
+
+
+def _machine_table(intact: int, wreck: int, shoot: ActionScript) -> ActionTable:
+    """A war-machine figure (notes/machine_figure_animation.md 1): actions 1-5 hold the intact group's phase 0
+    facing the unit's facing, 6 is the wreck held with its facing kept, 7 the family's locked shot."""
+    held = ActionScript(intact, sequence=(0,), faces_unit=True)
+    return {STAND: held, IDLE: held, WALK: held, FIGHT: held, WEAPON_READY: held,
+            DEAD: ActionScript(wreck, sequence=(0,), loop=False, locks_facing=True, keeps_facing=True),
+            SHOOT: shoot}
+
+
+def _machine_shot(group: int, sequence: tuple[int, ...], fire_at: int) -> ActionScript:
+    """A machine's shot: random entry 0-3 skips into the lead-in of one fixed program, the fire event is its own
+    step, then back to stand; requests during the shot are dropped (notes/machine_figure_animation.md 0.3, 2)."""
+    return ActionScript(group, sequence=sequence, random_entry=4, next_action=STAND, fire_at=fire_at,
+                        skip_ahead=True, faces_unit=True, drops_requests=True)
+
+
+# notes/machine_figure_animation.md 2.1-2.4. Cannon and Great Cannon: intact frames 8-15, wreck 0-7, the gun
+# never changes frame while shooting (the muzzle puff, not modelled here, shows the shot); fire step on the 7th
+# step. The Volley Gun shares these frames; its three puffs and two extra event posts are not modelled
+# (PROVISIONAL: one shot like the cannon's until the shooting hand-off settles how the extra posts launch).
+GUN = _machine_table(8, 0, _machine_shot(8, (0,) * 11, fire_at=6))
+# Rock Lobber and Doom Diver catapult: the "fire" group's phase 0 is the rest frame; the arm swings only in the
+# shot, after the fire step: 0,0,0,0,fire,1,1,2,3,0.
+THROWER = _machine_table(0, 32, _machine_shot(0, (0, 0, 0, 0, 0, 1, 1, 2, 3, 0), fire_at=4))
+# Mortar: intact frames 40-47, wreck 0-7, the firing smoke 8-39. Addressed from group 8, so 40 is phase 4.
+MORTAR = _machine_table(40, 0, _machine_shot(8, (4, 4, 4, 4, 0, 1, 1, 2, 3, 3, 4), fire_at=6))
+
 FAMILY_TABLES: dict[str, ActionTable] = {"standard_infantry": STANDARD_INFANTRY, "peasants": PEASANTS, "slaves": SLAVES,
-                 "wagons": WAGONS, "carts": CARTS}
+                 "wagons": WAGONS, "carts": CARTS, "gun": GUN, "thrower": THROWER, "mortar": MORTAR}
 # Script sprite resource names (casefolded) that select a decoded family; anything else is standard.
 SPRITE_FAMILIES = {"peasant": "peasants", "peasants": "peasants", "ratslave": "slaves", "slave": "slaves",
                    "slaves": "slaves", "wagon": "wagons", "caravan": "carts", "mrtwagon": "carts",
-                   "mrtwag": "carts", "packpony": "standard_infantry"}
+                   "mrtwag": "carts", "packpony": "standard_infantry",
+                   # War-machine figures, by the leader block's machine set (notes/machine_figure_animation.md 3).
+                   "cannon": "gun", "impcanon": "gun", "grtcannon": "gun", "grtcanon": "gun", "volleygun": "gun",
+                   "voleygun": "gun", "rocklobber": "thrower", "rocklob": "thrower", "doomdvrcatapult": "thrower",
+                   "ddcatplt": "thrower", "mortar": "mortar"}
 WAGON_CLASS = 7  # s_race class RollingStock
 DEFAULT_FAMILY = "standard_infantry"
 
@@ -185,6 +226,19 @@ def family_for(sprite: str | None, unit_class: int | None = None) -> str:
     if family is None and unit_class == WAGON_CLASS:
         family = "wagons"
     return family or DEFAULT_FAMILY
+
+
+def corpse_of(regiment: Any, model: "ModelState", x: float, y: float, rng: random.Random) -> Corpse:
+    """The corpse a collapsing figure leaves: its dead script's group, and a random facing, except a war-machine
+    wreck, which keeps the facing it had (notes/machine_figure_animation.md 0.4). `regiment` is the figure's
+    whshr.engine.Regiment."""
+    script = family_table(regiment.model_family(model))[DEAD]
+    if script.keeps_facing:
+        direction = int(regiment.direction if model.drawn_facing is None else model.drawn_facing)
+    else:
+        direction = rng.randrange(FULL_TURN)
+    group = script.group if script.variant_rule is None else script_group(script, model.stagger)
+    return Corpse(x, y, direction, regiment.model_sprite(model), group)
 
 
 def script_group(script: ActionScript, stagger: int) -> str | int:
@@ -411,7 +465,8 @@ def step(model: "ModelState", requested_action: int, rng: random.Random,
     if requested_action == model.action:
         model.pending_action = None
     elif one_shot_running(model, family):
-        model.pending_action = requested_action
+        if not table[model.action].drops_requests:
+            model.pending_action = requested_action
     else:
         _enter(model, table, requested_action, rng)
         model.pending_action = None
