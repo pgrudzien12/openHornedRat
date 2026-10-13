@@ -27,12 +27,15 @@ class Door:
 
     name: str
     hinge: tuple[float, float, float]
-    sense: int  # the door turns by sense x angle about the up axis (the two doors mirror each other)
+    # The door turns by sense x angle about the up axis, in the scenery convention of
+    # `battlefield.scenery_transform` (x' = x cos + z sin, z' = -x sin + z cos). The doors open outward, away from
+    # the piece's facing (BF015: towards decreasing y); the left door extends +x from its hinge, the right one -x.
+    sense: int
 
 
 SWINGING: dict[str, tuple[Door, Door]] = {
-    "zhufwallent": (Door("ZhufWallDoorL", (2.5, 0.0, -5.0), -1), Door("ZhufWallDoorR", (17.5, 0.0, -5.0), 1)),
-    "niteunderwayent": (Door("NiteUnderwayDrL", (-15.0, 0.0, 2.5), -1), Door("NiteUnderwayDrR", (15.0, 0.0, 2.5), 1)),
+    "zhufwallent": (Door("ZhufWallDoorL", (2.5, 0.0, -5.0), 1), Door("ZhufWallDoorR", (17.5, 0.0, -5.0), -1)),
+    "niteunderwayent": (Door("NiteUnderwayDrL", (-15.0, 0.0, 2.5), 1), Door("NiteUnderwayDrR", (15.0, 0.0, 2.5), -1)),
 }
 PORTCULLIS: dict[str, Door] = {"portcullisent": Door("PortcullisDoor", (0.0, 0.0, 0.0), 0)}
 MOLE_HOLES = frozenset({"molehole0", "molehole8"})
@@ -95,6 +98,11 @@ class ControlPiece:
         if key in PORTCULLIS:
             return (PORTCULLIS[key],)
         return ()
+
+
+def door_names() -> list[str]:
+    """Every door piece a control piece can create (the furniture names a battle lists in `loadfurn:`)."""
+    return [door.name for doors in SWINGING.values() for door in doors] + [door.name for door in PORTCULLIS.values()]
 
 
 def from_scenery(scenery: Iterable[Mapping[str, Any]]) -> ControlPiece | None:

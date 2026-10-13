@@ -15,7 +15,7 @@ from pathlib import Path
 import struct
 from typing import Any
 
-from . import legacy, pbx
+from . import control_piece, legacy, pbx
 from .image import load_rgb_palette
 from .paths import Installation
 from .script import View, load_battle, resource_name
@@ -447,5 +447,11 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
     effects = {mesh["name"].split(".")[0].casefold(): mesh for mesh in scenery["meshes"]
                if mesh["name"].casefold().startswith(("arrows", "boltbur", "flames", "fire", "ex", "spear",
                                                          "light", "wlight", "gaze", "dakrunch", "sapharch"))}
+    # The gate's door pieces are created by the control piece, not placed by the file, and move with its
+    # animation (notes/bf015_gate_npc_column.md 1.1): drawn per frame like the effects, keyed by furniture name.
+    for door in control_piece.door_names():
+        door_mesh = meshes.get((furniture.get(door.casefold()) or "").casefold())
+        if door_mesh is not None:
+            effects[door.casefold()] = door_mesh
     return Battlefield(script, terrain, vertices, size, layers, palette, atlas_size, atlas, sheets, ui_sheets,
                        sorted(set(missing)), effects, len(ground["textures"]), len(scenery["textures"]))
