@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from .engine import Battle, Regiment
 
 TAIL_TICKS = 8  # PROVISIONAL: the visual tail that keeps a finished bolt in the list (A 1.5 suggests ~8)
-UNIT_HEIGHT = 24  # engine choice for every unit object's height (A 4.1, the original's per-type heights are open)
+UNIT_HEIGHT = 16  # every unit object's height (A 4.1; notes/bf014_dragon_mission_audit.md 7.2)
 FLYING_ELEVATION = 72  # an airborne unit's elevation, as the ordinary missiles use it
 UNDISPELLABLE_MARKER = 512  # B 5.1: the script's +512 marker on a launched code
 BEAM_STEP = 20  # A 2.3: beams fly N = 1 + trunc(d / 20) ticks
@@ -112,6 +112,7 @@ class Bolt:
     save: bool
     fire: bool
     panic: bool = False
+    routs: bool = False  # every unit struck is sent the rout event, wounded or not
 
 
 BOLTS: dict[int, Bolt] = {
@@ -123,6 +124,10 @@ BOLTS: dict[int, Bolt] = {
     FIREBALL: Bolt("origin", 0, 0, False, True, 4, 1, False, True),
     PESTILENT_BREATH: Bolt("origin", 8, 8, False, False, 3, 1, False, False),
 }
+# notes/bf014_dragon_mission_audit.md 7: a Dragon breath flame is an innate Fireball effect with its own numbers: launch
+# elevation 20 and no arc, S8, 1 wound, no save, fire, and the rout event to every unit struck.
+BREATH_FLAME = Bolt("unit", 20, 0, False, True, 8, 1, False, True, routs=True)
+BREATH_RANGE = 576  # the Fireball's range, for the flame's scatter step
 SPEAR = Bolt("unit", 8, 8, False, True, 6, 3, False, False)  # A 3.5: 8 above the ground everywhere
 STORM_BOLT = BOLTS[LIGHTNING]  # C2 1.3: each Storm bolt is a Lightning-type beam
 LOGGED_FLIGHTS = frozenset({*BOLTS, STORM})  # flights with launch/strike/end battle-log records (bf003_playtest 3.1)
@@ -198,6 +203,10 @@ class Effect:
     # Conflagration of Doom: its burst places after the fall, None where empty (spell_area_particle_visuals.md 2.5).
     places: list[BurstPlace | None] = field(default_factory=list["BurstPlace | None"])
     saved_side: Side | None = None
+    # A Dragon breath flame (notes/bf014_dragon_mission_audit.md 7): flies as BREATH_FLAME, and its launch line starts
+    # at the ground under the dragon's unit position, not under its moved start.
+    breath: bool = False
+    line_ground: int | None = None
     saved_initiative: int = 0
     saved_speed: float = 0.0
     # Sounds this effect has started, as (packet, effect index); all stop in its end step (spell_sounds.md 0).
@@ -415,13 +424,14 @@ def _cos(angle: int) -> int:
 # ===== Launch =====
 
 def launch(battle: Battle, code: int, caster: Regiment, origin_model: int, x: float, y: float,
-           innate: bool = False) -> bool:
+           innate: bool = False, breath_start: tuple[float, float] | None = None) -> bool:
     """Create the effect of a launch that already passed the caster, range and arc checks (script_magic.md 0.4).
 
     Fails when a unit-target spell finds no unit under the point (B 0.1; Madness: no hostile, not-maddened unit,
     B 1.1); a failed launch of a player-army caster shows message 2021. Success un-hides the caster (A 1.6), replaces
     the caster's previous Wind Blast, Flamestorm, Tangling Thorn or Curse (C1 6, C2 4.1) and, for Dispel Magic, sets
-    the once-per-battle selection (B 5.4)."""
+    the once-per-battle selection (B 5.4). `breath_start` makes an innate Fireball a Dragon breath flame whose start is
+    then moved there (notes/bf014_dragon_mission_audit.md 7.1)."""
     effects = table(battle)
     spell = code % UNDISPELLABLE_MARKER
     target: Regiment | None = None
@@ -440,6 +450,7 @@ def launch(battle: Battle, code: int, caster: Regiment, origin_model: int, x: fl
                 cancel(battle, old)
     effect = Effect(effects.next_serial, spell, caster.identifier, innate, code >= UNDISPELLABLE_MARKER, (x, y),
                     target=target.identifier if target is not None else None)
+    effect.breath = breath_start is not None and spell == FIREBALL
     effects.next_serial += 1
     caster.hidden = False
     if spell == DISPEL_MAGIC:
@@ -447,6 +458,8 @@ def launch(battle: Battle, code: int, caster: Regiment, origin_model: int, x: fl
     battle.events.append(BattleEvent(f"{caster.name} casts spell {spell}", "spell", regiment=caster.identifier,
                                      spell=spell, x=x, y=y))
     _start(battle, effect, caster, origin_model, target)
+    if effect.breath and breath_start is not None:
+        _move_breath_start(battle, effect, caster, breath_start)
     _launch_sound(battle, effect, caster, target)
     effects.add(effect)
     return True
@@ -470,7 +483,11 @@ def _launch_sound(battle: Battle, effect: Effect, caster: Regiment, target: Regi
 def _start(battle: Battle, effect: Effect, caster: Regiment, origin_model: int, target: Regiment | None) -> None:
     """Per-spell launch state."""
     spell, rng = effect.code, battle.rng
-    if spell in BOLTS:
+    if effect.breath:
+        # 7.1 step 2: scattered from the dragon's unit position, the scatter distance measured from there too.
+        _start_projectile(battle, effect, (caster.x, caster.y), effect.aim, BREATH_FLAME, caster.bs, BREATH_RANGE,
+                          beam=False)
+    elif spell in BOLTS:
         bolt = BOLTS[spell]
         _start_projectile(battle, effect, _origin(caster, origin_model, bolt.start), effect.aim, bolt, caster.bs,
                           magic.SPELLS[spell].range or 1, beam=bolt.beam)
@@ -527,6 +544,19 @@ def _start(battle: Battle, effect: Effect, caster: Regiment, origin_model: int, 
         # spell_transport_visuals.md 2.1: the take-off head flies from the casting figure to the unit's launch centre.
         effect.start, effect.dest = _origin(caster, origin_model, "origin"), footprint_centre(caster)
         effect.x, effect.y = effect.start
+
+
+def _move_breath_start(battle: Battle, effect: Effect, caster: Regiment, start: tuple[float, float]) -> None:
+    """7.1 step 3: after the launch the start moves (horizontally only) to the sector origin; the launch line keeps
+    the ground under the dragon's unit position, and the destination and scatter are unchanged."""
+    effect.line_ground = _whole_ground(battle, caster.x, caster.y)
+    effect.start = (float(math.trunc(start[0])), float(math.trunc(start[1])))
+    effect.x, effect.y = effect.start
+
+
+def flight_bolt(effect: Effect) -> Bolt:
+    """The flight and impact numbers of a bolt effect: a Dragon breath flame's own, else its spell's row."""
+    return BREATH_FLAME if effect.breath else BOLTS[effect.code]
 
 
 def _origin(caster: Regiment, origin_model: int, kind: str) -> tuple[float, float]:
@@ -633,6 +663,7 @@ class Impact:
     wound_die: int
     save: bool
     fire: bool
+    routs: bool = False
 
 
 def _height_ok(unit: Regiment, height: float) -> bool:
@@ -743,6 +774,8 @@ def impact_test(battle: Battle, x: float, y: float, height: float, impact: Impac
         trace: dict[str, Any] = {"wounds": 0, "killed": 0}  # a strike that does not wound still logs both as 0
         before = unit.models
         magical_hit(battle, unit, impact, trace)
+        if impact.routs and unit.active:
+            combat.request_rout(battle, unit)  # bf014_dragon_mission_audit.md 7.3: wounded or not; its script decides
         if source is not None:
             battle.events.append(BattleEvent(
                 f"{unit.name}: struck by spell {source.code} ({trace.get('outcome')})", "spell_strike",
@@ -868,7 +901,7 @@ def _update(battle: Battle, effect: Effect) -> None:
         CURSE: _update_curse, FLYING_BOWER: _update_bower, SAPPHIRE_ARCH: _update_arch,
     }
     if code in BOLTS:
-        if _fly(battle, effect, BOLTS[code]):
+        if _fly(battle, effect, flight_bolt(effect)):
             _finish(effect)
         if code == BURNING_HEAD:
             _burning_head_laugh(battle, effect)
@@ -899,7 +932,8 @@ def _finish(effect: Effect) -> None:
 
 def _height_above_ground(battle: Battle, effect: Effect, bolt: Bolt, x: float, y: float) -> float:
     """A 2.1: L + line(t) - ground(here), the line running from ground(start) + L to ground(destination) + A."""
-    start_level = _whole_ground(battle, *effect.start) + bolt.launch_height
+    start_ground = effect.line_ground if effect.line_ground is not None else _whole_ground(battle, *effect.start)
+    start_level = start_ground + bolt.launch_height
     end_level = _whole_ground(battle, *effect.dest) + math.trunc(effect.aim_height)
     # bf003_playtest 8.2: line(r) = trunc((startLevel - endLevel) r / N) + endLevel, whole numbers throughout.
     line = math.trunc((start_level - end_level) * effect.remaining / effect.steps) + end_level if effect.steps \
@@ -927,10 +961,10 @@ def _fly(battle: Battle, effect: Effect, bolt: Bolt) -> bool:
     x = dx + int((sx - dx) * r / effect.steps)  # r = N gives the (whole) start exactly
     y = dy + int((sy - dy) * r / effect.steps)
     effect.x, effect.y = x, y
-    if effect.code == FIREBALL or effect.arched:
+    if (effect.code == FIREBALL and not effect.breath) or effect.arched:
         effect.arc += 1 if 2 * r > effect.steps else -1
     effect.height = height = _height_above_ground(battle, effect, bolt, x, y) + effect.arc
-    impact = Impact(effect.owner, bolt.strength, bolt.wound_die, bolt.save, bolt.fire)
+    impact = Impact(effect.owner, bolt.strength, bolt.wound_die, bolt.save, bolt.fire, bolt.routs)
     hit = impact_test(battle, x, y, height, impact, effect.owner, messages=False, source=effect)
     if hit:
         _after_hit(battle, effect, bolt, x, y)

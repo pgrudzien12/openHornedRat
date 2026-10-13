@@ -110,6 +110,7 @@ class UnitScriptState:
     pc: int = 0  # program counter (word index into the script)
     restart_pc: int = 0  # saved by SetRestartPoint, restored by Restart
     restart_script_id: int | None = None  # the restart point belongs to this script, even after SwitchScript
+    restart_depth: int = 0  # script stack depth saved by SetRestartPoint (notes/unit_script_control.md 3 (d))
     return_stack: list[tuple[int, ...]] = field(default_factory=list[tuple[int, ...]])  # (script_id, pc) pairs for gosub/return
 
     # Event handling
@@ -808,16 +809,28 @@ class ScriptInterpreter:
 
     def op_Restart(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """Restart the script that owns the saved restart point, including after a library script switch."""
+        """Restart the script that owns the saved restart point, including after a library script switch.
+
+        The script stack goes back to the depth saved by `SetRestartPoint` and every event addressed to the unit is
+        discarded, queued or current (notes/unit_script_control.md 3 (d), notes/bf014_dragon_mission_audit.md 2).
+        A `Restart` from inside an event handler leaves the handler (and any outer one it nests in): the unit
+        continues at the restart point, not at the interrupted instruction.
+        """
         state.script_id = state.restart_script_id if state.restart_script_id is not None else state.script_id
         state.pc = state.restart_pc
+        del state.return_stack[state.restart_depth:]
+        state.event_queue.clear()
+        state.current_event = Event()
+        state.interrupt_return = None
+        state.outer_returns.clear()
         return state.pc
 
     def op_SetRestartPoint(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """SetRestartPoint: save current PC as the restart point for Restart."""
+        """SetRestartPoint: save the next instruction and the current stack depth as the restart point."""
         state.restart_script_id = state.script_id
         state.restart_pc = state.pc + 1
+        state.restart_depth = len(state.return_stack)
         return state.pc + 1
 
     def op_GotoScript(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
@@ -2785,11 +2798,9 @@ class ScriptInterpreter:
         """Reveal every hidden unit of the opposite army this unit sees; 0x1C to the spotter (source = the
         revealed unit) and 0x1D to the revealed unit (source = the spotter), both checked
         (notes/script_behaviours.md 1.0)."""
-        for other in self.battle.regiments.values():
+        for other in list(self.battle.regiments.values()):
             if other.hidden and other.active and self._hostile(unit, other) and self._sees(unit, other):
-                other.hidden = False
-                self.event_bus.queue_event(unit.identifier, Event(code=0x1C, source=other.identifier), checked=True)
-                self.event_bus.queue_event(other.identifier, Event(code=0x1D, source=unit.identifier), checked=True)
+                self.battle.reveal(other, unit)
 
     def _detect_threat(self, unit: "Regiment", state: UnitScriptState) -> None:
         """Code 11 (notes/script_behaviours.md 1.3): spot; unless braced, a threat that targets this unit (any

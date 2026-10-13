@@ -257,8 +257,6 @@ class BattleScene(Scene):
                 if self.selected_id is not None and self.selected_id != identifier:
                     self.battle.clear_spell_selection(self.selected_id)  # notes/player_magic_panel.md 5
                 self.selected_id = identifier
-                if self.battle.phase == "deployment":
-                    self.battle.refresh_visibility()
         elif kind == "deselect":
             self.battle.end_deployment_drag()
             if self.selected_id is not None:

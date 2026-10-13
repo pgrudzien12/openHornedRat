@@ -58,6 +58,47 @@ class RestartTests(ControlTestCase):
         self.assertEqual(self.state.script_id, 1)
         self.assertEqual(self.state.unit_flags2 & 0x40, 0x40)
 
+    def test_set_restart_point_saves_the_stack_depth(self):
+        self.state.script_id, self.state.pc = 7, 88
+        self.state.return_stack = [(10,), (6, 5), (20,)]
+        self.call("SetRestartPoint")
+        self.assertEqual((self.state.restart_script_id, self.state.restart_pc, self.state.restart_depth), (7, 89, 3))
+
+    def test_restart_restores_depth_and_discards_queued_events(self):
+        """notes/bf014_dragon_mission_audit.md 2: depth 4 with two queued events restarts at depth 3, queue empty."""
+        self.state.script_id, self.state.pc = 7, 88
+        self.state.return_stack = [(10,), (6, 5), (20,)]
+        self.call("SetRestartPoint")
+        self.state.return_stack.append((30,))
+        self.state.event_queue.extend([Event(code=3), Event(code=33)])
+        self.state.current_event = Event(code=33)
+        self.state.script_id, self.state.pc = 154, 12
+        self.state.interrupt_return = (7, 95)
+
+        pc = self.call("Restart")
+
+        self.assertEqual((self.state.script_id, pc), (7, 89))
+        self.assertEqual(self.state.return_stack, [(10,), (6, 5), (20,)])
+        self.assertEqual(len(self.state.event_queue), 0)
+        self.assertEqual(self.state.current_event.code, 0)
+        self.assertIsNone(self.state.interrupt_return)
+
+    def test_restarted_gosub_cycle_returns_to_its_caller(self):
+        """A cycle run inside a gosub and restarted from a handler still returns to the caller when it ends."""
+        self.state.script_dll = FakeDll({
+            1: [word("GosubScript"), 7, word("SetUnitFlags2"), 0x40, word("Yield"), END],
+            7: [word("SetRestartPoint"), word("Yield"), word("ReturnGosub"), END],
+        })
+        self.state.script_id, self.state.pc = 1, 0
+        self.interp.run("t", self.state, 1, self.battle.rng)
+        self.assertEqual(self.state.script_id, 7)
+        # The handler leaves a stale stack word and restarts the cycle.
+        self.state.return_stack.append((0,))
+        self.state.script_id, self.state.pc = 7, self.call("Restart")
+        for tick in (2, 3):
+            self.interp.run("t", self.state, tick, self.battle.rng)
+        self.assertEqual(self.state.unit_flags2 & 0x40, 0x40)
+
 
 class ConditionWordTests(ControlTestCase):
     def test_set_clear_test_vectors(self):

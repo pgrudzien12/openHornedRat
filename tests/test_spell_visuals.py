@@ -80,6 +80,26 @@ class FireballVisualsTest(unittest.TestCase):
         sprites = _fly(FireballVisuals(), 3, end=True)[-1]
         self.assertIn((10.0, 125), [(s.x, s.frame) for s in sprites if s.frame < 177 and s.x == 10.0][:1])
 
+    def test_trail_runs_from_the_start_point_to_the_end_point(self):
+        """Owner's decision: the ending tick leaves a closing puff where the flight ends, under the explosion."""
+        sprites = _fly(FireballVisuals(), 5, end=True)[-1]
+        puffs = sorted(s.x for s in sprites if s.frame < 177)  # no head on the ending tick: these are all puffs
+        self.assertEqual(min(puffs), 0.0)
+        self.assertEqual(max(puffs), 40.0)
+
+    def test_closing_puff_outlasts_the_explosion_at_the_end_point(self):
+        visuals = FireballVisuals()
+        _fly(visuals, 5, end=True)
+        for _ in range(12):
+            visuals.advance([])
+        self.assertIn(40.0, [s.x for s in visuals.sprites() if s.frame < 177])
+
+    def test_closing_puff_is_never_below_the_ground(self):
+        visuals = FireballVisuals()
+        visuals.advance([Flight(1, 0.0, 0.0, 4.0)])
+        visuals.advance([Flight(1, 10.0, 0.0, -1.0, True)])
+        self.assertIn((10.0, 0.0), [(s.x, s.height) for s in visuals.sprites() if s.frame < 177])
+
     def test_explosion_shows_177_to_185_over_nine_ticks_then_vanishes(self):
         visuals = FireballVisuals()
         _fly(visuals, 5, end=True)

@@ -25,6 +25,10 @@ class Entry(random.Random):
         return self.entry
 
 
+def flames(battle):
+    return [effect for effect in battle.spell_effects.effects() if effect.breath]
+
+
 class DragonMeshTests(unittest.TestCase):
     def setUp(self):
         self.unit = Regiment('dragon', 'dragon', 1120, 600, 384, Side.ENEMY, models=1, ranks=1,
@@ -200,12 +204,12 @@ class DragonBreathTests(unittest.TestCase):
             angle = bearing * math.tau / 512
             aim = (1000 + 200 * math.sin(angle), 1000 + 200 * math.cos(angle))
             launch_shot(battle, unit, (1000, 1000), aim)
-            self.assertGreaterEqual(len(battle.innate_projectiles), 4)
+            self.assertGreaterEqual(len(flames(battle)), 4)
             self.assertEqual(animation.mesh_dragon_pose(unit.melee_models[0]), pose)
             direction = (384 + (sector - 1) * 64) * math.tau / 512
-            for flame in battle.innate_projectiles:
-                self.assertEqual(flame.x0, 1000 + math.floor(72 * math.trunc(256 * math.sin(direction)) / 256))
-                self.assertEqual(flame.y0, 1000 + math.floor(72 * math.trunc(256 * math.cos(direction)) / 256))
+            for flame in flames(battle):
+                self.assertEqual(flame.start[0], 1000 + math.floor(72 * math.trunc(256 * math.sin(direction)) / 256))
+                self.assertEqual(flame.start[1], 1000 + math.floor(72 * math.trunc(256 * math.cos(direction)) / 256))
             self.assertEqual(unit.direction, 384)
 
     def test_rejected_wraparound_shot_leaves_prior_sector_and_action_intact(self):
@@ -219,7 +223,7 @@ class DragonBreathTests(unittest.TestCase):
         model.action_pc = 2
         angle = 20 * math.tau / 512
         launch_shot(battle, unit, (1000, 1000), (1000 + 200 * math.sin(angle), 1000 + 200 * math.cos(angle)))
-        self.assertFalse(battle.innate_projectiles)
+        self.assertFalse(flames(battle))
         self.assertEqual((model.action, model.action_pc, model.breath_sector), (animation.SHOOT, 2, 2))
 
     def test_sector_three_uses_default_pose_and_documented_host_origin_policy(self):
@@ -231,8 +235,8 @@ class DragonBreathTests(unittest.TestCase):
         launch_shot(battle, unit, (900, 800), (1000 + 200 * math.sin(angle), 1000 + 200 * math.cos(angle)))
         self.assertEqual(unit.melee_models[0].breath_sector, 3)
         self.assertEqual(animation.mesh_dragon_pose(unit.melee_models[0]), 2)
-        self.assertGreaterEqual(len(battle.innate_projectiles), 4)
-        self.assertEqual((battle.innate_projectiles[0].x0, battle.innate_projectiles[0].y0), (1000, 1000))
+        self.assertGreaterEqual(len(flames(battle)), 4)
+        self.assertEqual(flames(battle)[0].start, (1000, 1000))
 
 class DragonFlameOriginTests(unittest.TestCase):
     def launch(self, bearing, ground=lambda x, y: 0):
@@ -249,47 +253,31 @@ class DragonFlameOriginTests(unittest.TestCase):
     def test_report_exact_integer_origin_vectors_and_initial_current_positions(self):
         for bearing, origin in ((340, (1069, 549)), (341, (1048, 600)), (510, (1069, 650))):
             battle = self.launch(bearing)
-            self.assertGreaterEqual(len(battle.innate_projectiles), 4)
-            for flame in battle.innate_projectiles:
-                self.assertEqual((flame.x0, flame.y0), origin)
+            self.assertGreaterEqual(len(flames(battle)), 4)
+            for flame in flames(battle):
+                self.assertEqual(flame.start, origin)
                 self.assertEqual((flame.x, flame.y), origin)
-                self.assertEqual(flame.z, 40)
 
-    def test_flat_ground_height_runs_from_forty_to_ground_without_arc(self):
-        from whshr.ranged import _step_innate
-        battle = self.launch(341)
-        flame = battle.innate_projectiles[0]
-        self.assertEqual((flame.z0, flame.z1, flame.z), (40, 0, 40))
-        previous = flame.z
-        for _ in range(9):
-            _step_innate(battle)
-            self.assertLessEqual(flame.z, previous)
-            previous = flame.z
-        self.assertEqual(flame.z, 0)
-
-    def test_height_baseline_samples_unit_before_shift_and_does_not_resample_current_ground(self):
-        from whshr.ranged import _step_innate
+    def test_launch_line_starts_at_the_ground_under_the_dragon_not_under_the_moved_start(self):
+        """bf014_dragon_mission_audit.md 7.1 step 3: the line starts at ground(dragon position) + 20."""
+        from whshr import spell_effects
         battle = self.launch(340, lambda x, y: 7.5 if (x, y) == (1120, 600) else 23.4)
-        flame = battle.innate_projectiles[0]
-        self.assertEqual((flame.z0, flame.z1, flame.z), (48, 23, 48))
-        _step_innate(battle)
-        self.assertEqual(flame.z, 45)
+        flame = flames(battle)[0]
+        self.assertEqual(flame.line_ground, 8)
+        spell_effects.tick(battle)
+        self.assertEqual(flame.height, 20 + 8 + 20 - 23)  # L + line(start) - ground(here)
 
-    def test_renderer_uses_fireball_sprites_at_absolute_flame_height_instead_of_fire_meshes(self):
+    def test_renderer_draws_no_fire_mesh_wall_for_dragon_flames(self):
         from whshr.frontend.battle_view import BattleView
-        from whshr.frontend.spell_visuals import FireballVisuals
-        flame = self.launch(341).innate_projectiles[0]
+        battle = self.launch(341)
         field = SimpleNamespace(effect_meshes={'fire1': triangle(1)}, ground_texture_count=0,
-                                scenery_texture_count=1, ground_height=lambda x, y: 999)
-        battle = SimpleNamespace(regiments={}, control_piece=None, projectiles=[], innate_projectiles=[flame],
-                                 impact_effects=[], ground_height=lambda x, y: 999)
+                                scenery_texture_count=1, ground_height=lambda x, y: 0)
+        view_battle = SimpleNamespace(regiments={}, control_piece=None, projectiles=[],
+                                      innate_projectiles=battle.innate_projectiles, impact_effects=[],
+                                      ground_height=lambda x, y: 0)
         view = BattleView.__new__(BattleView)
-        view.scene = SimpleNamespace(field=field, battle=battle)
+        view.scene = SimpleNamespace(field=field, battle=view_battle)
         view.effect_capacity = 65536
         self.assertFalse(view._effect_vertices())  # FIRE1 must never draw a dragon wall of fire
-        battle.spell_effects = SimpleNamespace(active=[])
-        visuals = FireballVisuals()
-        visuals.advance(view._fireball_flights())
-        sprites = visuals.sprites()
-        self.assertEqual(sprites[0].frame, 125)
-        self.assertEqual(field.ground_height(flame.x, flame.y) + sprites[0].height, 40)
+
+

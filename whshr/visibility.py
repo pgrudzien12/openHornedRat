@@ -19,14 +19,65 @@ def crosses(first: Segment, second: Segment) -> bool:
     return 0 <= t <= 1 and 0 <= u <= 1
 
 
-def clear_ray(start: Point, end: Point, boundaries: Sequence[View], objects: Sequence[View]) -> bool:
-    ray = (*start, *end)
+def sight_lines(boundaries: Sequence[View], area_only: bool = False) -> list[Segment]:
+    """The lines of every active `SightEdge` boundary (with `area_only`, of those that enclose an area)."""
+    result: list[Segment] = []
     for boundary in boundaries:
         flags = {str(flag).casefold() for flag in boundary.get("status") or ()}
+        if area_only and "bnd_area" not in flags:
+            continue
         if "bnd_active" in flags and ("bnd_sight" in flags or "bnd_sightedge" in flags):
             lines: Sequence[Sequence[float]] = boundary.get("lines") or ()
-            if any(crosses(ray, (line[0], line[1], line[2], line[3])) for line in lines if len(line) == 4):
-                return False
+            result.extend((line[0], line[1], line[2], line[3]) for line in lines if len(line) == 4)
+    return result
+
+
+def inside_area(point: Point, lines: Sequence[Segment]) -> bool:
+    """Even-odd containment of a point in the area the lines enclose."""
+    px, py = point
+    inside = False
+    for ax, ay, bx, by in lines:
+        if (ay > py) != (by > py) and px < ax + (py - ay) * (bx - ax) / (by - ay):
+            inside = not inside
+    return inside
+
+
+def sight_start(looker: Point, lines: Sequence[Segment]) -> Point:
+    """Where the `SightEdge` line starts: the looker's own position, or, for a looker outside the area, the nearest
+    edge point moved inward by 1.1 times the looker's distance outside (notes/bf014_dragon_mission_audit.md 4.1).
+    Every shipped `SightEdge` is a closed area; an open line (no area flag) is only an obstacle, never a start."""
+    if not lines or inside_area(looker, lines):
+        return looker
+    lx, ly = looker
+    best: Point = looker
+    best2 = math.inf
+    for ax, ay, bx, by in lines:
+        dx, dy = bx - ax, by - ay
+        length2 = dx * dx + dy * dy
+        t = 0.0 if length2 == 0 else max(0.0, min(1.0, ((lx - ax) * dx + (ly - ay) * dy) / length2))
+        px, py = ax + t * dx, ay + t * dy
+        distance2 = (px - lx) ** 2 + (py - ly) ** 2
+        if distance2 < best2:
+            best, best2 = (px, py), distance2
+    return best[0] + 1.1 * (best[0] - lx), best[1] + 1.1 * (best[1] - ly)
+
+
+def sight_edge_clear(looker: Point, target: Point, boundaries: Sequence[View]) -> bool:
+    """The `SightEdge` part of the visibility test: one line from the looker's position (moved inside when it stands
+    outside the area) to the target's position, which must cross no edge; the target is never moved
+    (game_rules.md "Routes, collisions and visibility", notes/bf014_dragon_mission_audit.md 4.1)."""
+    lines = sight_lines(boundaries)
+    if not lines:
+        return True
+    ray = (*sight_start(looker, sight_lines(boundaries, area_only=True)), *target)
+    return not any(crosses(ray, line) for line in lines)
+
+
+def clear_ray(start: Point, end: Point, boundaries: Sequence[View], objects: Sequence[View]) -> bool:
+    """A ray free of `SightEdge` lines and of sight-blocking scenery."""
+    ray = (*start, *end)
+    if any(crosses(ray, line) for line in sight_lines(boundaries)):
+        return False
     sx, sy = start
     ex, ey = end
     length2 = (ex - sx) ** 2 + (ey - sy) ** 2
@@ -61,6 +112,9 @@ def clear_ray(start: Point, end: Point, boundaries: Sequence[View], objects: Seq
 
 def visible(start: Point, facing: float, target: Point, radius: float, half_cone: float,
             boundaries: Sequence[View], objects: Sequence[View]) -> bool:
+    """`IsVisible`: the view cone from the looker, one of three scenery sample rays spread across the target's
+    footprint, and the single `SightEdge` line between the two positions (game_rules.md "Routes, collisions and
+    visibility")."""
     dx, dy = target[0] - start[0], target[1] - start[1]
     distance = math.hypot(dx, dy)
     if distance < 1e-9:
@@ -68,6 +122,8 @@ def visible(start: Point, facing: float, target: Point, radius: float, half_cone
     heading = math.atan2(dx, dy) * 512 / math.tau
     if abs((heading - facing + 256) % 512 - 256) > half_cone:
         return False
+    if not sight_edge_clear(start, target, boundaries):
+        return False
     side_x, side_y = dy * radius / distance, -dx * radius / distance
-    return any(clear_ray(start, (target[0] + side_x * side, target[1] + side_y * side), boundaries, objects)
+    return any(clear_ray(start, (target[0] + side_x * side, target[1] + side_y * side), (), objects)
                for side in (0, -1, 1))

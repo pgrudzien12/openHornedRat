@@ -852,8 +852,8 @@ class Battle:
         self.building_index: dict[str, buildings.Building] = {b.identifier: b for b in self.buildings}
         # Projectile and missile-target obstacles: the [OBJECTS] collision circles, then one entry per building.
         # Other placed furniture (roads, trees, fences) is no map object (notes/map_objects_and_projectiles.md 1).
-        # A building entry keeps the engine's unit object height (spell_effects.UNIT_HEIGHT, 24; the original's per-type
-        # unit object height is open, ibid. 6).
+        # A building entry keeps an engine height of 24 (the original's building object height is open,
+        # notes/map_objects_and_projectiles.md 6).
         self.shooting_objects = list(objects) + [
             {"x": building.x, "y": building.y, "radius": buildings.footprint_radius(building.name), "height": 24.0,
              "status": ["os_active", "os_solid"], "name": building.name, "building": building.identifier}
@@ -1081,7 +1081,7 @@ class Battle:
         if self.phase == "deployment":
             self.end_deployment_drag()
             self.phase = "battle"
-            self.refresh_visibility()
+            self.battle_start_spotting()
 
     def set_view_rect(self, rect: tuple[float, float, float, float] | None) -> None:
         """Frontend hook: the ground rectangle (with margin) the camera currently shows, in world units."""
@@ -1105,28 +1105,33 @@ class Battle:
             x, y = self.route_reference_point(regiment)
             regiment.screen_mark = rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]
 
-    def refresh_visibility(self) -> None:
-        """Reveal individually hidden regiments permanently when another army spots them. Owner's decision, not
-        original parity: nothing is spotted during deployment (selecting or placing a regiment there revealed hidden
-        enemies far beyond the sight edge, BF017); the first pass runs when the battle starts."""
-        if self.phase == "deployment":
-            return
-        for target in self.regiments.values():
-            if not target.hidden or not target.active:
+    def battle_start_spotting(self) -> None:
+        """The spotting pass made once when the battle starts (notes/bf014_dragon_mission_audit.md 8): every
+        enemy-army unit, hidden ones included, reveals each hidden player or allied unit it sees. Player and allied
+        units take no part. During the battle only the periodic spotting behaviours spot (the interpreter); nothing
+        is spotted during deployment (owner's decision; the original's deployment rule is still open)."""
+        for looker in list(self.regiments.values()):
+            if not looker.active or looker.side != Side.ENEMY:
                 continue
-            for looker in self.regiments.values():
-                if not looker.active or looker.side == target.side:
+            for target in self.regiments.values():
+                if not target.hidden or not target.active or target.side == Side.ENEMY:
                     continue
-                cone = 142 if looker.in_melee else 71
+                cone = 2 * interpreter.VIEW_CONE if looker.in_melee or looker.reforming else interpreter.VIEW_CONE
                 if visibility.visible(self.formation_centre(looker), looker.direction,
                                       self.formation_centre(target), target.bounding_radius(),
                                       cone, self.boundaries, self.objects):
-                    target.hidden = False
-                    self.event_bus.queue_event(target.identifier, interpreter.Event(code=0x1C, source=looker.identifier))
-                    self.event_bus.queue_event(looker.identifier, interpreter.Event(code=0x1D, source=target.identifier))
-                    self.events.append(BattleEvent(f"{target.name} is spotted.", "spotted", regiment=target.identifier,
-                                                  spotter=looker.identifier))
-                    break
+                    self.reveal(target, looker)
+
+    def reveal(self, target: Regiment, spotter: Regiment) -> None:
+        """A spotted hidden unit is revealed permanently: 0x1C to the spotter (source = the revealed unit) and 0x1D
+        to the revealed unit (source = the spotter), both checked (notes/script_behaviours.md 1.0)."""
+        target.hidden = False
+        self.event_bus.queue_event(spotter.identifier, interpreter.Event(code=0x1C, source=target.identifier),
+                                   checked=True)
+        self.event_bus.queue_event(target.identifier, interpreter.Event(code=0x1D, source=spotter.identifier),
+                                   checked=True)
+        self.events.append(BattleEvent(f"{target.name} is spotted.", "spotted", regiment=target.identifier,
+                                       spotter=spotter.identifier))
 
     @staticmethod
     def formation_centre(regiment: Regiment) -> Point:
@@ -1286,7 +1291,6 @@ class Battle:
                 break
         self._begin_reform(regiment, regiment.ranks)
         self._snap_deployment_layout(regiment)
-        self.refresh_visibility()
 
     @staticmethod
     def _snap_deployment_layout(regiment: Regiment) -> None:
@@ -1871,7 +1875,6 @@ class Battle:
         regiment.clear_shooting()
         if self.phase == "deployment":
             self._snap_deployment_layout(regiment)
-            self.refresh_visibility()
 
     def reform_to_ranks(self, regiment: Regiment, ranks: int, formation_clamp: bool = True,
                         walk_back: bool = False) -> None:
@@ -2145,7 +2148,6 @@ class Battle:
             self.objectives.segment(self)
         if self.phase == "battle":
             spell_effects.blow_wind(self)
-            self.refresh_visibility()
         # Run behaviour scripts via the bytecode interpreter (issue #3); a mission-less/synthetic
         # battle has no interpreter and so no automatic orders (only explicit Battle.order_* calls).
         if self.interpreter:

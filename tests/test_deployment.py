@@ -318,27 +318,40 @@ def instruction(name):
 
 
 class DeploymentLifecycleTests(unittest.TestCase):
-    def test_given_hidden_observer_and_hidden_enemy_when_facing_changes_during_battle_then_enemy_is_spotted(self):
+    def test_given_hidden_player_unit_in_view_of_hidden_enemy_when_started_then_the_enemy_spots_it(self):
+        """notes/bf014_dragon_mission_audit.md 8: every enemy-army unit, hidden ones included, makes one pass at Start."""
         data = source(1)
         data["nodes"] = []
         own = data["merc"]["armies"][0]["units"][0]
         own["hidden"] = True
-        own["set"].update(x=100, y=100, dir=256)
+        own["set"].update(x=100, y=100, dir=0)
+        enemy = unit("enemy", 129)
+        enemy["hidden"] = True
+        enemy["set"].update(x=100, y=900, dir=256)
+        data["armies"] = [{"count": 1, "units": [enemy]}]
+        battle = Battle.from_script(data)
+        battle.start_battle()
+        self.assertFalse(battle.regiments["player0"].hidden)
+        self.assertTrue(battle.regiments["enemy"].hidden)  # player units take no part in the start pass
+        self.assertEqual([(e.code, e.source) for e in battle.event_bus.unit_states["enemy"].event_queue],
+                         [(0x1C, "player0")])
+        self.assertEqual([(e.code, e.source) for e in battle.event_bus.unit_states["player0"].event_queue],
+                         [(0x1D, "enemy")])
+
+    def test_given_a_unit_without_a_spotting_behaviour_when_the_battle_runs_then_it_never_spots(self):
+        data = source(1)
+        data["nodes"] = []
+        data["merc"]["armies"][0]["units"][0]["set"].update(x=100, y=100, dir=256)
         enemy = unit("enemy", 129)
         enemy["hidden"] = True
         enemy["set"].update(x=100, y=900, dir=0)
         data["armies"] = [{"count": 1, "units": [enemy]}]
         battle = Battle.from_script(data)
         battle.start_battle()
-        self.assertTrue(battle.regiments["enemy"].hidden)
         battle.regiments["player0"].direction = 0
-        battle.tick()
-        self.assertFalse(battle.regiments["enemy"].hidden)
-        self.assertTrue(battle.regiments["player0"].hidden)
-        self.assertEqual([e.code for e in battle.event_bus.unit_states["enemy"].event_queue], [0x1C])
-        battle.regiments["player0"].direction = 256
-        battle.tick()
-        self.assertFalse(battle.regiments["enemy"].hidden)
+        for _ in range(40):
+            battle.tick()
+        self.assertTrue(battle.regiments["enemy"].hidden)
 
     def test_given_hidden_player_when_initialized_selected_and_dragged_then_flag_is_preserved(self):
         data = source(1)
@@ -453,7 +466,7 @@ class DeploymentLifecycleTests(unittest.TestCase):
         battle.tick()
         self.assertEqual(battle.mission_state, 2)
 
-    def test_given_hidden_enemy_in_view_when_started_then_it_is_revealed_permanently_and_spotting_events_are_posted(self):
+    def test_given_hidden_enemy_in_view_of_a_player_unit_when_started_then_it_stays_hidden(self):
         data = source(1)
         data["nodes"] = []
         data["merc"]["armies"][0]["units"][0]["set"].update(x=100, y=100, dir=0)
@@ -462,14 +475,8 @@ class DeploymentLifecycleTests(unittest.TestCase):
         enemy["hidden"] = True
         data["armies"] = [{"count": 1, "units": [enemy]}]
         battle = Battle.from_script(data)
-        self.assertFalse(battle.regiments["player0"].hidden)
-        self.assertTrue(battle.regiments["enemy"].hidden)
         battle.start_battle()
-        self.assertFalse(battle.regiments["enemy"].hidden)
-        self.assertEqual(battle.event_bus.unit_states["enemy"].event_queue[0].code, 0x1C)
-        battle.regiments["player0"].direction = 256
-        battle.refresh_visibility()
-        self.assertFalse(battle.regiments["enemy"].hidden)
+        self.assertTrue(battle.regiments["enemy"].hidden)
 
     def test_given_sight_boundary_between_armies_when_started_then_hidden_enemy_remains_hidden(self):
         data = source(1)
