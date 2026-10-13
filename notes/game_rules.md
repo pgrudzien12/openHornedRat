@@ -861,8 +861,11 @@ The key visibility constants are recorded here for implementers.
 - **Visibility** (`IsVisible`), shared by hidden-unit spotting and "is my target visible" for
   AI shooting and casting: the target must lie within the looker's **view cone** (half-width 71/512 turn =
   **±50°**, doubled to ±100° while in melee or re-forming), one of three sample rays towards the target (spread by its
-  footprint) must be free of scenery (`ScanObjectsOnLine`, the missile obstruction test), and the line must not
-  cross a **`SightEdge`** boundary (if a battle has none, "No Sight Boundary" and visible). **No range limit and
+  footprint) must be free of scenery (`ScanObjectsOnLine`, the missile obstruction test), and the single line
+  from the looker's regiment position to the target's must not cross a **`SightEdge`** boundary (if a battle has
+  none, "No Sight Boundary" and visible). A looker standing **outside** the `SightEdge` area looks from the nearest
+  edge point moved inward by 1.1 × its distance outside; the target is never moved, so a target outside the area
+  is not visible (corrected October 2026, `bf014_dragon_mission_audit.md` §4). **No range limit and
   no terrain height** anywhere in spotting, shooting or casting line of sight: hills never hide units.
 - **Hidden units** (`SpotHiddenUnits`, run by threat detection): each hidden enemy that passes
   `IsVisible` is revealed **permanently** (flag `0x80000` cleared), with event 0x1C to the spotter and 0x1D to the revealed unit (`threat_events_nodes.md`).
@@ -2404,7 +2407,7 @@ These reuse the **spell effect engine** (the spell launch, innate casting) and a
 | Code / routine | Targeting | Shots | Per shot |
 |---|---|---|---|
 | 13 Doomwheel warp lightning (behaviour 0x1A, `DoomwheelBolt`) | reload on the leader block | 3 bolts: ahead, right, left; distance `D6 × D6 × D6 × 12`; nearest unit **of either side** (not itself, not hidden) whose position is within the bolt's own distance of that point, else a point 96 ahead ±40 (`notes/spell_blades_flock_items.md` §5) | fails on a 6 (`GMTXT 2021`), rolled after the aim; S5, D6 wounds, no save |
-| 14 Dragon breath | target in the front 180° | D6+3 flames around the target | S8, 1 wound, no save, **every unit hit routs** (flags `0x41`) |
+| 14 Dragon breath | target in the front 180° | D6+3 flames, each aimed at the target −40…+39 per axis, then launched as an innate Fireball (18 ticks, scattered; `bf014_dragon_mission_audit.md` §3) | S8, 1 wound, no save, **every unit hit routs** (flags `0x41`) |
 | 15 warpfire thrower | needs crew | D6 flames around the target | S4, 1 wound, no save; no misfire |
 | 16 (Wyvern shaman) | – | – | not a weapon: marks a monster-class unit as a **spellcaster** (`CanCastSpells`) |
 | 17 Gyrocopter steam gun (Infantry-class files) | range 144 (6") | 1, passes through units | S4, 1 wound, no save, hits one model of each unit it crosses |
