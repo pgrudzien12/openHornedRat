@@ -53,11 +53,11 @@ class GroundPointRangeTests(unittest.TestCase):
         })
         self.runner = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, dll)
         self.runner.op_FireAtNode(self.state, 0, [], 'dragon', 0, self.battle.rng)
-        self.assertFalse(self.battle.innate_projectiles)  # command queues, does not launch
+        self.assertFalse([e for e in self.battle.spell_effects.effects() if e.breath])  # command queues, does not launch
         self.state.current_event = self.state.event_queue.pop()
         self.state.script_id = 154
         self.runner.run('dragon', self.state, 1, self.battle.rng)
         self.assertIsNone(self.state.current_target)
         self.assertEqual(self.state.target_point, (900, 600))
-        self.assertGreaterEqual(len(self.battle.innate_projectiles), 4)
+        self.assertGreaterEqual(len([e for e in self.battle.spell_effects.effects() if e.breath]), 4)
         self.assertEqual(self.unit.melee_models[0].action, 7)

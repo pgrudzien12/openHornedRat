@@ -82,7 +82,7 @@ class ArmyExclusionTests(unittest.TestCase):
         battle.interpreter.run(dragon.identifier, state, 0, battle.rng)
         self.assertTrue(dragon.active)
         self.assertTrue(dragon.listed_for_removal)
-        self.assertGreaterEqual(len(battle.innate_projectiles), 4)
+        self.assertGreaterEqual(len([e for e in battle.spell_effects.effects() if e.breath]), 4)
 
     def test_excluded_player_can_trigger_z_while_active(self):
         player = regiment('player', Side.PLAYER)

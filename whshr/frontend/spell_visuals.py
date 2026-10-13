@@ -17,7 +17,7 @@ of Anraheir, Azure Blades, Ere We Go!, Mork Save Uz!) follow notes/spell_attache
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 import math
 import random
@@ -27,7 +27,6 @@ from .. import spell_effects
 
 if TYPE_CHECKING:
     from ..engine import Battle
-    from ..ranged import InnateProjectile
 
 HEAD_FIRST, HEAD_COUNT = 125, 4
 PUFF_FIRST, PUFF_FRAMES = 125, 20
@@ -119,39 +118,14 @@ class FireballVisuals:
         return drawn
 
 
-@dataclass
-class DragonFlameFlights:
-    """Feed innate dragon flames into Fireball art, retaining final positions for the ending tick.
-
-    Negative presentation ids cannot collide with spell-effect serials. Holding each projectile until
-    its ending update also prevents Python object-id reuse from joining two unrelated trails.
-    """
-
-    next_serial: int = -1
-    previous: dict[int, tuple[int, InnateProjectile]] = field(default_factory=dict)
-
-    def sample(self, projectiles: Iterable[InnateProjectile],
-               ground_height: Callable[[float, float], float]) -> list[Flight]:
-        present: dict[int, tuple[int, InnateProjectile]] = {}
-        flights: list[Flight] = []
-        for projectile in projectiles:
-            if projectile.code != 14:
-                continue
-            key = id(projectile)
-            if key in self.previous:
-                serial = self.previous[key][0]
-            else:
-                serial = self.next_serial
-                self.next_serial -= 1
-            present[key] = serial, projectile
-            flights.append(Flight(serial, projectile.x, projectile.y,
-                                 projectile.z - ground_height(projectile.x, projectile.y)))
-        for key, (serial, projectile) in self.previous.items():
-            if key not in present:
-                flights.append(Flight(serial, projectile.x, projectile.y,
-                                     projectile.z - ground_height(projectile.x, projectile.y), True))
-        self.previous = present
-        return flights
+def breath_display_height(effect: spell_effects.Effect) -> float:
+    """Where a Dragon breath flame is drawn: on a straight line from its launch height down to the ground at its
+    destination (owner's decision, not original parity: the flame itself flies 40 -> 20 on flat ground and is tested
+    at those heights, notes/bf014_dragon_mission_audit.md 7.2). The line drops the launch elevation linearly with the
+    flown fraction of the path."""
+    total = math.dist(effect.start, effect.dest)
+    flown = 1.0 if total == 0 else min(1.0, math.dist(effect.start, (effect.x, effect.y)) / total)
+    return max(0.0, effect.height - spell_effects.BREATH_FLAME.launch_height * flown)
 
 
 # ===== The other projectile spells (notes/spell_visuals.md) =====

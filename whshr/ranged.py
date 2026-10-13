@@ -83,11 +83,6 @@ class InnateProjectile:
     x: float = 0
     y: float = 0
     struck: frozenset[str] = frozenset()
-    # Absolute dragon flame display heights; terrain is sampled before shifting the launch point
-    # (bf014_dragon_rendering.md §3.2). Other innate weapon visuals retain their existing policy.
-    z0: float = 0
-    z1: float = 0
-    z: float = 0
 
 
 def _message(battle: Battle, unit: Regiment, text_id: int) -> None:
@@ -425,45 +420,54 @@ def _launch_innate(battle: Battle, unit: Regiment, code: int,
     if aim is None:
         return
     if code == 14:
-        dx, dy = aim[0] - unit.x, aim[1] - unit.y
-        bearing = int(256 - 256 * math.atan2(dx, -dy) / math.pi) % 512
-        sector = dragon_breath_sector(bearing, unit.direction)
-        if sector is None:
-            return
-        unit.model_positions()
-        for model in unit.melee_models:
-            if unit.model_family(model) == "mesh_dragon":
-                animation.request_mesh_breath(model, sector, battle.rng)
-        if sector < 3:
-            angle = (unit.direction + (sector - 1) * 64) % 512 * math.tau / 512
-            origin = (unit.x + math.floor(72 * math.trunc(256 * math.sin(angle)) / 256),
-                      unit.y + math.floor(72 * math.trunc(256 * math.cos(angle)) / 256))
-        else:
-            # Stable repair of the history-dependent (q,q) defect: q=0. This is a deliberate
-            # deviation, not an original origin rule (bf014_dragon_rendering.md §3.2).
-            origin = (unit.x, unit.y)
-    count = battle.rng.randint(1, 6) + 3 if code == 14 else battle.rng.randint(1, 6) if code == 15 else 1
+        _breathe(battle, unit, aim)
+        return
+    count = battle.rng.randint(1, 6) if code == 15 else 1
     for _ in range(count):
         if len(battle.innate_projectiles) >= 64:
             break
-        if code in {14, 15}:
+        if code == 15:
             x1 = aim[0] + battle.rng.randint(-24, 24)
             y1 = aim[1] + battle.rng.randint(-24, 24)
         else:
             x1, y1 = aim
-        z0 = z1 = 0.0
-        if code == 14:
-            from .spell_effects import flying_aim_height
-            # User-requested visual path: straight from the elevated origin to target ground
-            # (or a flying target's aim height). Unlike the original's L+A endpoint, no extra
-            # launch elevation is added at the destination. Puffs stay where the head passed.
-            z0 = math.floor(battle.ground_height(unit.x, unit.y) + 0.5) + 40
-            z1 = (math.floor(battle.ground_height(x1, y1) + 0.5)
-                  + math.trunc(flying_aim_height(battle, *aim)))
         battle.innate_projectiles.append(InnateProjectile(unit.identifier, code, *origin, x1, y1,
-                                                        x=origin[0], y=origin[1], z0=z0, z1=z1, z=z0))
+                                                        x=origin[0], y=origin[1]))
     battle.events.append(BattleEvent("Innate projectiles launched.", "innate_launch",
                                      regiment=unit.identifier, code=code, count=count))
+
+
+def _breathe(battle: Battle, unit: Regiment, aim: tuple[float, float]) -> None:
+    """Dragon breath, special weapon 14 (notes/bf014_dragon_mission_audit.md 3.1 and 7.1): the flame count
+    (rand mod 6) + 4 is drawn first, even when the sector test then rejects the breath; then the pose and the flame
+    origin (bf014_dragon_rendering.md §3.1-3.2); then per flame a y and an x spread of (rand mod 80) - 40 around the
+    aim, launched as an innate Fireball effect whose start is moved to the origin."""
+    from . import spell_effects
+    rng = battle.rng
+    count = rng.randrange(6) + 4
+    dx, dy = aim[0] - unit.x, aim[1] - unit.y
+    bearing = int(256 - 256 * math.atan2(dx, -dy) / math.pi) % 512
+    sector = dragon_breath_sector(bearing, unit.direction)
+    if sector is None:
+        return
+    unit.model_positions()
+    for model in unit.melee_models:
+        if unit.model_family(model) == "mesh_dragon":
+            animation.request_mesh_breath(model, sector, rng)
+    if sector < 3:
+        angle = (unit.direction + (sector - 1) * 64) % 512 * math.tau / 512
+        origin = (unit.x + math.floor(72 * math.trunc(256 * math.sin(angle)) / 256),
+                  unit.y + math.floor(72 * math.trunc(256 * math.cos(angle)) / 256))
+    else:
+        # Stable repair of the history-dependent (q,q) defect: q=0. This is a deliberate
+        # deviation, not an original origin rule (bf014_dragon_rendering.md §3.2).
+        origin = (unit.x, unit.y)
+    for _ in range(count):
+        ay = aim[1] + rng.randrange(80) - 40
+        ax = aim[0] + rng.randrange(80) - 40
+        spell_effects.launch(battle, spell_effects.FIREBALL, unit, -1, ax, ay, innate=True, breath_start=origin)
+    battle.events.append(BattleEvent("Innate projectiles launched.", "innate_launch",
+                                     regiment=unit.identifier, code=14, count=count))
 
 
 def _damage_innate(battle: Battle, unit: Regiment, p: InnateProjectile) -> None:
@@ -474,16 +478,14 @@ def _damage_innate(battle: Battle, unit: Regiment, p: InnateProjectile) -> None:
     index = battle.rng.randrange(unit.models)
     if "MagicResistent" in unit.psychology and battle.rng.randrange(2) == 0:
         return
-    strength = 8 if p.code == 14 else 4
+    strength = 4
     if battle.rng.randint(1, 6) < wfb_to_wound(strength, unit.toughness):
         return
     model = unit.melee_models[index]
     model.wounds_taken += 1
     if model.wounds_taken >= unit.wounds:
-        kind = animation.DEATH_FIRE if p.code == 14 else animation.DEATH_WARPFIRE if p.code == 15 else animation.DEATH_MISSILE
+        kind = animation.DEATH_WARPFIRE if p.code == 15 else animation.DEATH_MISSILE
         combat.kill_models(unit, [index], battle, kind, killer=p.source)
-    if p.code == 14 and unit.active:
-        combat.start_rout(unit, battle)
     battle.events.append(BattleEvent("Innate missile hit.", "innate_hit",
                                      regiment=unit.identifier, code=p.code))
 
@@ -495,8 +497,6 @@ def _step_innate(battle: Battle) -> None:
         t = min(1, p.elapsed / 9)
         p.x = p.x0 + (p.x1-p.x0)*t
         p.y = p.y0 + (p.y1-p.y0)*t
-        if p.code == 14:
-            p.z = math.trunc((p.z0 - p.z1) * max(0, 9 - p.elapsed) / 9) + p.z1
         struck = set(p.struck)
         for unit in battle.regiments.values():
             if unit.identifier == p.source or unit.identifier in struck or not unit.active:

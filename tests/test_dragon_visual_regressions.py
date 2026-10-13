@@ -1,5 +1,4 @@
-"""Regression vectors for near-camera culling and Fireball art for dragon flames."""
-from array import array
+"""Regression vectors for dragon display culling."""
 from types import SimpleNamespace
 import unittest
 
@@ -8,8 +7,6 @@ from whshr.battle3d import Projection
 from whshr.camera import BattleCamera
 from whshr.engine import Battle, Regiment
 from whshr.frontend.battle_view import BattleView
-from whshr.frontend.spell_visuals import DragonFlameFlights, FireballVisuals
-from whshr.ranged import InnateProjectile
 from whshr.rules import Side
 
 
@@ -53,55 +50,3 @@ class DragonDisplayBoundsTests(unittest.TestCase):
         self.assertTrue(dragon_mesh.visible(battle, unit, tuple(v * 8 for v in render)))
 
 
-class DragonFireballArtTests(unittest.TestCase):
-    def setUp(self):
-        self.adapter = DragonFlameFlights()
-        self.visuals = FireballVisuals()
-
-    def step(self, flames, ground=lambda x, y: 0):
-        flights = self.adapter.sample(flames, ground)
-        self.visuals.advance(flights)
-        return flights, self.visuals.sprites()
-
-    def test_every_flame_has_a_fireball_head_and_trail_with_independent_identity(self):
-        flames = [InnateProjectile('d', 14, 100, 200, 50, 200, x=100, y=200, z=40) for _ in range(4)]
-        flights, sprites = self.step(flames)
-        self.assertEqual(len({f.serial for f in flights}), 4)
-        self.assertTrue(all(f.serial < 0 for f in flights))  # no collision with cast Fireball ids
-        self.assertEqual([s.frame for s in sprites], [125] * 8)
-        for flame in flames:
-            flame.x -= 10
-        _, sprites = self.step(flames)
-        self.assertEqual([s.frame for s in sprites[:4]], [126] * 4)
-        self.assertTrue(any(s.x == 100 for s in sprites))  # trail at previous point
-
-    def test_last_projectile_position_starts_one_explosion_and_trail_can_finish(self):
-        flame = InnateProjectile('d', 14, 100, 200, 50, 200, x=100, y=200, z=40)
-        flights, _ = self.step([flame])
-        serial = flights[0].serial
-        flame.x, flame.z = 50, 20  # simulation advances even the projectile removed this tick
-        ending, sprites = self.step([])
-        self.assertEqual((ending[0].serial, ending[0].x, ending[0].ending), (serial, 50, True))
-        self.assertTrue(any(s.frame == 177 and s.x == 50 for s in sprites))
-        ending, _ = self.step([])
-        self.assertEqual(ending, [])  # no repeated explosion reset
-        for _ in range(21):
-            self.step([])
-        self.assertEqual(self.visuals.sprites(), [])
-
-    def test_absolute_height_is_preserved_and_other_innate_weapons_are_ignored(self):
-        flame = InnateProjectile('d', 14, 100, 200, 50, 200, x=100, y=200, z=48)
-        warpfire = InnateProjectile('w', 15, 0, 0, 0, 100)
-        flights, sprites = self.step([flame, warpfire], ground=lambda x, y: 23)
-        self.assertEqual(len(flights), 1)
-        self.assertEqual(sprites[0].height + 23, 48)
-
-    def test_renderer_no_longer_emits_fire_mesh_wall_for_dragon_flames(self):
-        # A fire mesh is deliberately present: it must not be used as the dragon's visual.
-        field = SimpleNamespace(effect_meshes={'fire1': {}}, ground_texture_count=0, scenery_texture_count=1)
-        battle = SimpleNamespace(regiments={}, control_piece=None, projectiles=[], impact_effects=[],
-                                 innate_projectiles=[InnateProjectile('d', 14, 0, 0, 100, 0)])
-        view = BattleView.__new__(BattleView)
-        view.scene = SimpleNamespace(field=field, battle=battle)
-        view.effect_capacity = 65536
-        self.assertEqual(view._effect_vertices(), array('f'))

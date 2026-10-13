@@ -45,8 +45,8 @@ from .gpu import Gpu
 from .area_particle_visuals import area_effects, area_meshes, area_sprites
 from .obstacle_visuals import ObstacleVisuals, obstacle_effects
 from .transport_visuals import TransportVisuals, transport_effects
-from .spell_visuals import (AttachedVisuals, DirectionalSprite, DragonFlameFlights, FireballVisuals, Flight,
-                            ProjectileVisuals, Sprite, attached_effects, projectile_shots)
+from .spell_visuals import (AttachedVisuals, DirectionalSprite, FireballVisuals, Flight,
+                            ProjectileVisuals, Sprite, attached_effects, breath_display_height, projectile_shots)
 from .scene_view import SceneView
 from .hud import Hud, order_target_hit, select_regiment_hit
 
@@ -1070,9 +1070,7 @@ class BattleView(SceneView[BattleScene]):
         for p in self.scene.battle.projectiles:
             if p.visual not in ARTILLERY_VISUALS:  # artillery shots are sprites (_artillery_sprites)
                 append(MISSILE_MESH.get(p.visual, "arrows1"), p.x, p.y, p.z, p.x1-p.x0, p.y1-p.y0)
-        for p in self.scene.battle.innate_projectiles:
-            if p.code == 14:  # Dragon breath uses Fireball sprites; FIRE meshes belong to Flamestorm.
-                continue
+        for p in self.scene.battle.innate_projectiles:  # warpfire and steam gun; Dragon breath is Fireball effects
             family = "flames" if p.code == 15 else "boltbur"
             append(f"{family}{1 + p.elapsed % 4}", p.x, p.y,
                    self.scene.battle.ground_height(p.x, p.y) + 8, p.x1-p.x0, p.y1-p.y0)
@@ -1199,9 +1197,8 @@ class BattleView(SceneView[BattleScene]):
                 if effect.serial in ended:
                     continue
                 ended.add(effect.serial)
-            flights.append(Flight(effect.serial, effect.x, effect.y, max(0.0, effect.height), not flying))
-        dragon: DragonFlameFlights = self.__dict__.setdefault("_dragon_flames", DragonFlameFlights())
-        flights.extend(dragon.sample(battle.innate_projectiles, self.scene.field.ground_height))
+            height = breath_display_height(effect) if effect.breath else max(0.0, effect.height)
+            flights.append(Flight(effect.serial, effect.x, effect.y, height, not flying))
         return flights
 
     def _artillery_sprites(self) -> bytes:

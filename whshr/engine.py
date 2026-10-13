@@ -852,8 +852,8 @@ class Battle:
         self.building_index: dict[str, buildings.Building] = {b.identifier: b for b in self.buildings}
         # Projectile and missile-target obstacles: the [OBJECTS] collision circles, then one entry per building.
         # Other placed furniture (roads, trees, fences) is no map object (notes/map_objects_and_projectiles.md 1).
-        # A building entry keeps the engine's unit object height (spell_effects.UNIT_HEIGHT, 24; the original's per-type
-        # unit object height is open, ibid. 6).
+        # A building entry keeps an engine height of 24 (the original's building object height is open,
+        # notes/map_objects_and_projectiles.md 6).
         self.shooting_objects = list(objects) + [
             {"x": building.x, "y": building.y, "radius": buildings.footprint_radius(building.name), "height": 24.0,
              "status": ["os_active", "os_solid"], "name": building.name, "building": building.identifier}
