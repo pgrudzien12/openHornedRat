@@ -239,6 +239,8 @@ class SceneMachine:
         self._apply(Transition(fallback, "blank glue scene: back to the map"))
 
     def _start_glue_activities(self) -> None:
+        if self._end_glue_game():
+            return
         self._start_glue_debrief()
         self._start_glue_battle()
         self._start_glue_movie()
@@ -258,6 +260,19 @@ class SceneMachine:
         parent = scene.release_mission()
         if parent is not None:
             self._apply(Transition(parent, "mission released"))
+
+    def _end_glue_game(self) -> bool:
+        """``endgame`` returns to the title menu (notes/glue_interpreter.md section 8.5): the runtime has already
+        cleared its stacks; the menu is a fresh scene and the campaign files are left alone.  Battles started
+        later take their log directory and seed from the shared context, so the command-line settings survive."""
+        from .campaign_scenes import MainMenuScene
+        from .glue_scene import GlueScene
+
+        if not isinstance(self.active, GlueScene) or self.active.take_endgame_effect() is None:
+            return False
+        self._apply(Transition(MainMenuScene(log_dir=self.context.battle_log_dir, seed=self.context.battle_seed),
+                               "campaign ended"))
+        return True
 
     def _start_glue_debrief(self) -> None:
         """A debrief request opens the debrief screen (whshr.debrief_scene); Done applies its effects and the script

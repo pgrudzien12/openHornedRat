@@ -11,7 +11,6 @@ from whshr.campaign_scenes import (
 )
 from whshr.campaign_state import CampaignState
 from whshr.catalog import build
-from whshr.glue_runtime import EndGame
 from whshr.glue_scene import GlueScene
 from whshr.glue_content import GlueContent
 from whshr.scenes import SceneAssets, SceneMachine
@@ -186,8 +185,7 @@ class MovieSceneTests(unittest.TestCase):
 
         machine.update(machine.active.duration_seconds)
 
-        self.assertIsInstance(machine.active, GlueScene)
-        self.assertEqual(machine.active.take_effects(), (EndGame(),))
+        self.assertIsInstance(machine.active, MainMenuScene)  # the resumed script ran to its endgame
 
     def test_given_main_menu_when_quit_is_chosen_then_the_application_receives_a_quit_signal(self):
         machine = SceneMachine(MainMenuScene(), self.context)

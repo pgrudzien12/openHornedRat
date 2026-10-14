@@ -116,8 +116,10 @@ renumber later work.
   mission rows; advance the campaign for release and replacement paths; rebuild the offered list
   after mission commitment.
 
-- [ ] **GEI11 — Remaining scene boundary effects.** (issue #125) Route `EndGame` to the main menu and retain
-  battle logging and seed configuration when Glue starts a battle.
+- [x] **GEI11 — Remaining scene boundary effects.** (issue #125) `SceneMachine` turns a glue scene's `EndGame`
+  effect into a fresh main menu (campaign files untouched); the menu and every glue-started battle take the
+  battle log directory and seed from the shared context, so the command-line settings survive.
+  Tests: `tests/test_endgame.py`, `tests/test_battle_handoff.py`.
 
 - [ ] **GEI12 — Remaining campaign commands.** (issue #126) Implement `addunit`, `cash`, bonus counters,
   book flags, `testmission`, `testobjective`, and `gomissionselect`. Explicitly reject reachable
@@ -241,8 +243,8 @@ renumber later work.
   stayed open. `GlueScene._leave_caravan` now handles `AbortGame` there too, matching the direct path: after a
   Yes/No confirmation (`whshr/confirm_scene.py`; Yes goes to the main menu, `notes/mission_selection.md` §8.1: "abandons
   the campaign toward the main menu"; No returns to the caravan). Troop selection's Abort uses the same box
-  (`notes/troop_selection.md` §4.4). The question text is `GMTXT 36070` ("quit the campaign"); `mission_selection.md` §8.1
-  names `BRTXT 308` ("Are you sure?") for this box, which fits troop selection's Abort but is the less specific text. Save (`LoadSaveWindow`) and the roster book
+  (`notes/troop_selection.md` §4.4). The question text is `BRTXT 308` (issue #160, `notes/native-windows.md` §13: a plain system Yes/No box).
+  PROVISIONAL: Yes always opens a fresh main menu instead of popping to the main-menu frame (whether one is always present under a loaded stack is open). Save (`LoadSaveWindow`) and the roster book
   (`ArmyBook`/`HireOnlyArmyBook`) already worked from a `gocaravan`-opened caravan; `EncyclopediaBook`,
   `MagicBook` and `OptionsDialog` still queue that diagnostic and stay open (no screen built for them yet).
 - [x] **GEI7i — Hotspot cursors on glue screens.** (issue #150) `RenderHotspot` now keeps `altcursor` next to

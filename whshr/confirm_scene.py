@@ -3,7 +3,7 @@
 
 The original asks "Are you sure?" before an Abort leaves troop selection with something selected
 (``notes/builtin_widgets.md`` section 4.1, ``BRTXT 308``) and before ``AbortGame`` abandons the campaign
-(``notes/activity_results.md`` section 6, ``GMTXT 36070``). Yes carries on to ``yes_scene``; No returns
+(``notes/native-windows.md`` section 13, ``BRTXT 308``). Yes carries on to ``yes_scene``; No returns
 to ``parent`` unchanged.
 
 Events: ``"yes"``, ``"no"``. The view resolves the question text from ``string`` ((table, id)).

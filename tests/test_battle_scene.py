@@ -10,7 +10,7 @@ from whshr.battle_scene import BATTLE_TICK_SECONDS, BattleScene
 from whshr.cache import AssetCache
 from whshr.catalog import build
 from whshr.glue_content import GlueContent
-from whshr.glue_runtime import EndGame
+from whshr.campaign_scenes import MainMenuScene
 from whshr.glue_scene import GlueScene
 from whshr.debrief_scene import DebriefScene
 from whshr.result_scene import ResultScene
@@ -97,8 +97,7 @@ class BattleSceneTests(unittest.TestCase):
 
         machine.handle("done")  # the debrief screen closes
 
-        self.assertIs(machine.active, glue)
-        self.assertEqual(glue.take_effects(), (EndGame(),))
+        self.assertIsInstance(machine.active, MainMenuScene)  # the resumed script ran to its endgame
 
     def test_given_active_battle_when_a_quarter_second_passes_then_two_100_ms_ticks_have_run(self):
         scene = BattleScene()
@@ -261,9 +260,9 @@ class BattleSceneTests(unittest.TestCase):
         self.assertIsInstance(machine.active, BattleScene)
 
         machine.update(BATTLE_TICK_SECONDS)
+        machine.update(0)  # the resumed script's endgame is acted on at the next step
 
-        self.assertIs(machine.active, glue)
-        self.assertEqual(glue.take_effects(), (EndGame(),))
+        self.assertIsInstance(machine.active, MainMenuScene)  # the resumed script ran to its endgame
 
     def test_given_no_debug_mode_then_the_win_key_does_nothing(self):
         self.context.debug = False
@@ -296,7 +295,7 @@ class BattleSceneTests(unittest.TestCase):
     def test_given_a_campaign_battle_when_the_win_key_is_used_then_the_flow_resumes_with_a_flawless_win(self):
         self.context.debug = True
         self.context.glue = GlueContent.from_data(resources={
-            "FLOW": "[RUN]\n[START]\nplaygame:bf001\nendgame:\n[END]",
+            "FLOW": "[RUN]\n[START]\nplaygame:bf001\n[END]",
         })
         glue = GlueScene("FLOW")
         machine = SceneMachine(glue, self.context)

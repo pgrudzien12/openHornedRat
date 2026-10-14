@@ -20,7 +20,7 @@ from whshr.scenes import SceneAssets, SceneMachine
 from tests.test_battle_scene import SCRIPT
 
 RESOURCES = {
-    "FLOW": "[RUN]\n[START]\nopenwindow:res=MISSIONAWINDOW\nwaitforrelease:\nopenwindow:res=MISSIONBWINDOW\nwaitforrelease:\nendgame:\n[END]",
+    "FLOW": "[RUN]\n[START]\nopenwindow:res=MISSIONAWINDOW\nwaitforrelease:\nopenwindow:res=MISSIONBWINDOW\nwaitforrelease:\n[END]",
     "MISSIONAWINDOW": "[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n"
             "[MISSION]\nset:res=601\nres:BRIEF\nsetbattlescript:bf001\nsetmissionscript:MSCRIPT\n[END]",
     "MISSIONBWINDOW": "[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n"

@@ -24,7 +24,7 @@ WINDOW = "[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n"
 
 def _flow(*windows):
     body = "".join(f"openwindow:res={w}\nwaitforrelease:\n" for w in windows)
-    return f"[RUN]\n[START]\n{body}endgame:\n[END]"
+    return f"[RUN]\n[START]\n{body}[END]"
 
 
 RESOURCES = {
