@@ -392,8 +392,9 @@ class GlueScene(Scene):
         """AbortGame asks the plain Yes/No question ``BRTXT 308`` (notes/native-windows.md §13); Yes leaves the
         campaign for the main menu and resets nothing (campaign files stay), No comes back to this caravan.
 
-        PROVISIONAL: the original pops frames to the main-menu frame under the stack; whether one always exists
-        under a loaded stack is unknown, so the engine always opens a fresh main menu."""
+        The original pops frames down to the main-menu frame; one is always at the bottom, also after a Load, so
+        opening a fresh main menu gives the same result (notes/native-windows.md §13.3.5). Only a damaged or foreign
+        save could lack it; the original then leaves a blank screen, the engine still opens the menu."""
         from .campaign_scenes import MainMenuScene
         from .confirm_scene import ConfirmScene
 
