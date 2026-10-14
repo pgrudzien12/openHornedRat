@@ -2146,6 +2146,23 @@ New Game resets them), does not clear the remembered tune or paused flag, and do
 - "Return to main menu" (game over, quit battle, `endgame:`): `ClearGlueScriptStack` (all four depths and the data-file stack to 0), stop and
   discard the tune, build the menu; not a pop loop.
 
+#### 13.3.5 AbortGame after a Load, and `endgame:` ✅
+- **Load restores the saved stacks wholesale**, replacing whatever was on the stacks (`save_resume.md`, §8.1). A save
+  can only be written from a caravan, inside a campaign, and a campaign is only entered from the main menu: either by
+  New Game, whose launcher pushes `W(MainMenu)`, or by a Load, which restores a stack that itself starts with that
+  frame. So **every save the game writes has `W(MainMenu)` as its bottom frame**, and AbortGame Yes after a Load
+  behaves exactly as in a new campaign: it pops to that frame and re-opens `MainMenu`. Both sample saves confirm it:
+  `savegame.0` (player slot) has callers `MainMenu, StartCaravan`; `savegame.5` (autosave) has `MainMenu, StartCaravan,
+  FlowScriptBP01, BPMission1`.
+- A stack **without** a `MainMenu*` frame cannot arise from the game's own saves. Only a damaged or foreign save could
+  produce one. The original then pops everything and leaves a blank screen (§13.3.4). An engine may open a fresh main
+  menu instead, as a tagged deviation for that impossible case.
+- **`endgame:`** (and the other "return to main menu" paths: game over, quit battle, a failed Load) does not use the
+  pop loop. It clears all four stacks, stops and discards the tune, and **always builds the title menu** in normal
+  play. The only other outcome is when the game was started with one of the two demo command-line switches
+  (`ectsdemo`, `msdemo`, `builtin_widgets.md`). Then, instead of the menu, it shows the demo's closing slide sequence
+  (skipped with the `noppt` switch) and closes the program. These switches are irrelevant to an engine.
+
 ### 13.4 Asset inventory
 
 No bitmap, font, palette, cursor, sound or music asset belongs to these built-ins; `AbortGame` uses the OS message box (buttons, icon, font,
@@ -2289,8 +2306,7 @@ tested without scene links. Engine saves may store a different shape (`CLAUDE.md
 - ⬜ Whether the busy-window launcher gate really blocks all hotspots while dialogue is queued (not observed).
 - ⬜ Whether speech and portrait animation are stopped by destroying windows (no built-in stops speech explicitly; the engine stops it on leave).
 - ⬜ The exact rule by which caravan-leave housekeeping removes a regiment (flag bit vs. file record) and the meaning of the "hired" field it tests.
-- ⬜ After **Load**, whether a `MainMenu` frame is guaranteed below the loaded stack (the save format stores all four stacks; `savegame.5` has
-  `[WINDOW, WINDOW, RUN, RUN]`); needed for the AbortGame Yes loop.
+- ✅ After **Load**: a `MainMenu` frame is always at the bottom of the loaded stack (§13.3.5).
 - 🟡 A hotspot while paused: the launcher does not check it; only the two resume tests do.
 
 ## 14. Click speech (`DietrichSpeech`) ✅
