@@ -24,7 +24,7 @@ import random
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from . import animation, combat, magic, map_objects
+from . import animation, buildings, combat, magic, map_objects
 from .battle_events import BattleEvent
 from .rules import Side, wfb_to_wound
 
@@ -388,6 +388,34 @@ def _leaving(battle: Battle, unit: Regiment) -> bool:
 
 def _building(unit: Regiment) -> bool:
     return unit.unit_class in BUILDING_CLASSES
+
+
+def _placed_buildings(battle: Battle, x: float, y: float, reach: int = 0,
+                      height: float | None = None) -> list[buildings.Building]:
+    """Standing placed buildings struck at the point: trunc(d) < radius + reach from the centre and, with a height,
+    the height at most the building's (notes/building_map_object.md 1, 2). A destroyed building keeps its map
+    object, so it still stops a bolt (`_solid_at`) but is never struck again (3)."""
+    return [b for b in battle.buildings
+            if not b.destroyed and _d(b.x, b.y, x, y) < b.radius + reach and (height is None or height <= b.height)]
+
+
+def _wound_building(battle: Battle, building: buildings.Building, strength: int, wound_die: int | None,
+                    caster: str | None) -> None:
+    """A magical hit on a placed building (A 4.3, notes/building_map_object.md 7): the first model rolls the
+    spell's strength against toughness 0, no save and no MagicResistent, then takes 1..wound_die wounds (exactly 1,
+    with no draw, for None: a blast margin); the caster is credited by the lethal wound only."""
+    if battle.rng.randrange(6) + 1 < wfb_to_wound(strength, buildings.MISSILE_TOUGHNESS):
+        return
+    wounds = 1 if wound_die is None else battle.rng.randrange(wound_die) + 1
+    if building.take_wounds(wounds, caster, lethal_only=True):
+        battle.destroy_building(building)
+
+
+def _destroy_building(battle: Battle, building: buildings.Building, caster: str | None) -> None:
+    """A spell that destroys a building outright (C1 4.2, 5.3): every wound it still needs, credited to the
+    caster."""
+    if building.take_wounds(max(1, building.wounds_to_destroy - building.wounds_taken), caster):
+        battle.destroy_building(building)
 
 
 def _message(battle: Battle, unit: Regiment, text_id: int, *text_args: tuple[str, object]) -> None:
@@ -766,8 +794,8 @@ def magical_hit(battle: Battle, unit: Regiment, impact: Impact, trace: dict[str,
 
 def impact_test(battle: Battle, x: float, y: float, height: float, impact: Impact, excluded: str | None,
                 messages: bool, source: Effect | None = None) -> bool:
-    """One impact test with radius 0 (A 4): each struck unit takes one magical hit; True when anything (unit or
-    solid object) was struck. Terminal impacts (messages on) show message 2004 for every unit struck. With a
+    """One impact test with radius 0 (A 4): each struck unit takes one magical hit, then each struck placed building
+    (A 4.3); True when anything (unit, building or solid object) was struck. Terminal impacts (messages on) show message 2004 for every unit struck. With a
     `source` effect every struck unit also yields a "spell_strike" battle event (rolls, wounds, deaths)."""
     struck = _units_at(battle, x, y, height, excluded)
     for unit in struck:
@@ -784,14 +812,18 @@ def impact_test(battle: Battle, x: float, y: float, height: float, impact: Impac
                 regiment=unit.identifier, caster=impact.caster, spell=source.code, serial=source.serial,
                 x=x, y=y, height=height, terminal=messages, models_before=before, models_after=unit.models,
                 **trace))
-    return bool(struck) or _solid_at(battle, x, y, height)
+    hit_buildings = _placed_buildings(battle, x, y, height=height)
+    for building in hit_buildings:
+        _wound_building(battle, building, impact.strength, impact.wound_die, impact.caster)
+    return bool(struck) or bool(hit_buildings) or _solid_at(battle, x, y, height)
 
 
 def blast(battle: Battle, x: float, y: float, radius: int, impact: Impact, excluded: str | None,
           messages: bool) -> None:
     """A radius > 0 magical impact at height 0 (C3 1): units whose footprint contains the point roll every model
     (wound die), units within footprint + radius take k = trunc((r + R - d) n / (r + R)) picks (at least 1) at S/2
-    with 1 wound and the save at S/2. Units in the air are never struck. Buildings: the first model."""
+    with 1 wound and the save at S/2. Units in the air are never struck. Buildings (Furniture-class units and placed
+    buildings): the first model, S inside, S/2 and 1 wound in the margin."""
     rng = battle.rng
     for unit in list(battle.regiments.values()):
         if not unit.active or unit.identifier == excluded or unit.models <= 0 or unit.airborne:
@@ -821,6 +853,10 @@ def blast(battle: Battle, x: float, y: float, radius: int, impact: Impact, exclu
                 if _wound_roll(battle, unit, half, impact.save, impact.fire, index):
                     _wound(unit, index, 1, dead)
         _kill(battle, unit, dead, impact)
+    for building in _placed_buildings(battle, x, y, radius):
+        core = _d(building.x, building.y, x, y) < building.radius
+        _wound_building(battle, building, impact.strength if core else impact.strength // 2,
+                        impact.wound_die if core else None, impact.caster)
 
 
 def slay(battle: Battle, unit: Regiment, count: int | None, kind: int, caster: str | None) -> None:
@@ -1233,6 +1269,10 @@ def _update_krunch(battle: Battle, effect: Effect) -> None:
             if (unit.active and unit.models > 0 and top >= height
                     and _centre_d(unit, *effect.aim) < unit.bounding_radius() + KRUNCH_REACH):
                 slay(battle, unit, None, animation.DEATH_MISSILE, effect.owner)
+        for building in battle.buildings:  # C1 4.2: a building whose height reaches the foot is destroyed
+            if (not building.destroyed and building.height >= height
+                    and _d(building.x, building.y, *effect.aim) < building.radius + KRUNCH_REACH):
+                _destroy_building(battle, building, effect.owner)
     elif e == KRUNCH_STAND:
         _add_area(battle, effect, KRUNCH_REACH, 40)
         _start_sound(battle, effect, SFX_DA_KRUNCH, effect.aim)  # spell_sounds.md 2: when the foot stands
@@ -1261,6 +1301,8 @@ def _update_conflagration(battle: Battle, effect: Effect) -> None:
         if unit.active and unit.models > 0 and d < fp:
             slay(battle, unit, 1 if _building(unit) else max(1, unit.models * (reach - d) // reach),
                  animation.DEATH_FIRE, effect.owner)
+    for building in _placed_buildings(battle, x, y):  # C1 5.3 fall test: the point inside the building
+        _destroy_building(battle, building, effect.owner)
     if e == 9 * k + 9:
         for unit in list(battle.regiments.values()):
             d, fp = _centre_d(unit, x, y), int(unit.bounding_radius())
@@ -1273,6 +1315,8 @@ def _update_conflagration(battle: Battle, effect: Effect) -> None:
             else:
                 count = max(1, unit.models * (reach - d + fp) // (2 * fp))
             slay(battle, unit, count, animation.DEATH_FIRE, effect.owner)
+        for building in _placed_buildings(battle, x, y, reach):  # C1 5.3 finale: d < footprint + R
+            _destroy_building(battle, building, effect.owner)
         effect.places = [None] * (BURST_PLACES_PER_K * k)
         _start_sound(battle, effect, SFX_DOOM, effect.aim)  # spell_sounds.md 2: the fire reaches the ground
     elif e > 9 * k + 9:
