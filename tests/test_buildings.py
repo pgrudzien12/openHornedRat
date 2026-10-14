@@ -3,7 +3,7 @@ event and the node-area side-32 query (notes/battle_end_objectives.md 12.1, note
 
 import unittest
 
-from whshr import buildings, interpreter, objectives
+from whshr import buildings, interpreter, map_objects, objectives
 from whshr.engine import Battle, Regiment
 from whshr.nodes import ScriptNode
 from whshr.ranged import Projectile
@@ -94,8 +94,10 @@ class DamageTests(unittest.TestCase):
         self.assertTrue(tent.destroyed)
         queue = b.event_bus.unit_states["S"].event_queue
         self.assertIn((0x18, "building:3"), [(e.code, e.source) for e in queue])
-        solid = [o for o in b.shooting_objects if o.get("building") == "building:3"]
-        self.assertEqual(solid[0]["status"], ["os_active", "os_solid"])  # the ruin keeps blocking
+        ruin = next(o for o in b.shooting_objects if o.get("building") == "building:3")
+        # notes/building_map_object.md 3: the ruin keeps the tent's map object, at its original height
+        self.assertTrue(map_objects.stops_projectile(ruin, tent.x + 10, tent.y, 20))
+        self.assertEqual((ruin["radius"], ruin["height"]), (30, 40))
 
     def test_a_missile_without_building_strength_does_no_damage(self):
         b = battle()

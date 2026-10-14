@@ -229,9 +229,9 @@ class RangedOrders(unittest.TestCase):
     def test_building_target_uses_ninety_percent_range_fallback(self):
         gun = unit("gun", 100, 100, code=11, models=4, cls="art")
         enemy = unit("enemy", 100, 400, Side.ENEMY, code=0)
-        building = {"x": 100, "y": 1800, "radius": 20, "status": ["os_solid"]}
-        battle = Battle(2000, 2000, [gun, enemy], objects=[building])
-        self.assertEqual(battle.order_fire("gun", point=(100, 1800), object_index=0), 2007)
+        battle = Battle(2000, 2000, [gun, enemy], scenery=[{"name": "Tudor2Stry", "x": 100, "y": 1800}])
+        index = battle.fire_pick_building(100, 1800)
+        self.assertEqual(battle.order_fire("gun", point=(100, 1800), object_index=index), 2007)
         battle.tick()
         self.assertAlmostEqual(gun.volley_aim[1], 100 + .9 * 1152)
 

@@ -30,6 +30,7 @@ CHARGING_K = 2.5
 FLEEING_K = 1.5
 
 CAST_ORDER_EVENT = 0x2B  # the player's cast order to a wizard's script (notes/script_magic.md 4)
+FIRE_PICK_FLOOR = 48.0  # a Fire click picks within max(object radius, 48) (notes/building_map_object.md 4)
 # Spells with no target click: the cast order is given on the spell click (notes/player_magic_panel.md 4.1).
 NO_TARGET_SPELLS = frozenset({spell_effects.AZURE_BLADES, spell_effects.DISPEL_MAGIC, spell_effects.FISTS})
 DEFAULT_SEED = 1995  # arbitrary but fixed: battles are deterministic unless a caller picks a seed
@@ -855,12 +856,13 @@ class Battle:
         self.buildings: list[buildings.Building] = buildings.from_scenery(scenery)
         self.building_index: dict[str, buildings.Building] = {b.identifier: b for b in self.buildings}
         # Projectile and missile-target obstacles: the [OBJECTS] collision circles, then one entry per building.
-        # Other placed furniture (roads, trees, fences) is no map object (notes/map_objects_and_projectiles.md 1).
-        # A building entry keeps an engine height of 24 (the original's building object height is open,
-        # notes/map_objects_and_projectiles.md 6).
+        # Other placed furniture (roads, trees, fences, walls) is no map object (notes/map_objects_and_projectiles.md
+        # 1). A building's entry is the circle of its type radius at its type height; it exists but is not solid
+        # (push-apart uses the footprint rule), and it stays as it is after destruction
+        # (notes/building_map_object.md 1, 3).
         self.shooting_objects = list(objects) + [
-            {"x": building.x, "y": building.y, "radius": buildings.footprint_radius(building.name), "height": 24.0,
-             "status": ["os_active", "os_solid"], "name": building.name, "building": building.identifier}
+            {"x": building.x, "y": building.y, "radius": building.radius, "height": float(building.height),
+             "status": ["os_active"], "name": building.name, "building": building.identifier}
             for building in self.buildings]
         # Camera rotation in 1/512 turns, set by the frontend; two-figure wagons line up on it (_wagon_layout).
         self.view_angle: float | None = None
@@ -1767,8 +1769,9 @@ class Battle:
             if target is None or not target.active or target.hidden:
                 raise ValueError("target cannot be picked")
             mode, feedback = "target", 2008
-        elif object_index is not None and 0 <= object_index < len(self.shooting_objects):
-            mode, feedback = "building", 2007
+        elif (object_index is not None and 0 <= object_index < len(self.shooting_objects)
+              and self.shooting_objects[object_index].get("building") is not None):
+            mode, feedback = "building", 2007  # destroyed buildings too (notes/building_map_object.md 4)
         elif point is not None:
             mode, feedback = "ground", None
         else:
@@ -1788,8 +1791,9 @@ class Battle:
 
     def destroy_building(self, building: buildings.Building) -> None:
         """A building at its wounds-to-destroy ends: it stops counting as a target, every live scripted unit gets
-        event 0x18 (notes/building_units.md 7) and a battle event is recorded. The footprint stays solid -- the
-        ruin still pushes regiments apart and intercepts shots. Not modelled: the ruin's own size and height."""
+        event 0x18 (notes/building_units.md 7) and a battle event is recorded. The footprint and the map object stay as
+        they were: the ruin still pushes regiments apart, stops shots and blocks sight at the original size and height
+        (notes/building_map_object.md 3). Not modelled: redrawing the scenery piece as its ruin."""
         building.destroyed = True
         building.models = 0
         credited = self.regiments.get(building.credit or "")
@@ -3659,6 +3663,19 @@ class Battle:
             regiment.charge_started_target = building.identifier
         return self._advance_toward(regiment, centre, regiment.speed_for_mode(CHARGING_K) * move_scale, arrive=False,
                                     order_key=("charge", building.identifier), scale=scale)
+
+    def fire_pick_building(self, x: float, y: float) -> int | None:
+        """The shooting-object index of the building a player Fire click picks, or None (notes/building_map_object.md
+        4): the first building, in file order, whose circle floored to radius 48 strictly contains the point.
+        Destroyed buildings are not excluded; plain collision objects and spell areas are never picked. Buildings
+        come before every regiment, so the caller tests this before a regiment under the click."""
+        for index, obj in enumerate(self.shooting_objects):
+            if obj.get("building") is None:
+                continue
+            reach = max(float(obj.get("radius") or 0), FIRE_PICK_FLOOR)
+            if (float(obj.get("x") or 0) - x) ** 2 + (float(obj.get("y") or 0) - y) ** 2 < reach ** 2:
+                return index
+        return None
 
     def building_at(self, x: float, y: float) -> str | None:
         """Identifier of the standing building whose footprint contains the point (a click target), or None."""

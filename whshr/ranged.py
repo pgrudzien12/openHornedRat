@@ -565,12 +565,15 @@ def _damage_buildings(battle: Battle, p: Projectile, flight: bool) -> None:
     hit (wound die of the weapon at building strength), a blast margin is one wound at half strength; no armour
     save, and the wound roll uses toughness 0 (automatic from strength 8; notes/building_units.md 3). The firer is
     credited only by the wound that destroys the building. Bows and crossbows have no building strength and never
-    reach here with damage."""
+    reach here with damage. In flight only a direct hit counts, at or below the building's height
+    (notes/building_map_object.md 2); a destroyed building still stops the projectile but takes nothing (3)."""
     from . import buildings
     if not p.building_strength:
         return
     for building in battle.buildings:
         if building.destroyed:
+            continue
+        if flight and p.z - battle.ground_height(p.x, p.y) > building.height:
             continue
         q = math.hypot(building.x - p.x, building.y - p.y)
         if q < building.radius:
