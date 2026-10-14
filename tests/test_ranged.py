@@ -212,11 +212,12 @@ class RangedOrders(unittest.TestCase):
 
     def test_ctrl_gyrocopter_bomb_requires_airborne_and_drops_at_self(self):
         craft = unit("gyro", 100, 100, code=17, models=1)
+        craft.sprite = "Gyrocopter"
         enemy = unit("enemy", 100, 200, Side.ENEMY, code=0)
         battle = Battle(1000, 1000, [craft, enemy])
         self.assertEqual(battle.order_fire("gyro", "enemy", bomb=True), 2020)
         self.assertIsNone(craft.shooting_mode)
-        craft.airborne = True
+        craft.flight_state().elevation = 32  # notes/airborne_units.md A2: full height
         battle.order_fire("gyro", "enemy", bomb=True)
         battle.tick()
         craft.fire_posts = 1
@@ -224,7 +225,7 @@ class RangedOrders(unittest.TestCase):
         battle.rng = FixedRandom([1, 0, 0])
         ranged._launch_posts(battle)
         self.assertEqual((battle.projectiles[0].x1, battle.projectiles[0].y1), (100, 100))
-        self.assertEqual(battle.projectiles[0].z0, 72)
+        self.assertEqual(battle.projectiles[0].z0, 32)  # dropped from its elevation (airborne_units.md B2.7)
 
     def test_building_target_uses_ninety_percent_range_fallback(self):
         gun = unit("gun", 100, 100, code=11, models=4, cls="art")

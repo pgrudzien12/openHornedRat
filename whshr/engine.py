@@ -7,7 +7,7 @@ import random
 from typing import Any, Callable, Literal, cast
 
 from . import animation, battle_grid, behaviour, buildings, combat, deployment, formation, interpreter, map_objects, navigation, npc_merge, ranged, visibility
-from . import birds as bird_flock, camera_shake as camera_shakes, control_piece as control_pieces, magic, objectives as objective_table, spell_effects, steering
+from . import birds as bird_flock, camera_shake as camera_shakes, flight as flight_rules, control_piece as control_pieces, magic, objectives as objective_table, spell_effects, steering
 from . import nodes as node_table
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
@@ -231,7 +231,7 @@ class Regiment:
     contact_attack_segment: int = -1  # the segment in which this unit last made contact attacks on a router underfoot
     update_counter: int = 0  # counts the unit's updates; starts at its slot so units are staggered (see collision_recheck)
     screen_mark: bool = False  # inside the camera's view rectangle at the end of the last tick (Battle.on_screen)
-    airborne: bool = False
+    flight: "flight_rules.FlightState | None" = None  # a flying sprite set's state (`flight_state`)
     waypoints: list[Point] = field(default_factory=list[Point])
     route_follows_unit: bool = False
     # The current point move was ordered while the unit was already moving: it gets no move-start snap
@@ -424,6 +424,25 @@ class Regiment:
         if self.frontage < 0:
             sizes = formation.rank_sizes(self.models, self.ranks)
             self.frontage = sizes[0] if sizes else 0
+
+    def flight_state(self) -> "flight_rules.FlightState | None":
+        """The flying state of a unit whose figure has a flying sprite set, else None (notes/airborne_units.md A1:
+        the leader block's set, else the unit's). Every flier starts grounded."""
+        if self.flight is None:
+            profile = flight_rules.profile_for(self.leader_sprite) or flight_rules.profile_for(self.sprite)
+            if profile is not None:
+                self.flight = flight_rules.FlightState(profile)
+        return self.flight
+
+    @property
+    def elevation(self) -> int:
+        """Height above the terrain under the unit, 0..32 (notes/airborne_units.md A2, B0.2)."""
+        return self.flight.elevation if self.flight is not None else 0
+
+    @property
+    def airborne(self) -> bool:
+        """The flying state: exactly while the elevation is above 0, during the climb and descent too (A2)."""
+        return self.elevation > 0
 
     @property
     def camp(self) -> Side:
@@ -820,7 +839,6 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
         "hud_class": hud_class,
         "unit_class": race >> 3 if race is not None else None,
         "race": race & 7 if race is not None else None,
-        "airborne": hud_class == "arch" and firing_code == 17,
         "points": stat_int(fields, "s_pntval") or 0,
     }
 
@@ -3268,6 +3286,11 @@ class Battle:
                 requested = regiment.rest_action()
             family = regiment.model_family(model)
             animation.step(model, requested, self.rng, family)
+            if model_index == 0 and (flight := regiment.flight_state()) is not None:
+                # notes/airborne_units.md A3: the (single) figure's action drives take-off and landing.
+                flight.take_request(flight_rules.flight_request(
+                    model.action, regiment.charging or regiment.pursuing or regiment.routing))
+                flight.step()
             self._slew_drawn_facing(regiment, model, wagon)
             if model.fire_event:
                 self.event_bus.animation_event_step(regiment.identifier, model_index)

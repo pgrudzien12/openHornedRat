@@ -339,7 +339,8 @@ def _create_projectile(battle: Battle, unit: Regiment, code: int, weapon: Weapon
                * spread * distance / weapon.reach for _ in range(2)]
     radius = battle.rng.randint(24, 48) if code in {5, 11} else weapon.radius
     strength = 4 if code == 7 and distance > 287 else weapon.strength
-    z0 = battle.ground_height(x0, y0) + (72 if code == 17 else 24 if code in {8, 12} else 0)
+    # notes/airborne_units.md B2.7: the bomb drops from the craft's elevation; ordinary missiles never add it.
+    z0 = battle.ground_height(x0, y0) + (unit.elevation if code == 17 else 24 if code in {8, 12} else 0)
     p = Projectile(unit.identifier, code, x0, y0, z0, aim[0]+offsets[0], aim[1]+offsets[1],
                    battle.ground_height(*aim), radius, strength, weapon.wounds,
                    x=x0, y=y0, z=z0,
@@ -589,6 +590,12 @@ def _damage_buildings(battle: Battle, p: Projectile, flight: bool) -> None:
             battle.destroy_building(building)
 
 
+def hit_band(unit: "Regiment") -> int:
+    """How far above its base a missile still hits a unit: 16 for a flier (notes/airborne_units.md A2, the band
+    E..E+16), else the engine's 24 for a ground unit."""
+    return 16 if unit.airborne else 24
+
+
 def _impact(battle: Battle, p: Projectile, *, flight: bool,
             hit_unit: str | None = None) -> None:
     for unit in battle.regiments.values():
@@ -596,8 +603,8 @@ def _impact(battle: Battle, p: Projectile, *, flight: bool,
             continue
         if flight and unit.identifier != hit_unit:
             continue
-        base = battle.ground_height(unit.x, unit.y) + (72 if unit.airborne else 0)
-        if not base <= p.z <= base + 24:
+        base = battle.ground_height(unit.x, unit.y) + unit.elevation
+        if not base <= p.z <= base + hit_band(unit):
             continue
         q = math.hypot(unit.x-p.x, unit.y-p.y)
         radius = unit.bounding_radius()
@@ -638,8 +645,8 @@ def _step_projectiles(battle: Battle) -> None:
                 if entry is not None:
                     hx, hy = old_x+(p.x-old_x)*entry, old_y+(p.y-old_y)*entry
                     height = old_z+(p.z-old_z)*entry
-                    base = battle.ground_height(hx, hy) + (72 if unit.airborne else 0)
-                    if base <= height <= base+24:
+                    base = battle.ground_height(hx, hy) + unit.elevation
+                    if base <= height <= base + hit_band(unit):
                         hits.append((entry, unit.identifier))
             for obj in battle.shooting_objects:
                 if not map_objects.exists(obj):  # notes/map_objects_and_projectiles.md 2: solid not required

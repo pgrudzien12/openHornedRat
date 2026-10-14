@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 
 TAIL_TICKS = 8  # PROVISIONAL: the visual tail that keeps a finished bolt in the list (A 1.5 suggests ~8)
 UNIT_HEIGHT = 16  # every unit object's height (A 4.1; notes/bf014_dragon_mission_audit.md 7.2)
-FLYING_ELEVATION = 72  # an airborne unit's elevation, as the ordinary missiles use it
 UNDISPELLABLE_MARKER = 512  # B 5.1: the script's +512 marker on a launched code
 BEAM_STEP = 20  # A 2.3: beams fly N = 1 + trunc(d / 20) ticks
 BEAM_TERMINAL = 40  # A 2.4: the terminal impact fires at d < 40 from the destination
@@ -604,7 +603,7 @@ def flying_aim_height(battle: Battle, x: float, y: float) -> float:
     """A 2.1: half the height plus the elevation of a flying unit standing at the point, else none."""
     for unit in battle.regiments.values():
         if unit.active and unit.airborne and _centre_d(unit, x, y) < unit.bounding_radius():
-            return FLYING_ELEVATION + UNIT_HEIGHT / 2
+            return unit.elevation + UNIT_HEIGHT / 2
     return 0.0
 
 
@@ -699,7 +698,7 @@ class Impact:
 def _height_ok(unit: Regiment, height: float) -> bool:
     """A 4.1 with the engine's unit height: ground units up to it, flying units inside their band."""
     if unit.airborne:
-        return FLYING_ELEVATION <= height <= FLYING_ELEVATION + UNIT_HEIGHT
+        return unit.elevation <= height <= unit.elevation + UNIT_HEIGHT
     return height <= UNIT_HEIGHT
 
 
@@ -1265,7 +1264,7 @@ def _update_krunch(battle: Battle, effect: Effect) -> None:
     if e <= KRUNCH_FALL:
         height = 120 * (KRUNCH_FALL - e) // KRUNCH_FALL
         for unit in list(battle.regiments.values()):
-            top = FLYING_ELEVATION + UNIT_HEIGHT if unit.airborne else UNIT_HEIGHT
+            top = unit.elevation + UNIT_HEIGHT
             if (unit.active and unit.models > 0 and top >= height
                     and _centre_d(unit, *effect.aim) < unit.bounding_radius() + KRUNCH_REACH):
                 slay(battle, unit, None, animation.DEATH_MISSILE, effect.owner)

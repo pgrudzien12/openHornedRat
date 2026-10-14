@@ -3929,6 +3929,9 @@ class ScriptInterpreter:
     # ===== Animation requests, casting states and sound cues (notes/script_animation_sound.md) =====
 
     def _broadcast_action(self, unit: "Regiment", action: int) -> None:
+        flight = unit.flight_state()
+        if flight is not None:
+            flight.repeat = True  # notes/airborne_units.md A3.2: a repeated request lands a hovering Gyrocopter
         unit.script_action = action
         unit.script_action_key = unit.activity_key()
 

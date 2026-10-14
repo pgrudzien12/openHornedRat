@@ -229,6 +229,15 @@ def edge_scroll(pixel: Sequence[float], width: float, bottom: float, margin: flo
     return strength(pixel[0], 0.0, width), -strength(pixel[1], 0.0, bottom)
 
 
+
+def _figure_frame(regiment: Any, model: Any) -> tuple[str | int, int]:
+    """A figure's sprite group and phase: a flier's take-off, landing and flying loops replace its ordinary action
+    (notes/airborne_units.md A3, A4), but not its death."""
+    flight = regiment.flight
+    if flight is not None and model is regiment.melee_models[0] and (override := flight.frame()) is not None:
+        return override
+    return animation.current(model, regiment.model_family(model))
+
 class BattleView(SceneView[BattleScene]):
     background = BACKGROUND
 
@@ -757,10 +766,11 @@ class BattleView(SceneView[BattleScene]):
                 sheet = field.sprite_sheet(regiment.model_sprite(model))
                 if sheet is None or not self._on_map(x, y):
                     continue
-                action, phase = animation.current(model, regiment.model_family(model))
+                action, phase = _figure_frame(regiment, model)
                 facing = regiment.direction if model.drawn_facing is None else model.drawn_facing
                 frame = sheet.frames[sheet.frame_index(action, phase, sprite_direction(yaw, facing))]
-                foot = projection.view(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH)
+                foot = projection.view(x / WORLD_PER_MESH, field.ground_height(x, y) + regiment.elevation / WORLD_PER_MESH,
+                                       y / WORLD_PER_MESH)
                 depth = foot[2]
                 if depth < NEAR or depth > FAR:
                     continue
@@ -1147,14 +1157,16 @@ class BattleView(SceneView[BattleScene]):
                     sheet = field.sprite_sheet(regiment.model_sprite(model))
                     if sheet is None or not self._on_map(x, y):
                         return b""
-                    action, phase = animation.current(model, regiment.model_family(model))
+                    action, phase = _figure_frame(regiment, model)
                     facing = regiment.direction if model.drawn_facing is None else model.drawn_facing
                     index = sheet.frame_index(action, phase, sprite_direction(yaw, facing))
                     frame, rect = sheet.frames[index], _atlas_rect(sheet, index)
-                    return INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y), y / WORLD_PER_MESH,
+                    return INSTANCE.pack(x / WORLD_PER_MESH, field.ground_height(x, y) + lift, y / WORLD_PER_MESH,
                                          *rect, frame.anchor_x, frame.anchor_y, selected)
+                lift = regiment.elevation / WORLD_PER_MESH  # notes/airborne_units.md A4: ground + elevation
                 for (x, y), model in zip(positions, regiment.melee_models):
                     data += draw_model(x, y, model)
+                lift = 0.0
                 for dying in regiment.dying:  # still playing their animation until they collapse
                     data += draw_model(dying.x, dying.y, dying.model)
             # Corpses (game_rules.md, "Panic": models that died stay on the ground where they fell), each in its own set.
@@ -1191,7 +1203,7 @@ class BattleView(SceneView[BattleScene]):
                 center_y = sum(y for _, y in on_map) / len(on_map)
                 banner_instances.append((regiment.identifier, INSTANCE.pack(
                     center_x / WORLD_PER_MESH,
-                    field.ground_height(center_x, center_y) + BANNER_MARKER_RAISE,
+                    field.ground_height(center_x, center_y) + BANNER_MARKER_RAISE + regiment.elevation / WORLD_PER_MESH,
                     center_y / WORLD_PER_MESH,
                     *rect, frame.width / 2, frame.height, selected,
                 )))
