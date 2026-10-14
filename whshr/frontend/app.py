@@ -192,7 +192,7 @@ def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), 
     if skip_intro and not battle:
         machine.handle("skip")
         view = synchronise(view)
-    frame, last, overlay_time, running, show_overlay = 0, time.perf_counter(), float("-inf"), True, True
+    frame, last, overlay_time, running, show_overlay = 0, time.perf_counter(), float("-inf"), True, False
     battle_log_path = None  # tracked across scene transitions so it survives a battle -> result switch
     try:
         while running:
