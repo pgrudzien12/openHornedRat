@@ -24,7 +24,7 @@ import random
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from . import animation, buildings, combat, magic, map_objects
+from . import animation, buildings, camera_shake, combat, magic, map_objects
 from .battle_events import BattleEvent
 from .rules import Side, wfb_to_wound
 
@@ -1276,6 +1276,7 @@ def _update_krunch(battle: Battle, effect: Effect) -> None:
     elif e == KRUNCH_STAND:
         _add_area(battle, effect, KRUNCH_REACH, 40)
         _start_sound(battle, effect, SFX_DA_KRUNCH, effect.aim)  # spell_sounds.md 2: when the foot stands
+        battle.shake_camera(camera_shake.STRONG)  # camera_shake.md 5
     elif e == KRUNCH_LIFT:
         _remove_areas(battle, effect)
     elif e >= KRUNCH_END:
@@ -1320,6 +1321,8 @@ def _update_conflagration(battle: Battle, effect: Effect) -> None:
         effect.places = [None] * (BURST_PLACES_PER_K * k)
         _start_sound(battle, effect, SFX_DOOM, effect.aim)  # spell_sounds.md 2: the fire reaches the ground
     elif e > 9 * k + 9:
+        if e == 9 * k + 10:
+            battle.shake_camera(camera_shake.STRONG)  # camera_shake.md 5: the impact tick, with flash 108
         _conflagration_embers(battle, effect, e - 9 * k)
 
 

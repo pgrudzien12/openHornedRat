@@ -154,8 +154,9 @@ class BattleCamera:
         self.update()
 
     def projection(self, width: int, height: int, field_width: float, field_height: float,
-                   target_height: float = 0.0) -> Projection:
-        """The verified viewer camera model for this state (mesh units, left-handed world)."""
+                   target_height: float = 0.0, eye_lift: float = 0.0) -> Projection:
+        """The verified viewer camera model for this state (mesh units, left-handed world). `eye_lift` is a
+        presentation-only vertical eye offset applied after the terrain lift (notes/camera_shake.md 1)."""
         return Projection(width, height, field_width, field_height, self.yaw, self.view_pitch, 1.0,
                           self.target_x / WORLD_PER_MESH, self.target_y / WORLD_PER_MESH, "perspective",
-                          self.view_distance, self.fov, target_height)
+                          self.view_distance, self.fov, target_height, eye_lift)
