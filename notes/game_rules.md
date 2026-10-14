@@ -1206,7 +1206,7 @@ variants are documented in [deployment.md §3–4](deployment.md#3-player-intera
 | 0x13 | Withdraw (banner flag, melee) | disengages only when fighting rolling stock or furniture (classes 7, 9) with no other enemy unit fighting its models; **against living enemies the unit routs** (a voluntary rout) |
 | 0x14 | Rally (open hand, broken or pursuing) | toggles the rally / pursuit-restraint attempts (section 7.4) |
 | 0x15 | Charge (war horn) | event 0x06 → script 106 `ChargeForward` (op 0x4F): a charge **straight ahead**, reach 12 × `s_rlmv`, not inside `0xB0` regions |
-| 0x16 | Fire (crossed bow) + click; Ctrl = Gyrocopter bomb | `OrderFire` (section 8.1) |
+| 0x16 | Fire (crossed bow) + click; Ctrl held when the Fire **button** is released = Gyrocopter bomb for the focused unit (`gyrocopter_steam_gun.md` §2) | `OrderFire` (section 8.1) |
 | 0x17 | Magic (chaos star) + spell + click | cast (focused unit) |
 | 0x19 | Halt (open hand) | halt and re-form, "Hold!" (the halt is refused for broken or pursuing units, which only shout) |
 | 0x1A | **Independent** (head in profile; idle panel) | toggles unit flag bit 27 |
@@ -2302,7 +2302,7 @@ battle clock (19 per segment, 100 ms each).
 - Shooting is run by the **library behaviour scripts** (107–124, handlers 154/156, identical in all mission
   DLLs). A player fire order (`OrderFire`) **halts a moving unit** and queues an event:
   target unit, target building, search (click on itself), ground point, or hunt variants with unit flag
-  bit 27. Special shooters (codes 14, 15, 17) fire their own routine at once.
+  bit 27. Special shooters (codes 14, 15, 17) fire their own routine at once, without halting (`gyrocopter_steam_gun.md` §3).
 - The fire loops re-run every update: `ReadyToFire` (reload) ∧ `InArcAndRange` ∧ `TargetValid` → volley;
   otherwise the unit turns towards the target (threshold 11.25°) and **waits until halted**. Search picks the
   **nearest non-broken enemy unit in range**. A building out of range is shot at 90% of maximum range.
@@ -2414,8 +2414,8 @@ These reuse the **spell effect engine** (the spell launch, innate casting) and a
 | 14 Dragon breath | target in the front 180° | D6+3 flames, each aimed at the target −40…+39 per axis, then launched as an innate Fireball (18 ticks, scattered; `bf014_dragon_mission_audit.md` §3) | S8, 1 wound, no save, **every unit hit routs** (flags `0x41`) |
 | 15 warpfire thrower | needs crew | D6 flames around the target | S4, 1 wound, no save; no misfire |
 | 16 (Wyvern shaman) | – | – | not a weapon: marks a monster-class unit as a **spellcaster** (`CanCastSpells`) |
-| 17 Gyrocopter steam gun (Infantry-class files) | range 144 (6") | 1, passes through units | S4, 1 wound, no save, hits one model of each unit it crosses |
-| 17 Gyrocopter bomb (Archers-class files) | Ctrl + command, only while flying (`GMTXT 2020`) | 1, dropped | radius 72, S4, 1 wound, saves; artillery misfire roll |
+| 17 Gyrocopter steam gun (plain Fire, **any** class; `gyrocopter_steam_gun.md`) | at the clicked point; no range, arc or reload test (144 only scales the scatter) | 1, an 18-tick cloud passing through units | S4, 1 wound, no save; one model of each unit **per tick** the cloud is inside it, plus the terminal impact |
+| 17 Gyrocopter bomb (Archers/Artillery class only, i.e. the campaign Gyrocopter) | Ctrl + Fire button, focused unit, only while flying (`GMTXT 2020`), reload 144 | 1, dropped | radius 72, S4, 1 wound, saves; artillery misfire roll |
 | Pestilent Breath (behaviour 0x1B) | scripted units | 1 near the unit | S3, 1 wound, no save, passes through |
 
 The doom diver is an ordinary artillery shot (`0x4C` is only its graphic; no steering found). On landing

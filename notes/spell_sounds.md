@@ -127,7 +127,7 @@ unit under the point. Sounds not marked LOOP are one-shot. All stop with their e
 | Pestilent Breath (24), spell and behaviour breath | — | | | silent | |
 | Madness (25) | 12 `SFX_Cast_Madness` | no | plain | launch | aim point |
 | warpfire flame (26, innate) | 0 `SFX_Cast_Fireball` | no | plain | each flame's launch | the shooter |
-| steam-gun shot (27, innate) | 14 `SFX_Cast_Steam` | yes | plain | launch | the shooter, fixed; stopped when the shot's projectile has finished (🟡 the exact condition) |
+| steam-gun shot (27, innate) | 14 `SFX_Cast_Steam` | yes | plain | launch | the shooter, fixed; stopped on the tick the cloud finishes (terminal impact or removal below ground), not at the end of the trail (`gyrocopter_steam_gun.md` §6.2) |
 
 Items use their spell's row (Banner of Wrath = Lightning, Grudgebringer = Fireball). Dragon breath flames are
 Fireball launches, so each flame plays `SFX_Cast_Fireball` at the shooter.

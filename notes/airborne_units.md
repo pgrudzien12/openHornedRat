@@ -36,7 +36,7 @@ Flying is **not** a unit-type field, class, weapon code or `.BTS`/`.MRC` keyword
 | sprite set (`troopsprites:` name) | flies | notes |
 |---|---|---|
 | `Wyvern` | **yes** | the Orc shaman's Wyvern (BF026, BF034): `s_side=…,1,1,1` → **one figure**, the leader, whose own `troopsprites` is also `Wyvern`. Rider and mount are a single figure |
-| `Gyrocopter` | **yes** | `3rd_Gyrocopters` (BF033.MRC, MAXARMY.MRC, saves): one figure. **Both** the Infantry-class file variant (steam gun) **and** the Archers-class variant (bomb) fly — the class and weapon code play no part |
+| `Gyrocopter` | **yes** | `3rd_Gyrocopters` (BF033.MRC, MAXARMY.MRC, saves): one figure. **Both** the Archers-class campaign variant (steam gun and bomb) **and** the Infantry-class `BF033.MRC` variant (steam gun only) fly — the class and weapon code play no part (`gyrocopter_steam_gun.md` §0) |
 | `SquigHopper` | **only during a hop** | the hop animation lifts the figure on a ballistic arc (§A7) |
 | `Dragon` (3D mesh), `DoomDiver`, `Giant`, everything else | **never** | the Dragon's breath launches from 20 above the ground (`bf014_dragon_mission_audit.md`), but the Dragon itself is a ground unit; the Doom Diver's "flight" is a projectile |
 
@@ -260,7 +260,8 @@ F is a flier with elevation E (airborne while E > 0, band `E ≤ h ≤ E + 16`, 
    destination. Correction to `spell_effects.md` §3.4: "against a flying unit the terminal impact happens normally"
    means only that the bolt is not below ground and so reaches its terminal impact. That impact cannot strike the
    airborne flier. A Fireball hits an airborne flier only **in flight**.
-4. **Launch heights do not use the caster's elevation**, except Gaze of Mork (`spell_effects.md` §3.0). Fireball,
+4. **Launch heights do not use the caster's elevation**, except Gaze of Mork (`spell_effects.md` §3.0) and the Gyrocopter's
+   steam gun (launch height = elevation, aim height fixed at 8, no flier aim pick; `gyrocopter_steam_gun.md` §5.1). Fireball,
    Lightning, Warp Lightning, Piercing Bolts, Burning Head and Pestilent Breath start at their fixed launch height
    above the ground under an airborne Wyvern shaman, as if it stood on the ground. The Hunting Spear starts at 8
    above the ground.
@@ -552,7 +553,7 @@ There is still no fear or terror test at a distance (`game_rules.md`).
 - **Flier as shooter** 🟡: ordinary missiles start at the ground under the shooter plus the weapon's usual launch
   height. The elevation is **not** added. Only the Gyrocopter bomb (dropped from its elevation,
   `ranged_combat_handoff.md`) and the spells/innate attacks listed in `spell_effects.md` (Gaze of Mork from a flying
-  caster's elevation) start from the elevation. The bomb order is refused unless the craft is airborne (GMTXT 2020,
+  caster's elevation; the steam gun from the Gyrocopter's elevation, `gyrocopter_steam_gun.md` §5.1) start from the elevation. The bomb order is refused unless the craft is airborne (GMTXT 2020,
   public).
 - **Arc** ✅: unchanged (facing-based, no height).
 
