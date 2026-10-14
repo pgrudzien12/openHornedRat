@@ -928,16 +928,12 @@ def _resolve_group_break_test(group_id: str, members: Sequence["Regiment"], turn
 
 def _break_test(regiment: "Regiment", modifier: float, group_id: str, breakdown: Breakdown,
                 battle: "Battle") -> None:
-    """The losing side's Leadership test (game_rules.md 6.2, simplified). Logs every check, including a
-    skipped one (regiment already destroyed or CantBreak), so a rout can always be traced back to its
-    exact Ld, roll, modifier and the kills/rank/direction breakdown (per side) behind that modifier."""
-    if not regiment.active:
-        return
-    if "CantBreak" in regiment.psychology:
-        battle.events.append(BattleEvent(
-            f"{regiment.name} cannot break (CantBreak).", "leadership_test",
-            regiment=regiment.identifier, fight=group_id, leadership=regiment.base_leadership,
-            modifier=modifier, breakdown=breakdown, cant_break=True, roll=None, passed=True))
+    """The losing side's Leadership test (game_rules.md 6.2, simplified). Every unit of the losing side that is not
+    already broken rolls, CantBreak or not; a failure is the rout request 0x0C to the unit (`request_rout`), whose
+    handler decides: CantBreak holds, artillery does not rout, otherwise the rout script (notes/panic_tests.md 3,
+    game_rules.md "Flight and catching fleeing units"). Every check is logged, so a rout can always be traced back
+    to its exact Ld, roll, modifier and the kills/rank/direction breakdown (per side) behind that modifier."""
+    if not regiment.active or regiment.routing:
         return
     roll = _2_to_12(battle.rng)
     passed = modifier + roll <= regiment.effective_leadership
@@ -945,9 +941,10 @@ def _break_test(regiment: "Regiment", modifier: float, group_id: str, breakdown:
         f"{regiment.name} takes a Leadership test (Ld {regiment.base_leadership}, roll {roll} + {modifier}): "
         f"{'passes' if passed else 'fails'}.", "leadership_test",
         regiment=regiment.identifier, fight=group_id, leadership=regiment.base_leadership,
-        roll=roll, modifier=modifier, breakdown=breakdown, cant_break=False, passed=passed))
+        roll=roll, modifier=modifier, breakdown=breakdown, cant_break="CantBreak" in regiment.psychology,
+        passed=passed))
     if not passed:
-        start_rout(regiment, battle)
+        request_rout(battle, regiment)
 
 
 def _reform_for_pursuit(battle: "Battle", regiment: "Regiment") -> None:
