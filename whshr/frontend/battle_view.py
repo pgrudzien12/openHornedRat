@@ -701,7 +701,8 @@ class BattleView(SceneView[BattleScene]):
         if mode == "move":
             return (("move_to", *ground_point),) if ground_point is not None else ()
         if mode == "fire":
-            return (("fire", regiment_id, target_point, bool(pygame.key.get_mods() & pygame.KMOD_CTRL)),)
+            # The click point itself: a building under it is picked before the regiment (building_map_object.md 4).
+            return (("fire", regiment_id, (x, y), bool(pygame.key.get_mods() & pygame.KMOD_CTRL)),)
         if mode.startswith("item:"):
             return (("item_target", mode[5:], *target_point),)
         if mode == "face_point":

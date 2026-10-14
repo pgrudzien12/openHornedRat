@@ -284,14 +284,10 @@ class BattleScene(Scene):
             bomb = bool(args[2]) if len(args) > 2 else False
             if self.selected_id is not None:
                 try:
-                    object_index = None
-                    if target_id is None and point is not None:
-                        for index, obj in enumerate(self.battle.shooting_objects):
-                            radius = float(obj.get("radius") or 0)
-                            if radius > 0 and ((float(obj.get("x") or 0)-point[0])**2
-                                               + (float(obj.get("y") or 0)-point[1])**2) < radius**2:
-                                object_index = index
-                                break
+                    # notes/building_map_object.md 4: a building under the click wins over any regiment there.
+                    object_index = self.battle.fire_pick_building(*point) if point is not None else None
+                    if object_index is not None:
+                        target_id = None
                     text_id = self.battle.order_fire(self.selected_id, target_id, point,
                                                      object_index=object_index, bomb=bomb)
                     if text_id is not None:

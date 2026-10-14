@@ -74,17 +74,6 @@ TYPES: dict[str, BuildingType] = {
     "SkavBase20FLR": _SKAV_20, "SkavBase20FaR": _SKAV_20, "SkavBase20FaL": _SKAV_20,
     "SkavBase20x10": _t(21, 11, 120, 5, 5, 1),
 }
-DEFAULT_SCENERY_RADIUS = 12.0  # PROVISIONAL footprint radius of non-building furniture
-LARGE_SCENERY_RADIUS = 24.0  # PROVISIONAL: towers, houses and walls that are not buildings
-
-
-def footprint_radius(name: str) -> float:
-    """Circle radius of a furniture piece: the building table's radius, else a PROVISIONAL guess."""
-    kind = TYPES.get(name)
-    if kind is not None:
-        return float(kind.radius)
-    return LARGE_SCENERY_RADIUS if any(w in name.casefold() for w in ("tower", "house", "wall")) \
-        else DEFAULT_SCENERY_RADIUS
 
 
 @dataclass
