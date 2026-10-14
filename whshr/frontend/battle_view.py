@@ -230,11 +230,13 @@ def edge_scroll(pixel: Sequence[float], width: float, bottom: float, margin: flo
 
 
 
-def _figure_frame(regiment: Any, model: Any) -> tuple[str | int, int]:
+def figure_frame(regiment: Any, model: Any) -> tuple[str | int, int]:
     """A figure's sprite group and phase: a flier's take-off, landing and flying loops replace its ordinary action
     (notes/airborne_units.md A3, A4), but not its death."""
     flight = regiment.flight
-    if flight is not None and model is regiment.melee_models[0] and (override := flight.frame()) is not None:
+    # Only the live flying figure: a dying one (its unit may have no live figure left) plays its own action.
+    if (flight is not None and regiment.melee_models and model is regiment.melee_models[0]
+            and (override := flight.frame()) is not None):
         return override
     return animation.current(model, regiment.model_family(model))
 
@@ -766,7 +768,7 @@ class BattleView(SceneView[BattleScene]):
                 sheet = field.sprite_sheet(regiment.model_sprite(model))
                 if sheet is None or not self._on_map(x, y):
                     continue
-                action, phase = _figure_frame(regiment, model)
+                action, phase = figure_frame(regiment, model)
                 facing = regiment.direction if model.drawn_facing is None else model.drawn_facing
                 frame = sheet.frames[sheet.frame_index(action, phase, sprite_direction(yaw, facing))]
                 foot = projection.view(x / WORLD_PER_MESH, field.ground_height(x, y) + regiment.elevation / WORLD_PER_MESH,
@@ -1157,7 +1159,7 @@ class BattleView(SceneView[BattleScene]):
                     sheet = field.sprite_sheet(regiment.model_sprite(model))
                     if sheet is None or not self._on_map(x, y):
                         return b""
-                    action, phase = _figure_frame(regiment, model)
+                    action, phase = figure_frame(regiment, model)
                     facing = regiment.direction if model.drawn_facing is None else model.drawn_facing
                     index = sheet.frame_index(action, phase, sprite_direction(yaw, facing))
                     frame, rect = sheet.frames[index], _atlas_rect(sheet, index)
