@@ -130,7 +130,7 @@ campaign Gyrocopter; the Infantry-class file never bombs. Checks in this order:
 | 4 | **the reload is stamped now** | — |
 | 5 | the craft is **in the flying state** (elevation > 0, `airborne_units.md` §A2) | `GMTXT 2020`; the reload stamped in step 4 **is used up** |
 | 6 | the artillery misfire roll (`game_rules.md` "Artillery misfire") | `GMTXT 2018` (destroyed) or `2019` (shot lost); no bomb; the reload is used up |
-| 7 | launch: one bomb at the craft's **own current position**, falling from its **current elevation** (any of 4…32, e.g. 16 during take-off) to the ground in 9 ticks. The first misfire D6 (1–5) is the scatter die, with no distance scaling. Blast values in `game_rules.md` §8.3 and `ranged_combat_handoff.md` | — |
+| 7 | launch: one bomb aimed at the craft's **own current position**, falling from its **current elevation** (any of 4…32, e.g. 16 during take-off) to the ground in 9 ticks, with the scatter of §4.1. Blast values in `game_rules.md` §8.3 and `ranged_combat_handoff.md` | — |
 | 8 | the drop reveals a hidden craft | — |
 
 - The bomb is not an order, so the order gate does not apply: the button acts at once. The Fire button exists only in
@@ -139,9 +139,51 @@ campaign Gyrocopter; the Infantry-class file never bombs. Checks in this order:
 - The bomb does not halt, turn, retarget or animate the craft. A moving craft drops it where it is and flies on.
 - No success text.
 - The reload is the **same** one the scripted volley stamps (§7), so a threat-reaction "volley" delays the next bomb.
-- **Destroyed misfire** (6 then 1): what gets destroyed is the unit's **leader figure** (the machine). whoami 13 has
-  one; whoami 36 and 37 have none. 🟡 For them the original's result is undefined, probably a crash. Recommended
-  engine choice: treat it as a lost shot (`GMTXT 2019`), tagged as a deviation.
+- **Destroyed misfire** (6 then 1): see §4.2. whoami 36 and 37 have no leader figure, and for them the original's
+  result is undefined, probably a crash 🟡. Recommended engine choice: treat it as a lost shot (`GMTXT 2019`), tagged
+  as a deviation.
+
+### 4.1 Bomb scatter ✅
+
+The bomb **does** scatter, by a fixed amount with **no distance factor** (the aim point is the craft's own
+position, so a distance factor would always give 0). Per axis:
+
+`offset = (rand mod (11 − min(BS, 10))) × sign × d`
+
+- `BS` is the unit's BS, the same value ordinary artillery uses (`leader_ballistic_skill.md`).
+- `sign` is a second draw: an even draw gives +1, an odd draw gives −1.
+- `d` is the first misfire D6, which is 1–5 on any bomb that drops.
+- The multiplier is **`d`, not `8d`**, and there is no `+8` for an obstructed line.
+- Random-stream order per bomb: misfire D6 (`d`), then x size, x sign, y size, y sign. That is five draws on a dropped
+  bomb. A 6 adds the second D6, and then no scatter draws follow.
+- The largest offset per axis is `(10 − min(BS, 10)) × 5`: 35 at BS 3, 20 at BS 6.
+
+| BS | d | draws (x size, x sign, y size, y sign) | landing point relative to the craft |
+|---|---|---|---|
+| 3 | 4 | 5, even, 2, odd | (+20, −8) |
+| 3 | 5 | 7, odd, 7, even | (−35, +35), the largest at BS 3 |
+| 6 | 1 | 3, even, 0, even | (+3, 0) |
+| 6 | 5 | 4, even, 4, odd | (+20, −20), the largest at BS 6 |
+| 10 | any | any | (0, 0): `rand mod 1` is always 0, but the four draws are still taken |
+
+### 4.2 Destroyed misfire on a Gyrocopter with a leader (whoami 13)
+
+The craft's single figure is the unit's **leader figure**, so the destroyed misfire kills the craft itself. In order:
+
+1. The leader figure is marked as having taken all its wounds. **No killer is recorded**, so nobody gets the kill.
+   It then dies through the ordinary death handling, as for a missile hit. In particular a Gyrocopter **in the air**
+   plays its crash program (`airborne_units.md` §A5.2), which ends with the radius-72 crash blast and the medium camera
+   shake (`camera_shake.md` §5). 🟡 The crash follows from the ordinary death path; it has not been seen on screen.
+2. The machine's "anchor" state is cleared (as for any destroyed war machine, `ranged_combat_handoff.md`).
+3. The "crew" loop then gives **each figure of the unit**, the leader included, a 50 % chance of one more wound (one
+   draw per figure). For whoami 13 that is the one, already dead, figure: one draw, no visible effect.
+4. A Leadership test follows only if some figure is still alive. None is, so there is **no test** and no rout.
+5. `GMTXT 2018` is shown. No bomb is dropped, and the reload stamped in step 4 of the check table stands.
+
+| before | action | after |
+|---|---|---|
+| whoami 13 at E = 32, reloaded; D6 = 6, then 1 | Ctrl + Fire | reload stamped; `GMTXT 2018`; the craft figure is killed with no kill credit; crash program from 32, crash blast (radius 72) and medium shake at its end; one extra random draw (the crew roll); no Leadership test; no bomb; the unit is gone |
+| whoami 37 (no leader) at E = 32; D6 = 6, then 1 | Ctrl + Fire | undefined in the original 🟡; engine choice: as `GMTXT 2019` |
 
 ## 5. The steam-gun shot ✅
 
