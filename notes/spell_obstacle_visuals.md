@@ -148,7 +148,7 @@ Use the ordinary mesh yaw convention in `spell_visuals.md` §0.
 
 The solid radius-32, height-40 obstacle starts at **T+10** and is removed at **T+47**.
 The foot already reaches ground and performs its final descent crush at T+9: obstacle creation
-is one tick later. A screen shake accompanies the standing transition at T+10.
+is one tick later. A screen shake accompanies the standing transition at T+10 (the strong shake of `camera_shake.md`).
 
 ### 4.2 Impact dust
 

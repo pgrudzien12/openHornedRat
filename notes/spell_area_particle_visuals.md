@@ -118,8 +118,7 @@ On the fuse's last tick (T+9k−1) the falling fire is set up at the aim point P
 
 On the tick after the finale, the falling fire is removed and replaced, in the same tick, by:
 - the **flash** at P on the ground: frames 108 … 116, one per tick, on T+9k+10 … T+9k+18, removed on T+9k+19;
-- **one camera shake**, the same shake as Da Krunch's landing (`spell_obstacle_visuals.md` §4.1) 🟡 (its curve is not
-  specified here);
+- **one camera shake**, the same strong shake as Da Krunch's landing (curve and test vectors: `camera_shake.md`);
 - the impact sound.
 
 ### 2.5 Ground bursts and flames (from T+9k+11)
@@ -214,5 +213,4 @@ T+65 … T+73, the last 3 filled on T+73; picks begin when c < 30 (from T+80); e
 ## 🟡 Open
 
 - Scene comparison of the Flock's colours (map 18) and of the flash and flames on screen.
-- The camera shake's exact curve (shared with Da Krunch).
 - Why the magic book describes a visible fireball during the fuse when nothing is drawn.
