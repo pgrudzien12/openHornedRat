@@ -150,7 +150,8 @@ On the tick the first model has `W` or more wounds (and not already destroyed):
 1. The building is marked destroyed. Every model is killed at once (zero death delay; cause "fire": burning figure,
    `game_rules.md` figure animation table).
 2. **Multi-model types**: a collapse effect is spawned at the building, and the scenery piece changes to its ruin
-   when that effect ends 🟡. If no effect can be created, it changes at once. The unit stays with 0 models.
+   about 13.8 s into that effect (a step inside it, not at its end; `building_ruins.md` §3). If no effect can be
+   created, it changes at once. The unit stays with 0 models.
    **Single-model types**: the model is removed alive (`s_routed`), the unit is removed from the battle, and the
    piece changes to its ruin at once.
 3. **Event 0x18** is sent to **every live unit** on the battlefield (both armies, allies, NPCs, other buildings),
@@ -190,6 +191,6 @@ building's **original** map object (same radius, original height), not the ruin 
 
 - 🟡 Armour save in melee against a building (leader profile armour 0; assumed "no save").
 - 🟡 Combat result and break tests in a fight whose only enemy is a building.
-- 🟡 Timing of the ruin swap after the collapse effect (multi-model types). (Footprint persistence for removed
+- (Settled: ruin swap timing in `building_ruins.md` §3. Footprint persistence for removed
   single-model types and the sight-line effect of ruins: settled in `building_map_object.md` §3.)
 - 🟡 The T 0 used by missiles looks like an original oversight; reproduce it for parity.
