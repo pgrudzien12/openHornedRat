@@ -106,6 +106,11 @@ melee, each model's *opponent* gets the same pause** — both sides visibly hesi
 moment of the break, before the routers turn about. This depends on the same per-model stagger value
 introduced by epic #49/task #50.
 
+**Fleeing figures mill as a mob** (#345, implemented): the rout does not move the figures themselves.
+It scatters every figure's *destination*, and during the flight each figure re-rolls its destination
+every 24–66 ticks. The mob settles about `2n` units behind the anchor and collapses onto the anchor
+past the table edge. Rally lays out fresh slots. Full rules: `notes/flight_figure_movement.md`.
+
 ## Open questions
 
 None specific to the core mechanism — fully catalogued, including the worked verification table

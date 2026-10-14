@@ -929,17 +929,21 @@ def start_rout(regiment: "Regiment", battle: "Battle", flee_point: formation.Poi
                  if other.active and may_engage(other, regiment)
                  and other.melee_group == group_id and group_id is not None]
     regiment.model_positions()
-    for index, model in enumerate(regiment.melee_models):
+    # notes/flight_figure_movement.md 2: the rout start scatters every model's destination once (no shift, no timer),
+    # in model order; the old slots, laid out at the pre-rout facing, are the starting point.
+    slots = battle.model_targets(regiment)
+    for model, (sx, sy) in zip(regiment.melee_models, slots):
+        model.flee_offset = formation.scatter_flee_offset((int(sx - regiment.x), int(sy - regiment.y)),
+                                                          regiment.models, battle.rng)
+        model.flee_reaim_ticks = 0
+    for model in regiment.melee_models:
         if not model.at_rest:
             continue
         pause = (model.stagger & 7) * 3 + 6
         model.start_pause(pause, rout=True)
+        model.flee_reaim_ticks = pause  # the same countdown holds the pause and the re-aim (section 1)
         model.at_rest = False
         model.current_speed = model.distance_budget = 0.0
-        # The public rule specifies a slight scatter, but not its exact distance or bearing.
-        px, py = regiment.positions[index]
-        regiment.positions[index] = (px + (1 if model.stagger & 1 else -1),
-                                     py + (1 if model.stagger & 2 else -1))
         if group_id is not None and model.opponent is not None:
             opponent_id, opponent_uid = model.opponent
             opponent = battle.regiments.get(opponent_id)

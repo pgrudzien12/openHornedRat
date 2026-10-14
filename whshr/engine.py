@@ -148,6 +148,10 @@ class ModelState:
     # (None = re-aim on the next step) and the countdown to the next re-aim.
     reform_step: Point | None = None
     reaim_countdown: float = 0.0
+    # Flight (notes/flight_figure_movement.md 1): while the unit flees, the model walks to this point relative to the
+    # anchor, in world axes, instead of its slot; re-rolled when `flee_reaim_ticks` (counted down by the walk) is 0.
+    flee_offset: tuple[int, int] | None = None
+    flee_reaim_ticks: int = 0
 
     def start_pause(self, ticks: int, rout: bool = False) -> None:
         """Set the model's timed pause, replacing whatever was left of an older one (bf003_playtest 8.1)."""
@@ -2240,8 +2244,10 @@ class Battle:
                         self._advance_reforming_models(regiment, scale)
                     else:
                         self._advance_models(regiment, scale)
+                    # notes/flight_figure_movement.md 4: and once the re-aim timers left from the flight ran out.
                     if (self.tick_count > regiment.flight_complete_tick
-                            and all(model.at_rest for model in regiment.melee_models)):
+                            and all(model.at_rest and model.flee_reaim_ticks == 0
+                                    for model in regiment.melee_models)):
                         self.remove_from_play(regiment)
                         self._announce_removal(regiment)
                         self.events.append(BattleEvent(
@@ -2326,6 +2332,8 @@ class Battle:
                 models_catching_up = self._advance_reforming_models(regiment, scale)
             else:
                 models_catching_up = self._advance_models(regiment, scale)
+            if regiment.routing and not regiment.in_melee:
+                self._reaim_fleeing_models(regiment)
             regiment.walking = moved or models_catching_up
             # notes/fanatic_collisions.md 5: a position step switches the re-check state on only on every 4th update
             # of the unit (staggered by slot); gradual turn steps do so every time. PROVISIONAL: a turn step is read
@@ -2797,6 +2805,40 @@ class Battle:
         angle = regiment.direction * math.tau / formation.FULL_TURN
         return regiment.x + math.sin(angle) * 1e4, regiment.y + math.cos(angle) * 1e4
 
+    def model_targets(self, regiment: Regiment) -> list[Point]:
+        """Where each model walks: its formation slot (a two-figure wagon's own layout), or, while the unit flees, the
+        anchor plus the model's flight destination (notes/flight_figure_movement.md 1)."""
+        targets = self._wagon_layout(regiment) or formation.place(regiment.x, regiment.y, regiment.direction,
+                                                                  regiment.slots())
+        if not regiment.routing:
+            return targets
+        return [(regiment.x + model.flee_offset[0], regiment.y + model.flee_offset[1])
+                if model.flee_offset is not None else slot
+                for model, slot in zip(regiment.melee_models, targets)]
+
+    def _reaim_fleeing_models(self, regiment: Regiment) -> None:
+        """The flight's re-aim of every model whose re-aim timer is 0 (notes/flight_figure_movement.md 2): scatter its
+        destination, shift it `n` back along the facing, restart the timer at ((stagger & 7) * 3 + 12) * 2 ticks and
+        the catch-up speed at 0, and request the walk action. None once the unit is past the table edge (section 4).
+
+        Order within the tick differs slightly from the original (section 3): the engine steps the anchor before the
+        catch-up walk, the original after it. The re-aim still follows that tick's walk, so its timing is the same."""
+        if regiment.flight_complete:
+            return
+        shift = formation.flee_shift(int(regiment.direction), regiment.models)
+        targets: list[Point] | None = None
+        for index, model in enumerate(regiment.melee_models):
+            if model.flee_reaim_ticks > 0 or model.rout_pause_ticks > 0:
+                continue
+            if model.flee_offset is None:
+                targets = targets or self.model_targets(regiment)
+                model.flee_offset = (int(targets[index][0] - regiment.x), int(targets[index][1] - regiment.y))
+            dx, dy = formation.scatter_flee_offset(model.flee_offset, regiment.models, self.rng)
+            model.flee_offset = (dx + shift[0], dy + shift[1])
+            model.flee_reaim_ticks = ((model.stagger & 7) * 3 + 12) * 2
+            model.current_speed = 0.0
+            model.own_request = animation.WALK
+
     def _advance_models(self, regiment: Regiment, scale: float) -> bool:
         """Walk each model toward its target with its own ramping, rank-dependent pace.
 
@@ -2804,8 +2846,7 @@ class Battle:
         grid walks to that cell instead and is marked `arrived` once it is within
         `battle_grid.ARRIVAL_DISTANCE` of it (game_rules.md 5.8 step 6): only then may it strike.
         """
-        targets = self._wagon_layout(regiment) or formation.place(regiment.x, regiment.y, regiment.direction,
-                                                                  regiment.slots())
+        targets = self.model_targets(regiment)
         rank_sizes = formation.rank_sizes(regiment.models, regiment.ranks)
         rank_indices = [rank for rank, width in enumerate(rank_sizes)
                         for _ in range(width)]
@@ -2821,9 +2862,12 @@ class Battle:
             model = regiment.melee_models[index]
             # The timed pause counts down every tick for every model, before any step decision, so a model
             # at rest in a melee also leaves its pause (bf003_playtest 4, 8.1).
+            # notes/flight_figure_movement.md 3: a model whose rout pause runs out moves on that same tick.
             in_rout_pause = model.rout_pause_ticks > 0
             was_frozen = model.count_down_pause() and not in_rout_pause
-            if in_rout_pause:
+            if model.flee_reaim_ticks > 0:
+                model.flee_reaim_ticks -= 1
+            if model.rout_pause_ticks > 0:
                 updated.append((px, py))
                 still_moving = True
                 continue
@@ -3822,4 +3866,7 @@ class Battle:
             if not any(edge.contains(trailing) for edge in edges):
                 regiment.flight_complete = True
                 regiment.flight_complete_tick = self.tick_count
+                # notes/flight_figure_movement.md 4: every figure walks in to the anchor, which stops.
+                for model in regiment.melee_models:
+                    model.flee_offset = (0, 0)
                 regiment.rally_segment = None

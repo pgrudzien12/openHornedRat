@@ -5,6 +5,7 @@ here; wagons only differ by their rank spacing.
 """
 
 import math
+import random
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -297,3 +298,19 @@ def unit_layout(unit: Mapping[str, Any], spacing: float = MODEL_SPACING) -> tupl
     slots = block_slots(models, ranks, spacing)
     return (place(position["x"], position["y"], position.get("dir"), slots), models,
             len(rank_sizes(models, ranks)))
+
+
+def scatter_flee_offset(offset: tuple[int, int], models: int, rng: random.Random) -> tuple[int, int]:
+    """One flight scatter of a destination relative to the anchor (notes/flight_figure_movement.md 2): per axis, x then
+    y with one draw each, d - trunc(d / 2) + 3 * (trunc(n / 2) - rand % n), n the unit's current model count."""
+    n = max(1, models)
+    return (offset[0] - int(offset[0] / 2) + 3 * (n // 2 - rng.randrange(n)),
+            offset[1] - int(offset[1] / 2) + 3 * (n // 2 - rng.randrange(n)))
+
+
+def flee_shift(facing: int, models: int) -> tuple[int, int]:
+    """The flight re-aim's shift of `n` back along the facing (notes/flight_figure_movement.md 2): per axis
+    trunc(-dir * n / 256), dir the facing's direction value scaled by 256 (heading 0 = +y)."""
+    angle = (facing % FULL_TURN) * math.tau / FULL_TURN
+    dir_x, dir_y = int(256 * math.sin(angle)), int(256 * math.cos(angle))
+    return int(-dir_x * models / 256), int(-dir_y * models / 256)

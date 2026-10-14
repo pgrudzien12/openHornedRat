@@ -499,7 +499,12 @@ class BattleNavigationTests(unittest.TestCase):
         self.assertTrue(unit.flight_departed)
         self.assertTrue(unit.flight_complete)
         self.assertFalse(unit.fled)
-        battle.tick()
+        # notes/flight_figure_movement.md 4: removal waits for the re-aim timer left from the flight (24..66 ticks).
+        timer = unit.melee_models[0].flee_reaim_ticks
+        self.assertGreater(timer, 0)
+        for _ in range(timer):
+            self.assertFalse(unit.fled)
+            battle.tick()
         self.assertTrue(unit.fled)
 
 
