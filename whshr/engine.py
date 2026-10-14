@@ -3273,6 +3273,15 @@ class Battle:
                 "Defeat! Your army is destroyed.", "result",
                 result="defeat", counts=self.side_counts()))
 
+    def _forget_departed_target(self, other: Regiment, departed: str) -> None:
+        """Fallback for battles run without scripts: ``other`` drops the departed unit as attack and current target,
+        what its script would do on the 0x0E (notes/unit_removal_broadcast.md 4 (d))."""
+        if other.attack_target == departed:
+            other.attack_target = other.charge_started_target = None
+        state = self.event_bus.unit_states.get(other.identifier)
+        if state is not None and state.current_target and state.current_target[0] == departed:
+            state.current_target = None
+
     def _announce_removal(self, regiment: Regiment) -> None:
         """Broadcast event 0x16 ("unit removed", source = the unit) once, to every other unit still in the battle:
         both armies, hidden and routing units (notes/unit_removal_broadcast.md 1). Their scripts drop it as a target
@@ -3847,14 +3856,13 @@ class Battle:
                 continue
             if not regiment.flight_departed:
                 regiment.flight_departed = True
+                # notes/unit_removal_broadcast.md 3, 5.4: departure only broadcasts 0x0E; each unit's script drops the
+                # fugitive through Query 23 and 0x19. Without scripts nothing would, so the targets are cleared here.
                 for other in self.regiments.values():
                     if other.identifier == regiment.identifier:
                         continue
-                    if other.attack_target == regiment.identifier:
-                        other.attack_target = other.charge_started_target = None
-                    state = self.event_bus.unit_states.get(other.identifier)
-                    if state is not None and state.current_target and state.current_target[0] == regiment.identifier:
-                        state.current_target = None
+                    if self.interpreter is None:
+                        self._forget_departed_target(other, regiment.identifier)
                     self.event_bus.queue_event(other.identifier, interpreter.Event(code=0x0E,
                                                                                 source=regiment.identifier))
                 self.events.append(BattleEvent(f"{regiment.name} leaves the table.", "flight_departure",

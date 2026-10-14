@@ -468,8 +468,8 @@ class BattleNavigationTests(unittest.TestCase):
 
     def test_a_routed_unit_leaves_the_table_and_broadcasts_its_departure(self):
         # notes/movement_boundaries_route_finding.md, flight: on the departure check every other unit (either side,
-        # but not the fugitive itself) drops it as a target and gets event 0x0E (source = the fugitive); the unit is
-        # removed from play later.
+        # but not the fugitive itself) gets event 0x0E (source = the fugitive); the unit is removed from play later.
+        # Without scripts the engine drops the fugitive as a target itself (notes/unit_removal_broadcast.md 5.4).
         unit = Regiment("u", "U", 290, 200, 128, Side.PLAYER, models=1, ranks=1, speed_per_tick=20)
         chaser = Regiment("c", "C", 100, 100, 0, Side.ENEMY, models=1, ranks=1, speed_per_tick=0)
         bystander = Regiment("b", "B", 100, 400, 0, Side.PLAYER, models=1, ranks=1, speed_per_tick=0)  # same side
