@@ -233,9 +233,9 @@ script 111: FireAtTarget                        script 112: FireAt90PercentRange
 orders a volley on its own. The only launches that bypass scripts are:
 
 1. **Player fire order on a special shooter** (codes 14, 15, 17, any class): the special routine fires **at once at
-   the clicked point** — no reload, range or arc test, no event (`game_rules.md` "Who shoots"). 🟡 This includes an
-   Archers-class Gyrocopter: its plain Fire order fires the **steam gun**, which contradicts `game_rules.md` ("the
-   two Archers-class files … never use the steam gun"); the bomb is the separate Ctrl command.
+   the clicked point** — no reload, range or arc test, no event (`game_rules.md` "Who shoots"). ✅ This includes an
+   Archers-class Gyrocopter: its plain Fire order fires the **steam gun**; the bomb is the separate Ctrl command
+   (`gyrocopter_steam_gun.md` §3, §4).
 2. **Gyrocopter bomb** (Ctrl + command).
 3. **Periodic behaviours set by mission scripts** (`SetBehaviour`, timing in `deployment.md` §5.3): case 26
    (Doomwheel bolts, own reload on the leader block) and 27 (Pestilent Breath). Case 26 is also run by the player
@@ -322,7 +322,7 @@ still happen.
   exactly `trunc(0.9 R)` along the line, arc required, fails silently otherwise).
 - `game_rules.md` §8 / `ReadyToFire`: "at least 2 crew" — at least 2 **models** (machine probably included 🟡); the
   2015/2016 messages ignore the message operand.
-- `game_rules.md` special weapons: an Archers-class Gyrocopter's Fire order fires the steam gun (§5.1) 🟡.
+- `game_rules.md` special weapons: an Archers-class Gyrocopter's Fire order fires the steam gun (§5.1) ✅ (corrected there, `gyrocopter_steam_gun.md`).
 - `unit_script_control.md` §5 🟡 "what that argument selects": the event source selects the **launching model**
   (and, for `CastPending`, presumably the same; not re-checked here).
 

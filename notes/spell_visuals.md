@@ -172,4 +172,4 @@ the tick's drawing, so the frame may lag one tick behind this table.
 - How long beam segments stay after the flash starts; whether an early-stopped beam shows its flash.
 - The storm sprite's exact cycle; the head's 64-step yaw quantisation (optional).
 - Not covered: Fireball (already public), Flamestorm, Conflagration, Wind Blast, Flock, Doomwheel bolts and the
-  other area or lasting effects.
+  other area or lasting effects. The steam gun (27) is in `gyrocopter_steam_gun.md` §6.1.
