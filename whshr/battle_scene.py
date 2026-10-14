@@ -418,7 +418,7 @@ class BattleScene(Scene):
         player = [(identifier, regiment) for identifier, regiment in self.battle.regiments.items()
                   if regiment.side == Side.PLAYER]
         marching = campaign.ordered_march_units
-        battle_items = {regiment.whoami: regiment.items for _, regiment in player if regiment.whoami in marching}
+        battle_items = {regiment.whoami: regiment.items_after_battle for _, regiment in player if regiment.whoami in marching}
         campaign.company = tuple(roster.with_items(record, battle_items[record.whoami])
                                  if record.whoami in battle_items else record for record in campaign.company)
         marching = [whoami for whoami in marching if whoami not in self.battle.swapped_regiments]  # objective I
