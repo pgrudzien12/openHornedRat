@@ -732,8 +732,11 @@ def _keeps_grid_without_enemy(battle: "Battle", regiment: "Regiment", fight: Fig
       grid with the 0x16 broadcast; our unit counts as out of the fight while its last models collapse).
     - The only unit on its grid: event 0x30 on every tick outside the grid's creation segment, nothing else.
     - Two or more units: a target still on a grid keeps it pairing; an owner with no target does nothing; otherwise
-      the "another enemy" search over its models' opponents sets the target, or the target is cleared, the unit
-      leaves the grid and gets 0x19 (section 0.3). Its script then idles: the original's behaviour (section 0.7).
+      the "another enemy" search over its models' opponents sets the target, or the target is cleared and the unit
+      leaves the grid (section 0.3).
+      DELIBERATE DEVIATION (section 0.7): the original then sends 0x19 with no target, which library 152 ignores, so
+      the unit idles un-re-formed in 165, likely an oversight. We send 0x30 instead, which library 152 answers with
+      the re-form (163) unless the unit is broken or pursuing.
     Units are taken in unit order, so whoever leaves first leaves the other alone (section 4)."""
     group = regiment.melee_group
     state = battle.event_bus.unit_states.get(regiment.identifier)
@@ -769,7 +772,7 @@ def _keeps_grid_without_enemy(battle: "Battle", regiment: "Regiment", fight: Fig
     if state is not None:
         state.current_target = None
     leave_grid(battle, regiment)
-    _send_opponent_gone(battle, regiment)
+    battle.event_bus.queue_event(regiment.identifier, interpreter.Event(code=ALONE_ON_GRID_EVENT), route="self")
     return False
 
 

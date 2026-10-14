@@ -1,6 +1,7 @@
 """A unit whose last enemy leaves its grid (notes/lone_unit_on_grid.md): alone, it hears 0x30 outside the grid's
 creation segment and stays in melee until its script leaves; with others still on the grid, the pairing step either
-keeps it there or makes it leave with 0x19 and no target. Nothing geometric decides it."""
+keeps it there or makes it leave with no target. Nothing geometric decides it. Deliberate deviation: the leaver gets
+0x30 (re-form) instead of the original's target-less 0x19, which left it idling un-re-formed (report section 0.7)."""
 
 import unittest
 
@@ -152,7 +153,7 @@ class FriendsLeftOnTheGridTests(Case):
         self.next_segment()
         self.clear_queues()
 
-    def test_vector_7_the_joiner_first_in_unit_order_leaves_with_0x19_and_no_target_the_owner_is_then_alone(self):
+    def test_vector_7_the_joiner_first_in_unit_order_leaves_with_no_target_the_owner_is_then_alone(self):
         self.grid.owner_id = "b"
         combat.start_rout(self.r, self.battle)
         self.clear_queues()
@@ -160,7 +161,7 @@ class FriendsLeftOnTheGridTests(Case):
         self.assertFalse(self.a.in_melee)
         self.assertIsNone(self.a.melee_group)
         self.assertIsNone(self.state("a").current_target)
-        self.assertEqual(self.queued("a"), [OPPONENT_GONE_EVENT])
+        self.assertEqual(self.queued("a"), [ALONE_ON_GRID_EVENT])  # deviation: the original sends 0x19
         self.assertTrue(self.b.in_melee)
         self.assertEqual(self.queued("b"), [ALONE_ON_GRID_EVENT])
 
@@ -172,7 +173,7 @@ class FriendsLeftOnTheGridTests(Case):
         self.assertTrue(self.a.in_melee)
         self.assertEqual(self.queued("a"), [])
         self.assertFalse(self.b.in_melee)
-        self.assertEqual(self.queued("b"), [OPPONENT_GONE_EVENT])
+        self.assertEqual(self.queued("b"), [ALONE_ON_GRID_EVENT])  # deviation: the original sends 0x19
         combat.resolve_contacts(self.battle)
         self.assertEqual(self.queued("a"), [ALONE_ON_GRID_EVENT])
 
@@ -196,6 +197,28 @@ class StuckUnitTests(Case):
             self.battle.tick()
         self.assertFalse(a.in_melee)
         self.assertEqual(self.state("a").script_id, 163)
+
+
+class LeaverReFormsTests(Case):
+    """The deviation end to end: the unit that leaves a grid with friends still on it re-forms (163)."""
+
+    def test_both_friends_end_in_the_re_form_script_once_their_router_has_gone(self):
+        handler = [word("PushPC"), word("GetEvent"),
+                   word("CaseEvent"), 48, word("LeaveSharedGrid"), word("SwitchScript"), 163, word("Break"),
+                   behaviour.BREAK_LABEL, behaviour.LABEL, word("ConsumeEvent"), word("LoopIfTrue"),
+                   word("ReturnInterrupt"), behaviour.END]
+        a, b = unit("a", 480, 500, Side.PLAYER), unit("b", 530, 500, Side.PLAYER)
+        r = unit("r", 505, 512, Side.ENEMY, direction=256)
+        self.build(a, b, r, scripts={**ROUT_SCRIPTS, 151: handler})
+        self.engage(a, r)
+        self.assertTrue(self.interp._engage(b, r))
+        combat.resolve_contacts(self.battle)
+        self.state("a").current_target = self.state("b").current_target = None
+        combat.start_rout(r, self.battle)
+        for _ in range(2 * SEGMENT_TICKS):
+            self.battle.tick()
+        self.assertFalse(a.in_melee or b.in_melee)
+        self.assertEqual((self.state("a").script_id, self.state("b").script_id), (163, 163))
 
 
 if __name__ == "__main__":
