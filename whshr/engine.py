@@ -454,6 +454,14 @@ class Regiment:
         return self.index_of(self.leader_uid) if self.leader_uid is not None else None
 
     @property
+    def items_after_battle(self) -> tuple[str, ...]:
+        """The items written back to the campaign roster: a Potion of Strength that was drunk is gone for good
+        (notes/battlefield_items.md, game_rules.md 5.6). During the battle it keeps its slot and its bonus."""
+        if "ItemPotionOfStrength" in self.used_items:
+            return tuple(item for item in self.items if item != "ItemPotionOfStrength")
+        return self.items
+
+    @property
     def displayed_leader_strength(self) -> int | None:
         if self.living_leader_index is None:
             return None

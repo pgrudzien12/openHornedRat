@@ -223,6 +223,24 @@ class NodeLetterTests(unittest.TestCase):
         self.assertNotIn("ItemSwordOfMight", picker.items)
         self.assertTrue(picker.potion_strength)
 
+    def test_given_a_drunk_potion_when_the_battle_ends_then_the_items_to_save_no_longer_include_it(self):
+        # Given a regiment that drinks its Potion of Strength
+        picker = regiment("p", Side.PLAYER, has_leader=True, items=("ItemPotionOfStrength", "ItemSwordOfMight"))
+        battle = make([], picker, regiment("e", Side.ENEMY))
+        battle.arm_item("p", "ItemPotionOfStrength")
+
+        # Then the bonus and the slot last for the battle, but the saved items drop the potion
+        self.assertIn("ItemPotionOfStrength", picker.items)
+        self.assertEqual(picker.items_after_battle, ("ItemSwordOfMight",))
+
+    def test_given_an_undrunk_potion_when_the_battle_ends_then_the_items_to_save_keep_it(self):
+        # Given a regiment that never drinks its potion
+        picker = regiment("p", Side.PLAYER, has_leader=True, items=("ItemPotionOfStrength", "ItemSwordOfMight"))
+        make([], picker, regiment("e", Side.ENEMY))
+
+        # Then it keeps both items
+        self.assertEqual(picker.items_after_battle, ("ItemPotionOfStrength", "ItemSwordOfMight"))
+
     def test_given_a_drunk_potion_and_a_free_slot_when_the_sword_is_picked_up_then_both_bonuses_stack(self):
         # Given a drunk potion (+3 S) and a free slot
         nodes = [ScriptNode(500.0, 500.0, radius=40)]
