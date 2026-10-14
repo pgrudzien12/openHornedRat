@@ -216,7 +216,7 @@ two laps of a 12-frame rotor sequence with an altitude step of +4 every 4 ticks,
 `0,1,2,3,1,2` (6 ticks). Actions 1, 4 and 5 share another: depending on whether it was flying when the request came,
 it either keeps its height or **lands** (the same 32 ticks with −4 steps), then loops a slow rotor
 `0,0,0,1,1,1,2,2,2,3,3,3,1,1,1,2,2` (17 ticks). Dead: in the air it falls for 32 ticks with smoke puffs, then wreck
-group 32 with a blast (radius 72, fire damage) and a battle message; on the ground, wreck group 32 held. 🟡 The
+group 32 with a blast (radius 72, fire damage) and a medium camera shake (`camera_shake.md`; corrected: not a battle message); on the ground, wreck group 32 held. 🟡 The
 "keeps height" branch and the blast's numbers should be confirmed before implementing; its shoot has no fire step.
 
 `MoleMachine` uses its own non-directional frame loops and a demolition sequence; out of scope (3D mesh unit).
