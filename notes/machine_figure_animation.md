@@ -114,8 +114,8 @@ during which the frame does not change.
 | wreck (6) | 0 | 0–7 |
 | shoot (7) | 8 | unchanged frame throughout |
 
-Shoot: ticks 1 … 6−r intact; tick 7−r: a **muzzle puff** effect is spawned 24 units in front of the machine
-(rotated by the unit facing), 12 units up — battle-effects sprite set, a 4-tick, 4-frame one-shot (frames 110–113 of
+Shoot: ticks 1 … 6−r intact; tick 7−r: a **muzzle puff** effect is spawned 24 units ahead of the **unit position**
+(not the machine figure; rotated by the unit facing, `volley_gun_shot.md` §4), 12 units up — battle-effects sprite set, a 4-tick, 4-frame one-shot (frames 110–113 of
 `GENBATT` 🟡 by eye) — **and** the fire step; ticks 8−r … 11−r intact; tick 12−r back to stand. The gun itself never
 changes frame; the shot is shown by the puff and the projectile.
 
@@ -125,9 +125,9 @@ Intact 8–15, wreck 0–7. Shoot (three independent random entries r0, r1, r2, 
 `6−r0` intact ticks → puff + **unconditional event post** (one tick) → `4−r1` intact ticks → puff + unconditional event
 post (one tick) → `4−r2` intact ticks → puff + the ordinary fire step (one tick) → 4 intact ticks → stand.
 So one shot shows **three puffs** and posts the unit's animation-request event **three times**: twice without
-consulting the countdown and without a figure reference, once through the normal countdown step. 🟡 How the shooting
-script treats the two extra posts (three projectiles, or the extra ones ignored / launched from the unit position)
-was not traced — needs a public shooting hand-off before implementing more than one launch.
+consulting the countdown and without a figure reference, once through the normal countdown step. ✅ Each post is
+handled as an ordinary event 34 and **launches its own projectile** (the two extra ones from the unit position, each
+with its own misfire roll, scatter and reload re-stamp): `volley_gun_shot.md`.
 
 ### 2.3 Rock Lobber (`ROCKLOB`) and Doom Diver catapult (`DDCATPLT`) — one shared table
 
