@@ -445,6 +445,16 @@ class BattleView(SceneView[BattleScene]):
                     self.order_mode = None
                     self._set_cursor("default")
                     return cleared
+                if action == "fire" and self.order_mode == "fire":
+                    return cleared  # notes/gyrocopter_steam_gun.md 2 step 1: already waiting for a Fire click
+                if (action == "fire" and self._control_held(event) and self.scene.selected_id is not None
+                        and self.scene.battle.can_bomb(self.scene.selected_id)):
+                    # 2 step 2: Ctrl on the Fire button drops the Gyrocopter bomb at once, with no pick mode. The
+                    # original reads Ctrl when the button is released; engine buttons act on the press.
+                    self.order_mode = None
+                    self._set_cursor("default")
+                    self.hud.order_completed()
+                    return cleared + (("bomb",),)
                 if action in {"move", "attack", "fire", "face_point"}:
                     self.order_mode = action
                     self._set_cursor(action if action != "face_point" else "move")
@@ -727,7 +737,8 @@ class BattleView(SceneView[BattleScene]):
             return (("move_to", *ground_point),) if ground_point is not None else ()
         if mode == "fire":
             # The click point itself: a building under it is picked before the regiment (building_map_object.md 4).
-            return (("fire", regiment_id, (x, y), bool(pygame.key.get_mods() & pygame.KMOD_CTRL)),)
+            # Ctrl is not read at the click (gyrocopter_steam_gun.md 2).
+            return (("fire", regiment_id, (x, y)),)
         if mode.startswith("item:"):
             return (("item_target", mode[5:], *target_point),)
         if mode == "face_point":
@@ -901,8 +912,12 @@ class BattleView(SceneView[BattleScene]):
         if mode == "move":
             return (("move_to", *world),) if world is not None else ()
         if mode == "fire":
-            return (("fire", target_id, tuple(world) if world is not None else None,
-                     bool(pygame.key.get_mods() & pygame.KMOD_CTRL)),)
+            point = tuple(world) if world is not None else None
+            picked = self.scene.battle.regiments.get(target_id) if target_id is not None else None
+            if picked is not None and self.scene.battle.steam_gunner(self.scene.selected_id):
+                # notes/gyrocopter_steam_gun.md 3: a minimap steam-gun shot snaps to the picked unit's centre.
+                point = spell_effects.footprint_centre(picked)
+            return (("fire", target_id, point),)
         if mode.startswith("item:") and world is not None:
             return (("item_target", mode[5:], *world),)
         return ()

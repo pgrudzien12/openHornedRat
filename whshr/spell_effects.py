@@ -48,7 +48,7 @@ LASTING = 180  # B 1.3, 3, 4, 5.2; C3 2.1
 SPELLS_PACKET = 3
 SFX_FIREBALL, SFX_LAUGH, SFX_THUNDER, SFX_WIND1, SFX_WIND2, SFX_FLOCK = 0, 1, 2, 3, 4, 6
 SFX_FLAMESTORM, SFX_DA_KRUNCH, SFX_SKITTERLEAP, SFX_DOOM, SFX_GAZE, SFX_MADNESS = 7, 8, 9, 10, 11, 12
-SFX_SPELL, SFX_CURSE = 13, 15
+SFX_SPELL, SFX_STEAM, SFX_CURSE = 13, 14, 15
 SKITTER_FRAMES = 4  # B 2
 WIND_TICKS = 500  # B 7: winds at the start of ticks 501, 1001, ... (first tick = 1) at 10 ticks/s
 RANK_DEPTH = 6  # C3 conventions: the footprint centre lies (ranks - 1) x 6 behind the unit position
@@ -81,6 +81,7 @@ FLYING_BOWER, TANGLING_THORN, HUNTING_SPEAR, CURSE, FLOCK = 11, 12, 13, 14, 15
 DISPEL_MAGIC, GAZE, ERE_WE_GO, DA_KRUNCH = 16, 17, 18, 19
 FISTS, MORK_SAVE_UZ, WARP_LIGHTNING, SKITTERLEAP = 20, 21, 22, 23
 PESTILENT_BREATH, MADNESS = 24, 25
+STEAM_GUN = 27  # notes/gyrocopter_steam_gun.md 5: the Gyrocopter's steam gun, an innate launch only (no spell)
 
 GMTXT_DIRECT_HIT = 2004
 GMTXT_MARGIN_HIT = 2005
@@ -122,7 +123,12 @@ BOLTS: dict[int, Bolt] = {
     BURNING_HEAD: Bolt("origin", 8, 8, False, False, 4, 1, True, True, panic=True),
     FIREBALL: Bolt("origin", 0, 0, False, True, 4, 1, False, True),
     PESTILENT_BREATH: Bolt("origin", 8, 8, False, False, 3, 1, False, False),
+    # notes/gyrocopter_steam_gun.md 5.1: Pestilent Breath's 18-tick pass-through cloud at S4; the start, launch height
+    # and fixed aim height are set by _start_steam.
+    STEAM_GUN: Bolt("unit", 8, 8, False, False, 4, 1, False, False),
 }
+STEAM_SCATTER = 144  # gyrocopter_steam_gun.md 5.1: the scatter divisor (not a range: the shot is never clamped)
+STEAM_AHEAD = 24  # 5.1: the cloud starts this far ahead of the unit position along the unit's facing
 # notes/bf014_dragon_mission_audit.md 7: a Dragon breath flame is an innate Fireball effect with its own numbers: launch
 # elevation 20 and no arc, S8, 1 wound, no save, fire, and the rout event to every unit struck.
 BREATH_FLAME = Bolt("unit", 20, 0, False, True, 8, 1, False, True, routs=True)
@@ -144,6 +150,7 @@ LAUNCH_SOUNDS: dict[int, tuple[int, str]] = {
     CURSE: (SFX_CURSE, "target"), FLOCK: (SFX_FLOCK, "aim"), GAZE: (SFX_GAZE, "caster"),
     ERE_WE_GO: (SFX_SPELL, "target"), MORK_SAVE_UZ: (SFX_SPELL, "target"), WARP_LIGHTNING: (SFX_THUNDER, "caster"),
     SKITTERLEAP: (SFX_SKITTERLEAP, "caster"), MADNESS: (SFX_MADNESS, "aim"),
+    STEAM_GUN: (SFX_STEAM, "unit"),  # gyrocopter_steam_gun.md 6.2: at the unit position, never moved
 }
 
 
@@ -504,6 +511,8 @@ def _launch_sound(battle: Battle, effect: Effect, caster: Regiment, target: Regi
         at = footprint_centre(target)
     elif place == "aim":
         at = effect.aim
+    elif place == "unit":
+        at = (caster.x, caster.y)
     else:
         at = footprint_centre(caster)
     _start_sound(battle, effect, index, at)
@@ -516,6 +525,8 @@ def _start(battle: Battle, effect: Effect, caster: Regiment, origin_model: int, 
         # 7.1 step 2: scattered from the dragon's unit position, the scatter distance measured from there too.
         _start_projectile(battle, effect, (caster.x, caster.y), effect.aim, BREATH_FLAME, caster.bs, BREATH_RANGE,
                           beam=False)
+    elif spell == STEAM_GUN:
+        _start_steam(battle, effect, caster)
     elif spell in BOLTS:
         bolt = BOLTS[spell]
         if spell == GAZE and caster.airborne:
@@ -575,6 +586,22 @@ def _start(battle: Battle, effect: Effect, caster: Regiment, origin_model: int, 
         # spell_transport_visuals.md 2.1: the take-off head flies from the casting figure to the unit's launch centre.
         effect.start, effect.dest = _origin(caster, origin_model, "origin"), footprint_centre(caster)
         effect.x, effect.y = effect.start
+
+
+def _start_steam(battle: Battle, effect: Effect, caster: Regiment) -> None:
+    """gyrocopter_steam_gun.md 5.1: scattered from the unit position with the unit's BS and divisor 144 (the ground
+    under the launch line is taken there too), then the start moves 24 ahead along the unit's facing, each axis
+    rounded down after scaling. Launch height 8, or the elevation of a unit in the flying state (read once); the aim
+    height is always 8 (no flier pick at the aim point)."""
+    origin = (float(math.trunc(caster.x)), float(math.trunc(caster.y)))
+    _start_projectile(battle, effect, origin, effect.aim, BOLTS[STEAM_GUN], caster.bs, STEAM_SCATTER, beam=False)
+    effect.aim_height = float(BOLTS[STEAM_GUN].aim_floor)
+    if caster.airborne:
+        effect.launch_height = float(caster.elevation)
+    facing = int(caster.direction)
+    ahead = (origin[0] + math.floor(STEAM_AHEAD * _sin(facing) / 256),
+             origin[1] + math.floor(STEAM_AHEAD * _cos(facing) / 256))
+    _move_breath_start(battle, effect, caster, ahead)
 
 
 def _move_breath_start(battle: Battle, effect: Effect, caster: Regiment, start: tuple[float, float]) -> None:
@@ -945,6 +972,8 @@ def _update(battle: Battle, effect: Effect) -> None:
     if code in BOLTS:
         if _fly(battle, effect, flight_bolt(effect)):
             _finish(effect)
+            if code == STEAM_GUN:
+                _stop_sounds(battle, effect)  # gyrocopter_steam_gun.md 6.2: the hiss stops when the cloud finishes
         if code == BURNING_HEAD:
             _burning_head_laugh(battle, effect)
     elif code in updates:
