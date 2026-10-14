@@ -381,6 +381,9 @@ class BattleView(SceneView[BattleScene]):
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_F10:
             # Testing aid: win the battle at once (BattleScene "win_battle"), settled like no-battle mode.
             return (("win_battle",),)
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_m and self._control_held(event):
+            # Debug cheat: fill the player's power pool to 8 (BattleScene "fill_power").
+            return (("fill_power",),)
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_F2:
             # Debugging aid (whshr.figure_capture): trace the selected regiment's figures for 5 s.
             battle = self.scene.battle

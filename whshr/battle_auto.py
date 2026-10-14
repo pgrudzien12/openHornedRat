@@ -13,7 +13,7 @@ ORDER_ARITY = {
     "ranks_up": 0, "ranks_down": 0, "turn_left": 0,
     "turn_right": 0, "about_face": 0, "face_point": 2,
     "charge": 0, "rally": 0, "fight_harder": 0,
-    "independent": 0, "leave_battle": 0,
+    "independent": 0, "leave_battle": 0, "fill_power": 0,
 }
 
 

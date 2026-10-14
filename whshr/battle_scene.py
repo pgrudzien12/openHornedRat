@@ -178,6 +178,9 @@ class BattleScene(Scene):
             # settlement happens at the start of the next simulation tick (`update`), so a live run and its replay
             # reach the same terminal tick and final snapshot.
             self.win_requested = True
+        elif kind == "fill_power":
+            # Debug cheat (Ctrl+M), always available; logged like any order so a replay fills the pool on the same tick.
+            self.battle.fill_player_power()
         elif kind == "pause":
             if self.battle.phase == "battle" and not self.battle.can_leave:
                 self.battle.paused = not self.battle.paused

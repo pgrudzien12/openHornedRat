@@ -1521,6 +1521,11 @@ class Battle:
         """The player army's (and allies') power pool, 0-8; the compass shows it (player_magic_panel.md 2)."""
         return self.event_bus.power.player
 
+    def fill_player_power(self) -> None:
+        """Debug cheat (Ctrl+M): fill the player's pool to its maximum, like the original's developer key that sets
+        the pools to 8 (notes/player_magic_panel.md 7). Only the player's pool; the enemy's is untouched."""
+        self.event_bus.power.add(False, magic.MAX_POWER)
+
     def casting(self, identifier: str) -> bool:
         """A Wizard-class unit is casting: its cast pose is running, a spell is pending or ordered, or it is
         channelling. Its command slots are empty meanwhile (player_magic_panel.md 1, 4.2)."""
