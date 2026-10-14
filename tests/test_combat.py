@@ -339,7 +339,8 @@ class PursuitTests(unittest.TestCase):
 
 
 class RoutPauseTests(unittest.TestCase):
-    def test_given_resting_models_when_the_unit_breaks_then_they_scatter_and_pause_by_stagger(self):
+    def test_given_resting_models_when_the_unit_breaks_then_they_stay_put_and_pause_by_stagger(self):
+        # notes/flight_figure_movement.md: the rout start scatters the destination, not the model itself.
         fleeing = _regiment("f", 100, 100, Side.ENEMY, models=2, ranks=1)
         battle = Battle(1000, 1000, [fleeing], seed=0)
         before = list(fleeing.model_positions())
@@ -349,8 +350,7 @@ class RoutPauseTests(unittest.TestCase):
         combat.start_rout(fleeing, battle)
 
         self.assertEqual([model.rout_pause_ticks for model in fleeing.melee_models], [6, 27])
-        self.assertEqual(fleeing.positions, [(before[0][0] - 1, before[0][1] - 1),
-                                             (before[1][0] + 1, before[1][1] + 1)])
+        self.assertEqual(fleeing.positions, before)
 
     def test_given_a_model_already_walking_when_the_unit_breaks_then_it_gets_no_pause(self):
         fleeing = _regiment("f", 100, 100, Side.ENEMY, models=1)
@@ -388,10 +388,10 @@ class RoutPauseTests(unittest.TestCase):
         before = fleeing.positions[0]
         fleeing.x += 30
 
-        for _ in range(6):
+        for _ in range(5):
             battle._advance_models(fleeing, 1)
             self.assertEqual(fleeing.positions[0], before)
-        battle._advance_models(fleeing, 1)
+        battle._advance_models(fleeing, 1)  # notes/flight_figure_movement.md 3: moves on the tick the pause ends
 
         self.assertNotEqual(fleeing.positions[0], before)
 
