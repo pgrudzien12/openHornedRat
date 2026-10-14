@@ -902,6 +902,11 @@ class Battle:
         self.innate_projectiles: list[Any] = []
         self.spell_effects = spell_effects.EffectTable()  # active spell effects (whshr.spell_effects)
         self.impact_effects: list[Any] = []
+        # Destroyed buildings whose scene piece is drawn as its ruin, and the collapses still running before the swap
+        # (notes/building_ruins.md 3); the smoke puffs are kept for PUFF_TICKS but not drawn (buildings.Puff).
+        self.ruined: set[str] = set()
+        self.collapses: list[buildings.Collapse] = []
+        self.collapse_puffs: list[buildings.Puff] = []
         self.muzzle_puffs: list[MuzzlePuff] = []  # gun shots' muzzle puffs (_spawn_muzzle_puff), drawn by the frontend
         self.death_blasts: list[Any] = []
         self.ctrl_held = False
@@ -1815,7 +1820,8 @@ class Battle:
         """A building at its wounds-to-destroy ends: it stops counting as a target, every live scripted unit gets
         event 0x18 (notes/building_units.md 7) and a battle event is recorded. The footprint and the map object stay as
         they were: the ruin still pushes regiments apart, stops shots and blocks sight at the original size and height
-        (notes/building_map_object.md 3). Not modelled: redrawing the scenery piece as its ruin."""
+        (notes/building_map_object.md 3). A single-model type turns into its ruin at once, a multi-model type at
+        the peak of its collapse (`Battle.ruined`, `_step_collapses`; notes/building_ruins.md 3)."""
         building.destroyed = True
         building.models = 0
         credited = self.regiments.get(building.credit or "")
@@ -1823,11 +1829,50 @@ class Battle:
             credited.kills += building.pieces
         building.credit = None
         self.release_building_assaults(building.identifier)
+        if self.interpreter is None:  # with scripts, library 152 drops the target on 0x18 (building_ruins.md 5)
+            self._drop_building_fire_targets(building.identifier)
+        if building.pieces > 1:
+            self.collapses.append(buildings.Collapse(building.identifier, building.x, building.y, int(building.radius),
+                                                     building.height, self.tick_count))
+            self._sound_cue("loop_start", building.identifier, (building.x, building.y))
+        else:
+            self.ruined.add(building.identifier)
         for unit_id in list(self.event_bus.unit_states):
             self.event_bus.queue_event(unit_id, interpreter.Event(code=0x18, source=building.identifier,
                                                                   x=int(building.x), y=int(building.y)))
         self.events.append(BattleEvent(f"{building.name} is destroyed.", "building_destroyed",
                                        building=building.identifier, x=building.x, y=building.y))
+
+    def _drop_building_fire_targets(self, building_id: str) -> None:
+        """Without scripts, a unit whose Fire target is the building stops shooting when it falls (the scripts'
+        target drop, notes/building_ruins.md 5). A Fire order given at the ruin later keeps shooting at it."""
+        for unit in self.regiments.values():
+            if unit.shooting_mode == "building" and unit.shooting_object is not None and (
+                    self.shooting_objects[unit.shooting_object].get("building") == building_id):
+                unit.clear_shooting()
+
+    def _sound_cue(self, cue: str, building_id: str, at: Point | None) -> None:
+        packet, index = buildings.COLLAPSE_SOUND
+        self.events.append(BattleEvent(f"sound {cue} {packet}/{index}", "sound", regiment=None, cue=cue,
+                                       packet=packet, effect=index, position=at, handle=f"collapse {building_id}"))
+
+    def _step_collapses(self) -> None:
+        """Advance every building collapse one tick (notes/building_ruins.md 3): puffs on their schedule, the scene
+        piece turned into its ruin on effect tick 138, the sound stopped and the effect ended on tick 224."""
+        tick = self.tick_count
+        self.collapse_puffs = [p for p in self.collapse_puffs if tick - p.started < buildings.PUFF_TICKS]
+        running: list[buildings.Collapse] = []
+        for collapse in self.collapses:
+            age = collapse.age(tick)
+            if age == buildings.COLLAPSE_SWAP_TICK:
+                self.ruined.add(collapse.building)
+            if age in buildings.PUFF_SCHEDULE:
+                self.collapse_puffs.append(buildings.puff_at(collapse, self.rng, tick))
+            if age >= buildings.COLLAPSE_END_TICK:
+                self._sound_cue("loop_stop", collapse.building, None)
+            else:
+                running.append(collapse)
+        self.collapses = running
 
     def _post_fire_event(self, unit: Regiment, mode: str, target_id: str | None, point: Point | None,
                          object_index: int | None) -> None:
@@ -2171,6 +2216,7 @@ class Battle:
                 self._step_dying(regiment)
             ranged.finish_tick(self)
             spell_effects.tick(self)
+            self._step_collapses()
             self.tick_count += 1
             return
         scale = seconds / TICK_SECONDS
@@ -2221,6 +2267,7 @@ class Battle:
         combat.resolve_router_contact_attacks(self)
         combat.resolve_shooting(self)
         spell_effects.tick(self)  # after units and ordinary missiles (notes/spell_effects.md 1.7)
+        self._step_collapses()
         if self.objectives is None:
             self._update_result()
         self._step_control_piece()

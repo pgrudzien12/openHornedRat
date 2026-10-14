@@ -192,3 +192,64 @@ def nearest_to_point(buildings: Iterable[Building], x: float, y: float) -> Build
 def at_position(buildings: Iterable[Building], x: float, y: float) -> Building | None:
     """The standing building placed exactly at a point (a Fire order's clicked object), or None."""
     return next((b for b in buildings if not b.destroyed and b.x == x and b.y == y), None)
+
+
+# The collapse of a multi-model building (notes/building_ruins.md 3): puff phases as (puffs, ticks after each puff);
+# the scene piece turns into its ruin after the first four phases, and the effect ends after the rest.
+COLLAPSE_BEFORE_SWAP = ((12, 5), (18, 3), (9, 2), (6, 1))
+COLLAPSE_AFTER_SWAP = ((12, 2), (6, 3), (4, 5), (3, 8))
+COLLAPSE_SOUND = (2, 12)  # Battle2 packet, effect 12: started on the first tick, stopped at the end
+PUFF_TICKS = 17  # frames 1-4 four times, then frame 1 once
+
+
+def _schedule(phases: tuple[tuple[int, int], ...], start: int) -> tuple[list[int], int]:
+    ticks: list[int] = []
+    for count, gap in phases:
+        for _ in range(count):
+            ticks.append(start)
+            start += gap
+    return ticks, start
+
+
+PUFFS_BEFORE, COLLAPSE_SWAP_TICK = _schedule(COLLAPSE_BEFORE_SWAP, 0)  # swap on effect tick 138
+PUFFS_AFTER, COLLAPSE_END_TICK = _schedule(COLLAPSE_AFTER_SWAP, COLLAPSE_SWAP_TICK)  # ends on effect tick 224
+PUFF_SCHEDULE = frozenset(PUFFS_BEFORE + PUFFS_AFTER)
+
+
+@dataclass(frozen=True)
+class Puff:
+    """One smoke puff of a collapse: a point in the building's circle, a height relative to the ground and the
+    battle tick it appeared. PROVISIONAL: not drawn, its sprite sheet and rising speed are open
+    (notes/building_ruins.md 3, open items)."""
+
+    x: float
+    y: float
+    height: int
+    started: int
+
+
+@dataclass
+class Collapse:
+    """The invisible collapse effect of a destroyed multi-model building (notes/building_ruins.md 3), started on
+    the destruction tick at the building centre. Only the drawing waits for it; the game state does not."""
+
+    building: str
+    x: float
+    y: float
+    radius: int
+    height: int
+    started: int
+
+    def age(self, tick: int) -> int:
+        return tick - self.started
+
+
+def puff_at(collapse: Collapse, rng: Any, tick: int) -> Puff:
+    """A puff at a random point of the circle (3 draws in this order): angle rand mod 512, distance rand mod
+    radius, axis offsets floor(x256 direction value * distance / 256), height trunc(h / 2) - rand mod h."""
+    angle = rng.randrange(512)
+    distance = rng.randrange(collapse.radius) if collapse.radius > 0 else 0
+    sin = int(256 * math.sin(math.tau * angle / 512))
+    cos = int(256 * math.cos(math.tau * angle / 512))
+    height = collapse.height // 2 - (rng.randrange(collapse.height) if collapse.height > 0 else 0)
+    return Puff(collapse.x + (sin * distance) // 256, collapse.y + (cos * distance) // 256, height, tick)
