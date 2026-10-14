@@ -250,7 +250,8 @@ the unit position of the unit found (or the fallback point, `notes/spell_blades_
 so it flies low (≤ 9). Against a ground destination the final tick's height is −1: the in-flight test **still runs at
 the destination** (a ground unit there is hit, silently, caster excluded) and then the projectile is removed for
 being below ground, so **no terminal impact and no "direct hit" message**. Against a flying unit (aim height > 0) the
-terminal impact happens normally.
+bolt reaches its terminal impact, but that impact is made at height 0 and never strikes a unit that is airborne at
+that tick; an airborne flier can only be hit in flight (corrected October 2026, `airborne_units.md` §A8).
 
 **Burning thorns** (also Dragon breath and warpfire flames, which share this behaviour): whenever one of its impact
 tests hits anything, every active Tangling Thorn (any caster, any side) whose **cast point** is closer than **32**

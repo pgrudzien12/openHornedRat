@@ -336,8 +336,9 @@ So the bark comes from the unit that spotted a hidden enemy.
 - §3 also accepts one more footprint kind than §2 (not seen on ordinary units).
 - §5: the "destroyed/removed" building state, and a lookup mode in which the original uses the unit under the mouse
   pointer instead of the node point (seen only in the original's shared lookup; implement the node point).
-- §6 step 8: exact sector boundaries and the sign convention of the "approach side" point; and which footprints are
-  "regiment footprints".
+- §6 step 8: exact sector boundaries and the sign convention of the "approach side" point. ("Regiment footprints"
+  means ordinary troops footprints only; monster, war machine, wagon, building and airborne footprints get the centre,
+  `airborne_units.md` §B2.4.)
 - §6 step 6 and §1: the view cone is also widened while the looker is **re-forming** (as well as in melee); the
   public visibility note mentions only melee.
 - §4 capacity of 31 candidates: no shipped battle is known to exceed it.
