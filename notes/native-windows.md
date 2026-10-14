@@ -25,6 +25,7 @@ release (mouse-up, only if the pointer is still inside the button) plays `B3.WAV
 `B<number>.WAV` in the speech directory of the glue sounds. Both cues are skipped while a speech line is still playing and when
 speech is off (`nospeech`, i.e. the Sound option). Earlier notes and drafts that said "3 on press, 4 on release" were inverted.
 For glue hotspots the release cue plays for the hotspot under the pointer at release, even if the press was elsewhere.
+**Exception**: the Load / Save dialog's own buttons (OK, Cancel, slots) and its description prompt play no cue (§8.3).
 
 ## 2. The 15 built-in names: verification of the working table ✅
 
@@ -969,9 +970,17 @@ re-evaluates OK. No double-click action.
 enabled in **Save**, disabled in **Load**. Initially nothing is selected, so OK starts disabled in both modes. "Occupied" is only file existence (a header read
 follows but its result is not checked: a corrupt file still counts, showing whatever text the read produced 🟡).
 
-**Click cues 🟡 (not confirmed for this dialog).** The research found no cue call in the dialog's own code, so whether its owner-drawn buttons (OK, Cancel,
-slots) play a click cue was not confirmed. Expected behaviour, from the shared glue rule: press (mouse-down) = `B4.WAV`, release inside the control = `B3.WAV`
-(glue speech directory), skipped while a speech line is playing and when speech is off. For slots (select on mouse-down, mouse-up swallowed) at most the press cue is plausible.
+**Click cues ✅: none.** The Load / Save dialog is the one native window whose buttons play **no** click cue at all:
+- **OK and Cancel**: no `B4` on press, no `B3` on release. Their button behaviour is the dialog's own, and it chains to
+  the plain Windows push-button behaviour, **not** to the shared native-button behaviour of §1.1 that plays the cues.
+- **Slot rows**: no cue on press or release. A slot selects on mouse-down and swallows the mouse-up (above), and plays
+  nothing at either.
+- **Description prompt** (§8.3.6): no cue for typing, Enter, Esc or a rejected character (rejected characters are
+  dropped silently, without a beep).
+- The only cues on the way in are those of the **opening hotspot**: the main menu's Load hotspot has
+  `downsfx=4` / `upsfx=3` (§1.1); the caravan Save hotspots have none (§8.2).
+
+So §1.1's "shared by every native button" has this one exception. An engine that plays `B4`/`B3` here deviates.
 
 #### 8.3.4 Drawing of a control (owner-draw routine) ✅
 Font: glue font slot 2 (`PCTEXT.FON`, 12 px), transparent text. Text colour: **palette index 206** (near-black, (11,11,27) in palette pair 2); a disabled
@@ -1037,6 +1046,22 @@ continues. Frame semantics: `notes/save_resume.md` §6, `notes/glue_interpreter.
 Read: `SAVE/savegame.0..5` (headers), on Load the whole file. Written: on Save the four working files and `savegame.<slot>`. No option or campaign counter is touched by the
 dialog itself (Load restores them all).
 
+#### 8.3.11 Prompt look, error boxes, disabled colour ✅
+- **Prompt edit field**: the field is filled with the prompt's parchment colour (palette index 151 of §8.3.6) as its
+  background, with black text. On a Save the initial text (the slot's description, or `BRTXT 500` for an empty slot)
+  is **selected** when the prompt opens and the field has the keyboard focus. The selection is drawn by the standard
+  Windows edit control in the **system highlight colours** (no game colour or art), i.e. inverted text on the
+  system selection colour until the first key replaces or deselects it.
+- **Prompt caption**: the literal `Enter Save Description` (no string id), black, at (16, 10). The Save prompt uses
+  the same widget as the New Game name prompt (§7.3.2), with its own caption and the character filter on.
+- **Error boxes**: plain **system message boxes**, OK button only, no icon, caption `Error`. Save failure text:
+  `Save Game Failed` on one line, then `Error Code:<n>` (the OS error number). Load failure: `Load Game Failed`, then
+  `Error Code:<n>`. After a Save failure the dialog has already closed. After a Load failure the game resets to the
+  main menu (§8.3.10).
+- **Disabled (olive) text**: the olive colour is the rule for **any** of the dialog's buttons drawn in the disabled
+  state, but **only OK is ever disabled** (no slot selected, or an empty slot in Load). Cancel and the slot rows are
+  always enabled, so they never show olive.
+
 ### 8.4 Asset inventory ✅ (sizes measured from `BITMAP.DLL`; palette-index copies, index 0 transparent unless stated)
 | Asset | Kind | Source | Size, frames, rule | Use |
 |---|---|---|---|---|
@@ -1099,14 +1124,14 @@ Existing: `whshr/load_save_scene.py`, `whshr/frontend/load_save_view.py`, `whshr
 6. Given a slot with description "X", then its button shows the Tent(slot+1) icon at (6,6) and "X" centred in the field x+24..x+231.
 7. Given a Load of a save made in a caravan, when OK, then the caravan opens (pop of the loaded stack, kind WINDOW re-opens by name); given an autosave (slot 5), then the parked script resumes after the `autosave:` line.
 8. Given the labels, then OK reads `BRTXT 337` in Save and `336` in Load, Cancel `307`.
-9. 🟡 Given a button press then release inside OK with speech on and no line playing, then `B4.WAV` then `B3.WAV` play (expected shared rule; unconfirmed for this dialog).
+9. Given speech on and no line playing, when OK, Cancel or a slot is pressed and released inside, then **no** click cue plays; typing, Enter and Esc in the description prompt play none either.
 
 ### 8.10 Open questions
-- 🟡 Whether OK/Cancel/slots play the click cues (`B4` press / `B3` release; no cue call found in the dialog itself); which cursor shows over the owner-drawn buttons.
+- 🟡 Which cursor shows over the owner-drawn buttons. (Click cues settled: none, §8.3.)
 - 🟡 Whether the prompt caption uses font slot 2 (same face assumed).
 - 🟡 Backdrop/art compose order and corner transparency (not observed).
 - ⬜ A corrupt `savegame.N` (unreadable header): slot counted occupied, label text undefined.
-- ⬜ Exact wording of the literals (empty-slot label "-Empty-" known; error phrases known in shape only).
+- Literals: settled in §8.3.11 (prompt caption, error boxes); empty-slot label "-Empty-".
 - Close-out: open item 6 of `notes/builtin_widgets.md` §8 is answered (`BRTXT 500`, constant).
 
 ## 9. Debrief screen (post-battle pages) ✅
