@@ -1821,7 +1821,7 @@ Tallies are **not** reset on join or leave.
 | the game `RemoveUnit` | the unit is destroyed or removed (unconditional) |
 | the game | the unit walked off the battlefield (record flag `0x100`), after event 0x18 |
 | the game `StartRout` | it **routs** — but only `if unit_flags_hi & 2`, i.e. only if it was actually in melee |
-| the game / the game | per-tick pairing: `engaged_enemy` is gone or has no grid **and** the game finds no other enemy → leave, event 0x19 |
+| the game / the game | per-tick pairing, **only while another unit (any side) is still on the grid**: `engaged_enemy` (= the current target) is none or has no grid **and** no other enemy is found → target := none, leave, event 0x19. A unit **alone** on its grid gets event 0x30 instead, outside the grid's creation segment (`lone_unit_on_grid.md`) |
 | the game | removed from combat by a spell effect, then event 0x0F to the enemy side |
 | the game (opcode 0x56 `TargetGone`) | the event source was my target and no other enemy is found |
 | the game case 0x16/0x17 | "unit removed" / "leader killed" naming my opponent, and no other enemy → leave, event 0x19 |
@@ -2210,7 +2210,8 @@ BF001's scripted flight.
   leaves and it has no other enemy on the grid, `notes/game_rules.md` section 5): `DropTarget`, then, if the unit
   was pursuing, a bark; **every** non-broken unit that had a target then switches to the rally / re-form script
   163 (halt, clear charging and bracing, re-form to `s_rnks`, restart), not only pursuers
-  (`notes/movement_formation.md`, correction).
+  (`notes/movement_formation.md`, correction). The per-tick pairing's own 0x19 arrives with the target **already
+  cleared**, so there `DropTarget` is false and the unit stays idle in script 165 (`lone_unit_on_grid.md` §0.7).
 
 **`FleeAhead` (0x51)** — start a rout along the unit's current facing.
 - It starts an ordinary **rout**, not a plain move: the unit becomes broken, leaves the combat grid, loses Frenzy,
