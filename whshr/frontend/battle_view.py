@@ -29,7 +29,7 @@ from ..battle_events import BattleEvent
 from ..battlefield import (VERTEX_FLOATS, VERTEX_FORMAT, WORLD_PER_MESH, bake_mesh, scenery_transform,
                            sprite_direction, view_angle)
 from ..camera import BattleCamera
-from ..engine import NO_TARGET_SPELLS, Regiment
+from ..engine import MUZZLE_PUFF_UP, NO_TARGET_SPELLS, Regiment
 from ..formation import SPRITE_PIXEL_WORLD_UNITS
 from ..rules import Side
 from ..battle_scene import BattleScene
@@ -81,6 +81,7 @@ ARTILLERY_VISUALS = frozenset({"cannon", "mortar", "rock", "diver"})
 ARTILLERY_CODES = frozenset({5, 6, 8, 11, 12})  # the ranged codes drawn as those visuals (whshr.ranged)
 ARTILLERY_SHOT_FRAMES = (56, 17)
 ARTILLERY_PUFF_FRAME, ARTILLERY_PUFF_TICKS = 73, 4
+MUZZLE_PUFF_FIRST_FRAME = 110  # 🟡 by eye: a gun's muzzle puff is GENBATT 110-113 (notes/machine_figure_animation.md 2.1)
 BANNER_MARKER_RAISE = 4.0  # mesh units: above a 64-pixel troop sprite, below the camera's horizon
 EVENT_LOG_LINES = 3  # battle events shown in the debug overlay (whshr.engine.Battle.events, per tick)
 INSTANCE = struct.Struct("10f")  # foot position (mesh), atlas rectangle (pixels), anchor (pixels), selected
@@ -1198,7 +1199,8 @@ class BattleView(SceneView[BattleScene]):
         return flights
 
     def _artillery_sprites(self) -> bytes:
-        """Artillery shots in flight and their landing puffs, from the GENBATT set (ARTILLERY_VISUALS, PROVISIONAL)."""
+        """Artillery shots in flight, their landing puffs (ARTILLERY_VISUALS, PROVISIONAL) and the guns' muzzle puffs,
+        from the GENBATT set."""
         field, battle = self.scene.field, self.scene.battle
         sheet = field.ui_sheets.get("genbatt")
         if sheet is None or not sheet.rects:
@@ -1209,6 +1211,11 @@ class BattleView(SceneView[BattleScene]):
         sprites += [(x, y, field.ground_height(x, y), ARTILLERY_PUFF_FRAME)
                     for x, y, code, started in battle.impact_effects
                     if code in ARTILLERY_CODES and battle.tick_count - started < ARTILLERY_PUFF_TICKS]
+        for puff in battle.muzzle_puffs:
+            frame = puff.frame(battle.tick_count)
+            if frame is not None:
+                sprites.append((puff.x, puff.y, field.ground_height(puff.x, puff.y) + MUZZLE_PUFF_UP / WORLD_PER_MESH,
+                                MUZZLE_PUFF_FIRST_FRAME + frame))
         data = bytearray()
         for x, y, height, number in sprites:
             if number >= len(sheet.frames) or sheet.rects[number] is None:

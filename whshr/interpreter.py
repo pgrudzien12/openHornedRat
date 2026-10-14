@@ -249,6 +249,13 @@ class EventBus:
         if state.anim_divisor and state.anim_countdown % state.anim_divisor == 0:
             self.queue_event(unit_id, Event(code=state.anim_event, source=unit_id, model=model_index))
 
+    def post_without_figure(self, unit_id: str) -> None:
+        """An extra animation post (the Volley Gun's first two puffs, notes/volley_gun_shot.md 0.1): the unit's
+        current request event to itself with no figure, whatever the countdown, which it leaves untouched."""
+        state = self.unit_states.get(unit_id)
+        if state is not None and state.anim_event:
+            self.queue_event(unit_id, Event(code=state.anim_event, source=unit_id, model=-1))
+
     def queue_event(self, recipient_id: str, event: Event, route: str = "self", checked: bool = False) -> None:
         """Queue an event to a recipient or broadcast to a side (notes/threat_events_nodes.md, part B 0.2).
 

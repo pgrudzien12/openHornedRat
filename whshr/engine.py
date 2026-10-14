@@ -29,6 +29,8 @@ CLOSING_K = 1.0     # unused directly (player/AI attack orders go straight to ch
 CHARGING_K = 2.5
 FLEEING_K = 1.5
 
+# A gun's muzzle puff (notes/machine_figure_animation.md 2.1): placement, and a 4-tick one-shot of 4 frames.
+MUZZLE_PUFF_AHEAD, MUZZLE_PUFF_UP, MUZZLE_PUFF_TICKS = 24.0, 12.0, 4
 CAST_ORDER_EVENT = 0x2B  # the player's cast order to a wizard's script (notes/script_magic.md 4)
 # Spells with no target click: the cast order is given on the spell click (notes/player_magic_panel.md 4.1).
 NO_TARGET_SPELLS = frozenset({spell_effects.AZURE_BLADES, spell_effects.DISPEL_MAGIC, spell_effects.FISTS})
@@ -100,6 +102,24 @@ def has_leader_figure(leader: View) -> bool:
     return bool(sprite) and (sprite or "").casefold() != "voidtype"
 
 
+@dataclass(frozen=True)
+class MuzzlePuff:
+    """One gun shot's muzzle puff: its ground point and `started`, the tick count drawn right after the fire step
+    (its first frame); it lasts MUZZLE_PUFF_TICKS."""
+
+    x: float
+    y: float
+    started: int
+
+    def frame(self, tick: int) -> int | None:
+        """The puff's frame 0..3 on `tick`, one per tick, or None once it has ended."""
+        age = tick - self.started
+        return age if 0 <= age < MUZZLE_PUFF_TICKS else None
+
+    def ended(self, tick: int) -> bool:
+        return tick - self.started >= MUZZLE_PUFF_TICKS
+
+
 @dataclass
 class ModelState:
     """One model's close-combat state on its fight's battle grid (game_rules.md 5.7, whshr.battle_grid).
@@ -134,6 +154,7 @@ class ModelState:
     breath_sector: int = 1  # MeshDragon: left/forward/right sector, bf014_dragon_rendering.md §3
     height_above_ground: float = 0.0  # mesh-model translation in script units
     fire_event: bool = False  # animation reached its fire point on this tick (whshr.animation)
+    extra_post: bool = False  # animation made an extra fire post with no figure on this tick (Volley Gun)
     wounds_taken: int = 0
     # The unit credited with this model when it leaves its regiment, killed or removed alive (identifier, or None):
     # notes/casualty_bookkeeping.md 2.0-2.1.
@@ -879,6 +900,7 @@ class Battle:
         self.innate_projectiles: list[Any] = []
         self.spell_effects = spell_effects.EffectTable()  # active spell effects (whshr.spell_effects)
         self.impact_effects: list[Any] = []
+        self.muzzle_puffs: list[MuzzlePuff] = []  # gun shots' muzzle puffs (_spawn_muzzle_puff), drawn by the frontend
         self.death_blasts: list[Any] = []
         self.ctrl_held = False
         self.ground_height: Callable[[float, float], float] = lambda x, y: 0.0
@@ -3143,10 +3165,12 @@ class Battle:
         the shoot/stand cycle and drift out of step with the countdown across reloads."""
         wagon = regiment.unit_class == 7 and regiment.models == 2
         # Advance the volley age counter; the window is clamped at 6 ticks so the second SHOOT
-        # animation cycle (which starts on tick 7 from the order) cannot contaminate this volley.
+        # animation cycle (which starts on tick 7 from the order) cannot contaminate this volley. A war machine's
+        # countdown of 1 ends at its own fire step, which its shoot program reaches only after 4-7 ticks (the
+        # Volley Gun's after up to 17: notes/volley_gun_shot.md 3), so it is not clamped.
         if regiment.volley_countdown is not None:
             regiment.volley_age += 1
-            if regiment.volley_age >= 6:
+            if regiment.volley_age >= 6 and regiment.hud_class != "art":
                 regiment.volley_countdown = None
         special_shot = regiment.shooting_code in {14, 15} or (regiment.shooting_code == 17 and regiment.hud_class != "arch")
         volley_divisor = 1 if regiment.hud_class == "art" or special_shot else 4
@@ -3169,10 +3193,15 @@ class Battle:
                 requested = animation.WALK
             else:
                 requested = regiment.rest_action()
-            animation.step(model, requested, self.rng, regiment.model_family(model))
+            family = regiment.model_family(model)
+            animation.step(model, requested, self.rng, family)
             self._slew_drawn_facing(regiment, model, wagon)
             if model.fire_event:
                 self.event_bus.animation_event_step(regiment.identifier, model_index)
+            if model.extra_post:
+                self._extra_fire_post(regiment)
+            if (model.fire_event or model.extra_post) and family in ("gun", "volley"):
+                self._spawn_muzzle_puff(regiment)
             # Each model's fire event decrements the volley countdown once; a post is issued each
             # time the new countdown value is a multiple of the divisor (game_rules.md 8.1).
             # Reload does not gate this: it was stamped at order time, so reload > 0 is normal
@@ -3184,6 +3213,26 @@ class Battle:
                     regiment.fire_post_positions.append(regiment.positions[model_index])
                 if regiment.volley_countdown == 0:
                     regiment.volley_countdown = None
+
+    def _spawn_muzzle_puff(self, regiment: Regiment) -> None:
+        """Every puff of a gun's shot (the cannon's one, the Volley Gun's three) spawns a muzzle puff at the unit
+        position plus 24 straight ahead along the unit facing, with the x256 direction values truncated toward zero,
+        12 units above the ground; drawn whether or not the launch then works (notes/volley_gun_shot.md 4)."""
+        angle = int(regiment.direction) % formation.FULL_TURN * math.tau / formation.FULL_TURN
+        dx = int(MUZZLE_PUFF_AHEAD * int(256 * math.sin(angle)) / 256)
+        dy = int(MUZZLE_PUFF_AHEAD * int(256 * math.cos(angle)) / 256)
+        self.muzzle_puffs.append(MuzzlePuff(regiment.x + dx, regiment.y + dy, self.tick_count + 1))
+
+    def _extra_fire_post(self, regiment: Regiment) -> None:
+        """A Volley Gun's extra post (notes/volley_gun_shot.md 0.1, 1): with scripts, the unit's current request
+        event is posted to itself with no figure, so its FireAtTarget launches from the unit position and skips the
+        after-shot pause; the countdown is untouched. Without scripts, an engine volley in progress gets one more
+        fire post from the unit position."""
+        if self.interpreter is not None:
+            self.event_bus.post_without_figure(regiment.identifier)
+        elif regiment.volley_countdown is not None:
+            regiment.fire_posts += 1
+            regiment.fire_post_positions.append((regiment.x, regiment.y))
 
     def _slew_drawn_facing(self, regiment: Regiment, model: ModelState, wagon: bool = False) -> None:
         if animation.family_table(regiment.model_family(model))[model.action].locks_facing:
