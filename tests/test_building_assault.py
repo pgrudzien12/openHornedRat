@@ -73,6 +73,17 @@ class AssaultTests(unittest.TestCase):
         building = battle.buildings[0]
         self.assertIsNone(building.penetration(*Battle.formation_centre(unit), unit.bounding_radius() - 1))
 
+    def test_a_routing_regiment_is_pushed_clear_of_a_building_footprint(self):
+        # notes/runaway_routers_broken.md 1A: a building pushes a router unless it is charging or in melee.
+        from whshr import combat
+        unit = regiment(y=1240)
+        battle = battle_with(unit)
+        combat.start_rout(unit, battle, flee_point=(1000, 3000))
+        building = battle.buildings[0]
+        self.assertIsNotNone(building.penetration(*Battle.formation_centre(unit), unit.bounding_radius()))
+        battle._correct_buildings(unit)
+        self.assertIsNone(building.penetration(*Battle.formation_centre(unit), unit.bounding_radius() - 1))
+
     def test_a_destroyed_building_cannot_be_ordered_against(self):
         battle = battle_with(regiment())
         battle.destroy_building(battle.buildings[0])

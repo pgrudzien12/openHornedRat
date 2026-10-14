@@ -3697,9 +3697,8 @@ class Battle:
         pass records the contact and raises 0x0B, and the contact handler decides (assault on its own target, charge
         ends on any other); a unit that is pushed gets its re-check state back on. Without scripts, and during
         deployment, the engine decides at once. A destroyed building keeps its footprint. PROVISIONAL: the regiment
-        is pushed by the circle of its bounding radius against the rectangle."""
-        if regiment.routing:
-            return
+        is pushed by the circle of its bounding radius against the rectangle. A routing regiment is pushed like any other
+        (notes/runaway_routers_broken.md 1A)."""
         centre = self.formation_centre(regiment)
         radius = regiment.bounding_radius()
         state = (self.event_bus.unit_states.get(regiment.identifier)
