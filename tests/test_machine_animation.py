@@ -37,7 +37,7 @@ def frames(family, requests, entry=0, direction=0):
 class MachineFamilyTests(unittest.TestCase):
     def test_the_machine_sets_select_the_machine_tables(self):
         for sprite, family in (("RockLobber", "thrower"), ("DoomDvrCatapult", "thrower"), ("Cannon", "gun"),
-                               ("GrtCannon", "gun"), ("VolleyGun", "gun"), ("Mortar", "mortar")):
+                               ("GrtCannon", "gun"), ("VolleyGun", "volley"), ("Mortar", "mortar")):
             with self.subTest(sprite=sprite):
                 self.assertEqual(animation.family_for(sprite, 4), family)
         self.assertEqual(animation.family_for("OrcBoyz", 4), "standard_infantry")  # the crew

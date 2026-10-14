@@ -668,6 +668,7 @@ def _step_projectiles(battle: Battle) -> None:
             remaining.append(p)
     battle.projectiles = remaining
     battle.impact_effects = [e for e in battle.impact_effects if battle.tick_count-e[3] < 8]
+    battle.muzzle_puffs = [puff for puff in battle.muzzle_puffs if not puff.ended(battle.tick_count)]
 
 
 def _step_death_blasts(battle: Battle) -> None:

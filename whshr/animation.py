@@ -88,6 +88,9 @@ class ActionScript:
     variant_rule: str | None = None
     locks_facing: bool = False
     fire_at: int | None = None  # script step (counting the random entry skip) that posts the fire event
+    # Steps (counting the skip) that make an extra fire post with no figure, then draw a fresh skip that is added
+    # to the entry (the Volley Gun's first two puffs, notes/volley_gun_shot.md 3).
+    extra_posts: tuple[int, ...] = ()
     skip_ahead: bool = False  # the random entry skips ahead in ONE fixed-length program (bigger skip = sooner end)
     faces_unit: bool = False
     drops_requests: bool = False
@@ -190,10 +193,14 @@ def _machine_shot(group: int, sequence: tuple[int, ...], fire_at: int) -> Action
 
 
 # notes/machine_figure_animation.md 2.1-2.4. Cannon and Great Cannon: intact frames 8-15, wreck 0-7, the gun
-# never changes frame while shooting (the muzzle puff, not modelled here, shows the shot); fire step on the 7th
-# step. The Volley Gun shares these frames; its three puffs and two extra event posts are not modelled
-# (PROVISIONAL: one shot like the cannon's until the shooting hand-off settles how the extra posts launch).
+# never changes frame while shooting (the muzzle puff shows the shot); fire step on the 7th step.
 GUN = _machine_table(8, 0, _machine_shot(8, (0,) * 11, fire_at=6))
+# Volley Gun (notes/volley_gun_shot.md 3): the same frames; puffs at steps 6 and 11 are extra posts, each drawing a
+# fresh 0-3 skip, and the third puff at step 16 is the ordinary fire step; 4 intact steps, then stand. Puffs come
+# 7-r0, +5-r1, +5-r2 ticks apart, the whole shot taking 12 to 21 ticks.
+VOLLEY = _machine_table(8, 0, ActionScript(8, sequence=(0,) * 21, random_entry=4, next_action=STAND, fire_at=16,
+                                           extra_posts=(6, 11), skip_ahead=True, faces_unit=True,
+                                           drops_requests=True))
 # Rock Lobber and Doom Diver catapult: the "fire" group's phase 0 is the rest frame; the arm swings only in the
 # shot, after the fire step: 0,0,0,0,fire,1,1,2,3,0.
 THROWER = _machine_table(0, 32, _machine_shot(0, (0, 0, 0, 0, 0, 1, 1, 2, 3, 0), fire_at=4))
@@ -232,7 +239,7 @@ def mesh_dragon_pose(model: "ModelState") -> int:
 
 
 FAMILY_TABLES: dict[str, ActionTable] = {"standard_infantry": STANDARD_INFANTRY, "peasants": PEASANTS, "slaves": SLAVES,
-                 "mesh_dragon": MESH_DRAGON, "wagons": WAGONS, "carts": CARTS, "gun": GUN,
+                 "mesh_dragon": MESH_DRAGON, "wagons": WAGONS, "carts": CARTS, "gun": GUN, "volley": VOLLEY,
                  "thrower": THROWER, "mortar": MORTAR}
 # Script sprite resource names (casefolded) that select a decoded family; anything else is standard.
 SPRITE_FAMILIES = {"meshdragon": "mesh_dragon", "peasant": "peasants", "peasants": "peasants",
@@ -240,8 +247,8 @@ SPRITE_FAMILIES = {"meshdragon": "mesh_dragon", "peasant": "peasants", "peasants
                    "slaves": "slaves", "wagon": "wagons", "caravan": "carts", "mrtwagon": "carts",
                    "mrtwag": "carts", "packpony": "standard_infantry",
                    # War-machine figures, by the leader block's machine set (notes/machine_figure_animation.md 3).
-                   "cannon": "gun", "impcanon": "gun", "grtcannon": "gun", "grtcanon": "gun", "volleygun": "gun",
-                   "voleygun": "gun", "rocklobber": "thrower", "rocklob": "thrower", "doomdvrcatapult": "thrower",
+                   "cannon": "gun", "impcanon": "gun", "grtcannon": "gun", "grtcanon": "gun", "volleygun": "volley",
+                   "voleygun": "volley", "rocklobber": "thrower", "rocklob": "thrower", "doomdvrcatapult": "thrower",
                    "ddcatplt": "thrower", "mortar": "mortar"}
 WAGON_CLASS = 7  # s_race class RollingStock
 DEFAULT_FAMILY = "standard_infantry"
@@ -514,6 +521,9 @@ def step(model: "ModelState", requested_action: int, rng: random.Random,
     # random entry skip (game_rules.md "Figure animation"), so models entering at 0-3 reach it on
     # different ticks. `fire_event` is true for exactly that one tick.
     model.fire_event = active.fire_at is not None and model.action_pc + model.action_entry == active.fire_at
+    model.extra_post = model.action_pc + model.action_entry in active.extra_posts
+    if model.extra_post:
+        model.action_entry += rng.randrange(active.random_entry)  # drawn on the puff tick, after the post
     if active.random_choice is None:
         model.action_pc += 1
     return script_group(active, model.stagger), phase
