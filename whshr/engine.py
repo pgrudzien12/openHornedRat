@@ -594,7 +594,10 @@ class Regiment:
 
     @property
     def destroyed(self) -> bool:
-        return self.models <= 0
+        """No model left, standing or collapsing: a wiped-out unit stays in the battle (a valid target, counted by
+        searches and node areas, keeping its footprint) until its last model's death sequence starts
+        (notes/unit_removal_broadcast.md 2, 5.1)."""
+        return self.models <= 0 and not self.dying
 
     @property
     def active(self) -> bool:
@@ -3387,9 +3390,7 @@ class Battle:
         both armies, hidden and routing units (notes/unit_removal_broadcast.md 1). Their scripts drop it as a target
         through Query 22 (notes/script_queries.md 9); nothing here touches their targets. Sent for a unit wiped out,
         once its last dying model's collapse delay is over (section 2), and for a routing unit when it finally leaves
-        the table (after the 0x0E of its departure). A script's RemoveFromBattle is quiet and never calls this.
-        PROVISIONAL: our unit already counts as out of the fight while its last models collapse (the report keeps it
-        in the battle until then); only the broadcast waits for the collapse."""
+        the table (after the 0x0E of its departure). A script's RemoveFromBattle is quiet and never calls this."""
         if regiment.removal_announced:
             return
         regiment.removal_announced = True

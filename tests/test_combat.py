@@ -980,7 +980,8 @@ class CloseCombatStrikeTests(unittest.TestCase):
 
         self.assertEqual(removed, 10)
         self.assertEqual(self.defender.models, 0)
-        self.assertTrue(self.defender.destroyed)
+        # notes/unit_removal_broadcast.md 2: still in the battle until its last model's death sequence starts.
+        self.assertEqual(self.defender.destroyed, bool(not self.defender.dying))
 
     def test_given_casualties_when_applied_then_the_formation_shrinks_and_leaves_corpses(self):
         combat.apply_casualties(self.defender, 3, self.battle.rng, self.battle)
