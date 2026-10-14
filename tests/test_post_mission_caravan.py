@@ -145,7 +145,7 @@ class PostMissionCaravanTests(DirectMissionRouteTests):
 
     def test_given_a_gocaravan_opened_caravan_when_abort_is_confirmed_then_it_goes_to_the_main_menu(self):
         """The player got stuck with no working Abort in an info/mid-mission caravan (issue: reported
-        after the Nuln `gomissionselect` fix); the original asks Yes/No first (GMTXT 36070)."""
+        after the Nuln `gomissionselect` fix); the original asks Yes/No first (BRTXT 308)."""
         from whshr.campaign_scenes import MainMenuScene
         from whshr.confirm_scene import ConfirmScene
 
@@ -153,7 +153,7 @@ class PostMissionCaravanTests(DirectMissionRouteTests):
 
         machine.handle(GlueInput("hotspot-release", "AbortGame"))
         self.assertIsInstance(machine.active, ConfirmScene)
-        self.assertEqual(machine.active.string, ("GMTXT", 36070))
+        self.assertEqual(machine.active.string, ("BRTXT", 308))
         machine.handle("yes")
 
         self.assertIsInstance(machine.active, MainMenuScene)

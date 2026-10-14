@@ -25,12 +25,12 @@ RESOURCES = {
     "AMBUSH": "[WINDOW]\n[END]",
     # Mission script shaped like a chapter mission with a standard ambush sub-flow.
     "MISSION": ("[RUN]\n[START]\nsettextalign:left\nenablebook:0=26\naddmidiobject:looking\n"
-                "setbattlescript:bf001\ngosub:ENCOUNTER\nsetgluestatusmask:2\nsetgluestatus:\nendgame:\n[END]"),
+                "setbattlescript:bf001\ngosub:ENCOUNTER\nsetgluestatusmask:2\nsetgluestatus:\n[END]"),
     "ENCOUNTER": ("[RUN]\n[START]\nopenwindow:res=AMBUSH\nsettextalign:left\nsetgluestatusmask:80\nclrgluestatus:\n"
                   "waitforresume:\nclosewindow:res=AMBUSH\nreturn:\n[END]"),
-    "NOBATTLE": "[RUN]\n[START]\nopenwindow:res=AMBUSH\nwaitforresume:\nclosewindow:res=AMBUSH\nendgame:\n[END]",
+    "NOBATTLE": "[RUN]\n[START]\nopenwindow:res=AMBUSH\nwaitforresume:\nclosewindow:res=AMBUSH\n[END]",
     "ATTACKMASK": ("[RUN]\n[START]\nsetbattlescript:bf001\nsetgluestatusmask:80\nclrgluestatus:\n"
-                   "waitforresume:\nendgame:\n[END]"),
+                   "waitforresume:\n[END]"),
 }
 
 
@@ -114,7 +114,7 @@ class EncounterRuntimeTests(unittest.TestCase):
     def test_given_a_pending_dialogue_when_a_button_is_pressed_then_the_text_drains_and_the_action_runs(self):
         content = GlueContent.from_data(resources={
             **RESOURCES, "TALKING": ("[RUN]\n[START]\nsetbattlescript:bf001\nplaytext:res=1\n"
-                                     "waitforresume:\nendgame:\n[END]")})
+                                     "waitforresume:\n[END]")})
         runtime = GlueRuntime(content)
         runtime.start("TALKING")
         self.assertEqual(runtime.state.pending.kind, "dialogue")

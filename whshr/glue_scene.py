@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from .campaign_log import GlueWatcher
 from .campaign_state import PANEL_CARAVAN_WINDOWS
 from .glue import MissionRef
-from .glue_runtime import (ActivityResult, Autosave, Diagnostic, EnterCaravan, GlueEffect, GlueInput, GlueRuntime, GlueRuntimeState,
+from .glue_runtime import (ActivityResult, Autosave, Diagnostic, EndGame, EnterCaravan, GlueEffect, GlueInput, GlueRuntime, GlueRuntimeState,
                            MissionSelectRequested, StartBattle, StartDebrief, StartMovie)
 from .glue_fonts import glue_font_asset
 from .scenes import Quit, Scene, SceneAssets, SceneEvent, Transition
@@ -90,6 +90,14 @@ class GlueScene(Scene):
     def take_battle_effect(self) -> StartBattle | None:
         for index, effect in enumerate(self._effects):
             if isinstance(effect, StartBattle):
+                del self._effects[index]
+                return effect
+        return None
+
+    def take_endgame_effect(self) -> EndGame | None:
+        """A queued ``EndGame`` (the script's ``endgame``), removed from the queue."""
+        for index, effect in enumerate(self._effects):
+            if isinstance(effect, EndGame):
                 del self._effects[index]
                 return effect
         return None
@@ -381,8 +389,12 @@ class GlueScene(Scene):
         return None
 
     def _confirm_abort_game(self) -> Transition:
-        """AbortGame asks "Are you sure you want quit the campaign?" (notes/activity_results.md section 6);
-        Yes abandons the campaign for the main menu, No comes back to this caravan."""
+        """AbortGame asks the plain Yes/No question ``BRTXT 308`` (notes/native-windows.md §13); Yes leaves the
+        campaign for the main menu and resets nothing (campaign files stay), No comes back to this caravan.
+
+        The original pops frames down to the main-menu frame; one is always at the bottom, also after a Load, so
+        opening a fresh main menu gives the same result (notes/native-windows.md §13.3.5). Only a damaged or foreign
+        save could lack it; the original then leaves a blank screen, the engine still opens the menu."""
         from .campaign_scenes import MainMenuScene
         from .confirm_scene import ConfirmScene
 
@@ -390,7 +402,7 @@ class GlueScene(Scene):
             if self.runtime is not None:
                 self._queue(self.runtime.stop_speech())  # Dietrich does not go on talking over the menu
 
-        return Transition(ConfirmScene(self, MainMenuScene(), ("GMTXT", 36070), on_yes=leave, reason="caravan aborted"),
+        return Transition(ConfirmScene(self, MainMenuScene(), ("BRTXT", 308), on_yes=leave, reason="caravan aborted"),
                           "abort confirmation opened")
 
     def _open_save_dialog(self) -> Transition | None:

@@ -22,8 +22,8 @@ from whshr.scenes import SceneAssets, SceneMachine
 RECORD = "[MISSION]\nset:res={id}\nres:BRIEF\nsetbattlescript:bf001\ndebrief:{debrief}\n{extra}[END]"
 WINDOW = "[WINDOW]\n[MISSIONWINDOW]\nset:x=30\nset:y=15\n[END]\n"
 RESOURCES = {
-    "FLOWONE": "[RUN]\n[START]\nopenwindow:res=MISSIONAWINDOW\nwaitforrelease:\nendgame:\n[END]",
-    "FLOWTWO": "[RUN]\n[START]\nopenwindow:res=MISSIONBWINDOW\nwaitforrelease:\nendgame:\n[END]",
+    "FLOWONE": "[RUN]\n[START]\nopenwindow:res=MISSIONAWINDOW\nwaitforrelease:\n[END]",
+    "FLOWTWO": "[RUN]\n[START]\nopenwindow:res=MISSIONBWINDOW\nwaitforrelease:\n[END]",
     "MISSIONAWINDOW": WINDOW + RECORD.format(id=701, debrief=5, extra="replacescript:FLOWTWO\n"),
     "MISSIONBWINDOW": WINDOW + RECORD.format(id=702, debrief=6, extra="")
                       + RECORD.format(id=703, debrief=7, extra=""),
