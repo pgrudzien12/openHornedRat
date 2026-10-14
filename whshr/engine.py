@@ -65,6 +65,17 @@ HUD_CLASS_BY_RACE_TYPE: dict[int, str] = {
     9: "inf", 10: "arch", 11: "inf", 12: "inf", 13: "arch", 14: "inf",
     15: "art", 16: "art", 17: "art", 18: "art", 19: "wiz",
 }
+# The command panel, shooting rules and interrupt script follow the class part of s_race (notes/gyrocopter_steam_gun.md
+# 0), not the s_side type: the campaign Gyrocopter is Dwarven by type but Archers by class. Classes without a panel set
+# of their own (notype, rolling stock, special) keep the s_side mapping above.
+HUD_CLASS_BY_CLASS: dict[int, str] = {1: "inf", 2: "inf", 3: "arch", 4: "art", 5: "wiz", 6: "mon"}
+
+
+def hud_class_of(side: int | None, race: int | None) -> str | None:
+    """The panel class of a unit from its s_side and s_race bytes (notes/gyrocopter_steam_gun.md 0)."""
+    if race is not None and (race >> 3) in HUD_CLASS_BY_CLASS:
+        return HUD_CLASS_BY_CLASS[race >> 3]
+    return HUD_CLASS_BY_RACE_TYPE.get(side & 0x3F) if side is not None else None
 
 
 def wagon_layout_direction(facing: float, view_angle: float | None) -> float:
@@ -254,7 +265,7 @@ class Regiment:
     missile_code: int | None = None  # S_BalWeap, only ARCHER_MISSILE_CODES are modelled as shooters
     missile_range: float | None = None  # world units, from rules.MISSILE_RANGES
     psychology: frozenset[str] = frozenset()  # psy_status flag names, e.g. {"CantBreak", "CantRally"}
-    hud_class: str | None = None  # "inf"/"arch"/"art"/"wiz"/"mon"; see HUD_CLASS_BY_RACE_TYPE
+    hud_class: str | None = None  # "inf"/"arch"/"art"/"wiz"/"mon"; see hud_class_of
     unit_class: int | None = None  # s_race class; wagons use a four-deep movement layout
     race: int | None = None  # s_race & 7: 0 Human, 1 Elven, 2 Dwarven, 3 Goblinoid, 4 Orc, 5 Skaven, 6 Peasant, 7 big
     points: int = 0  # s_pntval: experience gained by the killer, and the AI's per-model worth unit
@@ -805,8 +816,8 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
     psy_status = unit.get("set", {}).get("psy_status")
     psychology = frozenset(f for f in str(psy_status or "").split("|") if f)
     side = stat_int(fields, "s_side")
-    hud_class = HUD_CLASS_BY_RACE_TYPE.get(side & 0x3F) if side is not None else None
     race = stat_int(fields, "s_race")
+    hud_class = hud_class_of(side, race)
     return {
         "speed_per_tick": speed_per_tick(move_stat, profile.get("I", DEFAULT_PROFILE["I"]),
                                          neutral=side is not None and side_of_code(side) == Side.NEUTRAL),
