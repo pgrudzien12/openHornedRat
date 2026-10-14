@@ -1192,8 +1192,27 @@ class Battle:
                 cone = 2 * interpreter.VIEW_CONE if looker.in_melee or looker.reforming else interpreter.VIEW_CONE
                 if visibility.visible(self.formation_centre(looker), looker.direction,
                                       self.formation_centre(target), target.bounding_radius(),
-                                      cone, self.boundaries, self.objects):
+                                      cone, self.boundaries, self.sight_objects(looker, target)):
                     self.reveal(target, looker)
+
+    def sight_objects(self, looker: Regiment, target: Regiment) -> list[dict[str, Any]]:
+        """The objects that may block `looker`'s sight of `target`: the map's, plus every other airborne unit as a
+        scenery circle of height 16 (notes/airborne_units.md B2.6), but only one strictly nearer than the target and
+        whose circle does not contain the looker. Not modelled: the side fact that ground monster, war machine and
+        wagon footprints block sight as well."""
+        flyers = [other for other in self.regiments.values()
+                  if other.airborne and other.active and other is not looker and other is not target]
+        if not flyers:
+            return self.objects
+        start, end = self.formation_centre(looker), self.formation_centre(target)
+        reach = math.dist(start, end)
+        blockers: list[dict[str, Any]] = list(self.objects)
+        for other in flyers:
+            centre, radius = self.formation_centre(other), other.bounding_radius()
+            if math.dist(start, centre) < reach and math.dist(start, centre) >= radius:
+                blockers.append({"x": centre[0], "y": centre[1], "radius": radius, "height": 16,
+                                 "status": ["os_active"]})
+        return blockers
 
     def reveal(self, target: Regiment, spotter: Regiment) -> None:
         """A spotted hidden unit is revealed permanently: 0x1C to the spotter (source = the revealed unit) and 0x1D
@@ -2860,6 +2879,13 @@ class Battle:
         units: dict[str, Regiment] = {}
         target = self.regiments.get(target_id) if target_id is not None else None
         for other in self.regiments.values():
+            if other.airborne and other.active and other is not regiment and other is not target:
+                # notes/airborne_units.md B2.2: an airborne unit is plain scenery to every other unit's steering, of
+                # any side or state; its own target's circle holds the waypoint, so that one is ignored (rule 2).
+                centre = self.formation_centre(other)
+                footprints.append(steering.Footprint(f"air:{other.identifier}", centre[0], centre[1],
+                                                     float(int(other.bounding_radius()))))
+                continue
             if (other is regiment or not other.active or other.routing or other is target
                     or (target is not None and target.melee_group is not None
                         and other.melee_group == target.melee_group)):
@@ -3498,6 +3524,8 @@ class Battle:
         pushed = False
         for other in regiments:
             if other is mover or other.in_melee or other.routing or self._marked(other):
+                continue
+            if other.airborne:  # notes/airborne_units.md B2.3: nothing collides with an airborne footprint
                 continue
             if may_engage(mover, other):
                 machine = (mover.is_wagon or mover.hud_class == "art") or (other.is_wagon or other.hud_class == "art")

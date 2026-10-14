@@ -164,8 +164,8 @@ def _blocked_crossbow(battle: Battle, unit: Regiment, point: tuple[float, float]
     if (unit.shooting_code or unit.missile_code) != 2:
         return False
     for other in battle.regiments.values():
-        if other is unit or not other.active or other.side in hostile_sides(unit.side):
-            continue
+        if other is unit or not other.active or other.airborne or other.side in hostile_sides(unit.side):
+            continue  # notes/airborne_units.md B2.7: an airborne friend is not on the crossbow's line
         gap, t = _segment_distance((unit.x, unit.y), point, (other.x, other.y))
         if 0 < t < 1 and gap < other.bounding_radius():
             return True
