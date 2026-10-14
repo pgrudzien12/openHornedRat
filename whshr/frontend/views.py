@@ -11,6 +11,7 @@ from ..campaign_scenes import (
     ArmyRecordsScene, EncyclopediaScene, MagicBookScene, TroopSelectScene, TroopSelectionScene,
 )
 from ..confirm_scene import ConfirmScene
+from ..message_scene import MessageScene
 from ..credits_scene import CreditsScene
 from ..debrief_scene import DebriefScene
 from ..glue_scene import GlueScene
@@ -22,6 +23,7 @@ from .battle_view import BattleView
 from .movie_view import MovieView
 from .briefing_view import BriefingView
 from .confirm_view import ConfirmView
+from .message_view import MessageView
 from .credits_view import CreditsView
 from .debrief_view import DebriefView
 from .glue_view import GlueView
@@ -53,6 +55,7 @@ VIEWS: dict[type[Scene], type[SceneView[Any]]] = {
     LoadSaveScene: LoadSaveView,
     NamePromptScene: NamePromptView,
     ConfirmScene: ConfirmView,
+    MessageScene: MessageView,
     CreditsScene: CreditsView,
     OptionsScene: OptionsView,
     DebriefScene: DebriefView,

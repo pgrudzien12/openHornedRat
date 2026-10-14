@@ -36,7 +36,7 @@ PLAYER_SLOTS = (0, 1, 2, 3, 4)
 AUTOSAVE_SLOT = 5
 ALL_SLOTS = PLAYER_SLOTS + (AUTOSAVE_SLOT,)
 AUTOSAVE_DESCRIPTION = "Last Game"  # notes/builtin_widgets.md section 6: the automatic slot's description
-DESCRIPTION_LIMIT = 25  # notes/builtin_widgets.md section 6: the edit box takes 25 characters
+DESCRIPTION_LIMIT = 24  # notes/native-windows.md section 8.3.6: a buffer of 25 -> 24 typed characters
 
 
 _CASH = Codec([CashTerms])

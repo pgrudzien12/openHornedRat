@@ -34,7 +34,8 @@ class ClickCueTests(unittest.TestCase):
                 set_speech_sound(None)
             self.assertEqual(load.call_count, 1)
 
-    def test_load_save_buttons_play_press_and_inside_release_only(self):
+    def test_load_save_buttons_play_no_click_cue(self):
+        # notes/native-windows.md §8.3: the dialog's OK/Cancel are plain push buttons, without the §1.1 cues
         import pygame
         from whshr.frontend.load_save_view import LoadSaveView
         cues: list[int] = []
@@ -46,10 +47,9 @@ class ClickCueTests(unittest.TestCase):
 
         self.assertEqual(LoadSaveView.events(view, down(0)), ())
         self.assertEqual(LoadSaveView.events(view, up(20)), ())
-        self.assertEqual(cues, [4])
         self.assertEqual(LoadSaveView.events(view, down(0)), ())
         self.assertEqual(LoadSaveView.events(view, up(0)), ("ok",))
-        self.assertEqual(cues, [4, 4, 3])
+        self.assertEqual(cues, [])
 
     def test_glue_release_uses_hotspot_under_pointer_even_when_press_was_elsewhere(self):
         import pygame

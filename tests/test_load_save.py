@@ -12,13 +12,18 @@ from whshr.catalog import build
 from whshr.glue_content import GlueContent
 from whshr.glue_runtime import GlueInput
 from whshr.glue_scene import GlueScene
-from whshr.load_save_scene import DEFAULT_DESCRIPTION, LOAD, SAVE, LoadSaveScene
+from whshr.load_save_scene import LOAD, SAVE, LoadSaveScene
+from whshr.message_scene import MessageScene
 from whshr.savegame import AUTOSAVE_SLOT, SaveStore
 from whshr.scenes import SceneAssets, SceneMachine
 from tests.test_savegame import GRAPH, MRC, ROWS
 
 CARAVAN = "[WINDOW]\n[POSITION]\nset:x=0\nset:y=0\nset:vx=640\nset:vy=480\n[END]\n" \
           "[HOTSPOT]\nset:x=1\nset:y=1\nset:vx=9\nset:vy=9\nscript:pop.wnd\nres:LoadSaveWindow\n[END]"
+
+
+STRINGS = {500: "Opening Region", 336: "Load", 337: "Save", 307: "Abort"}
+DEFAULT_DESCRIPTION = STRINGS[500]
 
 
 def campaign(**fields):
@@ -37,7 +42,8 @@ class LoadSaveFixture(unittest.TestCase):
             path.write_bytes(b"data")
         self.save_dir = root / "saves"
         self.context = SceneAssets(AssetLocator(root), build(root), AssetCache(), {}, save_dir=self.save_dir)
-        self.context.glue = GlueContent.from_data(resources={"STARTCARAVAN": CARAVAN, "MAINMENU": "[WINDOW]\n[END]"})
+        self.context.glue = GlueContent.from_data(resources={"STARTCARAVAN": CARAVAN, "MAINMENU": "[WINDOW]\n[END]"},
+                                                  strings={"BRTXT": STRINGS})
         self.store = SaveStore(self.save_dir)
 
 
@@ -120,26 +126,24 @@ class LoadSaveTests(LoadSaveFixture):
         self.assertTrue(machine.active.editing)
         self.assertEqual(machine.active.text, DEFAULT_DESCRIPTION)
 
-    def test_given_the_prompt_when_typing_then_the_text_is_capped_at_25_characters_and_backspace_works(self):
+    def test_given_the_prompt_when_typing_then_the_text_is_capped_at_24_characters_and_backspace_works(self):
         machine, _ = self._dialog(SAVE, campaign())
         machine.handle("slot:0")
         machine.handle("ok")
-        for _ in range(len(DEFAULT_DESCRIPTION)):
-            machine.handle("edit:backspace")
+        machine.handle("edit:backspace")  # the pre-selected default goes in one stroke
 
         for character in "abcdefghijklmnopqrstuvwxyz0123":
             machine.handle(f"text:{character}")
+        self.assertEqual(machine.active.text, "abcdefghijklmnopqrstuvwx")
         machine.handle("edit:backspace")
 
-        self.assertEqual(machine.active.text, "abcdefghijklmnopqrstuvwx")
+        self.assertEqual(machine.active.text, "abcdefghijklmnopqrstuvw")
 
     def test_given_a_description_when_confirmed_then_the_slot_is_written_and_the_caravan_returns(self):
         state = campaign(coffers=321)
         machine, caravan = self._dialog(SAVE, state)
         machine.handle("slot:1")
         machine.handle("ok")
-        for _ in DEFAULT_DESCRIPTION:
-            machine.handle("edit:backspace")
         for character in "Before Nuln":
             machine.handle(f"text:{character}")
 
@@ -206,8 +210,12 @@ class LoadSaveTests(LoadSaveFixture):
 
         machine.handle("ok")
 
-        self.assertIsInstance(machine.active, LoadSaveScene)
-        self.assertIn("damaged", machine.active.error)
+        box = machine.active
+        self.assertIsInstance(box, MessageScene)
+        self.assertEqual(box.caption, "Error")
+        self.assertIn("damaged", box.text)
+        machine.handle("ok")  # section 8.3.9: the game resets to a fresh main menu
+        self.assertIsInstance(machine.active, MainMenuScene)
 
     def test_given_no_save_directory_then_the_dialog_opens_disabled_with_a_message(self):
         self.context.save_dir = None
@@ -221,6 +229,81 @@ class LoadSaveTests(LoadSaveFixture):
         machine.handle("cancel")
         self.assertIs(machine.active, caravan)
 
+    # -- section 8 fidelity ----------------------------------------------------------------------
+
+    def test_given_the_dialog_then_labels_come_from_brtxt_ids_by_mode(self):
+        save, _ = self._dialog(SAVE, campaign())
+        load, _ = self._dialog(LOAD)
+
+        self.assertEqual((save.active.ok_label, save.active.cancel_label), ("Save", "Abort"))
+        self.assertEqual((load.active.ok_label, load.active.cancel_label), ("Load", "Abort"))
+
+    def test_given_the_prompt_then_the_default_text_is_selected_and_typing_replaces_it_through_the_name_filter(self):
+        machine, _ = self._dialog(SAVE, campaign())
+        machine.handle("slot:2")
+        machine.handle("ok")
+        self.assertTrue(machine.active.text_selected)
+
+        for character in "A_b<-\u00e9":
+            machine.handle(f"text:{character}")
+
+        self.assertEqual(machine.active.text, "Ab")
+        self.assertFalse(machine.active.text_selected)
+
+    def test_given_an_occupied_slot_then_a_longer_stored_description_is_cut_to_24(self):
+        self.store.write(3, "x" * 24, campaign())
+        machine, _ = self._dialog(SAVE, campaign())
+        machine.handle("slot:3")
+        machine.handle("ok")
+        machine.handle("text:y")
+        machine.handle("text:z")
+
+        self.assertEqual(machine.active.text, "yz")
+
+    def test_given_an_emptied_prompt_then_the_empty_description_is_written_untrimmed(self):
+        machine, _ = self._dialog(SAVE, campaign())
+        machine.handle("slot:0")
+        machine.handle("ok")
+        machine.handle("edit:backspace")
+
+        machine.handle("ok")
+
+        self.assertEqual(self.store.info(0).description, "")
+
+    def test_given_a_write_failure_then_an_error_box_shows_and_the_dialog_still_closes_to_the_caravan(self):
+        self.save_dir.parent.joinpath("saves").write_text("not a directory")  # the directory cannot be created
+        machine, caravan = self._dialog(SAVE, campaign())
+        machine.handle("slot:0")
+        machine.handle("ok")
+
+        machine.handle("ok")
+
+        self.assertIsInstance(machine.active, MessageScene)
+        self.assertIn("Save Game Failed", machine.active.text)
+        machine.handle("ok")
+        self.assertIs(machine.active, caravan)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FailureTextTests(unittest.TestCase):
+    """notes/native-windows.md §8.3.11: "<Save|Load> Game Failed", a new line, then "Error Code:<n>"."""
+
+    def test_an_operating_system_failure_shows_its_error_number(self):
+        from whshr.load_save_scene import SAVE_FAILED, failure_text
+        from whshr.savegame import SaveError
+        try:
+            try:
+                raise PermissionError(13, "denied")
+            except OSError as cause:
+                raise SaveError("cannot write slot 1") from cause
+        except SaveError as error:
+            self.assertEqual(failure_text(SAVE_FAILED, error), "Save Game Failed\nError Code:13")
+
+    def test_an_engine_failure_shows_its_reason_in_place_of_the_number(self):
+        from whshr.load_save_scene import LOAD_FAILED, failure_text
+        from whshr.savegame import SaveError
+        self.assertEqual(failure_text(LOAD_FAILED, SaveError("slot 2 is not a save of this version")),
+                         "Load Game Failed\nError Code:slot 2 is not a save of this version")

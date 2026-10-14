@@ -153,12 +153,12 @@ class SaveStoreTests(unittest.TestCase):
         with self.assertRaises(SaveError):
             self.store.load_into(2, campaign())
 
-    def test_given_a_saved_slot_then_the_listing_shows_its_description_cut_to_25_characters(self):
+    def test_given_a_saved_slot_then_the_listing_shows_its_description_cut_to_24_characters(self):
         self.store.write(3, "x" * 40, campaign())
 
         info = self.store.slots()[3]
 
-        self.assertEqual(info.description, "x" * 25)
+        self.assertEqual(info.description, "x" * 24)
         self.assertTrue(info.saved_at)
         self.assertIsNone(self.store.slots()[AUTOSAVE_SLOT])
 

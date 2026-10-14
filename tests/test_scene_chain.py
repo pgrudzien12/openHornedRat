@@ -14,6 +14,8 @@ from whshr.glue_content import GlueContent
 from whshr.glue_runtime import GlueInput
 from whshr.glue_scene import GlueScene
 from whshr.load_save_scene import LOAD, LoadSaveScene
+from whshr.campaign_scenes import MainMenuScene
+from whshr.message_scene import MessageScene
 from whshr.savegame import SaveStore
 from whshr.scenes import SceneAssets, SceneMachine
 
@@ -160,7 +162,7 @@ class SceneChainTests(unittest.TestCase):
 
         self.assertEqual(loaded.active.window, "STARTCARAVAN")
 
-    def test_given_a_damaged_scene_chain_then_the_load_reports_it_and_stays_in_the_dialog(self):
+    def test_given_a_damaged_scene_chain_then_the_load_reports_it_in_an_error_box_and_resets_to_the_main_menu(self):
         machine, _, _ = self._mission_caravan("SELECTSCRIPT")
         self._save(machine)
         import json
@@ -171,8 +173,10 @@ class SceneChainTests(unittest.TestCase):
 
         loaded, _ = self._load()
 
-        self.assertIsInstance(loaded.active, LoadSaveScene)
-        self.assertIn("damaged", loaded.active.error)
+        self.assertIsInstance(loaded.active, MessageScene)
+        self.assertIn("damaged", loaded.active.text)
+        loaded.handle("ok")
+        self.assertIsInstance(loaded.active, MainMenuScene)
 
 
 if __name__ == "__main__":
