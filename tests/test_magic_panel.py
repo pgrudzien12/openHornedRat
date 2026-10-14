@@ -221,5 +221,43 @@ class PowerDisplayTests(MagicPanelCase):
                          list(hud_module.POWER_MARKER_POSITIONS[:4]))
 
 
+
+class PowerCheatTests(MagicPanelCase):
+    def press(self, key, ctrl=False):
+        """A key press; the view's events go to the scene."""
+        mod = pygame.KMOD_CTRL if ctrl else 0
+        events = list(self.view.events(SimpleNamespace(type=pygame.KEYDOWN, key=key, mod=mod)))
+        for event in events:
+            self.scene.handle(event, SimpleNamespace())
+        return events
+
+    def test_ctrl_m_fills_the_player_pool_to_eight_and_leaves_the_enemy_pool(self):
+        self.battle.event_bus._power = magic.PowerPools(1, 3)
+
+        self.assertEqual(self.press(pygame.K_m, ctrl=True), [("fill_power",)])
+
+        self.assertEqual((self.battle.player_power, self.battle.event_bus.power.enemy), (8, 3))
+
+    def test_ctrl_m_on_an_empty_pool_makes_a_costly_spell_usable(self):
+        self.battle.event_bus._power = magic.PowerPools(0, 0)
+        self.assertFalse(self.battle.spell_usable("W", FIREBALL))
+
+        self.press(pygame.K_m, ctrl=True)
+
+        self.assertTrue(self.battle.spell_usable("W", FIREBALL))
+
+    def test_ctrl_m_on_a_full_pool_keeps_it_at_eight(self):
+        self.battle.event_bus._power = magic.PowerPools(8, 8)
+
+        self.press(pygame.K_m, ctrl=True)
+
+        self.assertEqual(self.battle.player_power, 8)
+
+    def test_m_without_ctrl_does_not_touch_the_pool(self):
+        self.press(pygame.K_m)
+
+        self.assertEqual(self.battle.player_power, 4)
+
+
 if __name__ == "__main__":
     unittest.main()
