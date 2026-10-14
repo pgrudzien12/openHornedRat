@@ -213,11 +213,11 @@ its idle loop rolls the wheels; the `*CWAG` files have one 1-phase intact group 
 
 Not crewed. Actions 2, 3 and 7 share one program: if the figure is on the ground it first **takes off** (32 ticks:
 two laps of a 12-frame rotor sequence with an altitude step of +4 every 4 ticks, up to 32), then loops the rotor
-`0,1,2,3,1,2` (6 ticks). Actions 1, 4 and 5 share another: depending on whether it was flying when the request came,
-it either keeps its height or **lands** (the same 32 ticks with −4 steps), then loops a slow rotor
+`0,1,2,3,1,2` (6 ticks). Actions 1, 4 and 5 share another: if the figure came **straight from** the 2/3/7 program it
+**hovers** (keeps its height); otherwise, if flying, it **lands** (corrected October 2026, `airborne_units.md` §A3.2) (the same 32 ticks with −4 steps), then loops a slow rotor
 `0,0,0,1,1,1,2,2,2,3,3,3,1,1,1,2,2` (17 ticks). Dead: in the air it falls for 32 ticks with smoke puffs, then wreck
-group 32 with a blast (radius 72, fire damage) and a medium camera shake (`camera_shake.md`; corrected: not a battle message); on the ground, wreck group 32 held. 🟡 The
-"keeps height" branch and the blast's numbers should be confirmed before implementing; its shoot has no fire step.
+group 32 with a blast (radius 72, fire damage) and a medium camera shake (`camera_shake.md`; corrected: not a battle message); on the ground, wreck group 32 held. The
+hover rule, the timing and the blast are specified in `airborne_units.md` §A3.2 and §A5; its shoot has no fire step.
 
 `MoleMachine` uses its own non-directional frame loops and a demolition sequence; out of scope (3D mesh unit).
 
