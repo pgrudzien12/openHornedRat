@@ -21,6 +21,8 @@ Companion reports, cited rather than repeated: `spell_effects.md` §2.1 and §4 
   program**, not on whether it was flying (§A3.2). The crash step is the camera shake (already corrected).
 - `threat_events_nodes.md` §6 open question: the "far side" approach point is used only for ordinary troops
   footprints. Monster, war machine, wagon, building and airborne footprints are approached at their centre (§B2.4).
+- `spell_effects.md` §3.4: a terminal impact against a flier's point is made at height 0 and never strikes an
+  airborne unit (§A8).
 - The engine's flier height of 72 is not a height: 72 is the radius of the bomb and of the crash blast. Full flying
   height is **32** (§A2).
 
@@ -233,6 +235,96 @@ the tick the elevation returns to 0, then the event step (event 53) and back to 
 the flying state for every rule (height-0 blasts and area spells skip it, missiles hit it only in its raised
 window). 🟡 Not watched in play; also the hop sets one further unit state whose meaning was not identified.
 
+
+## A8. Spell projectiles against a flier whose elevation changes ✅
+
+This section completes `spell_effects.md` §2–§3 for airborne targets. Heights are above the ground under the point.
+F is a flier with elevation E (airborne while E > 0, band `E ≤ h ≤ E + 16`, §A2), footprint radius 25 (3 × 3 cells,
+`game_rules.md` monster footprints, `movement_formation.md` bounding radius).
+
+### A8.1 The rules
+
+1. **The aim height is fixed at launch.** It is decided once, from the **pre-scatter** aim point, using the same
+   pick as the player's Fire click (`building_map_object.md` §4): the first unit or building whose pick circle
+   (footprint radius, at least 48) contains the aim point. If that object is airborne at the launch tick,
+   `A = 8 + E(launch)` (half the flier's object height 16, plus its elevation); otherwise there is no aim height. Then
+   comes the per-spell floor (`spell_effects.md` §3.0). After the scatter, the destination's ground is read at the
+   scattered point, and the flight line from `ground(start) + L` to `ground(destination) + A` is **fixed for the
+   whole flight**. Nothing re-reads the target's elevation, and nothing homes in on it in height. The only exception
+   is the Hunting Spear's horizontal re-aim (§A8.3).
+2. **Every in-flight test uses the target's *current* band.** A bolt hits F on a tick only if its point is inside
+   F's footprint (`d < 25`) and its height on that tick lies within F's band at that moment. A flier that changed
+   height since the launch can therefore be passed over or under.
+3. **The terminal impact is always at height 0**, for 18-tick bolts and beams alike. So it **never hits a unit
+   that is airborne at that tick**. It hits ground units, and a flier that has fully landed (E = 0), at the
+   destination. Correction to `spell_effects.md` §3.4: "against a flying unit the terminal impact happens normally"
+   means only that the bolt is not below ground and so reaches its terminal impact. That impact cannot strike the
+   airborne flier. A Fireball hits an airborne flier only **in flight**.
+4. **Launch heights do not use the caster's elevation**, except Gaze of Mork (`spell_effects.md` §3.0). Fireball,
+   Lightning, Warp Lightning, Piercing Bolts, Burning Head and Pestilent Breath start at their fixed launch height
+   above the ground under an airborne Wyvern shaman, as if it stood on the ground. The Hunting Spear starts at 8
+   above the ground.
+
+### A8.2 Heights near the target, flat ground
+
+The caster is 288 from F, the bolt is aimed at F's figure and the scatter draws are all 0, so the destination is
+F's position. `r` = remaining ticks (`spell_effects.md` §2.3), `d` = distance from the destination.
+
+**Fireball** (L = 0, floor 0, 18 ticks, arc as in §3.4). Height = `arc(r) + A − trunc(A × r / 18)`:
+
+| r | d | inside F (d < 25) | height if A = 40 (F at 32 at launch) | height if A = 0 (F on the ground at launch) |
+|---|---|---|---|---|
+| 3 | 48 | no | 36 | 2 |
+| 2 | 32 | no | 37 | 1 |
+| 1 | 16 | **yes** | **38** | **0** |
+| 0 | 0 | **yes** | **39**, then terminal at 0 | **−1**, then removed (below ground, no terminal) |
+
+**Lightning** (beam, L = 4, floor 4, `N = 1 + trunc(288 / 20) = 15`, ends at the first point with `d < 40`). Height =
+`4 + A + trunc((4 − A) × r / 15)`:
+
+| r | d | inside F | height if A = 40 | height if A = 4 (F on the ground) |
+|---|---|---|---|---|
+| 4 | 76 | no | 35 | 8 |
+| 3 | 57 | no | 37 | 8 |
+| 2 | 38 | **no** | 40, then the beam ends: **terminal at height 0** | 8, then terminal at height 0 |
+
+So **a beam aimed straight at a flier never enters its footprint**: it stops 38 short of the destination, and its
+terminal impact at height 0 cannot hit an airborne unit. A beam hits an airborne flier only when the scatter puts
+the destination far enough past or beside it that a tested point at `d ≥ 40` falls inside the footprint (vector 5
+below). The same holds for Gaze of Mork and Warp Lightning. Against a grounded flier the terminal impact hits it as
+it hits any ground unit.
+
+### A8.3 Hunting Spear
+
+- The spear flies at **8 above the ground** everywhere (`spell_effects.md` §3.5). Its in-flight tests hit an
+  airborne flier only when `E ≤ 8 ≤ E + 16`, i.e. at **E = 4 or 8**. Higher than that, the spear **passes under it**:
+  it never stops on the flier and re-aims at the flier's centre every 3 ticks. It parks under the flier, follows it
+  when it moves, and **expires when its 180-tick timer runs out**, unless something else stops it.
+- If something else stops it (a ground unit under the flier, an obstacle), that costs 1 S as usual. If the stop
+  point is inside the flier's footprint, the next tick's **strike chain** runs there. The chain tests at the
+  spear's **absolute** height, ground + 8 (the high-ground quirk of §3.5). It hits the flier only if
+  `E ≤ ground + 8 ≤ E + 16`. On low ground (ground height near 0) that again means E ≤ 8. On ground 24–40 high, a
+  flier at 32 *is* struck by the chain (quirk). The chain also strikes every ground unit containing the point, for
+  example the unit under the flier.
+- **Landing mid-chase:** the first in-flight test after E has dropped to 8 or less, with the spear inside the
+  footprint, hits the flier (the arrival hit, S as it stands, D3 wounds) and stops the spear. The next tick runs the
+  chain at ground + 8, which hits a flier at E ≤ 8 on low ground and a landed one (E = 0, ground rules).
+
+### A8.4 Test vectors (flat ground at height 0, caster 288 away, no scatter unless stated)
+
+| # | Before | Action | After |
+|---|---|---|---|
+| 1 | Wyvern F hovering at E = 32 throughout | Fireball cast at F | A = 40. r = 3, 2 outside the footprint. **r = 1: height 38 within 32…48 → in-flight hit** (S4, 1 wound, no save, silent), bolt stops; no terminal impact |
+| 2 | F at 32 at launch, starts landing on the launch tick (32 → 0 over 40 ticks); at the r = 1 and r = 0 tests F is at E = 20 (or 16) | Fireball | A = 40 (fixed). r = 1: 38 > 20 + 16 → miss; r = 0: 39 → miss; terminal at height 0 → F not hit (airborne); ground units at the destination are hit. **F unharmed.** Hit at r = 1 only if E ≥ 24 then |
+| 3 | F on the ground at launch (A = 0), takes off during the flight; E = 12 (or 16) at the r = 1 and r = 0 tests | Fireball | r = 1: height 0 < 12 → miss; r = 0: height −1 → miss, bolt removed (below ground), no terminal. **F unharmed.** Had F still been at E = 0, r = 1 would hit it (ground rules) |
+| 4 | F hovering at 32 | Lightning cast at F | A = 40; tested points r = 4, 3, 2 at d = 76, 57, 38: never inside the footprint; beam ends at r = 2; terminal at height 0 → **F not hit** |
+| 5 | as 4, but the scatter puts the destination 28 beyond F along the line of fire | Lightning | at r = 2 (d = 38 from the destination, 10 from F): inside the footprint, height 40 within 32…48 → **hit** (S6, D3, no save), beam stops; on that same tick the terminal impact at height 0 still runs (`spell_effects.md` §2.4) and can only strike ground units |
+| 6 | F landing; E = 20 when the beam's last points pass | Lightning, scattered as in 5 | height 40 > 36 → miss; terminal at height 0 → F not hit |
+| 7 | F on the ground (E = 0) | Lightning | A = 4; terminal at the destination at height 0 → **F hit** like any ground unit |
+| 8 | F hovering at 32, nothing else nearby | Hunting Spear at F | spear at height 8 reaches F's centre and keeps re-aiming there (8 < 32); **expires after 180 ticks, no hit** |
+| 9 | F hovering at 32 over an enemy-side ground unit G that contains F's centre | Hunting Spear at F | the spear's in-flight test hits G (S6, D3), stopping it inside F's footprint; next tick chain at height 8 (S6, 5 … 1, one random model each): hits G again, misses F; effect ends |
+| 10 | F at 32 while the spear chases, then lands; spear under F | landing | while E ≥ 12: misses. First in-flight test with E ≤ 8: **arrival hit** on F (S6 if nothing else was hit, D3, no save); next tick chain S6 … 1 (S as it stands) at height 8 hits F (E ≤ 8, band contains 8, or E = 0, ground) |
+| 11 | airborne Wyvern shaman at E = 32 casts a Fireball | launch | starts at ground + 0 under the caster (no elevation added); Gaze of Mork would start at 32 |
 
 ---
 
