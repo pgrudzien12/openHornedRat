@@ -652,9 +652,11 @@ rear rank trailing, converging again once the facing settles.
   battle phase; the pre-battle rules are documented in [deployment.md](deployment.md).
 
 **When a unit breaks and turns to run**, every model that is currently at rest is given a pause of
-`(per-model stagger value & 7) × 3 + 6` — **6 to 27 ticks** — with its timed-pause flag set, and is scattered
-slightly from its position. If the unit is in melee, **each model's opponent is given the same pause**, so both
-sides visibly hesitate together at the moment of the break before the routers turn about.
+`(per-model stagger value & 7) × 3 + 6` — **6 to 27 ticks** — with its timed-pause flag set. If the unit is in
+melee, **each model's opponent is given the same pause**, so both sides visibly hesitate together at the moment of
+the break before the routers turn about. Every model's **destination** (not its position) is then scattered, and
+throughout the flight each figure keeps re-rolling it every 24–66 ticks, so a fleeing unit is a milling mob trailing
+about `2n` units behind its anchor, not a formation (corrected October 2026; `notes/flight_figure_movement.md`).
 
 ### Figure animation: actions, timing, and why the figures are never in step ✅
 
