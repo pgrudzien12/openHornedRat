@@ -658,8 +658,10 @@ historical — any grid is left:
 Then both clear the contact latch `0x1000000`, so a later overlap can start a fresh engagement handshake.
 
 **Not done:** no event to anyone, no re-form, no facing change, `current_target`/`engaged_enemy` kept, `attack_dir`
-kept. The opponent learns through the **per-tick pairing**: when it has no enemy left on the grid it leaves too
-and gets event 0x19 ("opponent gone") — `game_rules.md` caller table. The leaving unit's models are no longer
+kept. The opponent learns through the **per-tick pairing**: if it is now the **only unit on the grid** it gets
+event **0x30** (from the first tick after the grid's creation segment); if other units are still on the grid and it
+finds no enemy, it leaves and gets event 0x19 with its target already cleared (`lone_unit_on_grid.md`, corrected
+October 2026). The leaving unit's models are no longer
 driven by the grid; with no re-form pending they walk back to their old slots under the catch-up walk. Shipped
 scripts therefore follow the opcode with `ReformToScriptRanks` or `Rally`, or switch to 163.
 
@@ -678,7 +680,7 @@ Difference between the two:
 
 | Before | Instruction | After |
 |---|---|---|
-| A and enemy B alone on grid G, B owner | A: `LeaveSharedGrid` | A: `0x200/0x400/0x800` clear, models unpaired, target still B, condition true; G holds B only; on the next pairing pass B finds no enemy, leaves G (freed) and receives event 0x19 |
+| A and enemy B alone on grid G, B owner | A: `LeaveSharedGrid` | A: `0x200/0x400/0x800` clear, models unpaired, target still B, condition true; G holds B only; B's pairing step finds it is alone and sends it **0x30** (not 0x19) on every tick outside G's creation segment; B's 0x30 handler leaves G (freed) and re-forms (`lone_unit_on_grid.md`) |
 | A owner of G with enemy B and furniture F | A: `LeaveSharedGrid` | ownership passes to whichever of B/F comes first in the unit array; G count 2, nobody else leaves |
 | A not on a grid | `LeaveSharedGrid` | no change, condition false |
 | A owner of G, only furniture F left after A | A: `LeaveGrid` | F becomes owner, is alone and is furniture → F leaves too, G freed; condition unchanged |
