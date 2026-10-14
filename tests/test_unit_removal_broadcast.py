@@ -4,7 +4,8 @@ kept firing at an empty spot); a script's RemoveFromBattle is quiet."""
 
 import unittest
 
-from whshr import animation, combat
+from tests.script_helpers import FakeDll, word
+from whshr import animation, behaviour, combat, interpreter
 from whshr.engine import Battle, Regiment
 from whshr.rules import Side
 
@@ -65,6 +66,61 @@ class RemovalBroadcastTests(unittest.TestCase):
         self.kill_last_model(animation.DEATH_MISSILE)
         self.battle.tick()
         self.assertEqual(state.current_target, ("X", 0))
+
+
+BATTLE_EDGE = {"status": ["bnd_ACTIVE", "bnd_BATTLEEDGE"],
+               "lines": [[100, 100, 300, 100], [300, 100, 300, 300], [300, 300, 100, 300], [100, 300, 100, 100]]}
+
+
+class FlightDepartureTests(unittest.TestCase):
+    """Vector (d): a routing unit whose centre leaves the battle area only broadcasts 0x0E; the units aiming at it
+    keep their targets until their own scripts drop it (notes/unit_removal_broadcast.md 3, 5.4)."""
+
+    def make(self, script_dll):
+        self.fugitive = Regiment("X", "Fugitives", 290, 200, 128, Side.ENEMY, models=1, ranks=1, speed_per_tick=20)
+        self.chaser = Regiment("Y", "Chasers", 150, 150, 0, Side.PLAYER, models=1, ranks=1, speed_per_tick=0)
+        self.chaser.attack_target = "X"
+        self.battle = Battle(500, 500, [self.fugitive, self.chaser], boundaries=[BATTLE_EDGE], seed=1995,
+                             script_dll=script_dll)
+        self.battle.phase = "battle"
+        self.state = self.battle.event_bus.unit_states["Y"]
+        self.state.current_target = ("X", 0)
+        self.fugitive.routing = True
+        self.fugitive.flee_x, self.fugitive.flee_y = 1000, 200
+
+    def run_to_departure(self):
+        for _ in range(50):
+            self.battle.tick()
+            if self.fugitive.flight_departed:
+                return
+        self.fail("the fugitive never left the battle area")
+
+    def test_given_scripts_then_departure_leaves_the_chasers_targets_to_its_script(self):
+        self.make(FakeDll([behaviour.END]))
+        self.run_to_departure()
+        self.assertEqual(self.chaser.attack_target, "X")
+        self.assertEqual(self.state.current_target, ("X", 0))
+        self.assertEqual([(e.code, e.source) for e in self.state.event_queue if e.code == 0x0E], [(0x0E, "X")])
+
+    def test_given_the_0x0E_then_query_23_and_drop_target_forget_the_fugitive(self):
+        self.make(FakeDll([behaviour.END]))
+        self.run_to_departure()
+        departure = next(e for e in self.state.event_queue if e.code == 0x0E)
+        interp = self.battle.interpreter
+        assert interp is not None
+        self.state.current_event = departure
+        interp.op_Query(self.state, 23, [word("Query"), 23], "Y", 0, self.battle.rng)
+        self.assertEqual([e.code for e in self.state.event_queue if e.code == 0x19], [0x19])
+        interp.op_DropTarget(self.state, None, [word("DropTarget")], "Y", 0, self.battle.rng)
+        self.assertIsNone(self.chaser.attack_target)
+        self.assertIsNone(self.state.current_target)
+
+    def test_given_no_scripts_then_departure_clears_the_targets_itself(self):
+        self.make(None)
+        self.run_to_departure()
+        self.assertIsNone(self.chaser.attack_target)
+        self.assertIsNone(self.state.current_target)
+        self.assertEqual([(e.code, e.source) for e in self.state.event_queue if e.code == 0x0E], [(0x0E, "X")])
 
 
 if __name__ == "__main__":
