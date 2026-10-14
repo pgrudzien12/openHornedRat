@@ -1046,6 +1046,22 @@ continues. Frame semantics: `notes/save_resume.md` §6, `notes/glue_interpreter.
 Read: `SAVE/savegame.0..5` (headers), on Load the whole file. Written: on Save the four working files and `savegame.<slot>`. No option or campaign counter is touched by the
 dialog itself (Load restores them all).
 
+#### 8.3.11 Prompt look, error boxes, disabled colour ✅
+- **Prompt edit field**: the field is filled with the prompt's parchment colour (palette index 151 of §8.3.6) as its
+  background, with black text. On a Save the initial text (the slot's description, or `BRTXT 500` for an empty slot)
+  is **selected** when the prompt opens and the field has the keyboard focus. The selection is drawn by the standard
+  Windows edit control in the **system highlight colours** (no game colour or art), i.e. inverted text on the
+  system selection colour until the first key replaces or deselects it.
+- **Prompt caption**: the literal `Enter Save Description` (no string id), black, at (16, 10). The Save prompt uses
+  the same widget as the New Game name prompt (§7.3.2), with its own caption and the character filter on.
+- **Error boxes**: plain **system message boxes**, OK button only, no icon, caption `Error`. Save failure text:
+  `Save Game Failed` on one line, then `Error Code:<n>` (the OS error number). Load failure: `Load Game Failed`, then
+  `Error Code:<n>`. After a Save failure the dialog has already closed. After a Load failure the game resets to the
+  main menu (§8.3.10).
+- **Disabled (olive) text**: the olive colour is the rule for **any** of the dialog's buttons drawn in the disabled
+  state, but **only OK is ever disabled** (no slot selected, or an empty slot in Load). Cancel and the slot rows are
+  always enabled, so they never show olive.
+
 ### 8.4 Asset inventory ✅ (sizes measured from `BITMAP.DLL`; palette-index copies, index 0 transparent unless stated)
 | Asset | Kind | Source | Size, frames, rule | Use |
 |---|---|---|---|---|
@@ -1115,7 +1131,7 @@ Existing: `whshr/load_save_scene.py`, `whshr/frontend/load_save_view.py`, `whshr
 - 🟡 Whether the prompt caption uses font slot 2 (same face assumed).
 - 🟡 Backdrop/art compose order and corner transparency (not observed).
 - ⬜ A corrupt `savegame.N` (unreadable header): slot counted occupied, label text undefined.
-- ⬜ Exact wording of the literals (empty-slot label "-Empty-" known; error phrases known in shape only).
+- Literals: settled in §8.3.11 (prompt caption, error boxes); empty-slot label "-Empty-".
 - Close-out: open item 6 of `notes/builtin_widgets.md` §8 is answered (`BRTXT 500`, constant).
 
 ## 9. Debrief screen (post-battle pages) ✅
