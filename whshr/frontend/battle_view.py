@@ -463,6 +463,7 @@ class BattleView(SceneView[BattleScene]):
                     if order == "leave_battle" and self.scene.battle.can_leave:
                         # Stop before the scene's final objective evaluation and result bookkeeping (§3).
                         self.music.release()
+                        self._stop_battle_sounds()
                     self.order_mode = None
                     self._set_cursor("default")
                     # Stay on the sub-panel for repeat-friendly formation buttons so the
@@ -931,10 +932,17 @@ class BattleView(SceneView[BattleScene]):
         # plays yet: which SFX resource is the UI feedback cue is not identified in notes/sfx.md.
         self.event_log.append(f"Cannot {order}!")
 
+    def _stop_battle_sounds(self) -> None:
+        """A lasting effect's loop (a Curse has no natural end) must not outlive the battle."""
+        battle_sounds: BattleSounds | None = getattr(self, "battle_sounds", None)  # tests build views without __init__
+        if battle_sounds is not None:
+            battle_sounds.release()
+
     def refresh(self) -> None:
         """A decided objective keeps playing; only a final result means battlefield departure."""
         if self.scene.battle.result is not None:
             self.music.release()
+            self._stop_battle_sounds()
         else:
             self.music.update(0.0, paused=self.scene.battle.paused)
 
@@ -1457,6 +1465,7 @@ class BattleView(SceneView[BattleScene]):
 
     def release(self) -> None:
         self.music.release()
+        self._stop_battle_sounds()
         for resource in (self.mesh, self.effects, *(getattr(self, name) for name in ("buildings", "building_buffer")
                                                      if hasattr(self, name)), self.sprites,
                          self.vertex_buffer, self.effect_buffer,

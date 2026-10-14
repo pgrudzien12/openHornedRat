@@ -65,6 +65,15 @@ class BeamTest(unittest.TestCase):
         visuals.advance([])
         self.assertEqual((visuals.meshes(), visuals.sprites()), ([], []))
 
+    def test_a_cancelled_beam_vanishes_at_once_with_no_flash(self):
+        # A Warp Lightning dispelled or cancelled by its caster's removal mid-flight: no ending is ever reported.
+        visuals = ProjectileVisuals()
+        for tick in range(6):
+            visuals.advance([shot(spell_effects.WARP_LIGHTNING, 20.0 * tick)])
+        self.assertTrue(len(visuals.meshes()) > 1)
+        visuals.advance([])
+        self.assertEqual((visuals.meshes(), visuals.sprites(), visuals.shots), ([], [], {}))
+
     def test_each_beam_has_its_own_flash(self):
         for code, first in ((spell_effects.WARP_LIGHTNING, 522), (spell_effects.GAZE, 464)):
             visuals = ProjectileVisuals()
