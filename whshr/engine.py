@@ -7,7 +7,7 @@ import random
 from typing import Any, Callable, Literal, cast
 
 from . import animation, battle_grid, behaviour, buildings, combat, deployment, formation, interpreter, map_objects, navigation, npc_merge, ranged, visibility
-from . import birds as bird_flock, control_piece as control_pieces, magic, objectives as objective_table, spell_effects, steering
+from . import birds as bird_flock, camera_shake as camera_shakes, control_piece as control_pieces, magic, objectives as objective_table, spell_effects, steering
 from . import nodes as node_table
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
@@ -920,6 +920,7 @@ class Battle:
         self.collapse_puffs: list[buildings.Puff] = []
         self.muzzle_puffs: list[MuzzlePuff] = []  # gun shots' muzzle puffs (_spawn_muzzle_puff), drawn by the frontend
         self.death_blasts: list[Any] = []
+        self.camera_shake = camera_shakes.CameraShake()  # presentation only (notes/camera_shake.md)
         self.ctrl_held = False
         self.ground_height: Callable[[float, float], float] = lambda x, y: 0.0
         # {node id: (x, y)} from the battle's own [NODES] section (whshr.script.load_battle),
@@ -1138,6 +1139,16 @@ class Battle:
         if self.view_rect is None:
             return regiment.visible_to_player
         return regiment.screen_mark and not (regiment.side == Side.ENEMY and regiment.hidden)
+
+    def shake_camera(self, offsets: tuple[float, ...]) -> None:
+        """Start (or restart) the camera shake from this tick's step (notes/camera_shake.md 4). No random draws."""
+        self.camera_shake.start(self.tick_count, offsets)
+
+    @property
+    def camera_shake_offset(self) -> float:
+        """The eye's vertical offset (mesh units) for the view of the last stepped tick; 0 with no shake. A pause
+        freezes it, since no tick is stepped (the accepted engine choice of notes/camera_shake.md 4)."""
+        return self.camera_shake.offset(self.tick_count - 1)
 
     def refresh_screen_marks(self) -> None:
         """End-of-tick refresh of every regiment's drawn mark; scripts read the previous tick's value."""

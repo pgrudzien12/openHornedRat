@@ -73,7 +73,8 @@ class Projection:
 
     def __init__(self, width: int, height: int, field_width: float, field_height: float, yaw: float, pitch: float,
                  zoom: float, target_x: float, target_z: float, projection: str = "orthographic",
-                 distance: float = DEFAULT_DISTANCE, fov: float = DEFAULT_FOV, target_height: float = 0.0) -> None:
+                 distance: float = DEFAULT_DISTANCE, fov: float = DEFAULT_FOV, target_height: float = 0.0,
+                 eye_lift: float = 0.0) -> None:
         if projection not in PROJECTIONS:
             raise ValueError(f"projection must be one of: {', '.join(PROJECTIONS)}")
         self.width, self.height = width, height
@@ -92,7 +93,8 @@ class Projection:
                    -math.cos(self.yaw) * math.sin(self.pitch))
         horizontal = (math.sin(self.yaw) * math.cos(self.pitch), math.sin(self.pitch),
                       math.cos(self.yaw) * math.cos(self.pitch))
-        self.eye: Vec3 = (target_x + distance * horizontal[0], target_height + distance * horizontal[1],
+        # `eye_lift` raises the perspective eye without re-aiming it, so the image translates (the camera shake).
+        self.eye: Vec3 = (target_x + distance * horizontal[0], target_height + distance * horizontal[1] + eye_lift,
                           target_z + distance * horizontal[2])
         self.tan_fov_y = math.tan(math.radians(fov) / 2)
         self.tan_fov_x = self.tan_fov_y * width / height

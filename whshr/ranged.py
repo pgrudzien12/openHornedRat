@@ -9,7 +9,7 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from . import animation, map_objects
+from . import animation, camera_shake, map_objects
 from .battle_events import BattleEvent
 from .rules import hostile_sides, wfb_to_wound
 
@@ -685,6 +685,8 @@ def _step_death_blasts(battle: Battle) -> None:
             combat.resolve_death_blast(battle, x, y,
                                        combat.WARPFIRE_BLAST if kind == "warpfire" else combat.GIANT_BLAST)
         battle.events.append(BattleEvent("Death blast.", "death_blast", kind_name=kind, x=x, y=y))
+        if kind == "giant":
+            battle.shake_camera(camera_shake.MEDIUM)  # camera_shake.md 5: right after the Giant's death blast
 
 
 def tick(battle: Battle) -> None:

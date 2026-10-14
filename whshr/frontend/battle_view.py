@@ -1374,8 +1374,10 @@ class BattleView(SceneView[BattleScene]):
         super().draw()
         field, camera = self.scene.field, self.camera
         width, height = self.gpu.target.size
+        # The shake moves only the drawn view; picking keeps the unshaken camera (notes/camera_shake.md 6).
         projection = camera.projection(width, height, field.width, field.height,
-                                       field.ground_height(camera.target_x, camera.target_y))
+                                       field.ground_height(camera.target_x, camera.target_y),
+                                       self.scene.battle.camera_shake_offset)
         self.camera_buffer.write(CAMERA.pack(
             *projection.eye, 0.0, *projection.right, 0.0, *projection.up, 0.0, *projection.view_direction, 0.0,
             1 / projection.tan_fov_x, 1 / projection.tan_fov_y, NEAR, FAR,
