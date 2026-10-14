@@ -40,13 +40,21 @@ OK_LABEL_ID = {SAVE: 337, LOAD: 336}
 CANCEL_LABEL_ID = 307
 DEFAULT_DESCRIPTION_ID = 500
 STRING_TABLE = "BRTXT"
-# PROVISIONAL: the original's literals have no string id (section 8.4); these are the engine's own wording.
-# The empty-slot label is the one known verbatim ("-Empty-").
+# Short literals of the original's dialog, which have no string id (sections 8.4, 8.3.11).
 EMPTY_SLOT_LABEL = "-Empty-"
 PROMPT_CAPTION = "Enter Save Description"
 FALLBACK_DEFAULT_DESCRIPTION = "Saved game"  # only when BRTXT cannot be read (focused tests)
 ERROR_CAPTION = "Error"
-SAVE_FAILED, LOAD_FAILED = "Save Game Failed.", "Load Game Failed."
+SAVE_FAILED, LOAD_FAILED = "Save Game Failed", "Load Game Failed"
+
+
+def failure_text(head: str, error: SaveError) -> str:
+    """The error box text (section 8.3.11): the head line, then "Error Code:" and the operating-system error number.
+    PROVISIONAL: a failure of the engine's own (a damaged save, another version) has no such number; its reason is
+    shown in its place."""
+    cause = error.__cause__
+    code = cause.errno if isinstance(cause, OSError) and cause.errno is not None else str(error)
+    return f"{head}\nError Code:{code}"
 
 
 def _campaign_from_installation(context: SceneAssets, save_dir: Path) -> "CampaignState":
@@ -180,7 +188,7 @@ class LoadSaveScene(Scene):
             self.store.write(self.selected, self.text, self.campaign, self.parent)
         except SaveError as error:
             # Section 8.3.8: an error box, then the dialog closes as after a success.
-            return Transition(MessageScene(self.parent, ERROR_CAPTION, f"{SAVE_FAILED} {error}"), "save failed")
+            return Transition(MessageScene(self.parent, ERROR_CAPTION, failure_text(SAVE_FAILED, error)), "save failed")
         return Transition(self.parent, "game saved")
 
     def _load(self, context: SceneAssets) -> Transition | None:
@@ -193,6 +201,6 @@ class LoadSaveScene(Scene):
             # Section 8.3.9: an error box, then the game resets to the main menu.
             menu = MainMenuScene(log_dir=getattr(self.parent, "log_dir", None),
                                  seed=getattr(self.parent, "seed", DEFAULT_SEED))
-            return Transition(MessageScene(menu, ERROR_CAPTION, f"{LOAD_FAILED} {error}"), "load failed")
+            return Transition(MessageScene(menu, ERROR_CAPTION, failure_text(LOAD_FAILED, error)), "load failed")
         # A save with no scene chain (an older one) resumes on the start caravan.
         return Transition(scene or GlueScene(campaign=campaign, window="STARTCARAVAN"), "game loaded")

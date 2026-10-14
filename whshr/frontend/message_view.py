@@ -34,7 +34,9 @@ class MessageView(DialogView[MessageScene]):
         self._append(panel, PANEL_ORIGIN)
         height = self.font.font.height
         self._center(self.scene.caption, py + 8, YELLOW, x=px, width=PANEL_SIZE[0])
-        for index, line in enumerate(wrap(self.font, self.scene.text, PANEL_SIZE[0] - 2 * MARGIN)[:3]):
+        lines = [part for paragraph in self.scene.text.split("\n")
+                 for part in wrap(self.font, paragraph, PANEL_SIZE[0] - 2 * MARGIN)]
+        for index, line in enumerate(lines[:3]):
             self._center(line, py + 8 + (2 + index) * height, WHITE, x=px, width=PANEL_SIZE[0])
         self._bitmap("LoadSaveBtn0" + ("Dn" if self.pressed else "Up"), (BUTTON_X, BUTTON_Y))
         self._center(OK_LABEL, BUTTON_Y + (BUTTON_SIZE[1] - height) // 2, BLACK, x=BUTTON_X, width=BUTTON_SIZE[0])

@@ -30,7 +30,10 @@ PROMPT_ART, PROMPT_ORIGIN, CAPTION_OFFSET, EDIT_OFFSET, EDIT_SIZE = "EditScroll"
 TENT_ART, TENT_OFFSET = "LoadSaveTent{}", (6, 6)
 LABEL_X, LABEL_WIDTH, LABEL_Y, LABEL_CELL = 24, 207, 1, 30
 # Text colour is palette index 206 (near-black in palette pair 2); a disabled control is olive RGB.
-TEXT_INDEX, DISABLED = 206, (127, 127, 0)
+TEXT_INDEX, DISABLED = 206, (127, 127, 0)  # olive: only OK is ever drawn disabled (§8.3.11)
+# The description prompt (§8.3.11): black caption and text, the edit field filled with the parchment colour, and the
+# pre-selected text in the system selection colours. PROVISIONAL: the system colours are the classic defaults.
+PARCHMENT_INDEX, SELECTION_BACKGROUND, SELECTION_TEXT = 151, (0, 0, 128), (255, 255, 255)
 RED = (255, 96, 96)  # engine error line (no save directory)
 BLACK = (0, 0, 0)  # fallback when the palette has no entry 206
 
@@ -100,12 +103,24 @@ class LoadSaveView(DialogView[LoadSaveScene]):
         """The modal one-line description box (24 characters max) on the `EditScroll` panel."""
         px, py = PROMPT_ORIGIN
         self._bitmap(PROMPT_ART, PROMPT_ORIGIN)
-        for text, offset, size in ((PROMPT_CAPTION, CAPTION_OFFSET, EDIT_SIZE),
-                                   (self.scene.text + ("" if self.scene.text_selected else "_"), EDIT_OFFSET, EDIT_SIZE)):
-            label = self.gpu.text(size, self.font, color=self.text_colour, background=None, padding=0,
-                                  align="left", fixed_width=True)
-            label.set_lines((text,))
-            self.labels.append((label, (px + offset[0], py + offset[1])))
+        colours = self.palette.colours
+        parchment = colours[PARCHMENT_INDEX] if len(colours) > PARCHMENT_INDEX else (220, 200, 150)
+        field = pygame.Surface(EDIT_SIZE)
+        field.fill(parchment)
+        self._append(field, (px + EDIT_OFFSET[0], py + EDIT_OFFSET[1]))
+        caption = self.gpu.text(EDIT_SIZE, self.font, color=BLACK, background=None, padding=0, align="left",
+                                fixed_width=True)
+        caption.set_lines((PROMPT_CAPTION,))
+        self.labels.append((caption, (px + CAPTION_OFFSET[0], py + CAPTION_OFFSET[1])))
+        text = self.scene.text if self.scene.text_selected else self.scene.text + "_"
+        if self.scene.text_selected and text:
+            highlight = pygame.Surface((min(self.font.size(text)[0], EDIT_SIZE[0]), EDIT_SIZE[1]))
+            highlight.fill(SELECTION_BACKGROUND)
+            self._append(highlight, (px + EDIT_OFFSET[0], py + EDIT_OFFSET[1]))
+        edit = self.gpu.text(EDIT_SIZE, self.font, color=SELECTION_TEXT if self.scene.text_selected else BLACK,
+                             background=None, padding=0, align="left", fixed_width=True)
+        edit.set_lines((text,))
+        self.labels.append((edit, (px + EDIT_OFFSET[0], py + EDIT_OFFSET[1])))
 
     # -- input --------------------------------------------------------------------------------
 

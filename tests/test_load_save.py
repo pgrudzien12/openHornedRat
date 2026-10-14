@@ -286,3 +286,24 @@ class LoadSaveTests(LoadSaveFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FailureTextTests(unittest.TestCase):
+    """notes/native-windows.md §8.3.11: "<Save|Load> Game Failed", a new line, then "Error Code:<n>"."""
+
+    def test_an_operating_system_failure_shows_its_error_number(self):
+        from whshr.load_save_scene import SAVE_FAILED, failure_text
+        from whshr.savegame import SaveError
+        try:
+            try:
+                raise PermissionError(13, "denied")
+            except OSError as cause:
+                raise SaveError("cannot write slot 1") from cause
+        except SaveError as error:
+            self.assertEqual(failure_text(SAVE_FAILED, error), "Save Game Failed\nError Code:13")
+
+    def test_an_engine_failure_shows_its_reason_in_place_of_the_number(self):
+        from whshr.load_save_scene import LOAD_FAILED, failure_text
+        from whshr.savegame import SaveError
+        self.assertEqual(failure_text(LOAD_FAILED, SaveError("slot 2 is not a save of this version")),
+                         "Load Game Failed\nError Code:slot 2 is not a save of this version")
