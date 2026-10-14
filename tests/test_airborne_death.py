@@ -116,3 +116,16 @@ class CrashBlastTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DyingFrameTests(unittest.TestCase):
+    """The view draws a collapsing figure of a flier whose last figure is dying (no live figure left)."""
+
+    def test_a_dying_last_figure_uses_its_own_action(self):
+        from whshr.frontend.battle_view import figure_frame
+
+        w = wyvern(elevation=0)
+        battle = battle_of(w)
+        combat.kill_models(w, [0], battle, animation.DEATH_ORDINARY)
+        self.assertEqual((w.melee_models, len(w.dying)), ([], 1))
+        self.assertEqual(figure_frame(w, w.dying[0].model), animation.current(w.dying[0].model, w.model_family(w.dying[0].model)))
