@@ -34,7 +34,7 @@ from ..formation import SPRITE_PIXEL_WORLD_UNITS
 from ..rules import Side
 from ..battle_scene import BattleScene
 from ..battle3d import Projection
-from ..battlefield import SpriteSheet
+from ..battlefield import Battlefield, SpriteSheet
 from ..scenes import SceneEvent
 from .cursors import GameCursors
 from .battle_text import display_text, fill_message, reaction_text
@@ -283,6 +283,16 @@ class BattleView(SceneView[BattleScene]):
             depth=depth, framebuffer=[target.color, target.depth],
             vertex_buffers=zengl.bind(self.vertex_buffer, VERTEX_FORMAT, 0, 1, 2, 3),
             vertex_count=len(field.vertices) // VERTEX_FLOATS,
+        )
+        # Building pieces (intact or ruined), re-baked only when a building is destroyed (_refresh_buildings).
+        self.building_state: frozenset[str] | None = None
+        self.building_vertices = field.building_vertices(())
+        self.building_buffer = ctx.buffer(size=max(VERTEX_FLOATS * 4, self._building_capacity(field)))
+        self.buildings = ctx.pipeline(
+            vertex_shader=MESH_VERTEX_SHADER, fragment_shader=MESH_FRAGMENT_SHADER,
+            layout=[camera_layout, {"name": "textures", "binding": 0}],
+            resources=mesh_resources, depth=depth, framebuffer=[target.color, target.depth],
+            vertex_buffers=zengl.bind(self.building_buffer, VERTEX_FORMAT, 0, 1, 2, 3), vertex_count=0,
         )
         self.effect_capacity = 65536
         self.effect_buffer = ctx.buffer(size=self.effect_capacity * VERTEX_FLOATS * 4)
@@ -794,6 +804,12 @@ class BattleView(SceneView[BattleScene]):
                 if at not in scene_depths:
                     depth = picking.mesh_depth_at(projection, at[0], at[1], field.vertices,
                                                   field.texture_layers, field.texture_size, NEAR, FAR)
+                    building_vertices = getattr(self, "building_vertices", None)
+                    if building_vertices:
+                        building_depth = picking.mesh_depth_at(projection, at[0], at[1], building_vertices,
+                                                               field.texture_layers, field.texture_size, NEAR, FAR)
+                        if building_depth is not None and (depth is None or building_depth < depth):
+                            depth = building_depth
                     if field.effect_meshes or getattr(field, "dragon_meshes", {}):
                         effects_depth = picking.mesh_depth_at(projection, at[0], at[1], self._effect_vertices(),
                                                               field.texture_layers, field.texture_size, NEAR, FAR)
@@ -1010,6 +1026,23 @@ class BattleView(SceneView[BattleScene]):
                   f"{capture.remaining} ticks left" for capture in scene.captures if capture.running
                   and capture.unit_id in scene.battle.regiments)
         return lines + tuple(self.event_log)
+
+    @staticmethod
+    def _building_capacity(field: Battlefield) -> int:
+        """Bytes for every building piece at its larger mesh (intact or ruin)."""
+        everything = field.building_vertices(piece.identifier for piece in field.building_pieces)
+        return 4 * max(len(everything), len(field.building_vertices(())))
+
+    def _refresh_buildings(self) -> None:
+        """Re-bake the building pieces when the set of ruined ones changes (notes/building_ruins.md 2, 3)."""
+        state = frozenset(self.scene.battle.ruined)
+        if state == self.building_state:
+            return
+        self.building_state = state
+        self.building_vertices = self.scene.field.building_vertices(state)
+        if self.building_vertices:
+            self.building_buffer.write(self.building_vertices.tobytes())
+        self.buildings.vertex_count = len(self.building_vertices) // VERTEX_FLOATS
 
     def _append_doors(self, vertices: array[float]) -> None:
         """The gate's doors at their hinges, swung or lifted by the control piece's animation
@@ -1355,6 +1388,9 @@ class BattleView(SceneView[BattleScene]):
         self.soldiers = sum(regiment.models for regiment in self.scene.battle.regiments.values()
                             if regiment.active)
         self.mesh.render()
+        self._refresh_buildings()
+        if self.buildings.vertex_count:
+            self.buildings.render()
         effect_vertices = self._effect_vertices()
         if effect_vertices:
             self.effect_buffer.write(effect_vertices.tobytes())
@@ -1377,7 +1413,9 @@ class BattleView(SceneView[BattleScene]):
 
     def release(self) -> None:
         self.music.release()
-        for resource in (self.mesh, self.effects, self.sprites, self.vertex_buffer, self.effect_buffer,
+        for resource in (self.mesh, self.effects, *(getattr(self, name) for name in ("buildings", "building_buffer")
+                                                     if hasattr(self, name)), self.sprites,
+                         self.vertex_buffer, self.effect_buffer,
                          self.instance_buffer, self.camera_buffer,
                          self.textures, self.atlas, self.palette):
             self.gpu.ctx.release(resource)

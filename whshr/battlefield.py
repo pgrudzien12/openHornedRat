@@ -15,7 +15,7 @@ from pathlib import Path
 import struct
 from typing import Any
 
-from . import control_piece, legacy, pbx
+from . import buildings, control_piece, legacy, pbx
 from .image import load_rgb_palette
 from .paths import Installation
 from .script import View, load_battle, resource_name
@@ -63,6 +63,21 @@ def furniture_meshes(game: Installation) -> dict[str, str]:
     """Script furniture name (casefolded) -> scenery mesh name in SCENERY.PBX."""
     _, furniture, _ = exe_tables(game.require("WHSHR.EXE"))
     return {entry["name"].casefold(): entry["file"] + ".XOF" for entry in furniture if entry["file"]}
+
+
+BUILDING_RECORD_FLAG = 0x08  # furniture-table flags: the record is a building type (notes/building_ruins.md 1)
+RUIN_RECORD_OFFSET = 59  # the ruin of the building in furniture record i is record i + 59 (same section)
+
+
+def furniture_ruins(game: Installation) -> dict[str, str]:
+    """Building furniture name (casefolded) -> its ruin's scenery mesh name, read from the furniture table."""
+    _, furniture, _ = exe_tables(game.require("WHSHR.EXE"))
+    ruins: dict[str, str] = {}
+    for index, entry in enumerate(furniture):
+        ruin_index = index + RUIN_RECORD_OFFSET
+        if entry["flags"] & BUILDING_RECORD_FLAG and ruin_index < len(furniture) and furniture[ruin_index]["file"]:
+            ruins[entry["name"].casefold()] = furniture[ruin_index]["file"] + ".XOF"
+    return ruins
 
 
 def sprite_files(game: Installation, category: str) -> dict[str, str]:
@@ -285,6 +300,18 @@ def build_atlas(sheets: Sequence[SpriteSheet], width: int = ATLAS_WIDTH) -> tupl
     return (width, height), bytes(atlas)
 
 
+@dataclass(frozen=True)
+class BuildingPiece:
+    """A building-type furniture piece, drawn apart from the static scenery so that it can turn into its ruin:
+    the building identifier (`buildings.PREFIX` + file index), its placement, and the intact and ruin meshes."""
+
+    identifier: str
+    item: Item
+    ground: float
+    intact: Mesh
+    ruin: Mesh | None
+
+
 @dataclass
 class Battlefield:
     """Everything needed to present one battle: script, terrain, baked static geometry and sprites."""
@@ -304,6 +331,22 @@ class Battlefield:
     ground_texture_count: int = 0
     scenery_texture_count: int = 0
     dragon_meshes: dict[int, Mesh] = field(default_factory=dict)
+    building_pieces: list["BuildingPiece"] = field(default_factory=list["BuildingPiece"])
+    ambient: float = DEFAULT_AMBIENT
+    light: Sequence[float] = DEFAULT_LIGHT
+
+    def building_vertices(self, ruined: Iterable[str]) -> array[float]:
+        """The building pieces baked as world triangles: each one intact, or as its ruin piece (the same placement,
+        intact mesh gone) once its identifier is in `ruined` (notes/building_ruins.md 2). A ruin with no mesh in this
+        installation keeps the intact piece."""
+        gone = set(ruined)
+        vertices: array[float] = array("f")
+        for piece in self.building_pieces:
+            mesh = piece.ruin if piece.identifier in gone and piece.ruin is not None else piece.intact
+            vertex, normal = scenery_transform(piece.item, piece.ground)
+            bake_mesh(mesh, self.ground_texture_count, self.scenery_texture_count, vertex, normal, self.ambient,
+                      self.light, vertices)
+        return vertices
 
     @property
     def width(self) -> int:
@@ -369,14 +412,21 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
     vertices = bake_mesh(ground["meshes"][0], 0, len(ground["textures"]), ambient=ambient, light=light)
     meshes = {mesh["name"].casefold(): mesh for mesh in scenery["meshes"]}
     furniture = furniture_meshes(game)
+    ruins = furniture_ruins(game)
     missing: list[str] = []
-    for item in script["scenery"]:
+    pieces: list[BuildingPiece] = []
+    for index, item in enumerate(script["scenery"]):
         mesh = meshes.get((furniture.get(item["name"].casefold()) or "").casefold())
         if mesh is None:
             missing.append(item["name"])
             continue
         x, z = item["x"] / WORLD_PER_MESH, item["y"] / WORLD_PER_MESH
-        vertex, normal = scenery_transform(item, terrain.height(x, z) or 0.0)
+        ground_height = terrain.height(x, z) or 0.0
+        if item["name"] in buildings.TYPES:  # drawn per state (Battlefield.building_vertices)
+            ruin = meshes.get(ruins.get(item["name"].casefold(), "").casefold())
+            pieces.append(BuildingPiece(f"{buildings.PREFIX}{index}", item, ground_height, mesh, ruin))
+            continue
+        vertex, normal = scenery_transform(item, ground_height)
         bake_mesh(mesh, len(ground["textures"]), len(scenery["textures"]), vertex, normal, ambient, light, vertices)
 
     bundled = {name.casefold(): data for name, data in sprites["files"]}
@@ -471,4 +521,5 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
     if any(resource.casefold() == "meshdragon" for resource in troop_resources):
         dragon_meshes = load_dragon_meshes(meshes, furniture)
     return Battlefield(script, terrain, vertices, size, layers, palette, atlas_size, atlas, sheets, ui_sheets,
-                       sorted(set(missing)), effects, len(ground["textures"]), len(scenery["textures"]), dragon_meshes)
+                       sorted(set(missing)), effects, len(ground["textures"]), len(scenery["textures"]), dragon_meshes,
+                       pieces, ambient, light)
