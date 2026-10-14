@@ -178,7 +178,7 @@ class Effect:
     start: tuple[float, float] = (0.0, 0.0)
     dest: tuple[float, float] = (0.0, 0.0)
     aim_height: float = 0.0
-    terminal_height: float = 0.0  # a flying unit's aim height at the destination, else 0 (A 2.4: height 0)
+    launch_height: float | None = None  # Gaze of Mork from an airborne caster: its elevation (airborne_units.md A8.1)
     steps: int = 0
     remaining: int = 0
     flying: bool = False
@@ -518,6 +518,8 @@ def _start(battle: Battle, effect: Effect, caster: Regiment, origin_model: int, 
                           beam=False)
     elif spell in BOLTS:
         bolt = BOLTS[spell]
+        if spell == GAZE and caster.airborne:
+            effect.launch_height = float(caster.elevation)  # notes/airborne_units.md A8.1: only Gaze adds it
         _start_projectile(battle, effect, _origin(caster, origin_model, bolt.start), effect.aim, bolt, caster.bs,
                           magic.SPELLS[spell].range or 1, beam=bolt.beam)
     elif spell == HUNTING_SPEAR:
@@ -600,10 +602,14 @@ def _origin(caster: Regiment, origin_model: int, kind: str) -> tuple[float, floa
 
 
 def flying_aim_height(battle: Battle, x: float, y: float) -> float:
-    """A 2.1: half the height plus the elevation of a flying unit standing at the point, else none."""
+    """A 2.1 and notes/airborne_units.md A8.1: read once at launch at the pre-scatter aim point, picked as a Fire click
+    picks (the first building, then the first unit, whose circle of its footprint radius but at least 48 contains the
+    point): half the object height plus the elevation when that object is an airborne unit, else none."""
+    if battle.fire_pick_building(x, y) is not None:
+        return 0.0
     for unit in battle.regiments.values():
-        if unit.active and unit.airborne and _centre_d(unit, x, y) < unit.bounding_radius():
-            return unit.elevation + UNIT_HEIGHT / 2
+        if unit.active and _centre_d(unit, x, y) < max(unit.bounding_radius(), 48):
+            return unit.elevation + UNIT_HEIGHT / 2 if unit.airborne else 0.0
     return 0.0
 
 
@@ -633,8 +639,7 @@ def _start_projectile(battle: Battle, effect: Effect, start: tuple[float, float]
     dest = (float(math.trunc(dest[0])), float(math.trunc(dest[1])))
     effect.start, effect.dest = start, dest
     effect.x, effect.y = start
-    effect.terminal_height = flying_aim_height(battle, *dest)
-    effect.aim_height = max(effect.terminal_height, float(bolt.aim_floor))
+    effect.aim_height = max(flying_aim_height(battle, *aim), float(bolt.aim_floor))
     effect.steps = steps if steps is not None else 1 + _d(*start, *dest) // BEAM_STEP if beam else FIXED_FLIGHT
     effect.remaining = effect.steps
     effect.strength = bolt.strength
@@ -970,12 +975,13 @@ def _finish(effect: Effect) -> None:
 def _height_above_ground(battle: Battle, effect: Effect, bolt: Bolt, x: float, y: float) -> float:
     """A 2.1: L + line(t) - ground(here), the line running from ground(start) + L to ground(destination) + A."""
     start_ground = effect.line_ground if effect.line_ground is not None else _whole_ground(battle, *effect.start)
-    start_level = start_ground + bolt.launch_height
+    launch = bolt.launch_height if effect.launch_height is None else effect.launch_height
+    start_level = start_ground + launch
     end_level = _whole_ground(battle, *effect.dest) + math.trunc(effect.aim_height)
     # bf003_playtest 8.2: line(r) = trunc((startLevel - endLevel) r / N) + endLevel, whole numbers throughout.
     line = math.trunc((start_level - end_level) * effect.remaining / effect.steps) + end_level if effect.steps \
         else end_level
-    return bolt.launch_height + line - _whole_ground(battle, x, y)
+    return launch + line - _whole_ground(battle, x, y)
 
 
 def _whole_ground(battle: Battle, x: float, y: float) -> int:
@@ -1016,9 +1022,10 @@ def _fly(battle: Battle, effect: Effect, bolt: Bolt) -> bool:
         return True
     terminal = (_d(x, y, dx, dy) < BEAM_TERMINAL) if bolt.beam else r == 0
     if terminal:
-        if impact_test(battle, dx, dy, effect.terminal_height, impact, None, messages=True, source=effect):
+        # notes/airborne_units.md A8.1: always at height 0, so it never strikes a unit airborne on that tick.
+        if impact_test(battle, dx, dy, 0.0, impact, None, messages=True, source=effect):
             _after_hit(battle, effect, bolt, dx, dy)
-        _log_end(battle, effect, "terminal", dx, dy, effect.terminal_height)
+        _log_end(battle, effect, "terminal", dx, dy, 0.0)
         return True
     if hit and bolt.stops:
         _log_end(battle, effect, "hit", x, y, height)
