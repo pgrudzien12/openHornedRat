@@ -390,9 +390,11 @@ def _building(unit: Regiment) -> bool:
     return unit.unit_class in BUILDING_CLASSES
 
 
-def _message(battle: Battle, unit: Regiment, text_id: int) -> None:
+def _message(battle: Battle, unit: Regiment, text_id: int, *text_args: tuple[str, object]) -> None:
+    """A battle message; `text_args` fill its `%s` slots in order (whshr.frontend.battle_text.message_arguments)."""
+    extra: dict[str, object] = {"text_args": [list(argument) for argument in text_args]} if text_args else {}
     battle.events.append(BattleEvent(f"{unit.name}: message {text_id}", "message",
-                                     regiment=unit.identifier, text_id=text_id))
+                                     regiment=unit.identifier, text_id=text_id, **extra))
 
 
 def _move_unit(unit: Regiment, x: float, y: float) -> None:
@@ -442,7 +444,7 @@ def launch(battle: Battle, code: int, caster: Regiment, origin_model: int, x: fl
                                                            and not maddened(battle, target.identifier)))
     if not ok:
         if caster.side == Side.PLAYER:
-            _message(battle, caster, GMTXT_CAST_FAILED)
+            _message(battle, caster, GMTXT_CAST_FAILED, ("unit", caster.identifier), ("spell", spell))
         return False
     if spell in REPLACING or spell == CURSE:
         for old in effects.effects():
@@ -1564,7 +1566,8 @@ def doomwheel_volley(battle: Battle, unit: Regiment) -> None:
                    unit.y + math.floor(_cos(heading) * 96 / 256) + jitter_y)
         if rng.randrange(6) == 5:
             if unit.side == Side.PLAYER:
-                _message(battle, unit, GMTXT_CAST_FAILED)
+                # PROVISIONAL: the reports do not name the spell shown for a bolt; the bolt is a Warp Lightning.
+                _message(battle, unit, GMTXT_CAST_FAILED, ("unit", unit.identifier), ("spell", WARP_LIGHTNING))
             continue
         launch(battle, WARP_LIGHTNING, unit, -1, *aim, innate=True)
 
@@ -1661,7 +1664,8 @@ def dispel_pass(battle: Battle, protected: Regiment, chance: int, source: Effect
         x, y = _position(battle, effect)
         if _d(x, y, protected.x, protected.y) < DISPEL_REACH:
             cancel(battle, effect)
-            _message(battle, protected, GMTXT_DISPELLED)
+            # spell_lasting_effects.md B 5.1: "<spell> has been dispelled by <P's name>"
+            _message(battle, protected, GMTXT_DISPELLED, ("spell", effect.code), ("unit", protected.identifier))
             dispelled = True
     if dispelled and source is not None and source.code == MORK_SAVE_UZ:
         for effect in effects.effects():
