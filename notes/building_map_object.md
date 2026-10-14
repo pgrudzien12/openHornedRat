@@ -95,7 +95,8 @@ Already public in `player_missile_orders.md` §5. Restated, with the details #16
 - **Destroyed buildings are not excluded**. A Fire click on a ruin targets it: text 2007, event 30 (37 for an
   independent Archers unit), with the building as source. 🟡 No later check for "destroyed" was found in the shooting
   loop's target tests, so the unit would keep shooting at it. Its shots are stopped by the still-existing object and
-  do no damage. This was not observed on screen.
+  do no damage. This was not observed on screen. Details, including who stops shooting at the destruction:
+  `building_ruins.md` §5.
 - **Order between candidates**: the **first** object in the original's object list wins, not the nearest one.
   Objects are created in battle-file order: `[OBJECTS]`, then `[SCENERY]` (which creates the buildings), then
   `[UNITS]`. So **a building comes before every regiment placed at load**. A Fire click inside both a building's circle
