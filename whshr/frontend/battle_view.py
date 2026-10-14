@@ -37,7 +37,7 @@ from ..battle3d import Projection
 from ..battlefield import SpriteSheet
 from ..scenes import SceneEvent
 from .cursors import GameCursors
-from .battle_text import display_text, reaction_text
+from .battle_text import display_text, fill_message, reaction_text
 from .battle_sound import BattleSounds
 from .battle_music import BattleMusic
 from .ranged_sound import MissileSounds
@@ -952,15 +952,11 @@ class BattleView(SceneView[BattleScene]):
             if hasattr(event, "kind") and event.kind in {"ranged_message", "projectile_hit", "message"}:
                 text_id = event.data.get("text_id")
                 message = self.scene.battle.text_resources.get(text_id, str(event)) if isinstance(text_id, int) else str(event)
-                if "%s" in message:
-                    named = event.data.get("target") or event.data.get("regiment")
-                    named_regiment = self.scene.battle.regiments.get(named) if isinstance(named, str) else None
-                    display_name = event.data.get("target_name") or (named_regiment.name if named_regiment else None)
-                    if isinstance(display_name, str):
-                        try:
-                            message = message % display_name
-                        except (TypeError, ValueError):
-                            pass
+                def unit_name(identifier: str) -> str | None:
+                    regiment = self.scene.battle.regiments.get(identifier)
+                    return regiment.name if regiment is not None else None
+
+                message = fill_message(message, event.data, self.scene.battle.text_resources, unit_name)
                 self.battle_log.append(("", display_text(message)))
                 self.log_scroll = 0
             if hasattr(event, "kind") and event.kind == "react":

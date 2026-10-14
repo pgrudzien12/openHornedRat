@@ -1405,8 +1405,11 @@ class Battle:
         bearing = int(256 - 256 * math.atan2(x - unit.x, -(y - unit.y)) / math.pi) % 512
         difference = abs(int(unit.direction) - bearing) % 512
         if distance >= 576 or (not unit.in_melee and min(difference, 512 - difference) >= 71):
+            # notes/spell_blades_flock_items.md 4.4: message 2021 with the item's name as the "spell"
+            item = "ItemBannerOfWrath" if code == 0x105 else "ItemGrudgeBringer"
             self.events.append(BattleEvent(f"{unit.name} cannot use the item at that point.", "message",
-                                           regiment=unit.identifier, text_id=2021))
+                                           regiment=unit.identifier, text_id=2021,
+                                           text_args=[["unit", unit.identifier], ["item", item]]))
             return False
         spell = spell_effects.LIGHTNING if code == 0x105 else spell_effects.FIREBALL
         return spell_effects.launch(self, spell, unit, -1, x, y)

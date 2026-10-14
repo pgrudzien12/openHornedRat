@@ -3985,12 +3985,14 @@ class ScriptInterpreter:
         """Some model is playing action 7, the cast pose -- which is also the shoot pose (section 3)."""
         return unit is not None and any(model.action == animation.SHOOT for model in unit.melee_models)
 
-    def _battle_message(self, unit_id: str, text_id: int) -> None:
-        """A battle message by its game-text id; the frontend loads the text from the installation."""
+    def _battle_message(self, unit_id: str, text_id: int, text_args: tuple[tuple[str, object], ...] = ()) -> None:
+        """A battle message by its game-text id; the frontend loads the text from the installation and fills its
+        `%s` slots from `text_args` (whshr.frontend.battle_text.message_arguments)."""
         unit = self.battle.regiments.get(unit_id)
         name = unit.name if unit is not None else unit_id
+        extra: dict[str, object] = {"text_args": [list(argument) for argument in text_args]} if text_args else {}
         self.battle.events.append(BattleEvent(f"{name}: message {text_id}", "message",
-                                              regiment=unit_id, text_id=text_id))
+                                              regiment=unit_id, text_id=text_id, **extra))
 
     def op_IfCastingAnimation(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:
@@ -4260,7 +4262,8 @@ class ScriptInterpreter:
               and (unit.in_melee or self._arc_ok(unit, x, y, self.LAUNCH_ARC)))
         if not ok:
             if unit.side == Side.PLAYER:
-                self._battle_message(unit_id, 2021)
+                # game_rules.md magic: "The <caster> attempted to cast <spell> but failed."
+                self._battle_message(unit_id, 2021, (("unit", unit_id), ("spell", code % spell_effects.UNDISPELLABLE_MARKER)))
             return False
         return spell_effects.launch(self.battle, code, unit, origin_model, x, y)
 

@@ -131,6 +131,8 @@ class ActivatedItemTests(unittest.TestCase):
         self.assertEqual(spell_effects.table(battle).effects(), [])
         self.assertIn("ItemGrudgeBringer", bearer.used_items)
         self.assertIn(2021, [event.data.get("text_id") for event in battle.pending_feedback])  # reported with the next tick
+        failure = next(event for event in battle.pending_feedback if event.data.get("text_id") == 2021)
+        self.assertEqual(failure.data["text_args"], [["unit", "G"], ["item", "ItemGrudgeBringer"]])
 
     def test_cancelled_or_held_item_remains_used_and_potion_is_once_per_battle(self):
         bearer = unit("G", 0, 0, Side.PLAYER,
@@ -434,6 +436,12 @@ class SpearAndFireballTests(EffectTestCase):
         self.make()
         self.assertFalse(self.launch(spell_effects.HUNTING_SPEAR, 0, 360))
         self.assertEqual(len(self.messages(2021)), 1)
+
+    def test_a_failed_launch_message_names_the_caster_and_the_spell(self):
+        self.make()
+        self.launch(spell_effects.HUNTING_SPEAR, 0, 360)
+        self.assertEqual(self.messages(2021)[0].data["text_args"],
+                         [["unit", "W"], ["spell", spell_effects.HUNTING_SPEAR]])
 
     def test_fireball_at_the_ground_hits_silently_with_its_last_test(self):
         """V7: no terminal impact and no direct-hit message against a ground point."""
@@ -749,6 +757,8 @@ class DispelTests(EffectTestCase):
         self.update()
         self.assertFalse(spell_effects.spell_active(self.battle, "S", spell_effects.ERE_WE_GO))
         self.assertEqual(len(self.messages(2006)), 1)
+        self.assertEqual(self.messages(2006)[0].data["text_args"],  # "<spell> has been dispelled by <unit>"
+                         [["spell", spell_effects.ERE_WE_GO], ["unit", "W"]])
         self.assertEqual(self.effects(), [])
 
     def test_dispel_magic_is_once_per_battle(self):
@@ -824,6 +834,16 @@ class CastPendingTests(EffectTestCase):
         interp.op_CastPending(state, None, [0], "W", 0, random.Random(1))
         self.assertTrue(state.cond_flags)
         self.assertEqual([effect.code for effect in self.effects()], [spell_effects.WARP_LIGHTNING])
+
+    def test_an_out_of_range_cast_message_names_the_caster_and_the_spell(self):
+        self.make(unit("H", 0, 4000, Side.ENEMY))
+        interp = interpreter.ScriptInterpreter(self.battle, self.battle.event_bus, None)
+        state = self.battle.event_bus.unit_states["W"]
+        state.current_target, state.pending_spell = ("H", 0), spell_effects.WARP_LIGHTNING
+        interp.op_CastPending(state, None, [0], "W", 0, random.Random(1))
+        self.assertFalse(state.cond_flags)
+        self.assertEqual(self.messages(2021)[0].data["text_args"],
+                         [["unit", "W"], ["spell", spell_effects.WARP_LIGHTNING]])
 
 
 class AzureAndFlockTests(EffectTestCase):

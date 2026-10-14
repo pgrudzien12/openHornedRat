@@ -24,10 +24,9 @@ import pygame
 
 from .. import magic, spell_effects
 from ..battlefield import Battlefield, SpriteFrame, SpriteSheet
-from ..objectives import ITEM_NUMBERS
 from ..portrait_popup import overlay_frames
 from ..rules import Side
-from .battle_text import display_text
+from .battle_text import item_name, spell_name
 from .gpu import Gpu, ScreenQuad
 
 if TYPE_CHECKING:
@@ -219,9 +218,7 @@ SPELL_TEXT_COLOR = (0, 0, 0)  # black on the light row frame (playtest: light te
 # own width.
 MARK_ACTIVE, MARK_SELECTED, MARK_CAST_ORDERED = 210, 209, 208
 ITEM_NAME_WIDTH = LIST_ROW_SIZE[0] - 10  # an item row has no cost: its name takes the row
-ITEM_NAME_TEXT_BASE = 31000  # GMTXT name id = 31000 + item number (31007 Potion of Strength, game_rules.md)
 ACTIVATED_ITEMS = frozenset({"ItemBannerOfWrath", "ItemGrudgeBringer", "ItemPotionOfStrength"})
-SPELL_NAME_TEXT_BASE = 30003  # GMTXT name id = 30003 + spell code (30004 Wind Blast, notes/player_magic_panel.md 1.1)
 
 # Battle log panel: 4-line scrollable message area, left of the scroll arrows (panel-native coords).
 # Scroll arrows are at (424, 9) and (424, 34); readout ends at ~200; log fills the space between.
@@ -1123,20 +1120,10 @@ class Hud:
         return marks
 
     def _item_name(self, item: str) -> str:
-        """The item's GMTXT name (31000 + its item number, notes/game_rules.md magic item effects), else its id."""
-        texts = self.battle.text_resources if self.battle is not None else {}
-        name = texts.get(ITEM_NAME_TEXT_BASE + ITEM_NUMBERS.index(item)) if item in ITEM_NUMBERS else None
-        if name:
-            return display_text(name)
-        return item.removeprefix("Item").replace("Of", " of ").replace("The", " the ")
+        return item_name(self.battle.text_resources if self.battle is not None else {}, item)
 
     def _spell_name(self, code: int) -> str:
-        texts = self.battle.text_resources if self.battle is not None else {}
-        name = texts.get(SPELL_NAME_TEXT_BASE + code)
-        if name:
-            return display_text(name)
-        spell = magic.SPELLS.get(code)
-        return spell.name if spell is not None else str(code)
+        return spell_name(self.battle.text_resources if self.battle is not None else {}, code)
 
     def _spell_marks(self, regiment: "Regiment", code: int) -> list[int]:
         if self.battle is None:
