@@ -123,10 +123,8 @@ class LoadSaveView(DialogView[LoadSaveScene]):
             return ()
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             action = self._action_at(event.pos)
-            # PROVISIONAL: §1.1 gives the rule for every native button; this dialog is not
-            # separately observed yet (issue #156).
-            if action in ("ok", "cancel"):
-                self._click_cue(4)
+            # No click cue anywhere in this dialog: its buttons are plain push buttons, not the shared native buttons
+            # of §1.1, and the slot rows and the prompt are silent too (notes/native-windows.md §8.3).
             self.pressed = action if action in ("ok", "cancel") else None
             if action and action.startswith("slot:"):
                 return (action,)
@@ -135,7 +133,6 @@ class LoadSaveView(DialogView[LoadSaveScene]):
             action, self.pressed = self.pressed, None
             self.refresh()
             if action and action == self._action_at(event.pos):
-                self._click_cue(3)
                 return (action,)
         return ()
 
