@@ -219,11 +219,10 @@ def _order_volleys(battle: Battle) -> None:
             unit.reload_ticks = max(0.0, unit.reload_ticks - 1)
         if unit.volley_countdown is None:
             unit.volley_age = 0
-        if battle.interpreter is not None and not (unit.shooting_mode == "ground" and unit.shooting_code == 17
-                                                   and unit.hud_class == "arch"):
+        if battle.interpreter is not None:
             # notes/script_shooting.md 5.1: with behaviour scripts running, every ordinary shot comes from the
-            # scripts (FireAtTarget on events 34/35); the engine orders no volley of its own. The Gyrocopter
-            # bomb (Ctrl + Fire) is the one player order that bypasses the scripts.
+            # scripts (FireAtTarget on events 34/35); the engine orders no volley of its own. The Gyrocopter's steam
+            # gun and bomb are fired straight from the player's order (Battle.fire_steam_gun, Battle.drop_bomb).
             continue
         if not unit.active or unit.routing or unit.in_melee or unit.braced or unit.attack_target:
             unit.shooting_mode = None
@@ -234,9 +233,9 @@ def _order_volleys(battle: Battle) -> None:
         if aim is None:
             continue
         code = unit.shooting_code or unit.missile_code
-        weapon = SPECIAL[17] if code == 17 and unit.hud_class != "arch" else WEAPONS.get(code or 0) or SPECIAL.get(code or 0)
-        if weapon is None:
-            continue
+        weapon = WEAPONS.get(code or 0) or SPECIAL.get(code or 0)
+        if weapon is None or code == 17:
+            continue  # notes/gyrocopter_steam_gun.md 7: nothing ever fires a Gyrocopter weapon on its own
         # Ground is a single attempted order; its refusal order is readiness, arc, range.
         ground = unit.shooting_mode == "ground"
         if ground and not _ready(unit):
@@ -275,7 +274,7 @@ def _order_volleys(battle: Battle) -> None:
         if not _ready(unit) or unit.moving or unit.turn_order_key is not None:
             continue
         unit.volley_aim = aim
-        unit.volley_countdown = 1 if unit.hud_class == "art" or code in {14, 15} or (code == 17 and unit.hud_class != "arch") else unit.models
+        unit.volley_countdown = 1 if unit.hud_class == "art" or code in {14, 15} else unit.models
         unit.volley_age = 0
         unit.reload_ticks = reload_time(unit)
         battle.events.append(BattleEvent(f"{unit.name} prepares a volley.", "volley",
@@ -296,7 +295,7 @@ def _launch_posts(battle: Battle) -> None:
         if weapon is None:
             continue
         for index in range(posts):
-            if code in {14, 15} or (code == 17 and unit.hud_class != "arch"):
+            if code in {14, 15, 17}:
                 _launch_innate(battle, unit, code, positions[index] if index < len(positions) else (unit.x, unit.y))
                 continue
             if len(battle.projectiles) >= 32:
@@ -319,7 +318,7 @@ def _create_projectile(battle: Battle, unit: Regiment, code: int, weapon: Weapon
     """One ordinary projectile from `origin` at `aim` in pool `slot`: artillery and the bomb roll for a misfire
     first (no projectile, "misfire"); otherwise scatter, height and the flight record ("launched")."""
     first_die = 1
-    if code in ARTILLERY or code == 17:
+    if code in ARTILLERY:
         first_die = battle.rng.randint(1, 6)
         if first_die == 6:
             second = battle.rng.randint(1, 6)
@@ -339,17 +338,82 @@ def _create_projectile(battle: Battle, unit: Regiment, code: int, weapon: Weapon
                * spread * distance / weapon.reach for _ in range(2)]
     radius = battle.rng.randint(24, 48) if code in {5, 11} else weapon.radius
     strength = 4 if code == 7 and distance > 287 else weapon.strength
-    # notes/airborne_units.md B2.7: the bomb drops from the craft's elevation; ordinary missiles never add it.
-    z0 = battle.ground_height(x0, y0) + (unit.elevation if code == 17 else 24 if code in {8, 12} else 0)
-    p = Projectile(unit.identifier, code, x0, y0, z0, aim[0]+offsets[0], aim[1]+offsets[1],
-                   battle.ground_height(*aim), radius, strength, weapon.wounds,
-                   x=x0, y=y0, z=z0,
-                   visual=_visual(code) + ("_alt" if code in BOWS and battle.ctrl_held else ""),
-                   building_strength=weapon.building_strength, slot=slot)
-    battle.projectiles.append(p)
+    z0 = battle.ground_height(x0, y0) + (24 if code in {8, 12} else 0)
+    _spawn(battle, unit, code, weapon, (x0, y0, z0), (aim[0] + offsets[0], aim[1] + offsets[1]),
+           battle.ground_height(*aim), radius, strength, slot)
+    return "launched"
+
+
+def _spawn(battle: Battle, unit: Regiment, code: int, weapon: Weapon, start: tuple[float, float, float],
+           dest: tuple[float, float], dest_height: float, radius: int, strength: int, slot: int) -> None:
+    x0, y0, z0 = start
+    battle.projectiles.append(Projectile(
+        unit.identifier, code, x0, y0, z0, dest[0], dest[1], dest_height, radius, strength, weapon.wounds,
+        x=x0, y=y0, z=z0, visual=_visual(code) + ("_alt" if code in BOWS and battle.ctrl_held else ""),
+        building_strength=weapon.building_strength, slot=slot))
     battle.events.append(BattleEvent(f"{unit.name} launches a missile.", "projectile_launch",
                                      regiment=unit.identifier, code=code, x=x0, y=y0))
+
+
+def projectile_room(battle: Battle) -> bool:
+    """Whether the ordinary projectile pool has a free slot."""
+    return len(battle.projectiles) < 32
+
+
+def drop_bomb(battle: Battle, unit: Regiment) -> str:
+    """The Gyrocopter bomb (notes/gyrocopter_steam_gun.md 4 steps 6-7, 4.1, 4.2): the misfire D6; on a 6 a second D6
+    destroys the craft on a 1 (2018) or loses the shot (2019). Otherwise the D6 d is the scatter: per axis
+    (rand mod (11 - min(BS, 10))) x sign x d, size then sign for x then y, no distance factor; one bomb falls from the
+    craft's current elevation at its own position (notes/airborne_units.md B2.7). "launched", "misfire" or "full"."""
+    occupied = {projectile.slot for projectile in battle.projectiles}
+    slot = next((value for value in range(32) if value not in occupied), None)
+    if slot is None:
+        return "full"
+    rng = battle.rng
+    d = rng.randint(1, 6)
+    if d == 6:
+        if rng.randint(1, 6) == 1 and unit.living_leader_index is not None:
+            _destroy_gyrocopter(battle, unit)
+            _message(battle, unit, 2018)
+        else:
+            # 4.2: a leaderless Gyrocopter has no machine figure to destroy (undefined in the original); engine
+            # deviation: its destroyed misfire is a lost shot.
+            _message(battle, unit, 2019)
+        return "misfire"
+    span = 11 - min(unit.bs, 10)
+    offsets: list[int] = []
+    for _ in range(2):
+        size = rng.randrange(span)
+        offsets.append(size * (1 if rng.randrange(2) == 0 else -1) * d)
+    weapon = WEAPONS[17]
+    dest = (unit.x + offsets[0], unit.y + offsets[1])
+    _spawn(battle, unit, 17, weapon, (unit.x, unit.y, battle.ground_height(unit.x, unit.y) + unit.elevation),
+           dest, battle.ground_height(*dest), weapon.radius, weapon.strength, slot)
     return "launched"
+
+
+def _destroy_gyrocopter(battle: Battle, unit: Regiment) -> None:
+    """notes/gyrocopter_steam_gun.md 4.2: the craft's leader figure dies an ordinary death with no kill credit (an
+    airborne craft crashes through the ordinary death handling), the anchor is cleared, every figure the unit had
+    gets a 50% extra-wound draw (only survivors can take it), and survivors test Leadership or rout."""
+    from . import combat
+    leader = unit.living_leader_index
+    figures = len(unit.melee_models)
+    if leader is not None:
+        combat.kill_models(unit, [leader], battle, animation.DEATH_ORDINARY, clear_credit=True)
+    unit.clear_anchor()
+    unit.model_positions()
+    victims: list[int] = []
+    for index in range(figures):
+        wounded = battle.rng.randrange(2) == 0
+        if wounded and index < len(unit.melee_models):
+            model = unit.melee_models[index]
+            model.wounds_taken += 1
+            if model.wounds_taken >= unit.wounds:
+                victims.append(index)
+    combat.kill_models(unit, victims, battle, animation.DEATH_MISSILE, clear_credit=True)
+    if unit.active and unit.models > 0 and not combat.leadership_test(unit.effective_leadership, battle.rng):
+        combat.start_rout(unit, battle)
 
 
 def launch_shot(battle: Battle, unit: Regiment, origin: tuple[float, float], aim: tuple[float, float]) -> str:
@@ -422,6 +486,10 @@ def _launch_innate(battle: Battle, unit: Regiment, code: int,
         return
     if code == 14:
         _breathe(battle, unit, aim)
+        return
+    if code == 17:
+        from . import spell_effects
+        spell_effects.launch(battle, spell_effects.STEAM_GUN, unit, -1, *aim, innate=True)
         return
     count = battle.rng.randint(1, 6) if code == 15 else 1
     for _ in range(count):
@@ -505,10 +573,9 @@ def _step_innate(battle: Battle) -> None:
             if math.hypot(unit.x-p.x, unit.y-p.y) < unit.bounding_radius():
                 _damage_innate(battle, unit, p)
                 struck.add(unit.identifier)
-                if p.code != 17:
-                    break
+                break
         p.struck = frozenset(struck)
-        if p.elapsed < 9 and (p.code == 17 or not struck):
+        if p.elapsed < 9 and not struck:
             remaining.append(p)
         elif p.elapsed >= 9 and not struck:
             for unit in battle.regiments.values():

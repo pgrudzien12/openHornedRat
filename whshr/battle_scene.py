@@ -284,15 +284,20 @@ class BattleScene(Scene):
                     pass  # not an enemy regiment, the selection is routing, or the target is gone
         elif kind == "fire":
             target_id, point = args[:2]
-            bomb = bool(args[2]) if len(args) > 2 else False
-            if self.selected_id is not None:
+            if self.selected_id is not None and self.battle.steam_gunner(self.selected_id):
+                # notes/gyrocopter_steam_gun.md 3: a Gyrocopter fires its steam gun at the clicked point at once.
+                if point is not None:
+                    try:
+                        self.battle.fire_steam_gun(self.selected_id, tuple(point))
+                    except ValueError:
+                        pass
+            elif self.selected_id is not None:
                 try:
                     # notes/building_map_object.md 4: a building under the click wins over any regiment there.
                     object_index = self.battle.fire_pick_building(*point) if point is not None else None
                     if object_index is not None:
                         target_id = None
-                    text_id = self.battle.order_fire(self.selected_id, target_id, point,
-                                                     object_index=object_index, bomb=bomb)
+                    text_id = self.battle.order_fire(self.selected_id, target_id, point, object_index=object_index)
                     if text_id is not None:
                         self.battle.pending_feedback.append(BattleEvent(
                             f"GMTXT {text_id}", "ranged_message", regiment=self.selected_id,
@@ -300,6 +305,16 @@ class BattleScene(Scene):
                                                            if object_index is not None else None), text_id=text_id))
                 except ValueError:
                     pass
+        elif kind == "bomb":
+            # notes/gyrocopter_steam_gun.md 2, 4: Ctrl on the Fire button, for the focused unit only.
+            if self.selected_id is not None:
+                try:
+                    text_id = self.battle.drop_bomb(self.selected_id)
+                except ValueError:
+                    text_id = None
+                if text_id is not None:
+                    self.battle.pending_feedback.append(BattleEvent(
+                        f"GMTXT {text_id}", "ranged_message", regiment=self.selected_id, text_id=text_id))
         elif kind == "halt":
             if self.selected_id is not None:
                 try:

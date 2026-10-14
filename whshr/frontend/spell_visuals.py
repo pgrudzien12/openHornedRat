@@ -146,9 +146,12 @@ BEAM_ARRIVAL = 40  # spell_effects.md 2.3: the beam's terminal impact distance
 SKULL_FIRST = 32  # the Burning Head: directional frames 32 + d
 SKULL_PUFF_FIRST, SKULL_PUFF_FRAMES = 40, 20
 BREATH_FIRST = 533  # Pestilent Breath: 533 + flight stage
+# The cloud spells (spell_visuals.md 2.6): Pestilent Breath and the Gyrocopter's steam gun, which is drawn the same way
+# with its own grey puffs 591 + stage (notes/gyrocopter_steam_gun.md 6.1; frames from 529 decode with bank +32).
+CLOUD_FIRST: dict[int, int] = {spell_effects.PESTILENT_BREATH: BREATH_FIRST, spell_effects.STEAM_GUN: 591}
 # PROVISIONAL (spell_visuals.md 2.3): the storm sprite's cycle was not traced; each run plays once.
 STORM_FORMING, STORM_RELEASE = (391, 4), (395, 4)
-PROJECTILE_CODES = frozenset({*MESH_SETS, spell_effects.BURNING_HEAD, spell_effects.PESTILENT_BREATH})
+PROJECTILE_CODES = frozenset({*MESH_SETS, spell_effects.BURNING_HEAD, *CLOUD_FIRST})
 
 
 @dataclass(frozen=True)
@@ -280,10 +283,10 @@ class ProjectileVisuals:
             if shot.newest is None or previous[:2] != shot.newest:
                 shot.puffs.append([*previous, 0])
                 shot.newest = (previous[0], previous[1])
-        elif code == spell_effects.PESTILENT_BREATH:
+        elif code in CLOUD_FIRST:
             shot.stage = breath_stage(seen.remaining, seen.steps)
             if shot.last is not None and previous[:2] != here[:2]:
-                shot.clouds.append((*previous, BREATH_FIRST + shot.stage))
+                shot.clouds.append((*previous, CLOUD_FIRST[code] + shot.stage))
         if seen.ending:
             shot.flying = False
             if code in BEAM_FLASHES:
@@ -315,8 +318,8 @@ class ProjectileVisuals:
                 x, y, h = shot.last
                 if shot.code == spell_effects.BURNING_HEAD:
                     drawn.append(DirectionalSprite(SKULL_FIRST, x, y, h, bearing(*shot.heading)))
-                elif shot.code == spell_effects.PESTILENT_BREATH:
-                    drawn.append(Sprite(BREATH_FIRST + shot.stage, x, y, h))
+                elif shot.code in CLOUD_FIRST:
+                    drawn.append(Sprite(CLOUD_FIRST[shot.code] + shot.stage, x, y, h))
             if shot.flash is not None:
                 x, y, age = shot.flash
                 drawn.append(Sprite(BEAM_FLASHES[shot.code][0] + int(age), x, y, 0.0))

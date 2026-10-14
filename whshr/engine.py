@@ -1846,7 +1846,7 @@ class Battle:
 
     def order_fire(self, identifier: str, target_id: str | None = None,
                    point: Point | None = None, *, script: bool = False,
-                   object_index: int | None = None, bomb: bool = False) -> int | None:
+                   object_index: int | None = None) -> int | None:
         """Select a lasting object or one ground attempt; return a GMTXT feedback id."""
         self._require_battle_order()
         unit = self.regiments[identifier]
@@ -1860,10 +1860,6 @@ class Battle:
             raise ValueError("unit is busy")
         if unit.held:  # notes/spell_area_effects.md 3.3: a thorn-held unit does not shoot
             raise ValueError("unit is held")
-        if bomb and unit.shooting_code == 17 and unit.hud_class == "arch":
-            if not unit.airborne:
-                return 2020
-            point, target_id, object_index = (unit.x, unit.y), None, None
         if target_id == identifier:
             mode, feedback = "search", 2017 if unit.independent else 2009
             target_id = None
@@ -1883,7 +1879,7 @@ class Battle:
         unit.waypoints.clear()
         unit.turn_order_key = None
         unit.clear_shooting()
-        if self.interpreter is not None and not script and not bomb:
+        if self.interpreter is not None and not script:
             self._post_fire_event(unit, mode, target_id, point, object_index)
             return feedback
         unit.shooting_target = target_id
@@ -1891,6 +1887,50 @@ class Battle:
         unit.shooting_point = point
         unit.shooting_mode = mode
         return feedback
+
+    def steam_gunner(self, identifier: str) -> bool:
+        """A Gyrocopter (missile code 17, any class): a player Fire order fires its steam gun at once
+        (notes/gyrocopter_steam_gun.md 3)."""
+        unit = self.regiments.get(identifier)
+        return unit is not None and (unit.shooting_code or unit.missile_code) == 17
+
+    def fire_steam_gun(self, identifier: str, point: Point) -> bool:
+        """notes/gyrocopter_steam_gun.md 3: one steam-gun shot at the clicked point, whatever is under it. Dropped
+        silently by the order gate (charging, in melee, broken, pursuing or braced); otherwise no range, arc, reload or
+        hold test, no halt, turn, animation, stored target or script event. True when the shot was launched.
+        Not modelled: the original's effect capacity (its 2021 refusal) and multi-selection (one selected unit)."""
+        self._require_battle_order()
+        unit = self.regiments[identifier]
+        if unit.side != Side.PLAYER or not self.steam_gunner(identifier):
+            raise ValueError("unit has no steam gun")
+        if not unit.active or unit.charging or unit.in_melee or unit.routing or unit.pursuing or unit.braced:
+            return False
+        return spell_effects.launch(self, spell_effects.STEAM_GUN, unit, -1, *point, innate=True)
+
+    def can_bomb(self, identifier: str) -> bool:
+        """notes/gyrocopter_steam_gun.md 2, 4 steps 1-2: Ctrl on the Fire button tries the bomb only for an Archers- or
+        Artillery-class unit with missile code 17 and room in the projectile pool; any other unit ignores Ctrl."""
+        unit = self.regiments.get(identifier)
+        return (unit is not None and unit.side == Side.PLAYER and unit.hud_class in {"arch", "art"}
+                and self.steam_gunner(identifier) and ranged.projectile_room(self))
+
+    def drop_bomb(self, identifier: str) -> int | None:
+        """notes/gyrocopter_steam_gun.md 4: the bomb, at once and without the order gate. Ready to fire (reload elapsed,
+        not held) else 2003; then the reload is stamped; then the flying state else 2020; then the misfire roll
+        (2018/2019); then one bomb from the current elevation at the craft's own position, revealing it. Returns the
+        GMTXT id of a refusal shown by the caller, or None (no success text; misfire texts are shown by the launch)."""
+        self._require_battle_order()
+        if not self.can_bomb(identifier):
+            raise ValueError("unit cannot drop a bomb")
+        unit = self.regiments[identifier]
+        if unit.reload_ticks > 0 or unit.held:
+            return 2003
+        unit.reload_ticks = ranged.reload_time(unit) + 1  # as a scripted launch's stamp (ranged.launch_shot)
+        if not unit.airborne:
+            return 2020
+        if ranged.drop_bomb(self, unit) == "launched":
+            unit.hidden = False
+        return None
 
     def destroy_building(self, building: buildings.Building) -> None:
         """A building at its wounds-to-destroy ends: it stops counting as a target, every live scripted unit gets
