@@ -18,7 +18,7 @@ model counts, `W`), `script_behaviours.md` §2.2–2.5 (collision pass and conta
   the first model; the building never strikes back, and the wounds do not count for the combat result.
 - **Destruction** (first model at `W` wounds, checked every tick): models die at once, event 0x18 goes to **every**
   unit, the building leaves the grid, and the scenery piece becomes its ruin. The building's collision footprint
-  stays (🟡).
+  stays, for single-model types too (`building_map_object.md` §3).
 
 ## 2. Footprint per building type
 
@@ -161,9 +161,11 @@ On the tick the first model has `W` or more wounds (and not already destroyed):
 
 **The ruin**: the scenery piece's size and height change (§2 last column; e.g. `D_Tavern` height 0, `D_TudorChimney`
 48). The building's **collision footprint does not change**: the destroyed building still pushes walking regiments
-apart and still blocks route steering for those not targeting it. 🟡 This was not checked for single-model types,
-whose unit is removed. It can no longer be targeted, and missile hits on it do nothing (no model left). Sight-line
-obstruction uses map objects by radius (`game_rules.md` §8.3), and the ruin piece takes its own size there 🟡.
+apart and still blocks route steering for those not targeting it. This also holds for single-model types, whose
+unit is removed but whose map object is kept (`building_map_object.md` §3). It can no longer be targeted by Attack
+(Fire still picks it), and missile hits on it do nothing (no model left). Sight lines and projectiles still meet the
+building's **original** map object (same radius, original height), not the ruin piece's size
+(`building_map_object.md` §3, corrected October 2026).
 
 ## 8. Test vectors
 
@@ -188,6 +190,6 @@ obstruction uses map objects by radius (`game_rules.md` §8.3), and the ruin pie
 
 - 🟡 Armour save in melee against a building (leader profile armour 0; assumed "no save").
 - 🟡 Combat result and break tests in a fight whose only enemy is a building.
-- 🟡 Timing of the ruin swap after the collapse effect (multi-model types). Footprint persistence for removed
-  single-model types. Sight-line effect of ruins.
+- 🟡 Timing of the ruin swap after the collapse effect (multi-model types). (Footprint persistence for removed
+  single-model types and the sight-line effect of ruins: settled in `building_map_object.md` §3.)
 - 🟡 The T 0 used by missiles looks like an original oversight; reproduce it for parity.
