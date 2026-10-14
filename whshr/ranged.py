@@ -9,7 +9,7 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from . import animation, camera_shake, map_objects
+from . import animation, camera_shake, flight, map_objects
 from .battle_events import BattleEvent
 from .rules import hostile_sides, wfb_to_wound
 
@@ -164,8 +164,8 @@ def _blocked_crossbow(battle: Battle, unit: Regiment, point: tuple[float, float]
     if (unit.shooting_code or unit.missile_code) != 2:
         return False
     for other in battle.regiments.values():
-        if other is unit or not other.active or other.side in hostile_sides(unit.side):
-            continue
+        if other is unit or not other.active or other.airborne or other.side in hostile_sides(unit.side):
+            continue  # notes/airborne_units.md B2.7: an airborne friend is not on the crossbow's line
         gap, t = _segment_distance((unit.x, unit.y), point, (other.x, other.y))
         if 0 < t < 1 and gap < other.bounding_radius():
             return True
@@ -339,7 +339,8 @@ def _create_projectile(battle: Battle, unit: Regiment, code: int, weapon: Weapon
                * spread * distance / weapon.reach for _ in range(2)]
     radius = battle.rng.randint(24, 48) if code in {5, 11} else weapon.radius
     strength = 4 if code == 7 and distance > 287 else weapon.strength
-    z0 = battle.ground_height(x0, y0) + (72 if code == 17 else 24 if code in {8, 12} else 0)
+    # notes/airborne_units.md B2.7: the bomb drops from the craft's elevation; ordinary missiles never add it.
+    z0 = battle.ground_height(x0, y0) + (unit.elevation if code == 17 else 24 if code in {8, 12} else 0)
     p = Projectile(unit.identifier, code, x0, y0, z0, aim[0]+offsets[0], aim[1]+offsets[1],
                    battle.ground_height(*aim), radius, strength, weapon.wounds,
                    x=x0, y=y0, z=z0,
@@ -518,7 +519,8 @@ def _step_innate(battle: Battle) -> None:
 
 
 def _damage_unit(battle: Battle, unit: Regiment, projectile: Projectile,
-                 direct: bool, margin_picks: int = 0) -> None:
+                 direct: bool, margin_picks: int = 0, death_kind: int = animation.DEATH_MISSILE,
+                 quiet: bool = False) -> None:
     from . import combat
     if not unit.active:
         return
@@ -550,7 +552,9 @@ def _damage_unit(battle: Battle, unit: Regiment, projectile: Projectile,
         model.wounds_taken = getattr(model, "wounds_taken", 0) + wounds
         if model.wounds_taken >= unit.model_wounds(model):
             victims.add(index)
-    killed = combat.kill_models(unit, victims, battle, animation.DEATH_MISSILE, killer=projectile.source)
+    killed = combat.kill_models(unit, victims, battle, death_kind, killer=projectile.source)
+    if quiet:
+        return
     battle.events.append(BattleEvent(f"{unit.name} is hit by a missile.", "projectile_hit",
                                      regiment=unit.identifier, direct=direct, kills=killed,
                                      text_id=2004 if direct else 2005))
@@ -558,6 +562,30 @@ def _damage_unit(battle: Battle, unit: Regiment, projectile: Projectile,
     # direct hit only, once per impact, even with nobody wounded; the size is taken before this impact's deaths.
     if direct and not building and projectile.code != 17 and size_before <= unit.orgsize >> 2:
         combat.panic_test(battle, unit, 0, "impact")
+
+
+def crash_blast(battle: Battle, source: str, x: float, y: float, death_kind: int) -> None:
+    """A crashed flier's blast (notes/airborne_units.md A5.4): an ordinary impact at height 0, radius 72. Inside a
+    footprint every model takes S5 with D6 wounds; in the margin `(footprint + 72 - d) x size / (footprint + 72)`
+    random models (at least 1) take S2 with 1 wound; saves allowed. Any side is hit, airborne units never. Not
+    magical; no panic test and no messages. Buildings take S5, D6 (direct) or S2, 1. Kills are credited to the
+    crashed unit."""
+    z = battle.ground_height(x, y)
+    blast = Projectile(source, -1, x, y, z, x, y, z, flight.CRASH_RADIUS, flight.CRASH_STRENGTH, flight.CRASH_WOUNDS,
+                       x=x, y=y, z=z, building_strength=flight.CRASH_STRENGTH)
+    for unit in list(battle.regiments.values()):
+        if not unit.active or unit.airborne or unit.identifier == source:
+            continue
+        base = battle.ground_height(unit.x, unit.y)
+        if not base <= z <= base + hit_band(unit):
+            continue
+        q, radius = math.hypot(unit.x - x, unit.y - y), unit.bounding_radius()
+        if q < radius:
+            _damage_unit(battle, unit, blast, True, death_kind=death_kind, quiet=True)
+        elif q < radius + blast.radius:
+            count = max(1, int((radius + blast.radius - q) * unit.models / (radius + blast.radius)))
+            _damage_unit(battle, unit, blast, False, count, death_kind=death_kind, quiet=True)
+    _damage_buildings(battle, blast, False)
 
 
 def _damage_buildings(battle: Battle, p: Projectile, flight: bool) -> None:
@@ -589,6 +617,12 @@ def _damage_buildings(battle: Battle, p: Projectile, flight: bool) -> None:
             battle.destroy_building(building)
 
 
+def hit_band(unit: "Regiment") -> int:
+    """How far above its base a missile still hits a unit: 16 for a flier (notes/airborne_units.md A2, the band
+    E..E+16), else the engine's 24 for a ground unit."""
+    return 16 if unit.airborne else 24
+
+
 def _impact(battle: Battle, p: Projectile, *, flight: bool,
             hit_unit: str | None = None) -> None:
     for unit in battle.regiments.values():
@@ -596,8 +630,8 @@ def _impact(battle: Battle, p: Projectile, *, flight: bool,
             continue
         if flight and unit.identifier != hit_unit:
             continue
-        base = battle.ground_height(unit.x, unit.y) + (72 if unit.airborne else 0)
-        if not base <= p.z <= base + 24:
+        base = battle.ground_height(unit.x, unit.y) + unit.elevation
+        if not base <= p.z <= base + hit_band(unit):
             continue
         q = math.hypot(unit.x-p.x, unit.y-p.y)
         radius = unit.bounding_radius()
@@ -638,8 +672,8 @@ def _step_projectiles(battle: Battle) -> None:
                 if entry is not None:
                     hx, hy = old_x+(p.x-old_x)*entry, old_y+(p.y-old_y)*entry
                     height = old_z+(p.z-old_z)*entry
-                    base = battle.ground_height(hx, hy) + (72 if unit.airborne else 0)
-                    if base <= height <= base+24:
+                    base = battle.ground_height(hx, hy) + unit.elevation
+                    if base <= height <= base + hit_band(unit):
                         hits.append((entry, unit.identifier))
             for obj in battle.shooting_objects:
                 if not map_objects.exists(obj):  # notes/map_objects_and_projectiles.md 2: solid not required

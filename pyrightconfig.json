@@ -100,6 +100,7 @@
     "whshr/battle2d.py",
     "whshr/camera.py",
     "whshr/camera_shake.py",
+    "whshr/flight.py",
     "whshr/viewer_web.py",
     "whshr/__main__.py",
     "whshr/frontend/app.py",

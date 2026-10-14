@@ -743,7 +743,7 @@ class ScriptInterpreter:
             candidates = [other for other in candidates if visibility.visible(
                 self.battle.formation_centre(regiment), regiment.direction,
                 self.battle.formation_centre(other), other.bounding_radius(),
-                142 if regiment.in_melee else 71, self.battle.boundaries, self.battle.objects)]
+                142 if regiment.in_melee else 71, self.battle.boundaries, self.battle.sight_objects(regiment, other))]
         enemies = sorted(candidates, key=lambda other: math.trunc(math.hypot(
             other.x - regiment.x, other.y - regiment.y)))
         return enemies[(max(1, n) - 1) % len(enemies)].identifier if enemies else None
@@ -1503,7 +1503,7 @@ class ScriptInterpreter:
             self.battle.formation_centre(looker), looker.direction if facing is None else facing,
             self.battle.formation_centre(other), other.bounding_radius(),
             half_cone * 2 if looker.in_melee or looker.reforming else half_cone,
-            self.battle.boundaries, self.battle.objects)
+            self.battle.boundaries, self.battle.sight_objects(looker, other))
 
     def _threat_search(self, unit: "Regiment") -> str | None:
         """Nearest facing threat: the nearest eligible hostile the unit sees within trunc(3R/8),
@@ -1560,17 +1560,19 @@ class ScriptInterpreter:
         footprint radius + 24 of the aim point (candidate x, searcher y) -- the report's quirk.
         Not modelled: blast radii above 24 (part A 2.1 step 4)."""
         aim_x, aim_y = candidate.x, unit.y
+        # notes/airborne_units.md B2.7: airborne friends do not crowd the aim point.
         return any(other is not unit and other is not candidate and other.active and not self._hostile(unit, other)
-                   and math.hypot(other.x - aim_x, other.y - aim_y) < other.bounding_radius() + 24
+                   and not other.airborne and math.hypot(other.x - aim_x, other.y - aim_y) < other.bounding_radius() + 24
                    for other in self.battle.regiments.values())
 
     def _weapon_target_search(self, unit: "Regiment", class_operand: int, limited: bool) -> str | None:
         """Nearest shootable unit: eligible hostile of the class, d > 0, d <= R when limited, the
-        independent crowding check; first in order on ties; no visibility or arc (part A 2.1)."""
+        independent crowding check; first in order on ties; no visibility or arc (part A 2.1). An airborne unit is
+        never found (notes/airborne_units.md B2.7)."""
         best: "Regiment | None" = None
         best_distance = 0
         for other in self.battle.regiments.values():
-            if (other is unit or not self._eligible(other) or not self._hostile(unit, other)
+            if (other is unit or other.airborne or not self._eligible(other) or not self._hostile(unit, other)
                     or not self._of_class(other, class_operand)):
                 continue
             distance = self._distance(unit, other)
@@ -2111,8 +2113,8 @@ class ScriptInterpreter:
         FAR side for block formations (war machines, monsters and wagons are aimed at their centre).
         notes/target_queries.md section 5.1 and notes/movement_formation.md section 5."""
         centre = self._object_centre(target)
-        if target.hud_class in ("art", "mon") or target.is_wagon:
-            return centre
+        if target.hud_class in ("art", "mon") or target.is_wagon or target.airborne:
+            return centre  # notes/airborne_units.md B2.4: an airborne footprint is aimed at its centre too
         radius = int(target.bounding_radius())
         side = self._attack_direction(unit, target) % 4  # 0 front, 1 rear, 2 left flank, 3 right flank
         aim = (int(target.direction) + (256, 0, 128, -128)[side]) % 512
@@ -2309,7 +2311,7 @@ class ScriptInterpreter:
             heading = math.atan2(target.x - unit.x, target.y - unit.y) * 512 / math.tau
             state.cond_flags = visibility.visible(
                 self.battle.formation_centre(unit), heading, self.battle.formation_centre(target),
-                target.bounding_radius(), 256, self.battle.boundaries, self.battle.objects)
+                target.bounding_radius(), 256, self.battle.boundaries, self.battle.sight_objects(unit, target))
         return state.pc + 1
 
     def op_TargetValid(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
@@ -2326,13 +2328,16 @@ class ScriptInterpreter:
         if unit is None or aim is None:
             state.cond_flags = False
             return state.pc + 1
+        # notes/airborne_units.md B2.7: airborne friends neither crowd the aim point nor stand on the crossbow's line.
         friends = [other for other in self.battle.regiments.values()
-                   if other is not unit and other is not target and other.active and not self._hostile(unit, other)]
+                   if other is not unit and other is not target and other.active and not self._hostile(unit, other)
+                   and not other.airborne]
         crowded = unit.independent and any(
             math.hypot(other.x - aim[0], other.y - aim[1]) < other.bounding_radius() + 24 for other in friends)
         blocked = unit.missile_code == 2 and any(
             self._on_line_of_fire((unit.x, unit.y), aim, (other.x, other.y), other.bounding_radius())
-            for other in self.battle.regiments.values() if other.active and not self._hostile(unit, other))
+            for other in self.battle.regiments.values()
+            if other.active and not other.airborne and not self._hostile(unit, other))
         state.cond_flags = not (crowded or blocked)
         return state.pc + 1
 
@@ -3929,6 +3934,9 @@ class ScriptInterpreter:
     # ===== Animation requests, casting states and sound cues (notes/script_animation_sound.md) =====
 
     def _broadcast_action(self, unit: "Regiment", action: int) -> None:
+        flight = unit.flight_state()
+        if flight is not None:
+            flight.repeat = True  # notes/airborne_units.md A3.2: a repeated request lands a hovering Gyrocopter
         unit.script_action = action
         unit.script_action_key = unit.activity_key()
 

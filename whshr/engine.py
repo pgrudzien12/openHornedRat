@@ -7,7 +7,7 @@ import random
 from typing import Any, Callable, Literal, cast
 
 from . import animation, battle_grid, behaviour, buildings, combat, deployment, formation, interpreter, map_objects, navigation, npc_merge, ranged, visibility
-from . import birds as bird_flock, camera_shake as camera_shakes, control_piece as control_pieces, magic, objectives as objective_table, spell_effects, steering
+from . import birds as bird_flock, camera_shake as camera_shakes, flight as flight_rules, control_piece as control_pieces, magic, objectives as objective_table, spell_effects, steering
 from . import nodes as node_table
 from .battle_events import BattleEvent
 from .battle_log import BattleLogger
@@ -231,7 +231,8 @@ class Regiment:
     contact_attack_segment: int = -1  # the segment in which this unit last made contact attacks on a router underfoot
     update_counter: int = 0  # counts the unit's updates; starts at its slot so units are staggered (see collision_recheck)
     screen_mark: bool = False  # inside the camera's view rectangle at the end of the last tick (Battle.on_screen)
-    airborne: bool = False
+    flight: "flight_rules.FlightState | None" = None  # a flying sprite set's state (`flight_state`)
+    falling: list["flight_rules.FallingFlier"] = field(default_factory=list["flight_rules.FallingFlier"])
     waypoints: list[Point] = field(default_factory=list[Point])
     route_follows_unit: bool = False
     # The current point move was ordered while the unit was already moving: it gets no move-start snap
@@ -424,6 +425,25 @@ class Regiment:
         if self.frontage < 0:
             sizes = formation.rank_sizes(self.models, self.ranks)
             self.frontage = sizes[0] if sizes else 0
+
+    def flight_state(self) -> "flight_rules.FlightState | None":
+        """The flying state of a unit whose figure has a flying sprite set, else None (notes/airborne_units.md A1:
+        the leader block's set, else the unit's). Every flier starts grounded."""
+        if self.flight is None:
+            profile = flight_rules.profile_for(self.leader_sprite) or flight_rules.profile_for(self.sprite)
+            if profile is not None:
+                self.flight = flight_rules.FlightState(profile)
+        return self.flight
+
+    @property
+    def elevation(self) -> int:
+        """Height above the terrain under the unit, 0..32 (notes/airborne_units.md A2, B0.2)."""
+        return self.flight.elevation if self.flight is not None else 0
+
+    @property
+    def airborne(self) -> bool:
+        """The flying state: exactly while the elevation is above 0, during the climb and descent too (A2)."""
+        return self.elevation > 0
 
     @property
     def camp(self) -> Side:
@@ -820,7 +840,6 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
         "hud_class": hud_class,
         "unit_class": race >> 3 if race is not None else None,
         "race": race & 7 if race is not None else None,
-        "airborne": hud_class == "arch" and firing_code == 17,
         "points": stat_int(fields, "s_pntval") or 0,
     }
 
@@ -1174,8 +1193,27 @@ class Battle:
                 cone = 2 * interpreter.VIEW_CONE if looker.in_melee or looker.reforming else interpreter.VIEW_CONE
                 if visibility.visible(self.formation_centre(looker), looker.direction,
                                       self.formation_centre(target), target.bounding_radius(),
-                                      cone, self.boundaries, self.objects):
+                                      cone, self.boundaries, self.sight_objects(looker, target)):
                     self.reveal(target, looker)
+
+    def sight_objects(self, looker: Regiment, target: Regiment) -> list[dict[str, Any]]:
+        """The objects that may block `looker`'s sight of `target`: the map's, plus every other airborne unit as a
+        scenery circle of height 16 (notes/airborne_units.md B2.6), but only one strictly nearer than the target and
+        whose circle does not contain the looker. Not modelled: the side fact that ground monster, war machine and
+        wagon footprints block sight as well."""
+        flyers = [other for other in self.regiments.values()
+                  if other.airborne and other.active and other is not looker and other is not target]
+        if not flyers:
+            return self.objects
+        start, end = self.formation_centre(looker), self.formation_centre(target)
+        reach = math.dist(start, end)
+        blockers: list[dict[str, Any]] = list(self.objects)
+        for other in flyers:
+            centre, radius = self.formation_centre(other), other.bounding_radius()
+            if math.dist(start, centre) < reach and math.dist(start, centre) >= radius:
+                blockers.append({"x": centre[0], "y": centre[1], "radius": radius, "height": 16,
+                                 "status": ["os_active"]})
+        return blockers
 
     def reveal(self, target: Regiment, spotter: Regiment) -> None:
         """A spotted hidden unit is revealed permanently: 0x1C to the spotter (source = the revealed unit) and 0x1D
@@ -2236,6 +2274,7 @@ class Battle:
             for regiment in self.regiments.values():
                 self._step_burning(regiment)
                 self._step_dying(regiment)
+                self._step_falling(regiment)
             ranged.finish_tick(self)
             spell_effects.tick(self)
             self._step_collapses()
@@ -2305,6 +2344,7 @@ class Battle:
         for regiment in self.regiments.values():
             self._step_burning(regiment)
             self._step_dying(regiment)
+            self._step_falling(regiment)
             if regiment.destroyed and not regiment.dying:
                 self._announce_removal(regiment)
             if not regiment.active:
@@ -2842,6 +2882,13 @@ class Battle:
         units: dict[str, Regiment] = {}
         target = self.regiments.get(target_id) if target_id is not None else None
         for other in self.regiments.values():
+            if other.airborne and other.active and other is not regiment and other is not target:
+                # notes/airborne_units.md B2.2: an airborne unit is plain scenery to every other unit's steering, of
+                # any side or state; its own target's circle holds the waypoint, so that one is ignored (rule 2).
+                centre = self.formation_centre(other)
+                footprints.append(steering.Footprint(f"air:{other.identifier}", centre[0], centre[1],
+                                                     float(int(other.bounding_radius()))))
+                continue
             if (other is regiment or not other.active or other.routing or other is target
                     or (target is not None and target.melee_group is not None
                         and other.melee_group == target.melee_group)):
@@ -3192,6 +3239,24 @@ class Battle:
             animation.step(dying.model, animation.DEAD, self.rng, regiment.model_family(dying.model))
             regiment.corpses.append(animation.corpse_of(regiment, dying.model, dying.x, dying.y, self.rng))
 
+    def _step_falling(self, regiment: Regiment) -> None:
+        """A flier killed in the air falls, lies down, then crashes: a radius-72 blast at the corpse and the medium
+        camera shake right after it; the Gyrocopter's wreck also explodes and burns its victims
+        (notes/airborne_units.md A5.1, A5.2, A5.4; camera_shake.md 5)."""
+        for falling in list(regiment.falling):
+            moment = falling.step()
+            if moment == "corpse":
+                regiment.corpses.append(animation.Corpse(falling.x, falling.y, self.rng.randrange(animation.FULL_TURN),
+                                                         falling.sprite, flight_rules.WRECK_GROUP))
+            elif moment == "crash":
+                regiment.falling.remove(falling)
+                gyrocopter = falling.profile is flight_rules.GYROCOPTER
+                if gyrocopter:
+                    self.impact_effects.append((falling.x, falling.y, 15, self.tick_count))  # the explosion sprite
+                ranged.crash_blast(self, regiment.identifier, falling.x, falling.y,
+                                   animation.DEATH_FIRE if gyrocopter else animation.DEATH_MISSILE)
+                self.shake_camera(camera_shakes.MEDIUM)
+
     def _step_burning(self, regiment: Regiment) -> None:
         """Age each burning model; when its burn ends it becomes a charred corpse with a random facing,
         held forever (game_rules.md "Figure animation", burn sequences)."""
@@ -3268,6 +3333,11 @@ class Battle:
                 requested = regiment.rest_action()
             family = regiment.model_family(model)
             animation.step(model, requested, self.rng, family)
+            if model_index == 0 and (flight := regiment.flight_state()) is not None:
+                # notes/airborne_units.md A3: the (single) figure's action drives take-off and landing.
+                flight.take_request(flight_rules.flight_request(
+                    model.action, regiment.charging or regiment.pursuing or regiment.routing))
+                flight.step()
             self._slew_drawn_facing(regiment, model, wagon)
             if model.fire_event:
                 self.event_bus.animation_event_step(regiment.identifier, model_index)
@@ -3475,6 +3545,8 @@ class Battle:
         pushed = False
         for other in regiments:
             if other is mover or other.in_melee or other.routing or self._marked(other):
+                continue
+            if other.airborne:  # notes/airborne_units.md B2.3: nothing collides with an airborne footprint
                 continue
             if may_engage(mover, other):
                 machine = (mover.is_wagon or mover.hud_class == "art") or (other.is_wagon or other.hud_class == "art")
