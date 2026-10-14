@@ -3427,7 +3427,7 @@ class Battle:
                                                          centre[1] - float(obj.get("y") or 0))
             < float(obj.get("radius") or 0) + radius
             for obj in self.objects)
-        building = not mover.routing and self.overlaps_building(mover)
+        building = self.overlaps_building(mover)  # buildings push routers too (notes/lone_unit_on_grid.md 5)
         if not (scenery or building):
             return None
         if mover.is_wagon:

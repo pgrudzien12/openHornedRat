@@ -370,7 +370,12 @@ def refresh_melee_state(battle: "Battle") -> None:
     regiments share one grid, so the enemy a given regiment happened to be touching can rout while the
     fight it belongs to carries on around it. Testing only the touching list made a unit walk away
     from a melee its allies were still locked in.
+
+    Only without behaviour scripts: with them, a unit leaves only through its script or the pairing step's release
+    (`_keeps_grid_without_enemy`, notes/lone_unit_on_grid.md), never silently.
     """
+    if battle.interpreter is not None:
+        return
     for regiment in battle.regiments.values():
         if not regiment.in_melee:
             continue
@@ -699,12 +704,9 @@ def resolve_contacts(battle: "Battle") -> None:
     for identifier, regiment in by_id.items():
         if not touching[identifier] and regiment.in_melee:
             fight = battle.fights.get(regiment.melee_group or "")
-            if fight is not None and fight.get("alone"):
-                # notes/terror_contact_charge.md 0.6: alone on a grid, "alone" (0x30) on every tick whose segment
-                # differs from the grid's creation segment, until the unit's script leaves the grid.
-                kept_groups.add(regiment.melee_group or "")
-                if segment != fight["segment"]:
-                    battle.event_bus.queue_event(identifier, interpreter.Event(code=ALONE_ON_GRID_EVENT), route="self")
+            if scripted and fight is not None:
+                if _keeps_grid_without_enemy(battle, regiment, fight, segment):
+                    kept_groups.add(regiment.melee_group or "")
                 continue
             gone = _opponent_gone(battle, regiment, old_touching[identifier])
             battle_grid.release(battle, regiment)
@@ -719,6 +721,56 @@ def resolve_contacts(battle: "Battle") -> None:
     for group_id in list(battle.fights):
         if group_id not in kept_groups:
             battle.fights.pop(group_id, None)
+
+
+def _keeps_grid_without_enemy(battle: "Battle", regiment: "Regiment", fight: Fight, segment: int) -> bool:
+    """The per-tick pairing step of a unit in melee that no enemy holds any more (notes/lone_unit_on_grid.md 0).
+    Nothing geometric decides it; True while the unit stays on its grid.
+
+    - An unhandled rout (0x0F) or removal (0x16) of its current target is handled by its script first (section 0.5):
+      the step waits for it. So does a wiped-out unit on the grid whose removal is not yet announced (it leaves the
+      grid with the 0x16 broadcast; our unit counts as out of the fight while its last models collapse).
+    - The only unit on its grid: event 0x30 on every tick outside the grid's creation segment, nothing else.
+    - Two or more units: a target still on a grid keeps it pairing; an owner with no target does nothing; otherwise
+      the "another enemy" search over its models' opponents sets the target, or the target is cleared, the unit
+      leaves the grid and gets 0x19 (section 0.3). Its script then idles: the original's behaviour (section 0.7).
+    Units are taken in unit order, so whoever leaves first leaves the other alone (section 4)."""
+    group = regiment.melee_group
+    state = battle.event_bus.unit_states.get(regiment.identifier)
+    target = state.current_target[0] if state is not None and state.current_target is not None else None
+    if state is not None and target is not None and any(
+            event.code in (0x0F, 0x16) and event.source == target for event in state.event_queue):
+        return True
+    if any(other.destroyed and not other.fled and not other.removal_announced and other.melee_group == group
+           for other in battle.regiments.values()):
+        return True
+    others = [other for other in battle.regiments.values()
+              if other is not regiment and other.active and not other.routing and other.in_melee
+              and other.melee_group == group]
+    if not others:
+        if segment != fight["segment"]:
+            battle.event_bus.queue_event(regiment.identifier, interpreter.Event(code=ALONE_ON_GRID_EVENT),
+                                         route="self")
+        return True
+    target_unit = battle.regiments.get(target) if target is not None else None
+    if target_unit is not None and target_unit.active and target_unit.in_melee and target_unit.melee_group:
+        return True  # 🟡 pairing towards a target on a grid (section 2 rows 3 and 6)
+    grid = fight.get("grid")
+    if target is None and grid is not None and grid.owner_id == regiment.identifier:
+        return True
+    for model in regiment.melee_models:
+        opponent = battle.regiments.get(model.opponent[0]) if model.opponent is not None else None
+        if (opponent is not None and opponent.active and not opponent.routing and opponent.in_melee
+                and opponent.melee_group is not None and may_engage(regiment, opponent)
+                and opponent.side != Side.NEUTRAL):
+            if state is not None:
+                state.current_target = (opponent.identifier, 0)
+            return True
+    if state is not None:
+        state.current_target = None
+    leave_grid(battle, regiment)
+    _send_opponent_gone(battle, regiment)
+    return False
 
 
 def _left_alone_after_rout(battle: "Battle", regiment: "Regiment", turn: int, segment: int,
