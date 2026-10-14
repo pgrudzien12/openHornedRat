@@ -29,7 +29,7 @@ import random
 from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from . import animation, battle_grid, formation, interpreter, map_objects
+from . import animation, battle_grid, flight, formation, interpreter, map_objects
 from .battle_events import BattleEvent
 from .rules import EXPECTED_ARMOUR_SAVE, Side, may_engage, wfb_to_hit, wfb_to_wound
 
@@ -195,6 +195,8 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
         regiment.shooting_mode = regiment.shooting_target = None
         regiment.volley_countdown = None
     grid = _grid_of(battle, regiment)
+    # notes/airborne_units.md A5: tested once, at the first death tick; a flier killed in the air falls instead.
+    in_the_air = regiment.flight if regiment.flight is not None and regiment.flight.airborne else None
     dead_opponents: dict[int, tuple[str, int] | None] = {}
     immediate_checks: list[int] = []
     for index in victims:
@@ -205,7 +207,12 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
             model.credit = killer
         pay_credit(battle, regiment, model)
         delay = animation.collapse_delay_ticks(model.stagger, regiment.in_melee, death_kind)
-        if delay > 0:
+        if in_the_air is not None:
+            immediate_checks.append(len(regiment.positions) + len(regiment.dying))
+            regiment.falling.append(flight.FallingFlier(
+                *positions[index], battle.rng.randrange(animation.FULL_TURN), in_the_air.elevation,
+                in_the_air.profile, regiment.model_sprite(model)))
+        elif delay > 0:
             regiment.dying.append(animation.DyingModel(
                 *positions[index], model=model, ticks_left=delay, death_kind=death_kind,
                 body=regiment.model_body_class(model), burns=regiment.model_burns_on(model, death_kind)))

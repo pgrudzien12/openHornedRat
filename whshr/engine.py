@@ -232,6 +232,7 @@ class Regiment:
     update_counter: int = 0  # counts the unit's updates; starts at its slot so units are staggered (see collision_recheck)
     screen_mark: bool = False  # inside the camera's view rectangle at the end of the last tick (Battle.on_screen)
     flight: "flight_rules.FlightState | None" = None  # a flying sprite set's state (`flight_state`)
+    falling: list["flight_rules.FallingFlier"] = field(default_factory=list["flight_rules.FallingFlier"])
     waypoints: list[Point] = field(default_factory=list[Point])
     route_follows_unit: bool = False
     # The current point move was ordered while the unit was already moving: it gets no move-start snap
@@ -2273,6 +2274,7 @@ class Battle:
             for regiment in self.regiments.values():
                 self._step_burning(regiment)
                 self._step_dying(regiment)
+                self._step_falling(regiment)
             ranged.finish_tick(self)
             spell_effects.tick(self)
             self._step_collapses()
@@ -2342,6 +2344,7 @@ class Battle:
         for regiment in self.regiments.values():
             self._step_burning(regiment)
             self._step_dying(regiment)
+            self._step_falling(regiment)
             if regiment.destroyed and not regiment.dying:
                 self._announce_removal(regiment)
             if not regiment.active:
@@ -3235,6 +3238,24 @@ class Battle:
                 continue
             animation.step(dying.model, animation.DEAD, self.rng, regiment.model_family(dying.model))
             regiment.corpses.append(animation.corpse_of(regiment, dying.model, dying.x, dying.y, self.rng))
+
+    def _step_falling(self, regiment: Regiment) -> None:
+        """A flier killed in the air falls, lies down, then crashes: a radius-72 blast at the corpse and the medium
+        camera shake right after it; the Gyrocopter's wreck also explodes and burns its victims
+        (notes/airborne_units.md A5.1, A5.2, A5.4; camera_shake.md 5)."""
+        for falling in list(regiment.falling):
+            moment = falling.step()
+            if moment == "corpse":
+                regiment.corpses.append(animation.Corpse(falling.x, falling.y, self.rng.randrange(animation.FULL_TURN),
+                                                         falling.sprite, flight_rules.WRECK_GROUP))
+            elif moment == "crash":
+                regiment.falling.remove(falling)
+                gyrocopter = falling.profile is flight_rules.GYROCOPTER
+                if gyrocopter:
+                    self.impact_effects.append((falling.x, falling.y, 15, self.tick_count))  # the explosion sprite
+                ranged.crash_blast(self, regiment.identifier, falling.x, falling.y,
+                                   animation.DEATH_FIRE if gyrocopter else animation.DEATH_MISSILE)
+                self.shake_camera(camera_shakes.MEDIUM)
 
     def _step_burning(self, regiment: Regiment) -> None:
         """Age each burning model; when its burn ends it becomes a charred corpse with a random facing,

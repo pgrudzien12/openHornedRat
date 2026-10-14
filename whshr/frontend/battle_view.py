@@ -1169,6 +1169,16 @@ class BattleView(SceneView[BattleScene]):
                 lift = 0.0
                 for dying in regiment.dying:  # still playing their animation until they collapse
                     data += draw_model(dying.x, dying.y, dying.model)
+            for falling in regiment.falling:  # notes/airborne_units.md A5: killed in the air, still falling
+                sheet = field.sprite_sheet(falling.sprite)
+                if sheet is None or not self._on_map(falling.x, falling.y):
+                    continue
+                group, phase = falling.frame()
+                index = sheet.frame_index(group, phase, sprite_direction(yaw, falling.facing))
+                frame, rect = sheet.frames[index], _atlas_rect(sheet, index)
+                data += INSTANCE.pack(falling.x / WORLD_PER_MESH,
+                                      field.ground_height(falling.x, falling.y) + falling.elevation / WORLD_PER_MESH,
+                                      falling.y / WORLD_PER_MESH, *rect, frame.anchor_x, frame.anchor_y, 0.0)
             # Corpses (game_rules.md, "Panic": models that died stay on the ground where they fell), each in its own set.
             for corpse in regiment.corpses:
                 sheet = field.sprite_sheet(corpse.sprite)

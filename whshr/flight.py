@@ -6,6 +6,7 @@ landing programs, which its animation action starts (A3). The action is the publ
 notes/script_animation_sound.md 0 (whshr.animation STAND .. SHOOT).
 """
 
+import math
 from dataclasses import dataclass
 
 from .animation import FIGHT, IDLE, SHOOT, STAND, WALK, WEAPON_READY
@@ -124,3 +125,41 @@ def flight_request(action: int, charging_or_routing: bool) -> int:
     """The action the original would have requested: the engine walks figures to their slots with action 3 during
     any move, where the original requests 2 unless the unit charges, pursues or routs (script_animation_sound.md 0.1)."""
     return IDLE if action == WALK and not charging_or_routing else action
+
+
+GLIDE = 2  # world units per tick along the falling figure's random facing (A5.1, A5.2)
+CRASH_RADIUS, CRASH_STRENGTH, CRASH_WOUNDS = 72, 5, 6  # A5.4: S5, D6 wounds on a direct hit
+WRECK_GROUP = 32  # the corpse (Wyvern) or wreck (Gyrocopter) group, first-frame number (A5.1, A5.2)
+
+
+@dataclass
+class FallingFlier:
+    """A flier killed in the air (A5): its unit is already destroyed, and the figure falls on its own. During the
+    program's ticks it glides `GLIDE` units per tick along `facing` while the elevation steps down, then it lies
+    down on tick N + 1 and crashes on tick N + 2 (N = the program length). Engine choice (A5.3 allows it): the figure
+    is drawn at the stepped elevation, not on the ground. Not modelled: the Gyrocopter's eight smoke puffs."""
+
+    x: float
+    y: float
+    facing: int  # 0..511, 0 = +Y, clockwise
+    elevation: int
+    profile: FlightProfile
+    sprite: str | None
+    tick: int = 0
+
+    def step(self) -> str | None:
+        """One tick of the fall; returns "corpse" on the tick the corpse frame appears, "crash" on the tick after."""
+        self.tick += 1
+        ticks = self.profile.program_ticks
+        if self.tick <= ticks:
+            angle = self.facing * math.tau / 512
+            self.x += GLIDE * math.sin(angle)
+            self.y += GLIDE * math.cos(angle)
+            if self.tick % self.profile.step_every == 0:
+                self.elevation = max(0, self.elevation - STEP)
+            return None
+        return "corpse" if self.tick == ticks + 1 else "crash" if self.tick == ticks + 2 else None
+
+    def frame(self) -> tuple[str, int]:
+        phases = self.profile.program_phases
+        return self.profile.program_group, phases[(self.tick - 1) % len(phases)]
