@@ -6,7 +6,7 @@ import random
 import unittest
 
 from whshr import animation
-from whshr.animation import DEAD, FIGHT, SHOOT, STAND, WEAPON_READY
+from whshr.animation import DEAD, FIGHT, IDLE, SHOOT, STAND, WALK, WEAPON_READY
 from whshr.engine import ModelState, Regiment
 from whshr.rules import Side
 
@@ -79,6 +79,61 @@ class MachineFamilyTests(unittest.TestCase):
     def test_machine_figures_face_the_unit_even_when_fighting(self):
         self.assertTrue(animation.family_table("thrower")[FIGHT].faces_unit)
         self.assertFalse(animation.family_table("standard_infantry")[FIGHT].faces_unit)
+
+
+class DoomwheelTests(unittest.TestCase):
+    """notes/machine_figure_animation.md 2.5 and vectors 11-13."""
+
+    def test_the_wheel_sets_select_the_doomwheel_table(self):
+        for sprite in ("DoomWheel", "DWHEEL"):
+            self.assertEqual(animation.family_for(sprite, 4), "doomwheel")
+
+    def test_stand_and_weapon_ready_hold_the_first_rolling_frame(self):
+        self.assertEqual(frames("doomwheel", [STAND, WEAPON_READY, STAND], direction=3)[0], [11, 11, 11])
+
+    def test_walking_rolls_a_flat_loop_with_no_random_entry(self):  # vector 11
+        self.assertEqual(frames("doomwheel", [STAND] + [WALK] * 5, entry=3, direction=3)[0],
+                         [11, 11, 19, 27, 35, 11])
+
+    def test_changing_between_rolling_actions_restarts_the_loop(self):  # vector 12
+        shown, fires = frames("doomwheel", [WALK, WALK, WALK, FIGHT, FIGHT, FIGHT, FIGHT, SHOOT, IDLE], direction=1)
+        self.assertEqual(shown, [9, 17, 25, 9, 17, 25, 33, 9, 9])
+        self.assertFalse(any(fires))  # no fire step
+
+    def test_the_wheel_wreck_is_held_and_never_burns(self):  # vector 13
+        self.assertEqual(frames("doomwheel", [WALK, WALK, DEAD, DEAD], direction=5)[0], [5 + 8, 5 + 16, 5, 5])
+        self.assertFalse(animation.burns_on_death(animation.DEATH_FIRE, 4, "DoomWheel"))
+
+    def test_rolling_faces_the_heading_but_standing_faces_the_unit(self):
+        table = animation.family_table("doomwheel")
+        self.assertEqual([table[action].faces_unit for action in (STAND, WEAPON_READY)], [True, True])
+        for action in (IDLE, WALK, FIGHT, SHOOT):
+            self.assertTrue(table[action].faces_heading)
+            self.assertFalse(table[action].faces_unit)
+
+    def test_the_drawn_facing_target_follows_the_heading_while_idle(self):
+        from whshr.engine import Battle
+        wheel = Regiment("w", "W", 0, 0, 96, Side.ENEMY, models=1, ranks=1, sprite="DoomWheel", has_leader=True)
+        battle = Battle(5000, 5000, [wheel], seed=1995)
+        wheel.model_positions()
+        model = wheel.melee_models[0]
+        model.action, model.heading_x, model.heading_y = IDLE, 1.0, 0.0
+        self.assertEqual(battle._drawn_facing_target(wheel, model), 128)
+        model.action = STAND
+        self.assertEqual(battle._drawn_facing_target(wheel, model), wheel.direction)
+
+
+class DoomDiverCrewFacingTests(unittest.TestCase):
+    def test_the_crew_faces_its_own_heading_while_idle_and_the_unit_while_standing(self):  # 2.6
+        from whshr.engine import Battle
+        crew = Regiment("c", "C", 0, 0, 96, Side.ENEMY, models=3, ranks=1, sprite="DoomDiver")
+        battle = Battle(5000, 5000, [crew], seed=1995)
+        crew.model_positions()
+        model = crew.melee_models[0]
+        model.action, model.heading_x, model.heading_y = IDLE, 1.0, 0.0
+        self.assertEqual(battle._drawn_facing_target(crew, model), 128)
+        model.action = STAND
+        self.assertEqual(battle._drawn_facing_target(crew, model), crew.direction)
 
 
 class WreckTests(unittest.TestCase):
