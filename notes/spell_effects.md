@@ -310,8 +310,8 @@ and terminal impact). No test when the head hits nothing.
 
 18 ticks, passes through, S3 1 wound, no save, damage type 0. The spell (cost 1, range 144) starts at the origin
 model; the behaviour-27 breath (`script_behaviours.md` §1.10: its aim point is always towards +x, +y) is an innate
-launch from the unit position, scattered with range 144 (§2.2), not dispellable, and plays a screen shake when it
-finishes (presentation). Both hit every unit crossed once per tick, plus the terminal impact.
+launch from the unit position, scattered with range 144 (§2.2), not dispellable, and on the tick after it finishes fells
+every standing pine within 64 of its last position (no screen shake; `spell_plague_monk_breath_visuals.md` §4.2). Both hit every unit crossed once per tick, plus the terminal impact.
 
 ### 3.8 Piercing Bolts of Burning
 
