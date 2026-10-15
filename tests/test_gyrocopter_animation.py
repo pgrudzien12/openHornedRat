@@ -98,7 +98,7 @@ class TakeOffTests(unittest.TestCase):
             state.step()
             shown.append(state.frame()[1])
         lap = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 1, 1, 1, 2, 2, 2]
-        self.assertEqual(shown[:31], (lap * 2)[:31])  # tick 32 already shows the loop (existing off-by-one)
+        self.assertEqual(shown[:32], lap * 2)  # A3.3: both laps through tick 32, the loop from tick 33
         self.assertEqual(shown[32:38], FAST[2:] + FAST[:2])  # the loop runs on the flight tick count
         self.assertEqual(state.elevation, 32)
 
