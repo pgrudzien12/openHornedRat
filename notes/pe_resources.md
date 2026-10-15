@@ -127,7 +127,10 @@ lines, 2000–2025 success lines per objective letter** (1.8); 5000–5042 balan
 **`ANTXT` (cut-scene subtitles)**: `M×1000 + k`, M = movie number: `playmovie:A<M>` is always
 preceded by `loadanimstringintocache:<M>0xx` (31/32 pairs; the exception `GMMISSION3` caches
 18xxx and 19xxx before branching to `A18`/`A18B`). `+10,+20…` = speech lines, `+100,+101…` =
-narration captions, `+510` = alternative version (`A12b`, `A16b`).
+narration captions, `+510` = alternative version (`A12b`, `A16b`). **Correction:** which captions a film
+shows is a fixed per-film table, not the `+100` rule: `A13` shows `13200` (13100 is a speech line), `A12`/`A12b`
+share 12100, `A18`/`A18B` share 18100–18101, `A16b` shows 16600–16601, `A20` shows only 20100 (21100–21101 are
+never shown) and 12510/16510 are speech lines. Full table, layout and timing: `notes/cutscene_narration.md`.
 
 ## `RT_RCDATA`
 
