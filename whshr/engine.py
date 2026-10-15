@@ -954,6 +954,11 @@ class Battle:
         # Destroyed buildings whose scene piece is drawn as its ruin, and the collapses still running before the swap
         # (notes/building_ruins.md 3); the smoke puffs are kept for PUFF_TICKS but not drawn (buildings.Puff).
         self.ruined: set[str] = set()
+        # Standing pine trees as (identifier, x, y): the innate Pestilent Breath fells them, which adds the identifier
+        # to `ruined` (the scene piece turns into its dead variant, notes/spell_plague_monk_breath_visuals.md 4.2).
+        self.pines: list[tuple[str, float, float]] = [
+            (f"{buildings.TREE_PREFIX}{index}", float(item.get("x") or 0), float(item.get("y") or 0))
+            for index, item in enumerate(scenery) if str(item.get("name", "")) in buildings.PINE_TYPES]
         self.collapses: list[buildings.Collapse] = []
         self.collapse_puffs: list[buildings.Puff] = []
         self.muzzle_puffs: list[MuzzlePuff] = []  # gun shots' muzzle puffs (_spawn_muzzle_puff), drawn by the frontend
@@ -2003,6 +2008,15 @@ class Battle:
                                                                   x=int(building.x), y=int(building.y)))
         self.events.append(BattleEvent(f"{building.name} is destroyed.", "building_destroyed",
                                        building=building.identifier, x=building.x, y=building.y))
+
+    def fell_pines(self, x: float, y: float, reach: int = buildings.FELL_REACH) -> list[str]:
+        """Fell every standing pine whose truncated distance from (x, y) is at most `reach` (inclusive): its piece
+        turns into the dead variant, like a building's ruin. Silent. Returns the identifiers felled now
+        (notes/spell_plague_monk_breath_visuals.md 4.2)."""
+        felled = [identifier for identifier, tx, ty in self.pines
+                  if identifier not in self.ruined and int(math.hypot(tx - x, ty - y)) <= reach]
+        self.ruined.update(felled)
+        return felled
 
     def _drop_building_fire_targets(self, building_id: str) -> None:
         """Without scripts, a unit whose Fire target is the building stops shooting when it falls (the scripts'

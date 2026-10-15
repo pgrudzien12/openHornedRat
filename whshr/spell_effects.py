@@ -958,6 +958,10 @@ def _wizard(unit: Regiment | None) -> bool:
 
 def _update(battle: Battle, effect: Effect) -> None:
     if effect.tail >= 0:
+        if effect.tail == TAIL_TICKS and effect.innate and effect.code == PESTILENT_BREATH:
+            # notes/spell_plague_monk_breath_visuals.md 4.2: the tick after the cloud finishes, the innate breath
+            # fells the pines within 64 of its last position (the cast spell does not).
+            battle.fell_pines(effect.x, effect.y)
         effect.tail -= 1
         if effect.tail < 0:
             _end(battle, effect)

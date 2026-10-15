@@ -169,6 +169,7 @@ class Shot:
     remaining: int = 0
     steps: int = 0
     ending: bool = False
+    hidden: bool = False  # a cloud that went below the ground on its last flight tick: stepped but not drawn
 
 
 @dataclass(frozen=True)
@@ -206,6 +207,7 @@ class _Projectile:
     last: tuple[float, float, float] | None = None
     heading: tuple[float, float] = (0.0, 1.0)
     stage: int = 0
+    hidden: bool = False
     newest: tuple[float, float] | None = None  # the newest segment or puff position
     segments: list[list[float]] = field(default_factory=list[list[float]])  # x, y, height, age, dx, dy
     puffs: list[list[float]] = field(default_factory=list[list[float]])  # x, y, height, age
@@ -245,6 +247,7 @@ class ProjectileVisuals:
                 # removal): the head stops and a beam's segments go with it, with no flash (spell_effects.md 1.4).
                 shot.flying = False
                 shot.segments = []
+                shot.clouds = []  # spell_plague_monk_breath_visuals.md 4.1: a cancelled cloud leaves no tail
         self.shots = {key: shot for key, shot in self.shots.items()
                       if shot.flying or shot.segments or shot.flash is not None or shot.puffs or shot.clouds}
         for storm in self.storms.values():
@@ -287,11 +290,18 @@ class ProjectileVisuals:
                 shot.puffs.append([*previous, 0])
                 shot.newest = (previous[0], previous[1])
         elif code in CLOUD_FIRST:
+            # spell_plague_monk_breath_visuals.md 3: the puff takes the head's frame of this tick, is left at the
+            # head's previous position (the start on the first tick) and is skipped when that is the newest puff's
+            # point (always on the second tick).
             shot.stage = breath_stage(seen.remaining, seen.steps)
-            if shot.last is not None and previous[:2] != here[:2]:
+            shot.hidden = seen.hidden
+            if shot.newest is None or math.dist(previous[:2], shot.newest) >= 1:
                 shot.clouds.append((*previous, CLOUD_FIRST[code] + shot.stage))
+                shot.newest = (previous[0], previous[1])
         if seen.ending:
             shot.flying = False
+            if code in CLOUD_FIRST and shot.clouds:
+                shot.clouds.pop(0)  # section 4.1: the oldest puff goes in the same update the head does
             if code in BEAM_FLASHES:
                 end = (seen.x, seen.y)
                 if math.dist(end, seen.dest) < BEAM_ARRIVAL:
@@ -317,7 +327,7 @@ class ProjectileVisuals:
     def sprites(self) -> list[Sprite | DirectionalSprite]:
         drawn: list[Sprite | DirectionalSprite] = []
         for shot in self.shots.values():
-            if shot.flying and shot.last is not None:
+            if shot.flying and shot.last is not None and not shot.hidden:
                 x, y, h = shot.last
                 if shot.code == spell_effects.BURNING_HEAD:
                     drawn.append(DirectionalSprite(SKULL_FIRST, x, y, h, bearing(*shot.heading)))
@@ -361,6 +371,22 @@ def projectile_shots(effects: Iterable[spell_effects.Effect],
         if code not in PROJECTILE_CODES:
             continue
         flying = effect.tail < 0
+        if not flying and code in CLOUD_FIRST:
+            # spell_plague_monk_breath_visuals.md 4.1: the head is still drawn on the tick the flight finishes
+            # (not when it went below the ground) and gone on the next, which is the cloud's reported ending.
+            state = memory.setdefault(effect.serial, [True, False])
+            if not state[0]:
+                continue
+            if not state[1]:
+                state[1] = True
+                shots.append(Shot((effect.serial, 0), code, effect.x, effect.y, max(0.0, effect.height),
+                                  effect.start, effect.dest, effect.remaining, effect.steps,
+                                  hidden=effect.height < 0))
+                continue
+            state[0] = False
+            shots.append(Shot((effect.serial, 0), code, effect.x, effect.y, max(0.0, effect.height), effect.start,
+                              effect.dest, effect.remaining, effect.steps, ending=True))
+            continue
         if not flying:
             state = memory.setdefault(effect.serial, [True])
             if not state[0]:

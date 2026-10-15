@@ -106,14 +106,17 @@ class SpriteProjectileTest(unittest.TestCase):
         self.assertEqual(stages, {18: 0, 14: 0, 13: 1, 9: 1, 8: 2, 5: 2, 4: 3, 0: 3})
 
     def test_breath_leaves_frozen_clouds_then_removes_them_oldest_first(self):
+        # spell_plague_monk_breath_visuals.md 3.2, 4.1: a puff at the start at once, none on the second tick (same
+        # point), then one per tick at the head's previous position; the ending removes the oldest in the same update.
         visuals = ProjectileVisuals()
         for tick, remaining in enumerate((17, 16, 15)):
             visuals.advance([shot(spell_effects.PESTILENT_BREATH, 10.0 * tick, remaining=remaining)])
         clouds = [(s.frame, s.x) for s in visuals.sprites()][1:]
         self.assertEqual(clouds, [(533, 0.0), (533, 10.0)])
         visuals.advance([shot(spell_effects.PESTILENT_BREATH, 30.0, remaining=14, ending=True)])
-        visuals.advance([])
         self.assertEqual([s.x for s in visuals.sprites()], [10.0, 20.0])
+        visuals.advance([])
+        self.assertEqual([s.x for s in visuals.sprites()], [20.0])
 
 
 class EffectsToShotsTest(unittest.TestCase):
