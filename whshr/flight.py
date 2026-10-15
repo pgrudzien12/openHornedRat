@@ -64,6 +64,7 @@ class FlightState:
     from_flying_program: bool = False  # the Gyrocopter: the last program was its 2/3/7 one
     hovering: bool = False
     repeat: bool = False  # a script re-requested an action (it restarts the program of the same action, A3.2)
+    last_program_tick: bool = False  # the program ended on this tick, which still shows its lap frame (A3.3)
 
     @property
     def airborne(self) -> bool:
@@ -98,19 +99,21 @@ class FlightState:
     def step(self) -> None:
         """One tick of the running program: an elevation step on every `step_every`-th tick (A3.3)."""
         self.tick += 1
+        self.last_program_tick = False
         if not self.program:
             return
         if self.tick % self.profile.step_every == 0:
             self.elevation = max(0, min(CEILING, self.elevation + STEP * self.program))
         if self.tick >= self.profile.program_ticks:
             self.program = 0
+            self.last_program_tick = True  # A3.3: the lap's last frame is drawn on tick 32 (40); the loop from 33 (41)
 
     def frame(self) -> tuple[str, int] | None:
         """The group and phase the figure shows, or None for its family's ordinary script: the program laps, then
         the flying loop after a take-off action or the slow rest loop after a resting one (A3.1, A3.2). The
         Wyvern's walk, fight and cast use its ordinary groups."""
         profile = self.profile
-        if self.program:
+        if self.program or self.last_program_tick:
             phases = profile.program_phases
         elif self.action in profile.take_off and (self.airborne or profile is GYROCOPTER):
             phases = profile.air_phases
