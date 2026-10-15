@@ -207,6 +207,17 @@ THROWER = _machine_table(0, 32, _machine_shot(0, (0, 0, 0, 0, 0, 1, 1, 2, 3, 0),
 # Mortar: intact frames 40-47, wreck 0-7, the firing smoke 8-39. Addressed from group 8, so 40 is phase 4.
 MORTAR = _machine_table(40, 0, _machine_shot(8, (4, 4, 4, 4, 0, 1, 1, 2, 3, 3, 4), fire_at=6))
 
+# Gyrocopter (notes/machine_figure_animation.md 2.9, airborne_units.md A3.2): one flying figure, no random entry, and
+# its shoot has no fire step. The take-off and landing laps and the altitude steps are flight_rules'/FlightState's
+# (they depend on whether the craft is flying); these are the loops that follow them. Actions 2, 3 and 7 loop the
+# fast rotor, 1, 4 and 5 the slow one; the wreck (group 32) is held.
+_GYRO_FAST = ActionScript("move", sequence=(0, 1, 2, 3, 1, 2))
+_GYRO_SLOW = ActionScript("move", sequence=(0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 1, 1, 1, 2, 2))
+GYROCOPTER: ActionTable = {
+    STAND: _GYRO_SLOW, IDLE: _GYRO_FAST, WALK: _GYRO_FAST, FIGHT: _GYRO_SLOW, WEAPON_READY: _GYRO_SLOW,
+    DEAD: ActionScript(32, sequence=(0,), loop=False, locks_facing=True), SHOOT: _GYRO_FAST,
+}
+
 # Mesh pose numbers, not sprite phases (notes/bf014_dragon_rendering.md §3).
 DRAGON_FIGHT = tuple(pose for pose in (1, 2, 1, 3, 1, 4, 1, 2, 1, 4, 1, 3) for _ in range(2))
 MESH_DRAGON: ActionTable = {
@@ -240,7 +251,7 @@ def mesh_dragon_pose(model: "ModelState") -> int:
 
 FAMILY_TABLES: dict[str, ActionTable] = {"standard_infantry": STANDARD_INFANTRY, "peasants": PEASANTS, "slaves": SLAVES,
                  "mesh_dragon": MESH_DRAGON, "wagons": WAGONS, "carts": CARTS, "gun": GUN, "volley": VOLLEY,
-                 "thrower": THROWER, "mortar": MORTAR}
+                 "thrower": THROWER, "mortar": MORTAR, "gyrocopter": GYROCOPTER}
 # Script sprite resource names (casefolded) that select a decoded family; anything else is standard.
 SPRITE_FAMILIES = {"meshdragon": "mesh_dragon", "peasant": "peasants", "peasants": "peasants",
                    "ratslave": "slaves", "slave": "slaves",
@@ -249,7 +260,8 @@ SPRITE_FAMILIES = {"meshdragon": "mesh_dragon", "peasant": "peasants", "peasants
                    # War-machine figures, by the leader block's machine set (notes/machine_figure_animation.md 3).
                    "cannon": "gun", "impcanon": "gun", "grtcannon": "gun", "grtcanon": "gun", "volleygun": "volley",
                    "voleygun": "volley", "rocklobber": "thrower", "rocklob": "thrower", "doomdvrcatapult": "thrower",
-                   "ddcatplt": "thrower", "mortar": "mortar"}
+                   "ddcatplt": "thrower", "mortar": "mortar",
+                   "gyrocopt": "gyrocopter", "gyrocopter": "gyrocopter"}
 WAGON_CLASS = 7  # s_race class RollingStock
 DEFAULT_FAMILY = "standard_infantry"
 
