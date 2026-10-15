@@ -365,6 +365,24 @@ tick, and none in the other 171 ticks. (The battle's very first segment is segme
 the start of turn 1.) There is no state test: a target that is already broken or routing is tested too, and a
 failure sends it 0x0C again and ends the Curse (🟡 what 0x0C does to a unit already routing is its script's business).
 
+**Re-check (October 2026, prompted by a player's memory that panicking units kept the Curse):** the rule above was
+re-read and stands as written: a failed mounted test in segment 10 sends 0x0C **and** ends the Curse in that same
+effect step, with the end step of §4.4 (I and `s_rlmv` restored, spirits removed). The test runs on every tick of
+segment 10, at modifier 0, only for targets whose own `s_mount` is non-zero. Unmounted targets are never tested,
+so a cursed infantry unit that panics or routes for any other reason **keeps** the Curse, which is probably what
+the player remembers. The practical consequence for mounted targets (pass chance `(Ld − 1) / 11`):
+
+| Ld | pass one test | survive a whole segment-10 window (19 tests) | mean passes before the first failure |
+|---|---|---|---|
+| 5 (Goblin Wolf Riders) | 0.364 | 4.5 × 10⁻⁹ | 0.57 |
+| 7 | 0.545 | 1.0 × 10⁻⁵ | 1.20 |
+| 8 | 0.636 | 1.9 × 10⁻⁴ | 1.75 |
+| 9 | 0.727 | 0.0024 | 2.67 |
+| 10 | 0.818 | 0.022 | 4.50 |
+
+So a Curse on cavalry practically always ends, with a 0x0C to the target, within the first ticks of the next
+segment 10, or at once if it is cast during segment 10. 🟡 Not yet observed under Wine.
+
 ### 4.3 No other end ✅
 
 There is **no timer**. The Curse ends only by:
@@ -401,6 +419,8 @@ between (another Curse, Ere We Go). No event, no message, no reform.
 | mounted E (`s_mount` 1, Ld 7) cursed; segment 5 | any tick | no test |
 | same, segment 10, draws 4, 9 | two ticks | 4 mod 11 + 2 = 6 ≤ 7 pass; 9 mod 11 + 2 = 11 > 7 **fail** → 0x0C to E, Curse ends, I and `s_rlmv` restored in that tick |
 | mounted E already routing, cursed | segment 10, a failed test | 0x0C again, Curse ends |
+| mounted Goblin Wolf Riders (Ld 5), cast in segment 10, draws 3, 7 | next two ticks | 3 mod 11 + 2 = 5 ≤ 5 pass; 7 mod 11 + 2 = 9 > 5 **fail** → 0x0C, Curse ends, I and `s_rlmv` restored |
+| unmounted E cursed, E fails a casualty panic test and routs | any segment | 0x0C from the panic test; **the Curse stays** (no mounted test, no other end) |
 | Talisman bearer's own unit cursed | its aura passes | never dispelled (target = protected unit) |
 | Curse cast at (300,300) on E; E walks 400 away; enemy Dispel Magic wizard 50 from (300,300) | dispel pass succeeds | Curse dispelled (measured from the cast point) |
 
