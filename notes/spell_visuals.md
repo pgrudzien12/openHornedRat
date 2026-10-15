@@ -108,11 +108,12 @@ are already public: Lightning 4 above ground; Warp from ground level; Gaze 4, or
    a **last segment** is placed at the aim point, turned back along the beam (bearing + 256), and the head is
    removed.
 4. **Flash**: the end sprite plays once at the aim point (the scattered destination), one frame per tick: Lightning
-   / Banner / Storm bolt **433–439**, Warp **522–525**, Gaze **464–469**. All use colour bank +16. Then the segments
-   and flash are removed. 🟡 The exact number of ticks the segments stay after the flash starts is not settled: keep
-   them until the flash ends.
-5. A beam stopped early (hit in flight, `spell_effects.md` §2.3) skips 3. It still shows the flash at its end point
-   🟡.
+   / Banner / Storm bolt **433–439**, Warp **522–525**, Gaze **464–469**. All use colour bank +16. The flash is drawn at
+   the destination's **aim height** (not on the ground). The segments stay exactly as long as the flash: both are
+   removed together on the tick after the last flash frame (`spell_doomwheel_visuals.md` §4).
+5. A beam stopped early (hit in flight or below the ground, `spell_effects.md` §2.3) skips 3. It still shows the
+   flash, starting **one tick later** and **at the scattered destination**, not at the stop point
+   (`spell_doomwheel_visuals.md` §4).
 
 ### 2.3 Storm of Shemtek
 
