@@ -95,6 +95,7 @@ class ActionScript:
     faces_unit: bool = False
     drops_requests: bool = False
     keeps_facing: bool = False
+    wreck_sprite: str | None = None  # the dead script switches to another sprite set's wreck (limbered mortar)
 
 
 # Standard infantry (notes/game_rules.md "Figure animation" table). Sprite groups per
@@ -175,6 +176,36 @@ CARTS: ActionTable = {action: replace(script, variant_groups=(0, 0)) if script.v
 CARTS[DEAD] = ActionScript("dead", sequence=(0,), loop=False, locks_facing=True)
 
 
+# Doom Diver crew (notes/machine_figure_animation.md 2.6): 1/4/5 hold group 0 phase 0 facing the unit (no fighting
+# pose); 2/3 loop 0,0,0,1,1,2,2,2,3,3 with no random entry; dead burns (kind 1/3, decided by the regiment) else the
+# corpse group 32 with a random facing. Action 7 has no program (the figure keeps its frame): PROVISIONAL, shown as
+# the held rest frame, since the crew never receives a shot request.
+_CREW_HELD = ActionScript(0, sequence=(0,), faces_unit=True)
+_CREW_LOOP = ActionScript(0, sequence=(0, 0, 0, 1, 1, 2, 2, 2, 3, 3))
+DOOM_DIVER_CREW: ActionTable = {
+    STAND: _CREW_HELD, IDLE: _CREW_LOOP, WALK: _CREW_LOOP, FIGHT: _CREW_HELD, WEAPON_READY: _CREW_HELD,
+    DEAD: ActionScript(32, sequence=(0,), loop=False, locks_facing=True),
+    SHOOT: _CREW_HELD,
+}
+
+# Limbered guns (notes/machine_figure_animation.md 2.8). The limbered mortar: 1/4/5 hold group 0 phase 1; idle rolls
+# the wheels with the 8-tick loop; dead switches to the Wagon set's wreck (group 64), like the Caravan. Walking
+# rolls the wheels as well (the owner's request for all carts, see WAGONS); the report holds the frame.
+_MRT_HELD = ActionScript(0, sequence=(1,))
+_MRT_ROLL = ActionScript(0, sequence=(0, 0, 1, 1, 2, 2, 3, 3))
+LIMBERED_MORTAR: ActionTable = {
+    STAND: _MRT_HELD, IDLE: _MRT_ROLL, WALK: _MRT_ROLL, FIGHT: _MRT_HELD, WEAPON_READY: _MRT_HELD,
+    DEAD: ActionScript(64, sequence=(0,), loop=False, locks_facing=True, wreck_sprite="Wagon"),
+    SHOOT: _MRT_HELD,
+}
+# The Imperial / Great Cannon / Volley Gun limbers share one table: everything is the one held frame (a single
+# 1-phase intact group), dead is group 8 held with the facing frozen. No shoot program.
+_GUN_LIMBER_HELD = ActionScript(0, sequence=(0,))
+LIMBERED_GUN: ActionTable = {
+    **{action: _GUN_LIMBER_HELD for action in (STAND, IDLE, WALK, FIGHT, WEAPON_READY, SHOOT)},
+    DEAD: ActionScript(8, sequence=(0,), loop=False, locks_facing=True, keeps_facing=True),
+}
+
 
 def _machine_table(intact: int, wreck: int, shoot: ActionScript) -> ActionTable:
     """A war-machine figure (notes/machine_figure_animation.md 1): actions 1-5 hold the intact group's phase 0
@@ -240,12 +271,16 @@ def mesh_dragon_pose(model: "ModelState") -> int:
 
 FAMILY_TABLES: dict[str, ActionTable] = {"standard_infantry": STANDARD_INFANTRY, "peasants": PEASANTS, "slaves": SLAVES,
                  "mesh_dragon": MESH_DRAGON, "wagons": WAGONS, "carts": CARTS, "gun": GUN, "volley": VOLLEY,
-                 "thrower": THROWER, "mortar": MORTAR}
+                 "thrower": THROWER, "mortar": MORTAR,
+                 "doom_diver_crew": DOOM_DIVER_CREW, "limbered_mortar": LIMBERED_MORTAR,
+                 "limbered_gun": LIMBERED_GUN}
 # Script sprite resource names (casefolded) that select a decoded family; anything else is standard.
 SPRITE_FAMILIES = {"meshdragon": "mesh_dragon", "peasant": "peasants", "peasants": "peasants",
                    "ratslave": "slaves", "slave": "slaves",
-                   "slaves": "slaves", "wagon": "wagons", "caravan": "carts", "mrtwagon": "carts",
-                   "mrtwag": "carts", "packpony": "standard_infantry",
+                   "slaves": "slaves", "wagon": "wagons", "caravan": "carts", "mrtwagon": "limbered_mortar",
+                   "mrtwag": "limbered_mortar", "impcwagon": "limbered_gun", "impcwag": "limbered_gun",
+                   "grtcwagon": "limbered_gun", "grtcwag": "limbered_gun", "vollywagon": "limbered_gun",
+                   "vollywag": "limbered_gun", "doomdiver": "doom_diver_crew", "doomdivr": "doom_diver_crew", "packpony": "standard_infantry",
                    # War-machine figures, by the leader block's machine set (notes/machine_figure_animation.md 3).
                    "cannon": "gun", "impcanon": "gun", "grtcannon": "gun", "grtcanon": "gun", "volleygun": "volley",
                    "voleygun": "volley", "rocklobber": "thrower", "rocklob": "thrower", "doomdvrcatapult": "thrower",
@@ -278,7 +313,7 @@ def corpse_of(regiment: Any, model: "ModelState", x: float, y: float, rng: rando
     else:
         direction = rng.randrange(FULL_TURN)
     group = script.group if script.variant_rule is None else script_group(script, model.stagger)
-    return Corpse(x, y, direction, regiment.model_sprite(model), group)
+    return Corpse(x, y, direction, script.wreck_sprite or regiment.model_sprite(model), group)
 
 
 def script_group(script: ActionScript, stagger: int) -> str | int:
@@ -340,7 +375,7 @@ BURN_LAP_TICKS = 40  # the full laps that follow the lead-in
 CAVALRY_CLASS, ARTILLERY_CLASS, MONSTER_CLASS = 2, 4, 6
 CAVALRY_SPRITES = frozenset({"sheep"})  # PROVISIONAL: mounts with class Infantry in the data, if any, are not covered
 NEVER_BURN_SPRITES = frozenset({  # PROVISIONAL names: wagons, pack ponies, fanatics, mortars, big monsters
-    "wagon", "caravan", "mrtwag", "impcwag", "grtcwag", "vollywag", "packpony", "fanatic", "mortar",
+    "wagon", "caravan", "mrtwag", "impcwag", "grtcwag", "vollywag", "mrtwagon", "impcwagon", "grtcwagon", "vollywagon", "packpony", "fanatic", "mortar",
     "wyvern", "dragon", "meshdragon", "giant", "gyrocopt", "gyrocopter", "dwheel", "doomwheel"})
 BURN_EXCEPTION_SPRITES = frozenset({"warpfire", "doomdivr", "doomdiver"})  # war machines that do burn
 
