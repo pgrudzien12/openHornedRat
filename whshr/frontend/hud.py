@@ -948,7 +948,9 @@ class Hud:
             eyes, mouth = overlay_frames(popup.expression, len(frames), popup.age)
             for index in (0, eyes, mouth):
                 if index < len(frames):
-                    self._draw_panel(self._sheet_frame_quad(frames[index]), rx + 4, ry + 12)
+                    # Overlays sit at the position their frame record gives inside the portrait (notes/glue_portraits.md 3.1).
+                    frame = frames[index]
+                    self._draw_panel(self._sheet_frame_quad(frame), rx + 4 + frame.origin_x, ry + 12 + frame.origin_y)
         for frame_index in self._readout_ornament_frames(shown) or ():
             # Ornament piece offsets within the readout are not individually given by
             # notes/game_rules.md ("fixed offsets"); PROVISIONAL until confirmed.
