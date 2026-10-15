@@ -116,12 +116,13 @@ class FilmFadeTests(unittest.TestCase):
         fades = FilmFades(self.MEDIA)
         self.assertEqual([fades.level(t) for t in (0.0, 12.499, 12.5, 12.7, 20.0)], [100, 100, 98, 96, 0])
 
-    def test_given_the_fade_marker_then_only_a_skip_after_it_fades(self):
+    def test_given_the_fade_marker_then_only_a_skip_after_it_and_before_the_end_fade_fades(self):
         fades = FilmFades(self.MEDIA)
         self.assertFalse(fades.skip_fades(3.9))
         self.assertTrue(fades.skip_fades(4.0))
+        self.assertTrue(fades.skip_fades(12.499))
+        self.assertFalse(fades.skip_fades(12.5))  # the first AnimDone record removes the mark
         self.assertFalse(FilmFades({}).skip_fades(10.0))
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -181,13 +181,15 @@ def narration_text(movie: str, strings: Mapping[int, str]) -> str:
 class FilmFades:
     """A film's own fade events (notes/cutscene_narration.md 4.3).
 
-    ``AnimDone`` (one field, 98, 96 ... 0 every 125 ms) sets the film's sound volume to that percentage and darkens
-    the picture with it, so both fade out together at the end. ``Fade (10, 10)`` marks the moment from which a skip
-    fades out quickly instead of cutting."""
+    ``AnimDone`` (one field, 98, 96 ... 0 every 125 ms) sets the film's level to its value, so picture and sound
+    fade out together at the end. ``Fade (10, 10)`` marks the moment from which a skip fades out instead of
+    cutting; the first ``AnimDone`` record removes that mark again.
 
-    SKIP_FADE_STEPS = 10
-    # PROVISIONAL: the report gives ten short steps but not their length.
-    SKIP_FADE_STEP_SECONDS = 0.05
+    The look is the engine's own, not the original's: the level scales the film's colours (the original subtracts a
+    fixed amount per step and cuts the skip fade from a half-dimmed picture after ten repaints). The skip fade runs
+    smoothly from the current level to black and silence over ``SKIP_FADE_SECONDS``."""
+
+    SKIP_FADE_SECONDS = 0.5
 
     def __init__(self, media: Mapping[str, Any]) -> None:
         anim_done: list[tuple[float, int]] = []
@@ -214,5 +216,6 @@ class FilmFades:
         return level
 
     def skip_fades(self, elapsed_seconds: float) -> bool:
-        """Whether a skip at ``elapsed_seconds`` fades out (past the Fade marker) rather than cutting."""
-        return self.fade_mark is not None and elapsed_seconds >= self.fade_mark
+        """Whether a skip at ``elapsed_seconds`` fades out: past the Fade marker and before the end fade began."""
+        return (self.fade_mark is not None and elapsed_seconds >= self.fade_mark
+                and not any(time <= elapsed_seconds for time, _ in self.anim_done))

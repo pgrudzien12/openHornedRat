@@ -11,6 +11,7 @@ from whshr.campaign_scenes import (
 )
 from whshr.campaign_state import CampaignState
 from whshr.catalog import build
+from whshr.cutscene import FilmFades
 from whshr.glue_scene import GlueScene
 from whshr.glue_content import GlueContent
 from whshr.scenes import SceneAssets, SceneMachine
@@ -146,22 +147,47 @@ class MovieSceneTests(unittest.TestCase):
 
         self.assertIsInstance(machine.active, MainMenuScene)
 
-    def test_given_a_film_past_its_fade_marker_when_skipped_then_it_fades_out_quickly_first(self):
+    def test_given_a_film_past_its_fade_marker_when_skipped_then_it_fades_smoothly_to_black_first(self):
         machine = self._film_with_fade_marker()
         machine.update(0.6)
 
         machine.handle("skip")
         self.assertEqual(machine.active.phase, "skip_fade")
-        machine.handle("skip")  # a second skip changes nothing
+        quarter = FilmFades.SKIP_FADE_SECONDS / 4
         levels = []
-        for _ in range(9):
-            levels.append(machine.active.level)
-            machine.update(0.05)
+        for _ in range(4):
+            levels.append(round(machine.active.level))
+            machine.update(quarter)
 
-        self.assertEqual(levels, [90, 80, 70, 60, 50, 40, 30, 20, 10])
-        machine.update(0.05)
-        self.assertIsInstance(machine.active, MainMenuScene)
+        self.assertEqual(levels, [100, 75, 50, 25])
+        self.assertIsInstance(machine.active, MainMenuScene)  # ends on black
         self.assertEqual(machine.history[-1].reason, "movie skipped")
+
+    def test_given_a_skip_fade_when_skipped_again_then_the_cutscene_ends_at_once(self):
+        machine = self._film_with_fade_marker()
+        machine.update(0.6)
+        machine.handle("skip")
+
+        machine.handle("skip")
+
+        self.assertIsInstance(machine.active, MainMenuScene)
+
+    def test_given_a_skip_fade_then_anim_done_records_are_ignored(self):
+        machine = self._film_with_fade_marker()
+        machine.update(0.99)
+        machine.handle("skip")
+        machine.update(0.05)  # past the AnimDone record at 1.0 s
+
+        self.assertEqual(machine.active.phase, "skip_fade")
+        self.assertEqual(machine.active.level, 100 * (1 - 0.05 / FilmFades.SKIP_FADE_SECONDS))
+
+    def test_given_the_end_fade_has_begun_when_skipped_then_it_cuts_at_once(self):
+        machine = self._film_with_fade_marker()
+        machine.update(1.0)
+
+        machine.handle("skip")
+
+        self.assertIsInstance(machine.active, MainMenuScene)
 
     def test_given_a_film_near_its_end_then_anim_done_sets_the_level(self):
         machine = self._film_with_fade_marker()
