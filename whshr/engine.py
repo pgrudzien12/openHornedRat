@@ -3461,7 +3461,7 @@ class Battle:
             regiment.volley_age += 1
             if regiment.volley_age >= 6 and regiment.hud_class != "art":
                 regiment.volley_countdown = None
-        special_shot = regiment.shooting_code in {14, 15} or (regiment.shooting_code == 17 and regiment.hud_class != "arch")
+        special_shot = regiment.shooting_code == 14 or (regiment.shooting_code == 17 and regiment.hud_class != "arch")
         volley_divisor = 1 if regiment.hud_class == "art" or special_shot else 4
         # A script's broadcast holds until the unit's activity changes (notes/script_animation_sound.md,
         # 0.1); a model's own request beats it for one update (0.2).

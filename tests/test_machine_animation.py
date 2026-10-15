@@ -98,5 +98,51 @@ class WreckTests(unittest.TestCase):
         self.assertEqual((corpse.group, corpse.direction), ("dead", 77))
 
 
+class WarpfireThrowerTests(unittest.TestCase):
+    """notes/machine_figure_animation.md 2.7 and vectors 14, 15."""
+
+    def test_both_sprite_names_select_the_warpfire_table(self):
+        for sprite in ("WARPFIRE", "WarpFireThrower"):
+            self.assertEqual(animation.family_for(sprite, 1), "warpfire")
+
+    def test_actions_1_4_5_hold_the_stand_frame_facing_the_unit(self):  # vector 14
+        self.assertEqual(frames("warpfire", [STAND, FIGHT, WEAPON_READY, FIGHT], direction=6)[0], [62] * 4)
+        for action in (STAND, FIGHT, WEAPON_READY):
+            self.assertTrue(animation.family_table("warpfire")[action].faces_unit)
+
+    def test_idle_loops_the_stand_group_without_random_entry(self):
+        shown, _ = frames("warpfire", [animation.IDLE] * 11, entry=5)
+        self.assertEqual(shown, [48, 48, 48, 56, 56, 64, 64, 64, 72, 72, 48])
+
+    def test_walk_loops_group_0_with_a_random_entry_of_0_to_7(self):
+        shown, _ = frames("warpfire", [animation.WALK] * 9)
+        self.assertEqual(shown, [0, 0, 8, 8, 16, 16, 24, 24, 0])
+        self.assertEqual(animation.family_table("warpfire")[animation.WALK].random_entry, 8)
+        self.assertEqual(frames("warpfire", [animation.WALK] * 2, entry=2)[0], [8, 8])
+
+    def test_the_shot_shows_group_40_for_ten_minus_r_ticks_then_stand(self):  # vector 15
+        shown, fires = frames("warpfire", [SHOOT] * 8 + [STAND] * 2, entry=2, direction=3)
+        self.assertEqual(shown, [43] * 8 + [59, 59])
+        self.assertFalse(any(fires))  # no fire step
+        shown, _ = frames("warpfire", [SHOOT] * 11, entry=0)
+        self.assertEqual(shown, [40] * 10 + [56])
+
+    def test_a_request_during_the_shot_is_dropped(self):
+        shown, _ = frames("warpfire", [SHOOT, FIGHT, FIGHT, SHOOT, SHOOT], entry=2)
+        self.assertEqual(shown, [40] * 5)
+
+    def test_dead_is_the_corpse_group_with_a_random_facing(self):
+        unit = Regiment("w", "W", 0, 0, 96, Side.ENEMY, models=1, ranks=1, sprite="WARPFIRE",
+                        leader_sprite="WARPFIRE", unit_class=1)
+        unit.model_positions()
+        corpse = animation.corpse_of(unit, unit.melee_models[0], 0, 0, FixedEntry(5))
+        self.assertEqual((corpse.group, corpse.direction), (32, 5))
+        self.assertEqual(frames("warpfire", [DEAD] * 2, direction=0)[0], [32, 32])
+
+    def test_a_fire_or_warpfire_kill_burns(self):
+        for kind in (animation.DEATH_FIRE, animation.DEATH_WARPFIRE):
+            self.assertTrue(animation.burns_on_death(kind, 1, "WARPFIRE"))
+
+
 if __name__ == "__main__":
     unittest.main()
