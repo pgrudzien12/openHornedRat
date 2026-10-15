@@ -84,6 +84,7 @@ ARTILLERY_PUFF_FRAME, ARTILLERY_PUFF_TICKS = 73, 4
 MUZZLE_PUFF_FIRST_FRAME = 110  # 🟡 by eye: a gun's muzzle puff is GENBATT 110-113 (notes/machine_figure_animation.md 2.1)
 BANNER_MARKER_RAISE = 4.0  # mesh units: above a 64-pixel troop sprite, below the camera's horizon
 EVENT_LOG_LINES = 3  # battle events shown in the debug overlay (whshr.engine.Battle.events, per tick)
+ATTACHED_TOWARD_CAMERA = 2.0  # BTS world units an attached spell sprite is moved toward the camera (_spell_sprites)
 INSTANCE = struct.Struct("10f")  # foot position (mesh), atlas rectangle (pixels), anchor (pixels), selected
 CAMERA = struct.Struct("24f")
 
@@ -1338,7 +1339,12 @@ class BattleView(SceneView[BattleScene]):
         if sheet is None or not sheet.rects:
             return b""
         data = bytearray()
-        for sprite in [*visuals.sprites(), *projectiles.sprites(), *attached.sprites(),
+        on_figures = attached.sprites()
+        # An attached spell's sprite (Curse spirit, sparkles) stands on its figure's own ground point
+        # (notes/spell_attached_visuals.md 2.1), so at equal depth the figure drawn first would hide it. Its foot is
+        # moved a hair toward the camera, too little to see, so it is drawn over its own figure.
+        eye_x, eye_y = self.camera.eye_xy()
+        for sprite in [*visuals.sprites(), *projectiles.sprites(), *on_figures,
                        *self._obstacle_visuals().sprites(), *self._transport_visuals().sprites(),
                        *(sprite for spell in area_effects(self.scene.battle) for sprite in area_sprites(spell))]:
             number = (sprite.first + sprite_direction(self.camera.yaw, sprite.bearing)
@@ -1348,9 +1354,15 @@ class BattleView(SceneView[BattleScene]):
             frame, rect = sheet.frames[number], _atlas_rect(sheet, number)
             ground_x, ground_y = (sprite.ground_at if isinstance(sprite, Sprite) and sprite.ground_at is not None
                                   else (sprite.x, sprite.y))
-            data += INSTANCE.pack(sprite.x / WORLD_PER_MESH,
+            x, y = sprite.x, sprite.y
+            if any(sprite is drawn for drawn in on_figures):
+                distance = math.hypot(eye_x - x, eye_y - y)
+                if distance > 0:
+                    x += (eye_x - x) / distance * ATTACHED_TOWARD_CAMERA
+                    y += (eye_y - y) / distance * ATTACHED_TOWARD_CAMERA
+            data += INSTANCE.pack(x / WORLD_PER_MESH,
                                   field.ground_height(ground_x, ground_y) + sprite.height / WORLD_PER_MESH,
-                                  sprite.y / WORLD_PER_MESH, *rect, frame.anchor_x, frame.anchor_y, 0.0)
+                                  y / WORLD_PER_MESH, *rect, frame.anchor_x, frame.anchor_y, 0.0)
         return bytes(data)
 
     def _advance_spell_visuals(self) -> tuple[FireballVisuals, ProjectileVisuals]:
