@@ -384,18 +384,23 @@ CURSE_APPEARANCE, CURSE_LOOP, CURSE_APPEARANCE_TICKS = 229, 261, 4  # section 3.
 SPARKLES: dict[int, tuple[int, float]] = {  # section 1, 4: first of a 4-frame loop, height above local ground
     spell_effects.AZURE_BLADES: (387, 16.0), spell_effects.ERE_WE_GO: (470, 0.0), spell_effects.MORK_SAVE_UZ: (486, 0.0),
 }
-ATTACHED_CODES = frozenset({spell_effects.CURSE, *SPARKLES})
+# notes/spell_madness_visuals.md: Madness is one horned head per maddened *unit*, not per figure, at the unit's position
+# 48 above the local ground, frames 537-540 one per tick from 537 (they already decode with map 34, section 1.1).
+MADNESS_FIRST, MADNESS_HEIGHT = 537, 48.0
+ATTACHED_CODES = frozenset({spell_effects.CURSE, spell_effects.MADNESS, *SPARKLES})
 
 
 @dataclass(frozen=True)
 class Attachment:
     """One active attached effect seen this tick: `age` is the ticks since launch (0 on the launch tick T), `figures`
-    the target's current figure positions in figure order, `facing` the target unit's facing (1/512 turn)."""
+    the target's current figure positions in figure order, `facing` the target unit's facing (1/512 turn), `position`
+    the target unit's own position."""
     serial: int
     code: int
     age: int
     figures: tuple[tuple[float, float], ...]
     facing: int
+    position: tuple[float, float] = (0.0, 0.0)
 
 
 @dataclass
@@ -429,6 +434,9 @@ class AttachedVisuals:
             if attachment.code == spell_effects.CURSE:
                 drawn += [DirectionalSprite(self._curse_first(attachment, index), x, y, 0.0, attachment.facing)
                           for index, (x, y) in enumerate(attachment.figures)]
+            elif attachment.code == spell_effects.MADNESS:
+                x, y = attachment.position
+                drawn.append(Sprite(MADNESS_FIRST + attachment.age % 4, x, y, MADNESS_HEIGHT))
             else:
                 first, height = SPARKLES[attachment.code]
                 drawn += [Sprite(first + attachment.age % 4, x, y, height) for x, y in attachment.figures]
@@ -455,5 +463,5 @@ def attached_effects(battle: Battle) -> list[Attachment]:
         if target is None or not target.active:
             continue
         seen.append(Attachment(effect.serial, effect.code, max(0, effect.elapsed - 1),
-                               tuple(target.model_positions()), int(target.direction)))
+                               tuple(target.model_positions()), int(target.direction), (target.x, target.y)))
     return seen
