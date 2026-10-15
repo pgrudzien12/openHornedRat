@@ -104,14 +104,6 @@ def compose_portrait(palette: Sequence[Rgb], background: SpriteFrame, foreground
     return background.width, background.height, bytes(rgba)
 
 
-# Mouth/eye overlay rectangles verified for the two portraits used by every shipped briefing
-# (notes/glue_portraits.md §3.1); other sprite sets' overlay geometry is not yet reverse-engineered
-# (§6 open question), so they fall back to the static frame-0 portrait with no talk/blink overlay.
-OVERLAY_POSITIONS: dict[str, dict[int, tuple[int, int, int, int]]] = {
-    "SCRI": {frame: (40, 84, 44, 26) for frame in (1, 3, 4, 5, 6)} | {frame: (47, 69, 32, 5) for frame in (2, 7)},
-    "COMM": {frame: (43, 64, 36, 27) for frame in (1, 3, 4, 5, 6)} | {frame: (45, 52, 28, 4) for frame in (2, 7)},
-}
-
 # Kind-5 sequence tables, notes/glue_portraits.md §3.3. The eye loop's tick counts are given in
 # full and reproduced exactly. The mouth "talking" pattern is documented only as a partial,
 # non-generated prefix ("looks pseudo-random but is a fixed sequence... then loops"); this repeats
@@ -186,16 +178,13 @@ def compose_talking_portrait(palette: Sequence[Rgb], background: SpriteFrame, ba
                              sprite_sheet: SpriteSheet, mouth_frame: int, eye_frame: int) -> Rgba:
     """Composite the base portrait, then stamp the current mouth and eye overlay frames onto it."""
     width, height, rgba = compose_portrait(palette, background, base)
-    positions = OVERLAY_POSITIONS.get(sprite_sheet.name)
-    if positions is None:
-        return width, height, rgba
     canvas = bytearray(rgba)
     for frame_index in (mouth_frame, eye_frame):
-        position = positions.get(frame_index)
-        if position is None or frame_index >= len(sprite_sheet.frames):
+        if not 0 < frame_index < len(sprite_sheet.frames):
             continue
-        ox, oy, overlay_width, overlay_height = position
+        # Each overlay sits at the position its frame record gives inside the portrait (notes/glue_portraits.md 3.1).
         overlay = sprite_sheet.frames[frame_index]
+        ox, oy, overlay_width, overlay_height = overlay.origin_x, overlay.origin_y, overlay.width, overlay.height
         for row in range(overlay_height):
             for col in range(overlay_width):
                 pixel = overlay.pixels[row * overlay_width + col]

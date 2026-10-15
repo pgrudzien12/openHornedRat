@@ -195,6 +195,10 @@ class SpriteFrame:
     anchor_x: int  # foot anchor column
     anchor_y: int  # foot anchor row, counted from the top
     pixels: bytes  # palette indices, row 0 at the top, 0 = transparent
+    # Portrait overlays: where the frame sits inside the portrait (FOL int16 bytes 0-1 and 2-3,
+    # notes/animations.md "Anchor"; notes/glue_portraits.md 3.1). Directional sets leave them unused.
+    origin_x: int = 0
+    origin_y: int = 0
 
 
 @dataclass
@@ -259,7 +263,7 @@ def read_sprite_sheet(name: str, fol: bytes, bop: bytes, colors: bytes = b"") ->
         pixels = decode_frame(bop, record, ends[record[4]], maps, map_indices[index])
         # In directional FOL entries byte 3 is the horizontal anchor and byte 2 is measured up from the bottom.
         frames.append(SpriteFrame(width, height, fol[index * 16 + 3], height - fol[index * 16 + 2],
-                                  bytes(pixels).ljust(width * height, b"\0")[:width * height]))
+                                  bytes(pixels).ljust(width * height, b"\0")[:width * height], record[0], record[1]))
         nibble = record[5] >> 4
         if groups and groups[-1][0] == nibble:
             groups[-1][2] += 1
