@@ -127,3 +127,43 @@ def narration_text(movie: str, strings: Mapping[int, str]) -> str:
     """The page text: its captions concatenated with no separator (each continued fragment ends in its own space,
     notes/cutscene_narration.md 3); leading white space is skipped when wrapping."""
     return "".join(strings.get(text_id, "") for text_id in narration_caption_ids(movie))
+
+
+class FilmFades:
+    """A film's own fade events (notes/cutscene_narration.md 4.3).
+
+    ``AnimDone`` (one field, 98, 96 ... 0 every 125 ms) sets the film's sound volume to that percentage and darkens
+    the picture with it, so both fade out together at the end. ``Fade (10, 10)`` marks the moment from which a skip
+    fades out quickly instead of cutting."""
+
+    SKIP_FADE_STEPS = 10
+    # PROVISIONAL: the report gives ten short steps but not their length.
+    SKIP_FADE_STEP_SECONDS = 0.05
+
+    def __init__(self, media: Mapping[str, Any]) -> None:
+        anim_done: list[tuple[float, int]] = []
+        fade_marks: list[float] = []
+        for entry in media.get("objects", {}).values():
+            event = entry.get("evt")
+            rows = event.get("rows", ()) if event else ()
+            if not event or not rows:
+                continue
+            if event.get("fields") == 1:
+                anim_done.extend((row[0] / 1000, int(row[1])) for row in rows)
+            elif event.get("fields") == 2:
+                fade_marks.append(rows[0][0] / 1000)
+        self.anim_done = tuple(sorted(anim_done))
+        self.fade_mark: float | None = min(fade_marks) if fade_marks else None
+
+    def level(self, elapsed_seconds: float) -> int:
+        """The volume/brightness percentage at ``elapsed_seconds``: 100 until AnimDone's first record."""
+        level = 100
+        for time, value in self.anim_done:
+            if time > elapsed_seconds:
+                break
+            level = value
+        return level
+
+    def skip_fades(self, elapsed_seconds: float) -> bool:
+        """Whether a skip at ``elapsed_seconds`` fades out (past the Fade marker) rather than cutting."""
+        return self.fade_mark is not None and elapsed_seconds >= self.fade_mark

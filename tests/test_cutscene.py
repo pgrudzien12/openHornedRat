@@ -1,6 +1,6 @@
 import unittest
 
-from whshr.cutscene import SubtitleTimeline, movie_number, narration_caption_ids, narration_text, subtitle_color
+from whshr.cutscene import FilmFades, SubtitleTimeline, movie_number, narration_caption_ids, narration_text, subtitle_color
 
 
 def _media(rows, fields=5):
@@ -78,6 +78,25 @@ class NarrationCaptionTests(unittest.TestCase):
         timeline = SubtitleTimeline(_media([[0, 13030, 2, 0, 0, 4, 1]], fields=6),
                                     {13030: "Ungrunn: First part, ", 13031: "second part."})
         self.assertEqual(timeline.cues[0].text, "Ungrunn: First part, second part.")
+
+
+class FilmFadeTests(unittest.TestCase):
+    """The film's own fades (notes/cutscene_narration.md 4.3)."""
+
+    MEDIA = {"objects": {
+        7: {"evt": {"fields": 1, "rows": [[12500, 98], [12625, 96], [18625, 0]]}},
+        8: {"evt": {"fields": 2, "rows": [[4000, 10, 10]]}},
+    }}
+
+    def test_given_anim_done_then_the_level_follows_its_records(self):
+        fades = FilmFades(self.MEDIA)
+        self.assertEqual([fades.level(t) for t in (0.0, 12.499, 12.5, 12.7, 20.0)], [100, 100, 98, 96, 0])
+
+    def test_given_the_fade_marker_then_only_a_skip_after_it_fades(self):
+        fades = FilmFades(self.MEDIA)
+        self.assertFalse(fades.skip_fades(3.9))
+        self.assertTrue(fades.skip_fades(4.0))
+        self.assertFalse(FilmFades({}).skip_fades(10.0))
 
 
 if __name__ == "__main__":

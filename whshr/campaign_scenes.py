@@ -16,7 +16,7 @@ from .name_prompt_scene import NamePromptScene
 from .glue_fonts import glue_font_asset
 from . import payments
 from .legacy import module
-from .cutscene import narration_text
+from .cutscene import FilmFades, narration_text
 from .cache import Loader
 from .glue import MissionRecord, MissionRef
 from .scenes import Quit, Scene, SceneAssets, SceneEvent, SceneManifest, Transition
@@ -63,7 +63,10 @@ class MovieScene(Scene):
     A film with narration captions (whshr.cutscene.narration_text) first shows them as a text-only page
     (``phase`` "narration", notes/cutscene_narration.md 4.1): it stays up for 9.9 s or until "continue" (the
     view sends it for Enter or a left press over the film area), and the film's clock does not run before that.
-    "skip" ends the whole cutscene from either phase.
+    "skip" during the page ends the whole cutscene (``--skip-intro``). During the film (notes/cutscene_narration.md
+    4.2, 4.3) a skip before the film's Fade marker cuts at once; after it, the subtitles are cleared and the film
+    fades out quickly (``phase`` "skip_fade") before the cutscene ends. ``level`` is the film's current
+    volume/brightness percentage, the AnimDone fade-out and the skip fade combined.
     """
 
     NARRATION_SECONDS = 9.9
@@ -90,6 +93,8 @@ class MovieScene(Scene):
         self.narration = ""
         self.phase = "movie"
         self.narration_seconds = 0.0
+        self.fades = FilmFades({})
+        self.skip_fade_seconds = 0.0
 
     def enter(self, context: SceneAssets) -> None:
         self.container = context.load(self.cutscene_id)
@@ -99,6 +104,7 @@ class MovieScene(Scene):
         self.subtitle_font = context.load(SUBTITLE_FONT)
         self.narration = narration_text(self.movie, self.texts)
         self.phase = "narration" if self.narration else "movie"
+        self.fades = FilmFades(self.media)
 
     def _finish(self, reason: str) -> Transition:
         if self.glue_scene is not None:
@@ -110,6 +116,11 @@ class MovieScene(Scene):
 
     def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         if event == "skip":
+            if self.phase == "movie" and self.fades.skip_fades(self.elapsed_seconds):
+                self.phase = "skip_fade"
+                return None
+            if self.phase == "skip_fade":
+                return None  # already fading out
             return self._finish("movie skipped")
         if event == "continue" and self.phase == "narration":
             self.phase = "movie"
@@ -122,10 +133,28 @@ class MovieScene(Scene):
             if self.narration_seconds >= self.NARRATION_SECONDS:
                 self.phase = "movie"  # the film starts from its first frame; the page's time is not carried over
             return None
+        if self.phase == "skip_fade":
+            self.skip_fade_seconds += seconds
+            if self._skip_fade_steps() >= FilmFades.SKIP_FADE_STEPS:
+                return self._finish("movie skipped")
         self.elapsed_seconds += seconds
         if self.duration_seconds is not None and self.elapsed_seconds >= self.duration_seconds:
             return self._finish("movie completed")
         return None
+
+
+    @property
+    def level(self) -> int:
+        """The film's volume/brightness percentage now (notes/cutscene_narration.md 4.3)."""
+        level = self.fades.level(self.elapsed_seconds)
+        if self.phase == "skip_fade":
+            steps = self._skip_fade_steps() + 1
+            level = min(level, max(0, 100 * (FilmFades.SKIP_FADE_STEPS - steps) // FilmFades.SKIP_FADE_STEPS))
+        return level
+
+    def _skip_fade_steps(self) -> int:
+        """Whole skip-fade steps done (tolerant of float accumulation of the fixed ticks)."""
+        return int(self.skip_fade_seconds / FilmFades.SKIP_FADE_STEP_SECONDS + 1e-6)
 
 
 class MainMenuScene(Scene):

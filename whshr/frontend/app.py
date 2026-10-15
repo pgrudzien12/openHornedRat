@@ -176,7 +176,7 @@ def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), 
     clock = FixedStepClock(FIXED_STEP, MAX_STEPS_PER_FRAME)
     rate = FrameRate()
     limiter = pygame.time.Clock()
-    fade_remaining = FADE_SECONDS  # fade in from black on the initial scene too
+    fade_remaining = FADE_SECONDS if getattr(view, "fade_in", True) else 0.0  # the initial scene fades in too
 
     def synchronise(current: SceneView[Any]) -> SceneView[Any]:
         nonlocal fade_remaining
@@ -184,8 +184,9 @@ def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), 
             return current
         current.release()
         CursorController.restore_arrow()  # the next view sets its own cursor; none must leak from this one
-        fade_remaining = FADE_SECONDS
         next_view = view_for(gpu, machine.active, options)
+        # A view may opt out of the generic fade-in (the cutscene caption page, notes/cutscene_narration.md 4.1).
+        fade_remaining = FADE_SECONDS if getattr(next_view, "fade_in", True) else 0.0
         sync_profile()
         return next_view
 
