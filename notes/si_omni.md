@@ -267,17 +267,20 @@ Per-object details: `extracted/si/INDEX.md` and `extracted/si/<SI>/objects.json`
   versions (`musicawe\`), selected by the `MIDIType` variable (FM vs AWE32 setup).
 
 ## Open questions
-> Issue #41 tracks the EVT speaker, subtitle, and fade behavior needed for generic playback.
-> The other unknowns below are historical notes, not part of that issue; the broad backlog
-> audit (issue #45) is closed.
+> The EVT speaker, subtitle and fade behaviour (issue #41, closed) is answered in
+> `notes/cutscene_subtitles.md` and `notes/cutscene_narration.md` §4.3. The unknowns below are
+> historical notes; the broad backlog audit (issue #45) is closed.
 
 
 - `MxHd` second u32 (`0x100`), `MxOb.unk14` (1 for Events), `unk_a/unk_b` (always 0),
   `palette_mgmt` (always 1), `sustain` (−1 for films), `flags` (2 vs 0/1), WAV header field `44`.
-- EVT behavior tracked by #41: what `speaker` 2/3/4 means, why speech tracks last 15 ticks
-  past the line, and what the `Fade` record `(10, 10)` does. Needs subtitles/texts (1.1)
-  or watching the game under Wine.
-- Historical EVT unknown: the 6th field `1` (A13030, A14010).
+- ~~EVT `speaker` 2/3/4~~: the subtitle colour (red, green, blue), `notes/cutscene_subtitles.md` §3.1.
+- ~~The ~15-tick tail of speech tracks~~: the finished line is held about 2 s before the clearing
+  record, `notes/cutscene_subtitles.md` §3.2.
+- ~~`Fade (10, 10)`~~: marks the film as "fade when skipped", `notes/cutscene_narration.md` §4.3 and
+  `notes/cutscene_subtitles.md` §5.
+- ~~The 6th field `1` (A13030, A14010)~~: number of further text ids joined into the same subtitle,
+  `notes/cutscene_subtitles.md` §4.
 - The exact frame timing: whether the engine really ignores the Smacker frame rate (the chunk
   times say 125 ms for all films; A1/A27 headers say 85 ms per frame).
 - Why 24 speech lines differ from their `GLUE/SPEECH` counterparts, and which version the game

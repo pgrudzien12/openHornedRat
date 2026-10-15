@@ -139,14 +139,40 @@ For completeness (these are the film's own rules, already partly in `notes/si_om
 
 ### 4.3 Film fades (not the page)
 
+- **Darkening step.** Both fades darken the picture by **subtracting a fixed amount from every red,
+  green and blue component** of the film's palette (clamped at 0), cumulatively on the palette as it
+  currently is. It is not a multiply: dark colours reach black first, bright ones last.
 - `AnimDone` (one field, 98, 96 … 0 every 125 ms): each record sets the film's sound and music volume to
-  the value (as a percentage) and darkens the film picture one step, so the picture and audio fade out
-  together over the last 6.25 s.
-- `Fade (10, 10)` at 4 s marks the film as "fade when stopped": if the player skips it after that point,
-  the speech subtitles are cleared and the picture and sound fade out quickly (ten short steps) instead
-  of cutting. Skipping in the first 4 s cuts immediately. Every shipped film has this event.
+  the value (as a percentage) and darkens the picture by **5** per component, so the picture and audio
+  fade out together over the last 6.25 s (50 records × 5 = 250: everything is black by the end).
+- `Fade (10, 10)` at 4 s marks the film as "fade when skipped". Every shipped film has this event.
+  Skipping in the first 4 s cuts immediately.
+- **The first `AnimDone` record removes that mark again.** Once the end fade has begun, a skip cuts
+  immediately, with no skip fade (the picture is already dimming).
+- **Skip fade** (skip while marked):
+  1. Both speech subtitle blocks are cleared to black at once (`notes/cutscene_subtitles.md` §5).
+  2. **Ten steps.** Step `k` = 1 … 10 darkens the picture by **16** per component and then sets sound
+     and music volume to **`(11 − k) × 10` %**: 100, 90, … 10. The volume is lowered *after* each
+     darkening, so the first step leaves the volume at 100 % and the sound never reaches 0 inside the
+     fade. After ten steps the picture is down by 160 per component: colours with every component
+     ≤ 160 are black, the brightest are at most 95.
+  3. The film is then stopped (sound cut from 10 %) and its window hidden: the picture **cuts** from
+     this dimmed state, it does not reach full black.
+- **Step length: there is none.** The steps run back to back with no timer or wait. Each step only
+  rebuilds the palette, repaints the film area and handles the window messages already waiting. So
+  the whole fade lasts ten repaints, a fraction of a second on any machine. For the engine: **one
+  step per displayed frame** (about 0.15–0.3 s at 30–60 fps) reproduces it. 🟡 The real wall time was
+  never measured; it depends on the machine.
+- **During the skip fade:** the film's event records are ignored from the moment of the skip (no more
+  subtitles, no `AnimDone` volume or darkening). The film stream is stopped only after the tenth
+  step, so 🟡 its picture may still advance a frame or two. Input is not blocked; window messages are
+  handled normally between steps. 🟡 A second skip press during the fade ends it early (film window
+  hidden at once); this is too quick to matter in practice.
 - The darkening touches only the film's own colours, not the first and last ten palette entries
   (the system colours).
+- 🟡 Four films (`A1`, `A18`, `A18B`, `A20`) load a new palette once mid-film. A darkening applied before
+  that frame is probably lost when the new palette arrives. This only matters for an `AnimDone`
+  fade, which never overlaps those frames in the shipped films.
 
 ### 4.4 Speech subtitle joining (related)
 
@@ -172,7 +198,9 @@ joined into one subtitle: the last field is the number of further ids (`1`, so `
 | `REMISSION6` | `playmovie:A9` | no page; film starts at once |
 | Player killed / fled | `DEATH01` / `DEATH02` | no page; film starts at once |
 | `A27` playing, 2 s in | Enter | film cut immediately (before the 4 s fade marker) |
-| `A27` playing, 10 s in | Enter | subtitles cleared, picture and sound fade quickly, then the game continues |
+| `A27` playing, 10 s in | Enter | subtitles cleared; 10 steps: picture −16 per component each, volume 100, 90 … 10 %; then the film cuts and the game continues |
+| a film in its `AnimDone` fade (first record passed) | Enter | film cut immediately, no skip fade |
+| palette entry (200, 120, 40), skip fade | 10 steps | (184, 104, 24), (168, 88, 8), (152, 72, 0), … (40, 0, 0) after step 10 |
 
 ## 6. Open items
 
