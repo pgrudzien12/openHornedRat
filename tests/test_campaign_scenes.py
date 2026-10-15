@@ -6,7 +6,7 @@ from whshr.assets import AssetId, AssetLocator
 from whshr.battle_scene import BattleScene
 from whshr.cache import AssetCache
 from whshr.campaign_scenes import (
-    BriefingScene, MainMenuScene, MissionMapScene, MovieScene, OpeningNarrationScene,
+    BriefingScene, MainMenuScene, MissionMapScene, MovieScene,
     TroopSelectScene, briefing_asset_for,
 )
 from whshr.campaign_state import CampaignState
@@ -82,22 +82,55 @@ class MovieSceneTests(unittest.TestCase):
         self.assertEqual(self.loaded, [self.root / "REMOTE/BINARY/ANIM/A1.SI"] * 2 +
                          [self.root / "FILE/DLL/ANTXT.DLL", self.root / "FILE/BINARY/GLUE/SUBTEXT.FON"])
 
-    def test_given_opening_narration_when_clicked_then_the_intro_cutscene_becomes_active(self):
-        machine = SceneMachine(OpeningNarrationScene(), self.context)
+    def test_given_a_film_with_narration_captions_when_entered_then_its_text_page_comes_first(self):
+        machine = SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
 
-        self.assertEqual(machine.active.text, "".join(self.texts[text_id] for text_id in (1100, 1101, 1102)))
-        machine.handle("continue")
+        self.assertEqual(machine.active.phase, "narration")
+        self.assertEqual(machine.active.narration,
+                         "".join(self.texts[text_id] for text_id in (1100, 1101, 1102)).strip())
+
+    def test_given_the_text_page_when_time_passes_then_the_film_does_not_start(self):
+        machine = SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
+
+        machine.update(5.0)
 
         self.assertIsInstance(machine.active, MovieScene)
-        self.assertEqual(machine.history[-1].reason, "opening narration dismissed")
+        self.assertEqual(machine.active.elapsed_seconds, 0.0)
 
-    def test_given_opening_narration_when_the_intro_is_skipped_then_the_menu_becomes_active(self):
-        machine = SceneMachine(OpeningNarrationScene(), self.context)
+    def test_given_the_text_page_when_9_9_seconds_pass_then_the_film_starts_from_its_first_frame(self):
+        machine = SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
+
+        machine.update(9.8)
+        self.assertEqual(machine.active.phase, "narration")
+        machine.update(0.2)
+
+        self.assertEqual(machine.active.phase, "movie")
+        self.assertEqual(machine.active.elapsed_seconds, 0.0)
+
+    def test_given_the_text_page_when_clicked_then_the_film_plays(self):
+        machine = SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
+
+        machine.handle("continue")
+        machine.update(1.75)
+
+        self.assertIsInstance(machine.active, MainMenuScene)
+        self.assertEqual(machine.history[-1].reason, "movie completed")
+
+    def test_given_the_text_page_when_the_intro_is_skipped_then_the_menu_becomes_active(self):
+        machine = SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
 
         machine.handle("skip")
 
         self.assertIsInstance(machine.active, MainMenuScene)
-        self.assertEqual(machine.history[-1].reason, "intro skipped")
+        self.assertEqual(machine.history[-1].reason, "movie skipped")
+
+    def test_given_a_film_without_captions_when_entered_then_it_plays_at_once(self):
+        self.texts.clear()
+        machine = SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
+
+        self.assertEqual(machine.active.phase, "movie")
+        machine.update(1.75)
+        self.assertIsInstance(machine.active, MainMenuScene)
 
     def test_given_intro_when_player_skips_then_main_menu_becomes_active(self):
         machine = SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
@@ -109,6 +142,7 @@ class MovieSceneTests(unittest.TestCase):
 
     def test_given_intro_when_its_timeline_ends_then_main_menu_becomes_active(self):
         machine = SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
+        machine.handle("continue")  # the text page
 
         machine.update(1.75)
 
@@ -120,6 +154,7 @@ class MovieSceneTests(unittest.TestCase):
         # 10 ms). Playtesting report: the intro looped instead of stopping; reproduce the same
         # incremental-update pattern here rather than the single machine.update(1.75) above.
         machine = SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
+        machine.handle("continue")  # the text page
         step = 0.01
         for _ in range(174):  # 1.74 s, just short of the 1.75 s timeline
             machine.update(step)

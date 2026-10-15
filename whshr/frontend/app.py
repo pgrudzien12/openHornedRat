@@ -18,7 +18,7 @@ from ..assets import AssetId  # noqa: E402
 from ..audio_settings import audio_settings  # noqa: E402
 from ..battle_scene import BattleScene  # noqa: E402
 from .. import campaign_log as campaign_log_module  # noqa: E402
-from ..campaign_scenes import OpeningNarrationScene  # noqa: E402
+from ..campaign_scenes import MainMenuScene, MovieScene  # noqa: E402
 from ..clock import FixedStepClock  # noqa: E402
 from ..engine import DEFAULT_SEED  # noqa: E402
 from ..game import scene_context  # noqa: E402
@@ -147,7 +147,7 @@ def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), 
     overlay = gpu.text((820, 140))
     initial: Scene = (GlueScene(glue_program) if glue_program else
                BattleScene(AssetId("vanilla", "battle", Path(battle).stem.casefold()), log_dir=log_dir, seed=seed)
-               if battle else OpeningNarrationScene(log_dir=log_dir, seed=seed))
+               if battle else MovieScene("a1", successor=MainMenuScene(log_dir=log_dir, seed=seed)))
     machine = SceneMachine(initial, context)
     options: dict[str, Any] = {"camera": camera, "installation": context.locator.installation}
     view = view_for(gpu, machine.active, options)

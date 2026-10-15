@@ -1,6 +1,6 @@
 import unittest
 
-from whshr.cutscene import SubtitleTimeline, subtitle_color
+from whshr.cutscene import SubtitleTimeline, movie_number, narration_caption_ids, narration_text, subtitle_color
 
 
 def _media(rows, fields=5):
@@ -50,6 +50,34 @@ class SubtitleTimelineTests(unittest.TestCase):
         )
 
         self.assertEqual(timeline.cues, ())
+
+
+class NarrationCaptionTests(unittest.TestCase):
+    """The page before a film, from its name alone (notes/cutscene_narration.md 2, test vectors 5)."""
+
+    def test_given_film_names_then_their_numbers_ignore_trailing_letters(self):
+        self.assertEqual([movie_number(name) for name in ("A1", "A12b", "a16A", "A18B", "DEATH01")],
+                         [1, 12, 16, 18, 0])
+
+    def test_given_the_report_vectors_then_each_film_gets_its_row(self):
+        expected = {
+            "A1": (1100, 1101, 1102), "A12b": (12100,), "A12": (12100,), "A13": (13200,),
+            "A16a": (16100,), "A16b": (16600, 16601), "A18B": (18100, 18101), "A20": (20100,),
+            "A27": (27100, 27101, 27102, 27103), "A9": (), "A14": (), "DEATH01": (), "DEATH02": (),
+        }
+        for film, ids in expected.items():
+            with self.subTest(film=film):
+                self.assertEqual(narration_caption_ids(film), ids)
+
+    def test_given_captions_then_the_page_joins_them_with_no_separator(self):
+        strings = {3100: "In the Badlands, ", 3101: "a warlord stirs ", 3102: "again..."}
+        self.assertEqual(narration_text("A3", strings), "In the Badlands, a warlord stirs again...")
+        self.assertEqual(narration_text("A9", strings), "")
+
+    def test_given_a_six_field_speech_track_then_its_line_and_the_next_id_are_one_subtitle(self):
+        timeline = SubtitleTimeline(_media([[0, 13030, 2, 0, 0, 4, 1]], fields=6),
+                                    {13030: "Ungrunn: First part, ", 13031: "second part."})
+        self.assertEqual(timeline.cues[0].text, "Ungrunn: First part, second part.")
 
 
 if __name__ == "__main__":
