@@ -13,6 +13,13 @@ def _fly(visuals, ticks, serial=1, end=False):
     return seen
 
 
+def _after_end(visuals, ticks):
+    """Fly a bolt that ends on its last tick, then one more tick: the tick the explosion starts on."""
+    _fly(visuals, ticks, end=True)
+    visuals.advance([])
+    return visuals.sprites()
+
+
 def _heads(sprites):
     return [s for s in sprites if s.frame <= 128 and s.height == s.x / 10]
 
@@ -71,10 +78,24 @@ class FireballVisualsTest(unittest.TestCase):
         self.assertEqual(frames[:19], [[126 + i] for i in range(19)])
         self.assertEqual(frames[19:], [[], []])
 
-    def test_ending_tick_has_no_head_and_starts_the_explosion_on_the_ground(self):
+    def test_ending_tick_has_no_head_and_no_explosion_yet(self):
         sprites = _fly(FireballVisuals(), 5, end=True)[-1]
         self.assertEqual([s for s in sprites if s.frame <= 128 and s.x == 40.0 and s.frame != 125], [])
+        self.assertEqual([s for s in sprites if s.frame >= 177], [])
+
+    def test_explosion_starts_on_the_ground_the_tick_after_the_ending_tick(self):
+        """bf003_playtest 8.3 (corrected): the end step runs on the update after the final in-flight test."""
+        sprites = _after_end(FireballVisuals(), 5)
         self.assertEqual([(s.frame, s.x, s.height) for s in sprites if s.frame >= 177], [(177, 40.0, 0.0)])
+
+    def test_a_terminal_impact_on_a_flier_still_draws_the_head_on_the_ending_tick(self):
+        visuals = FireballVisuals()
+        visuals.advance([Flight(1, 0.0, 0.0, 4.0)])
+        visuals.advance([Flight(1, 10.0, 0.0, 3.0, True, terminal=True)])
+        self.assertEqual([(s.frame, s.x, s.height) for s in visuals.sprites() if s.frame <= 128 and s.x == 10.0],
+                         [(126, 10.0, 3.0)])
+        visuals.advance([])
+        self.assertNotIn((127, 10.0), [(s.frame, s.x) for s in visuals.sprites()])  # no head; the puff and burst
 
     def test_ending_tick_still_leaves_a_puff_when_the_head_moved(self):
         sprites = _fly(FireballVisuals(), 3, end=True)[-1]
@@ -82,8 +103,8 @@ class FireballVisualsTest(unittest.TestCase):
 
     def test_trail_runs_from_the_start_point_to_the_end_point(self):
         """Owner's decision: the ending tick leaves a closing puff where the flight ends, under the explosion."""
-        sprites = _fly(FireballVisuals(), 5, end=True)[-1]
-        puffs = sorted(s.x for s in sprites if s.frame < 177)  # no head on the ending tick: these are all puffs
+        sprites = _after_end(FireballVisuals(), 5)
+        puffs = sorted(s.x for s in sprites if s.frame < 177)  # no head after the ending tick: these are all puffs
         self.assertEqual(min(puffs), 0.0)
         self.assertEqual(max(puffs), 40.0)
 
@@ -98,16 +119,17 @@ class FireballVisualsTest(unittest.TestCase):
         visuals = FireballVisuals()
         visuals.advance([Flight(1, 0.0, 0.0, 4.0)])
         visuals.advance([Flight(1, 10.0, 0.0, -1.0, True)])
+        visuals.advance([])
         self.assertIn((10.0, 0.0), [(s.x, s.height) for s in visuals.sprites() if s.frame < 177])
 
     def test_explosion_shows_177_to_185_over_nine_ticks_then_vanishes(self):
         visuals = FireballVisuals()
         _fly(visuals, 5, end=True)
         shown = []
-        for _ in range(8):
+        for _ in range(9):
             visuals.advance([])
             shown.append([(s.frame, s.x) for s in visuals.sprites() if s.frame >= 177])
-        self.assertEqual(shown, [[(178 + i, 40.0)] for i in range(8)])
+        self.assertEqual(shown, [[(177 + i, 40.0)] for i in range(9)])
         visuals.advance([])
         self.assertEqual([s for s in visuals.sprites() if s.frame >= 177], [])
 
@@ -123,13 +145,15 @@ class FireballVisualsTest(unittest.TestCase):
         visuals = FireballVisuals()
         visuals.advance([Flight(1, 0.0, 0.0, 0.0), Flight(2, 50.0, 0.0, 0.0)])
         visuals.advance([Flight(1, 0.0, 0.0, 0.0, True), Flight(2, 50.0, 0.0, 0.0)])
+        visuals.advance([Flight(2, 50.0, 0.0, 0.0)])
         order = [(s.frame, s.x) for s in visuals.sprites()]
-        self.assertEqual(order, [(126, 50.0), (177, 0.0), (126, 0.0), (126, 50.0)])  # head, explosion, 2 puffs
+        self.assertEqual(order, [(127, 50.0), (177, 0.0), (127, 0.0), (127, 50.0)])  # head, explosion, 2 puffs
 
     def test_two_bolts_are_independent(self):
         visuals = FireballVisuals()
         visuals.advance([Flight(1, 0.0, 0.0, 0.0), Flight(2, 100.0, 0.0, 0.0)])
         visuals.advance([Flight(1, 0.0, 0.0, 0.0, True), Flight(2, 110.0, 0.0, 0.0)])
+        visuals.advance([Flight(2, 110.0, 0.0, 0.0)])
         self.assertEqual([(s.x, s.frame) for s in visuals.sprites() if s.frame >= 177], [(0.0, 177)])
 
 

@@ -1141,10 +1141,6 @@ class BattleView(SceneView[BattleScene]):
         for p in self.scene.battle.projectiles:
             if p.visual not in ARTILLERY_VISUALS:  # artillery shots are sprites (_artillery_sprites)
                 append(MISSILE_MESH.get(p.visual, "arrows1"), p.x, p.y, p.z, p.x1-p.x0, p.y1-p.y0)
-        for p in self.scene.battle.innate_projectiles:  # warpfire and steam gun; Dragon breath is Fireball effects
-            family = "flames" if p.code == 15 else "boltbur"
-            append(f"{family}{1 + p.elapsed % 4}", p.x, p.y,
-                   self.scene.battle.ground_height(p.x, p.y) + 8, p.x1-p.x0, p.y1-p.y0)
         for x, y, _code, started in self.scene.battle.impact_effects:
             frame = min(8, 1 + self.scene.battle.tick_count - started)
             append(f"ex{frame}", x, y, self.scene.battle.ground_height(x, y))
@@ -1281,7 +1277,8 @@ class BattleView(SceneView[BattleScene]):
                     continue
                 ended.add(effect.serial)
             height = breath_display_height(effect) if effect.breath else max(0.0, effect.height)
-            flights.append(Flight(effect.serial, effect.x, effect.y, height, not flying))
+            flights.append(Flight(effect.serial, effect.x, effect.y, height, not flying, effect.warpfire,
+                                  effect.terminal))
         return flights
 
     def _artillery_sprites(self) -> bytes:

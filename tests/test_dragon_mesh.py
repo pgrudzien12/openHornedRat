@@ -273,7 +273,7 @@ class DragonFlameOriginTests(unittest.TestCase):
         field = SimpleNamespace(effect_meshes={'fire1': triangle(1)}, ground_texture_count=0,
                                 scenery_texture_count=1, ground_height=lambda x, y: 0)
         view_battle = SimpleNamespace(regiments={}, control_piece=None, projectiles=[],
-                                      innate_projectiles=battle.innate_projectiles, impact_effects=[],
+                                      impact_effects=[],
                                       ground_height=lambda x, y: 0)
         view = BattleView.__new__(BattleView)
         view.scene = SimpleNamespace(field=field, battle=view_battle)

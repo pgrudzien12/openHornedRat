@@ -2,7 +2,7 @@
 import unittest
 from types import SimpleNamespace
 
-from whshr import animation, combat, interpreter, ranged
+from whshr import spell_effects, animation, combat, interpreter, ranged
 from whshr.engine import Battle, Regiment
 from whshr.rules import Side
 from whshr.battle_scene import BattleScene
@@ -303,14 +303,16 @@ class RangedDamage(unittest.TestCase):
     def test_innate_warpfire_reaches_the_burn_death_path(self):
         firer = Regiment("thrower", "thrower", 0, 0, 0, Side.PLAYER,
                           models=2, ranks=1, hud_class="inf", shooting_code=15,
-                          missile_code=15, missile_range=576)
+                          missile_code=15, missile_range=576, sprite="WarpFireThrower",
+                          leader_sprite="WarpFireThrower")
         victim = unit("victim", 0, 100, Side.ENEMY, code=0, models=1)
         battle = Battle(1000, 1000, [firer, victim])
-        battle.rng = FixedRandom([1, 0, 0, 6] + [6, 0, 0, 6] * 10)
+        from tests.test_warpfire_flames import Scripted
+        battle.rng = Scripted([0, 24, 24, 0, 0, 0, 0], default=5)  # one flame, no scatter, then every die is high
         firer.shooting_mode, firer.shooting_target = "target", "victim"
         ranged._launch_innate(battle, firer, 15, (0, 0))
-        for _ in range(9):
-            ranged._step_innate(battle)
+        for _ in range(20):
+            spell_effects.tick(battle)
         self.assertEqual(victim.models, 0)
         self.assertEqual(victim.dying[0].death_kind, animation.DEATH_WARPFIRE)
 

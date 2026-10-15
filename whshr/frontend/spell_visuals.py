@@ -7,9 +7,15 @@ advanced once per battle tick:
 - head: frames 125..128 cycling one per update from the launch tick, at the bolt's current position and height;
 - trail: a puff at the start point on the launch tick, then one at the previous position each tick the bolt moved; it
   plays frames 125..144, one per tick, then disappears;
-- explosion: frames 177..185 from the ending tick (no head then), on the ground at the last tested position;
-- the ending tick also leaves a closing puff at that position, so the trail runs from the start to the end point
-  (owner's decision; the original's last puff is one step short).
+- ending tick (the final in-flight test): no head, unless the flight ended through its terminal impact (a flier at the
+  aim point); the puff at the previous position is left as usual;
+- explosion: frames 177..185 from the tick AFTER the ending tick (corrected in bf003_playtest 8.3), on the ground at
+  the last tested position;
+- that next tick also leaves a closing puff at the last tested position, so the trail runs from the start to the end
+  point (as the warpfire report's last puff does, notes/spell_warpfire_visuals.md 3).
+
+A Warpfire Thrower's flame is the same Fireball in green (notes/spell_warpfire_visuals.md 1): head 562..565, puffs
+562..581, burst 582..590; only the frame numbers differ, so one state machine serves both.
 
 The other projectile spells (Hunting Spear, the Lightning family, Piercing Bolts, the Burning Head, Pestilent
 Breath) follow notes/spell_visuals.md in `ProjectileVisuals` below; the spells drawn on their target's figures (Curse
@@ -31,17 +37,22 @@ if TYPE_CHECKING:
 HEAD_FIRST, HEAD_COUNT = 125, 4
 PUFF_FIRST, PUFF_FRAMES = 125, 20
 EXPLOSION_FIRST, EXPLOSION_FRAMES = 177, 9
+# notes/spell_warpfire_visuals.md 1: the green Fireball's art (SPELLS bank +32): head, puff and burst first frames.
+WARPFIRE_HEAD_FIRST, WARPFIRE_PUFF_FIRST, WARPFIRE_EXPLOSION_FIRST = 562, 562, 582
 
 
 @dataclass(frozen=True)
 class Flight:
     """One bolt seen this tick: its identity, position and height above the ground at its last in-flight test.
-    `ending` marks the tick of the final test: the head is not drawn then and the explosion starts."""
+    `ending` marks the tick of the final test: the head is not drawn then (unless the flight `terminal`-ly ended at
+    the aim point) and the explosion starts on the next tick. `warpfire` selects the green art."""
     serial: int
     x: float
     y: float
     height: float
     ending: bool = False
+    warpfire: bool = False
+    terminal: bool = False
 
 
 @dataclass(frozen=True)
@@ -63,6 +74,9 @@ class _Bolt:
     newest: tuple[float, float] | None = None  # position of the newest puff left, even after it expired
     puffs: list[list[float]] = field(default_factory=list[list[float]])  # x, y, height, age
     explosion: list[float] | None = None  # x, y, age
+    warpfire: bool = False
+    ended_at: tuple[float, float, float] | None = None  # the final test's position, its explosion starts next tick
+    final_head: bool = False  # the head is still drawn on the ending tick of a terminal impact
 
 
 @dataclass
@@ -72,8 +86,10 @@ class FireballVisuals:
     def advance(self, flights: Iterable[Flight]) -> None:
         """Step all bolt presentation state by one battle tick, given the bolts updated this tick (bf003_playtest
         8.3): the launch tick shows the head and the first puff at the start point; later ticks leave a puff at the
-        previous position when it differs from the newest puff's; the ending tick has no head and starts the explosion."""
+        previous position when it differs from the newest puff's; the ending tick has no head, and the explosion with
+        the closing puff starts on the tick after it."""
         for bolt in self.bolts.values():
+            bolt.final_head = False
             for puff in bolt.puffs:
                 puff[3] += 1
             bolt.puffs = [puff for puff in bolt.puffs if puff[3] < PUFF_FRAMES]
@@ -81,8 +97,16 @@ class FireballVisuals:
                 bolt.explosion[2] += 1
                 if bolt.explosion[2] >= EXPLOSION_FRAMES:
                     bolt.explosion = None
+            if bolt.ended_at is not None:
+                x, y, height = bolt.ended_at
+                bolt.ended_at = None
+                bolt.explosion = [x, y, 0]
+                if bolt.newest != (x, y):
+                    # The trail reaches the flight's end point, under the explosion (warpfire report 3, last puff).
+                    bolt.puffs.append([x, y, max(0.0, height), 0])
+                    bolt.newest = (x, y)
         for flight in flights:
-            bolt = self.bolts.setdefault(flight.serial, _Bolt())
+            bolt = self.bolts.setdefault(flight.serial, _Bolt(warpfire=flight.warpfire))
             here = (flight.x, flight.y, flight.height)
             previous = here if bolt.last is None else bolt.last  # on the launch tick the previous position is the start
             if bolt.newest is None or previous[:2] != bolt.newest:
@@ -90,31 +114,30 @@ class FireballVisuals:
                 bolt.newest = (previous[0], previous[1])
             if flight.ending:
                 bolt.flying = False
-                bolt.explosion = [flight.x, flight.y, 0]
-                if bolt.newest != (flight.x, flight.y):
-                    # Owner's decision, not original parity (bf003_playtest 8.4 stops one step short): the trail
-                    # reaches the flight's end point, where the explosion starts, so it runs origin to target.
-                    bolt.puffs.append([flight.x, flight.y, max(0.0, flight.height), 0])
-                    bolt.newest = (flight.x, flight.y)
+                bolt.final_head = flight.terminal
+                bolt.ended_at = here
             bolt.last = here
             bolt.flights += 1
         self.bolts = {serial: bolt for serial, bolt in self.bolts.items()
-                      if bolt.flying or bolt.puffs or bolt.explosion is not None}
+                      if bolt.flying or bolt.puffs or bolt.explosion is not None or bolt.ended_at is not None}
 
     def sprites(self) -> list[Sprite]:
         """Everything to draw now. Heads first, then explosions, then puffs: with a strict depth test the first
         sprite emitted wins ties."""
         drawn: list[Sprite] = []
         for bolt in self.bolts.values():
-            if bolt.flying and bolt.last is not None:
+            if (bolt.flying or bolt.final_head) and bolt.last is not None:
                 x, y, h = bolt.last
-                drawn.append(Sprite(HEAD_FIRST + (bolt.flights - 1) % HEAD_COUNT, x, y, h))
+                first = WARPFIRE_HEAD_FIRST if bolt.warpfire else HEAD_FIRST
+                drawn.append(Sprite(first + (bolt.flights - 1) % HEAD_COUNT, x, y, h))
         for bolt in self.bolts.values():
             if bolt.explosion is not None:
                 x, y, age = bolt.explosion
-                drawn.append(Sprite(EXPLOSION_FIRST + int(age), x, y, 0.0))
+                first = WARPFIRE_EXPLOSION_FIRST if bolt.warpfire else EXPLOSION_FIRST
+                drawn.append(Sprite(first + int(age), x, y, 0.0))
         for bolt in self.bolts.values():
-            drawn += [Sprite(PUFF_FIRST + int(age), x, y, h) for x, y, h, age in bolt.puffs]
+            first = WARPFIRE_PUFF_FIRST if bolt.warpfire else PUFF_FIRST
+            drawn += [Sprite(first + int(age), x, y, h) for x, y, h, age in bolt.puffs]
         return drawn
 
 
