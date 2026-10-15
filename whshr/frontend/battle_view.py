@@ -1382,13 +1382,17 @@ class BattleView(SceneView[BattleScene]):
             memory: dict[int, list[Any]] = self.__dict__.setdefault("_projectile_memory", {})
             shots, storms = projectile_shots(battle.spell_effects.active, memory)
             projectiles.advance(shots)
-            for serial, owner, forming in storms:
-                caster = battle.regiments.get(owner)
-                if caster is not None:
-                    positions = caster.model_positions()
-                    x, y = positions[0] if positions else (caster.x, caster.y)
-                    projectiles.storm_sprite(serial, x, y, forming)
+            projectiles.set_storms(storms, lambda owner: self._first_figure(battle, owner))
         return visuals, projectiles
+
+    @staticmethod
+    def _first_figure(battle: Any, owner: str) -> tuple[float, float] | None:
+        """The ground point of a caster's first figure, None when the caster is gone."""
+        caster = battle.regiments.get(owner)
+        if caster is None:
+            return None
+        positions = caster.model_positions()
+        return positions[0] if positions else (caster.x, caster.y)
 
     def _obstacle_visuals(self) -> ObstacleVisuals:
         return self.__dict__.setdefault("_obstacle_state", ObstacleVisuals())

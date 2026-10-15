@@ -132,19 +132,20 @@ class EffectsToShotsTest(unittest.TestCase):
         bolt.tail = 7
         self.assertEqual(projectile_shots([bolt], memory)[0], [])
 
-    def test_storm_bolts_are_lightning_shots_and_start_the_storm_sprite_runs(self):
+    def test_storm_bolts_are_lightning_shots_and_the_storm_reports_its_sprite_frame(self):
         memory = {}
-        storm = self.effect(spell_effects.STORM)
-        shots, runs = projectile_shots([storm], memory)
-        self.assertEqual((shots, runs), ([], [(1, "W", True)]))
+        storm = self.effect(spell_effects.STORM, timer=4)
+        shots, frames = projectile_shots([storm], memory)
+        self.assertEqual((shots, frames), ([], [(1, "W", 391)]))
         storm.flying = True
-        shots, runs = projectile_shots([storm], memory)
-        self.assertEqual(([(s.key, s.code) for s in shots], runs), ([((1, 1), spell_effects.LIGHTNING)], [(1, "W", False)]))
+        storm.elapsed = 5
+        shots, frames = projectile_shots([storm], memory)
+        self.assertEqual(([(s.key, s.code) for s in shots], frames), ([((1, 1), spell_effects.LIGHTNING)], [(1, "W", 395)]))
         storm.flying = False
         self.assertEqual([s.ending for s in projectile_shots([storm], memory)[0]], [True])
         storm.flying = True  # the next bolt, from the same start point
-        shots, runs = projectile_shots([storm], memory)
-        self.assertEqual(([s.key for s in shots], runs), ([(1, 2)], [(1, "W", False)]))
+        shots, frames = projectile_shots([storm], memory)
+        self.assertEqual([s.key for s in shots], [(1, 2)])
 
 
 if __name__ == "__main__":
