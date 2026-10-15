@@ -80,7 +80,7 @@ Accepted: `set:x`, `set:y` (stored; the blocks all use 0,0), `set:sequence`, `se
 
 | Keyword | Meaning | Status | Example | Doc |
 |---|---|---|---|---|
-| `name:<Speaker>` | display label only (no lookup) | ✅ used (110) | `SCRIBEMWINDOW` | `glue_portraits.md` §1 |
+| `name:<Speaker>` | speaker name drawn over the portrait while the mouse hovers it (no lookup) | ✅ used (110) | `SCRIBEMWINDOW` | `glue_portraits.md` §3.6 |
 | `set:index=N` | portrait sprite set: position in a 37-entry resident list (4 = `SCRI`); `-1` = the army commander's portrait (5 ambush/encounter windows) | ✅ used (115) | `SCRIBEMWINDOW` | `glue_portraits.md` §1, §1.4 |
 | `set:bkindex=N` | `BACKALL` frame number (exactly N) | ✅ used (114) | `ALLORWINDOW` | `glue_portraits.md` §2 |
 | `set:controlpanel=N` | button panel under the portrait (0 = none) | ✅ used (105) | `SCRIBEMWINDOW` | `mission_selection.md` §9.4 |

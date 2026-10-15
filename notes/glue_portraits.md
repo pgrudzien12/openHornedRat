@@ -154,8 +154,8 @@ definition:
 4. **Fallbacks.** If the speaker's sprite-table index is not in the list, or no roster has been loaded yet, the
    block uses position **4** (`SCRI`, the Dietrich/Scribe portrait). If the chosen set's frames are not available, the
    block moves on to the next available list position.
-5. The block's `name:` label is filled with the speaker's sprite name. It is a display label only (no lookup keys on
-   it), so it changes nothing visible.
+5. The block's `name:` is replaced by the speaker's **sprite name** (`Commander` in the shipped roster, `Scribe` for the
+   position-4 fallback). No lookup keys on it, but it **is visible**: it is the hover label of §3.6.
 
 Only five windows use `index=-1` — the four ambush windows and `EncounterWindow`; every other `[ANIM]` block names
 a fixed position. (Windows with `palindex=-1` are a different key and unrelated.) All five draw the **same person**;
@@ -298,10 +298,83 @@ The text of a `playtext` line is revealed in step with the **playback position o
 speech file `glue/speech/b<id>.wav` exists and speech is enabled; otherwise a timer-based reveal is used. This is separate
 from the portrait animation.
 
+### 3.6 Speaker name on hover ✅
+
+The `[ANIM]` block's `name:` is the speaker's **name label**. It is drawn **into the portrait window**, not as a
+tooltip, and only while the mouse pointer is over the portrait picture. It is not tied to speaking.
+
+**Text.** The `name:` value exactly as written in the block (`Dietrich`, `Cpt Bernard`, `Luther Flamestrike`). It is one
+line and does not come from a string table. For `index=-1` windows it is the speaker's sprite name (§1.4 item 5:
+`Commander`, or `Scribe` for the fallback). A block with no `name:` (or an empty one) never shows a label.
+
+**Hit area: the portrait picture, not the window or the frame.** With the window's top-left corner as (0, 0) and the
+block at its `x`/`y` (0, 0 in every shipped window), the label is on while the pointer is at
+`12 ≤ px ≤ 12 + w` and `12 ≤ py ≤ 12 + h`, where `w × h` is the portrait set's size (120 × 152). So it is x 12…132 and
+y 12…164, **edges included**: the 8-px frame border, the 4-px margin and the button panel below do not count.
+
+**When it appears and disappears.**
+- It is checked whenever the pointer **moves over the portrait window**. When the result changes, the whole window is
+  redrawn at once with or without the label. There is no delay and no fade.
+- The talking/blinking overlay updates (§3) keep the label: each overlay redraw puts it back on while the pointer is still
+  inside. It works the same while text plays, between lines, after `applyseq` changes (`animseq` 1 or 2) and while the
+  dialogue waits for a click. The speaking state plays no part.
+- The original only notices the pointer when it moves **inside that window**. If the pointer leaves the portrait and the
+  window in one jump (no move event lands in the frame border first), the label stays until the pointer next moves over
+  the window. 🟡 This is a quirk; **recommended engine behaviour: remove the label as soon as the pointer is not over the
+  picture**, including when it leaves the window.
+- Before the pointer has ever moved over a newly opened window, the original tests the pointer's *screen* position
+  against the window-local box. A pointer near the top-left corner of the screen can therefore show a label on the first
+  draw. 🟡 Quirk; recommended: treat the window as not hovered until the pointer is over it.
+- No labels at all while the screen fades out before a `playmoviewithfade` film (the windows are redrawn without
+  them).
+
+**Several windows.** Each portrait window (and each `[ANIM]` block) keeps its own hover state. Since only one window is
+under the pointer, normally one label shows at a time. Because of the leave quirk above, a stale label can stay in
+another window in the original. With the recommended behaviour, at most one label is ever visible.
+
+**Placement and look** (window coordinates, block at 0, 0; `tw × th` = the text's size in the font):
+- Font: glue font slot **2** (`PCTEXT`, 12 px high), one line, no wrap.
+- `x = (W − tw) // 2` with `W` = the window's portrait width 144 (= 120 + 2 × 12), i.e. **centred on the window**.
+  Floor division.
+- `y = 152 − th`, the top of the text, so the text's bottom edge is at y = 152. That is the lower part of the portrait,
+  **12 px above the picture's bottom edge** (164) and above the panel.
+- **2-px black outline:** the text is first drawn in black (0, 0, 0) at all 25 offsets `(dx, dy)`, `dx, dy ∈ {−2 … 2}`,
+  then once in the colour at `(x, y)`. The background is transparent (backdrop and face show through).
+- Colour: the block's `settextcolor:` name (case-insensitive): black (0, 0, 0), white (255, 255, 255), red (255, 0, 0),
+  green (0, 255, 0), blue (0, 0, 255), yellow (255, 255, 0), magenta (255, 0, 255), cyan (0, 255, 255),
+  gray (127, 127, 127), lgray (192, 192, 192), dkred (127, 0, 0), dkgreen (0, 127, 0), dkblue (0, 0, 127),
+  olive (127, 127, 0), purple (127, 0, 127), drab (0, 127, 127). Unknown names are ignored. Every shipped speaker
+  window sets one: green 50, red 35, lgray 15, yellow 7, cyan 7, blue 1.
+- The window is an 8-bit picture in the window's palette, so 🟡 the colours land on the nearest palette entry; the pure
+  colours above are expected to exist in every glue palette's fixed system colours.
+- **No clipping logic.** A name wider than 144 px would start at a negative x and be cut by the window edges. The longest
+  shipped name, `Luther Flamestrike`, is 113 px, so it never happens.
+
+**Test vectors** (PCTEXT widths; text box `[x, x + tw) × [140, 152)`, outline box `[x − 2, x + tw + 2) × [138, 154)`):
+
+| Window (used by) | name, colour | tw | Text box (x, y, w, h) |
+|---|---|---|---|
+| `ScribeWindow` (`BPBRIEF10`) | `Dietrich`, red | 47 | (48, 140, 47, 12) |
+| `ceridan2Window` (`BPBRIEF10`) | `Ceridan`, lgray | 45 | (49, 140, 45, 12) |
+| `BernardIWindow` (`BPBRIEF10`) | `Cpt Bernard`, green | 72 | (36, 140, 72, 12) |
+| `BriWiz01Window` | `Luther Flamestrike`, yellow | 113 | (15, 140, 113, 12) |
+| `AmbushWindow` (index −1, shipped roster) | `Commander`, red | 71 | (36, 140, 71, 12) |
+| `UngrunnWindowBR` (`SZBrief5`) | `Ungrunn`, cyan | 52 | (46, 140, 52, 12) |
+
+| Before | Event | After |
+|---|---|---|
+| `ScribeWindow` open, no label | pointer moves to (12, 12) | label `Dietrich` drawn (corner is inside) |
+| label on | pointer moves to (11, 80) (left frame border) | label removed, window redrawn |
+| label on | pointer moves to (132, 164) | label stays (inclusive corner) |
+| label on | pointer moves to (70, 165) (panel) | label removed |
+| label on, Dietrich talking (`animseq` 1) | mouth frames advance | label stays on top of each new mouth frame |
+| label on | script `applyseq` → `animseq` 2 | label stays |
+| label on | pointer jumps straight off the window | engine: label removed (original 🟡: stays until the next move over the window) |
+
 ## 4. What the engine should read from data and what belongs in a small table
 
 **From data (per window):** window `[POSITION]` (x, y), `[ANIM]` `index`, `bkindex`, `controlpanel`, `settextcolor`, `sequence`;
-the script commands `set:animseq` and `applyseq:res=<window>`; the window's `palindex` (→ screen palette pair).
+the script commands `set:animseq` and `applyseq:res=<window>`; the window's `palindex` (→ screen palette pair); `name:` (hover label, §3.6).
 
 **Small tables in code (front-end constants, cite this note):**
 
