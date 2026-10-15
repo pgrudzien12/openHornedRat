@@ -105,6 +105,8 @@ Each row is 4H tall for hit testing: `row = (click_y - 50) / (4H)`, valid for th
 - **Rank icon**: bitmap `Skull<n>` with `n = floor((s_pntval & 31) * 4 / 31)`: 0 for 0–7, 1 for 8–15, 2 for 16–23, 3 for 24–30,
   4 for 31. `s_pntval` grows by 7 per campaign promotion, so this is the promotion level. Sizes 9×10, 9×22, 21×22, 21×22, 15×18. 🟡 as to
   what the game calls it; the arithmetic is ✅.
+  The mask makes a regiment promoted past 31 points wrap back to `Skull0` (an Amber Wizard hired at 24 shows `Skull0` at 38).
+  The engine deliberately caps instead: `n = min(4, floor(s_pntval * 4 / 31))`, so a veteran keeps the big single skull.
 - **Selected mark**: `RingMark` (65×45, a hand-drawn dark oval) drawn over the icons when the regiment is selected.
 - **Numbers** (x = 345 / 425 / 505), each followed by the `BKTXT 414` unit: regiment price (models × price per model), retainer
   (10 % of the price), and the amount that will really be paid: the price if selected, else the retainer.

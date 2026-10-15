@@ -14,6 +14,7 @@ import pygame
 from ..campaign_scenes import TroopSelectionScene
 from ..glue_palette import AppPalette
 from ..scenes import SceneEvent
+from ..roster import rank_icon
 from ..script import resource_name
 from ..troop_selection import TroopRow, TroopSelection, STATUS_AVAILABLE, STATUS_DESTROYED, STATUS_EXCLUDED, STATUS_NOT_HIRED
 from .bitmap_font import BitmapFont
@@ -187,7 +188,7 @@ class TroopSelectionView(NativeScreenView[TroopSelectionScene]):
     def _regiment(self, row: TroopRow, y: int, x: int, *, p1: bool) -> None:
         regiment, height = row.regiment, self.body_font.font.height
         name_colour = GREY if row.status == STATUS_NOT_HIRED else RED if row.status == STATUS_DESTROYED else BLACK
-        skull = min(4, (regiment.points & 31) * 4 // 31)
+        skull = rank_icon(regiment.points)
         self._bitmap_centered(f"Skull{skull}", (x + 20, y + 12))
         self._banner(regiment.banner, (x + 35, y))
         self._label(f"{regiment.name} {regiment.models} ({regiment.orgsize})", x + 60, y, name_colour)

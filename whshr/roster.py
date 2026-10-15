@@ -289,6 +289,12 @@ def with_improved_stat(regiment: Regiment, stat: str) -> Regiment:
     return updated
 
 
+def rank_icon(points: int) -> int:
+    """The ``Skull<n>`` rank icon for an ``s_pntval`` (notes/troop_selection.md 3.2): the original masks the value to
+    5 bits, so a regiment promoted past 31 points wraps back to the recruit's icon; the engine caps it at 4 instead."""
+    return min(4, max(0, points) * 4 // 31)
+
+
 def with_points(regiment: Regiment, points: int) -> Regiment:
     """The same regiment with a new ``s_pntval`` (the experience each model is worth)."""
     return with_stat(replace(regiment, points=points), "s_pntval", points)
