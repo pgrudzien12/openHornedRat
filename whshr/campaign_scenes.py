@@ -16,6 +16,7 @@ from .name_prompt_scene import NamePromptScene
 from .glue_fonts import glue_font_asset
 from . import payments
 from .legacy import module
+from .cutscene import narration_text
 from .cache import Loader
 from .glue import MissionRecord, MissionRef
 from .scenes import Quit, Scene, SceneAssets, SceneEvent, SceneManifest, Transition
@@ -31,7 +32,6 @@ SUBTITLE_FONT = AssetId("vanilla", "font", "subtext")
 PCTEXTA_FONT = AssetId("vanilla", "font", "pctexta")
 PCTEXT_FONT = glue_font_asset(2)
 BRIEFING_FONT = glue_font_asset(4)
-OPENING_TEXT_IDS = (1100, 1101, 1102)
 
 
 def omni_duration_seconds(container: Mapping[str, Any]) -> float:
@@ -52,34 +52,6 @@ def briefing_asset_for(mission: Mapping[str, Any]) -> AssetId:
                    else mission["briefing_key"])
 
 
-class OpeningNarrationScene(Scene):
-    """The text-only prologue shown before the A1 opening cutscene."""
-
-    manifest = SceneManifest(immediate=(ANIMATION_TEXT, SUBTITLE_FONT),
-                             prefetch=(INTRO_CUTSCENE, INTRO_MEDIA))
-
-    def __init__(self, successor: "MovieScene | None" = None, log_dir: Any = None, seed: int = DEFAULT_SEED) -> None:
-        self.successor: MovieScene = successor or MovieScene("a1", successor=MainMenuScene(log_dir=log_dir, seed=seed))
-        self.texts: Any = None
-        self.subtitle_font: Any = None
-        self.text: str | None = None
-
-    def enter(self, context: SceneAssets) -> None:
-        self.texts = context.load(ANIMATION_TEXT)
-        self.subtitle_font = context.load(SUBTITLE_FONT)
-        self.text = "".join(self.texts[text_id] for text_id in OPENING_TEXT_IDS)
-
-    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
-        if event == "continue":
-            return Transition(self.successor, "opening narration dismissed")
-        if event == "skip":
-            after_intro = self.successor.successor
-            if after_intro is None:
-                return None
-            return Transition(after_intro, "intro skipped")
-        return None
-
-
 class MovieScene(Scene):
     """Play one Omni cutscene timeline (notes/si_omni.md) end-to-end, then hand control back.
 
@@ -87,6 +59,10 @@ class MovieScene(Scene):
     intro), or a parked ``glue_scene`` resumed with an ``ActivityResult`` (``playmovie`` and
     its variants, notes/glue_interpreter.md §8.3). ``fade`` is accepted but has no observable
     original effect (notes/glue_interpreter.md §8.3: fade variants unused by shipped scripts).
+
+    A film with narration captions (whshr.cutscene.narration_text) first shows them as a text-only page
+    (``phase`` "narration"); "continue" starts the film, whose clock does not run before that. "skip" ends the
+    whole cutscene from either phase.
     """
 
     def __init__(self, movie: str, successor: Scene | None = None, glue_scene: GlueScene | None = None,
@@ -108,6 +84,8 @@ class MovieScene(Scene):
         self.media: Any = None
         self.texts: Any = None
         self.subtitle_font: Any = None
+        self.narration = ""
+        self.phase = "movie"
 
     def enter(self, context: SceneAssets) -> None:
         self.container = context.load(self.cutscene_id)
@@ -115,6 +93,8 @@ class MovieScene(Scene):
         self.media = context.load(self.media_id)
         self.texts = context.load(ANIMATION_TEXT)
         self.subtitle_font = context.load(SUBTITLE_FONT)
+        self.narration = narration_text(self.movie, self.texts, self.media)
+        self.phase = "narration" if self.narration else "movie"
 
     def _finish(self, reason: str) -> Transition:
         if self.glue_scene is not None:
@@ -127,10 +107,14 @@ class MovieScene(Scene):
     def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
         if event == "skip":
             return self._finish("movie skipped")
+        if event == "continue" and self.phase == "narration":
+            self.phase = "movie"
         return None
 
     def update(self, seconds: float, context: SceneAssets) -> Transition | Quit | None:
         super().update(seconds, context)
+        if self.phase == "narration":
+            return None
         self.elapsed_seconds += seconds
         if self.duration_seconds is not None and self.elapsed_seconds >= self.duration_seconds:
             return self._finish("movie completed")

@@ -7,7 +7,7 @@ from .gpu import Gpu
 
 from ..battle_scene import BattleScene
 from ..campaign_scenes import (
-    BriefingScene, MainMenuScene, MissionMapScene, MovieScene, OpeningNarrationScene,
+    BriefingScene, MainMenuScene, MissionMapScene, MovieScene,
     ArmyRecordsScene, EncyclopediaScene, MagicBookScene, TroopSelectScene, TroopSelectionScene,
 )
 from ..confirm_scene import ConfirmScene
@@ -31,7 +31,6 @@ from .load_save_view import LoadSaveView
 from .menu_view import MainMenuView
 from .name_prompt_view import NamePromptView
 from .mission_map_view import MissionMapView
-from .opening_view import OpeningNarrationView
 from .options_view import OptionsView
 from .result_view import ResultView
 from .scene_view import PlaceholderView, SceneView
@@ -41,7 +40,6 @@ from .magic_book_view import MagicBookView
 from .encyclopedia_view import EncyclopediaView
 
 VIEWS: dict[type[Scene], type[SceneView[Any]]] = {
-    OpeningNarrationScene: OpeningNarrationView,
     MovieScene: MovieView,
     MainMenuScene: MainMenuView,
     MissionMapScene: MissionMapView,

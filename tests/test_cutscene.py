@@ -1,6 +1,6 @@
 import unittest
 
-from whshr.cutscene import SubtitleTimeline, subtitle_color
+from whshr.cutscene import SubtitleTimeline, movie_number, narration_caption_ids, narration_text, subtitle_color
 
 
 def _media(rows, fields=5):
@@ -50,6 +50,29 @@ class SubtitleTimelineTests(unittest.TestCase):
         )
 
         self.assertEqual(timeline.cues, ())
+
+
+class NarrationCaptionTests(unittest.TestCase):
+    """The text page before a film: its M100... captions (notes/pe_resources.md "ANTXT")."""
+
+    STRINGS = {3010: "Urgat: speech", 3100: "In the Badlands ", 3101: "a warlord stirs. ", 3510: "alt speech",
+               13100: "timed caption", 13200: "Meanwhile... ", 4100: "Elsewhere. ", 30000: "You were killed."}
+
+    def test_given_movie_names_then_their_numbers_ignore_the_version_letter(self):
+        self.assertEqual([movie_number(name) for name in ("a1", "A12b", "a16A", "DEATH01", "")],
+                         [1, 12, 16, None, None])
+
+    def test_given_a_film_then_its_captions_are_its_hundreds_not_its_speech_or_alternative_lines(self):
+        self.assertEqual(narration_caption_ids("A3", self.STRINGS, {}), (3100, 3101))
+        self.assertEqual(narration_text("A3", self.STRINGS, {}), "In the Badlands a warlord stirs.")
+
+    def test_given_a_caption_the_film_already_times_then_only_the_rest_go_on_the_page(self):
+        media = _media([[0, 13100, 2, 0, 0, 4]])
+        self.assertEqual(narration_caption_ids("A13", self.STRINGS, media), (13200,))
+
+    def test_given_a_film_without_captions_or_number_then_there_is_no_page(self):
+        self.assertEqual(narration_text("A14", self.STRINGS, {}), "")
+        self.assertEqual(narration_text("DEATH01", self.STRINGS, {}), "")
 
 
 if __name__ == "__main__":
