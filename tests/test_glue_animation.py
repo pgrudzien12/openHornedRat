@@ -59,20 +59,19 @@ class GlueBitmapAnimatorTests(unittest.TestCase):
         animator.tick(50)
         self.assertEqual(animator.display_name, "TrailCell3")
 
-    def test_a_start_frame_without_a_stop_frame_reveals_it_once_then_holds_it(self):
-        # The Mark*Object cross markers (Cross8, animstartframe=7, no animstopframe) must not be
-        # treated as an already-finished S == E block: they show the stored base name until their
-        # first step, then reveal frame 7 once and hold it (notes/campaign_tent.md §5.3). Defaulting
-        # a missing stop frame to the start frame made this indistinguishable from "already finished"
-        # and left the marker stuck on the raw, unnumbered base name forever.
+    def test_a_start_frame_without_a_stop_frame_plays_down_to_frame_one_and_holds_it(self):
+        # The Mark*Object cross markers (Cross8, animstartframe=7, no animstopframe): a missing stop frame is 0
+        # (notes/campaign_tent.md §5.1), so the X is drawn stroke by stroke, Cross7 ... Cross1 (the whole X), and
+        # held. The stored base name shows until the first step (§5.2).
         animator = GlueBitmapAnimator({"bitmap": "Cross8", "animstartframe": 7})
 
         self.assertEqual(animator.display_name, "Cross8")
         self.assertFalse(animator.finished)
 
-        self.assertEqual(animator.tick(50).bitmap, "Cross7")
+        frames = [animator.tick(50).bitmap for _ in range(7)]
+        self.assertEqual(frames, [f"Cross{n}" for n in range(7, 0, -1)])
         self.assertTrue(animator.finished)
-        self.assertEqual(animator.tick(50).bitmap, "Cross7")  # held forever afterwards
+        self.assertEqual(animator.tick(50).bitmap, "Cross1")  # held forever afterwards
 
     def test_both_frames_absent_is_static_and_never_advances(self):
         animator = GlueBitmapAnimator({"bitmap": "SmallCross"})

@@ -27,10 +27,9 @@ class GlueBitmapAnimator:
         if "animstopframe" in spec:
             self.stop = int(spec["animstopframe"])
         elif "animstartframe" in spec:
-            # A start frame with no stop frame (e.g. the Mark*Object cross markers, Cross8 S=7)
-            # reveals that one frame on its first step and then holds it (notes/campaign_tent.md
-            # §5.3): it is not the same as an explicit S == E, which is static from the start.
-            self.stop = self.current - 1
+            # A missing field is 0 (notes/campaign_tent.md §5.1), so a start frame with no stop frame plays
+            # S ... 1 and holds frame 1: the Mark*Object cross markers (Cross8, S=7) draw the X stroke by stroke.
+            self.stop = 0
         else:
             self.stop = self.current  # both absent: S = E, static, draws the literal base name
         self.period = int(spec.get("timecnt", 0))
