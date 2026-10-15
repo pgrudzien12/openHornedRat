@@ -1,95 +1,144 @@
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
-"""Timed text cues decoded from Omni cutscene event tracks.
+"""Cutscene text: the speech subtitles typed under the film, the caption page before it, and the film's fades.
 
-The event tracks advance at the cutscene's fixed 8 Hz cadence.  They identify a
-string resource and give the complete display interval, but do not contain
-per-character timestamps.  ``SubtitleTimeline`` therefore reveals characters
-evenly through most of that recorded interval, then keeps completed text on
-screen for a short reading hold.
+Speech subtitles follow notes/cutscene_subtitles.md: each speech event track takes one of two subtitle blocks
+under the film at its first record and keeps it until its last; the text is typed in step with the records'
+``current_tick`` into a two-line block that scrolls up when a word does not fit.
 """
 
+import bisect
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+Rgb = tuple[int, int, int]
 
-# The event track's speaker field is a stable slot (2, 3 or 4), not a random
-# value.  The original subtitles use the corresponding primary display color.
-SPEAKER_COLORS: dict[int, tuple[int, int, int]] = {3: (0, 255, 0), 4: (0, 0, 255), 2: (255, 0, 0)}
-DEFAULT_SUBTITLE_COLOR: tuple[int, int, int] = (255, 255, 255)
+# notes/cutscene_subtitles.md 3.1: the speaker field only picks the colour.
+SPEAKER_COLORS: dict[int, Rgb] = {
+    0: (0, 0, 0), 1: (255, 255, 255), 2: (255, 0, 0), 3: (0, 255, 0), 4: (0, 0, 255),
+    5: (255, 255, 0), 6: (255, 0, 255), 7: (0, 255, 255),
+}
+DEFAULT_SUBTITLE_COLOR: Rgb = (255, 255, 255)
+SUBTITLE_BLOCKS = 2  # upper and lower (notes/cutscene_subtitles.md 1)
 
 
-def subtitle_color(speaker: int) -> tuple[int, int, int]:
-    """Return the original-style RGB subtitle color for an event speaker slot."""
+def subtitle_color(speaker: int) -> Rgb:
+    """The subtitle colour of an event speaker field."""
     return SPEAKER_COLORS.get(speaker, DEFAULT_SUBTITLE_COLOR)
 
 
 @dataclass(frozen=True)
-class SubtitleCue:
-    """One line of cutscene text and its original 125 ms display interval."""
+class SpeechTrack:
+    """One speech event track: its (joined) text, colour slot, tick range and record times."""
 
     text_id: int
     text: str
     speaker: int
-    start_seconds: float
-    reveal_end_seconds: float
-    end_seconds: float
+    first_tick: int
+    last_tick: int
+    times: tuple[float, ...]  # record times in seconds, ascending
+    ticks: tuple[int, ...]  # each record's current_tick
 
-    def text_at(self, elapsed_seconds: float) -> str:
-        """Return the typewritten portion visible at ``elapsed_seconds``."""
-        if elapsed_seconds < self.start_seconds or elapsed_seconds >= self.end_seconds:
-            return ""
-        duration = self.reveal_end_seconds - self.start_seconds
-        progress = min(1.0, (elapsed_seconds - self.start_seconds) / duration)
-        # Keep the first glyph visible on the event's first frame, then reveal
-        # uniformly through the recorded speech/subtitle lifetime.
-        count = min(len(self.text), max(1, int(progress * len(self.text)) + 1))
-        return self.text[:count]
+    @property
+    def start_seconds(self) -> float:
+        return self.times[0]
+
+    @property
+    def end_seconds(self) -> float:
+        """The time of the clearing record (current_tick = last_tick), or past the last record if it has none."""
+        return self.times[-1] if self.ticks[-1] >= self.last_tick else float("inf")
+
+    def visible_count(self, elapsed_seconds: float) -> int | None:
+        """Characters typed at ``elapsed_seconds`` (notes/cutscene_subtitles.md 3.2); None before the first record
+        or from the clearing record on."""
+        index = bisect.bisect_right(self.times, elapsed_seconds) - 1
+        if index < 0:
+            return None
+        tick = self.ticks[index]
+        if tick >= self.last_tick:
+            return None
+        span = self.last_tick - self.first_tick - 1
+        if span <= 0:
+            return len(self.text)
+        return max(0, min(len(self.text), len(self.text) * (tick - self.first_tick) // span))
 
 
-class SubtitleTimeline:
-    """Resolve active subtitle cues from ``process_si`` media and ANTXT strings."""
+def speech_tracks(media: Mapping[str, Any], strings: Mapping[int, str]) -> tuple[SpeechTrack, ...]:
+    """The film's speech tracks with known text, in start order. Rows are (time_ms, text id, speaker, first, current,
+    last[, extra]); a six-field track joins ``extra`` further ids with no separator (notes/cutscene_subtitles.md 4)."""
+    tracks: list[SpeechTrack] = []
+    for entry in media.get("objects", {}).values():
+        event = entry.get("evt")
+        rows = event.get("rows", ()) if event else ()
+        if not event or event.get("fields") not in (5, 6) or not rows:
+            continue
+        text_id, speaker, first, _, last = (int(value) for value in rows[0][1:6])
+        text = strings.get(text_id)
+        if text is None:
+            continue
+        if event.get("fields") == 6:
+            text += "".join(strings.get(text_id + offset, "") for offset in range(1, int(rows[0][6]) + 1))
+        tracks.append(SpeechTrack(text_id, text, speaker, first, last,
+                                  tuple(row[0] / 1000 for row in rows), tuple(int(row[4]) for row in rows)))
+    return tuple(sorted(tracks, key=lambda track: (track.start_seconds, track.text_id)))
 
-    TICK_SECONDS = 0.125
-    REVEAL_FRACTION = 0.8
-    READING_HOLD_SECONDS = 1.0
+
+def teleprompter_lines(text: str, count: int, fits: Callable[[str], bool]) -> tuple[str, str]:
+    """The (top, bottom) lines of a block after typing ``text[:count]`` (notes/cutscene_subtitles.md 2, 3.3).
+
+    Typing starts on the bottom line. Before the first letter of a word, the bottom line plus that whole word is
+    measured; if it does not fit, the space before the word is the break: the bottom line moves up (the old top
+    line is dropped) and the word starts a new bottom line."""
+    top, bottom = "", ""
+    for index in range(count):
+        char = text[index]
+        if not char.isspace() and (index == 0 or text[index - 1].isspace()) and bottom:
+            end = index
+            while end < len(text) and not text[end].isspace():
+                end += 1
+            if not fits(bottom + text[index:end]):
+                top, bottom = bottom.rstrip(), ""
+        bottom += char
+    return top, bottom
+
+
+@dataclass(frozen=True)
+class BlockText:
+    """What one subtitle block shows: its colour and its two lines."""
+
+    color: Rgb
+    top: str
+    bottom: str
+
+
+class SpeechSubtitles:
+    """The two subtitle blocks over time (notes/cutscene_subtitles.md 1, 4).
+
+    A track takes the first free block (upper first) at its first record and frees it at its clearing record; a
+    track that finds both busy is not shown (never happens in the shipped films)."""
 
     def __init__(self, media: Mapping[str, Any], strings: Mapping[int, str]) -> None:
-        cues: list[SubtitleCue] = []
-        for entry in media.get("objects", {}).values():
-            event = entry.get("evt")
-            rows = event.get("rows", ()) if event else ()
-            # Speech event rows are (time_ms, string id, speaker, first,
-            # current, last[, flag]).  Fade/animation events have fewer fields.
-            if not event or event.get("fields") not in (5, 6) or not rows:
-                continue
-            text_id, speaker = rows[0][1:3]
-            text = strings.get(text_id)
-            if text is None:
-                continue
-            if event.get("fields") == 6:
-                # notes/cutscene_narration.md 4.4: a six-field track's last field counts further ids joined to it
-                extra = int(rows[0][-1])
-                text += "".join(strings.get(text_id + offset, "") for offset in range(1, extra + 1))
-            start = rows[0][0] / 1000
-            source_end = (rows[-1][0] / 1000) + self.TICK_SECONDS
-            cues.append(SubtitleCue(
-                text_id, text, speaker, start,
-                start + (source_end - start) * self.REVEAL_FRACTION,
-                source_end + self.READING_HOLD_SECONDS,
-            ))
-        self.cues = tuple(sorted(cues, key=lambda cue: (cue.start_seconds, cue.text_id)))
+        self.tracks = speech_tracks(media, strings)
+        self.blocks: dict[int, int] = {}  # track index -> block (0 upper, 1 lower)
+        busy_until = [float("-inf")] * SUBTITLE_BLOCKS
+        for index, track in enumerate(self.tracks):
+            free = next((block for block in range(SUBTITLE_BLOCKS) if busy_until[block] <= track.start_seconds),
+                        None)
+            if free is not None:
+                self.blocks[index] = free
+                busy_until[free] = track.end_seconds
 
-    def current(self, elapsed_seconds: float) -> SubtitleCue | None:
-        """Return the newest active cue; dialogue overlaps replace older text."""
-        active = [cue for cue in self.cues
-                  if cue.start_seconds <= elapsed_seconds < cue.end_seconds]
-        return active[-1] if active else None
-
-    def text_at(self, elapsed_seconds: float) -> str:
-        cue = self.current(elapsed_seconds)
-        return cue.text_at(elapsed_seconds) if cue else ""
+    def at(self, elapsed_seconds: float, fits: Callable[[str], bool]) -> tuple[BlockText | None, ...]:
+        """Each block's text at ``elapsed_seconds`` (None: hidden). ``fits`` tells whether a line fits the block."""
+        shown: list[BlockText | None] = [None] * SUBTITLE_BLOCKS
+        for index, block in self.blocks.items():
+            track = self.tracks[index]
+            count = track.visible_count(elapsed_seconds)
+            if count is not None:
+                top, bottom = teleprompter_lines(track.text, count, fits)
+                shown[block] = BlockText(subtitle_color(track.speaker), top, bottom)
+        return tuple(shown)
 
 
 # notes/cutscene_narration.md 2.2: the narration page of each film, as (first ANTXT id, number of further ids), keyed

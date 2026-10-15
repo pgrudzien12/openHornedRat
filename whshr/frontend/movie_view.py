@@ -19,7 +19,7 @@ from ..audio_settings import audio_settings
 from ..scenes import SceneEvent
 
 from ..smacker import Smacker, frame_index_at
-from ..cutscene import SubtitleTimeline, subtitle_color
+from ..cutscene import SUBTITLE_BLOCKS, BlockText, SpeechSubtitles
 from .bitmap_font import BitmapFont
 from .gpu import QUAD_VERTEX_SHADER, Gpu
 from .scene_view import SceneView
@@ -115,6 +115,14 @@ class MovieView(SceneView[MovieScene]):
     # notes/cutscene_narration.md 3: a 125-pixel margin on every side of the 640x480 front end.
     NARRATION_WIDTH = 640 - 2 * 125
     NARRATION_HEIGHT = 480 - 2 * 125
+    # notes/cutscene_subtitles.md 2: the 640x480 front end, the 640x272 film, text 4 px into a block and a line
+    # that fits when 4 + width < 636.
+    SCREEN = (640, 480)
+    # notes/cutscene_narration.md 3 and cutscene_subtitles.md 3.1: the caption page and the subtitle blocks are solid
+    # black, and so is the rest of the cutscene screen.
+    background = (0, 0, 0)
+    FILM_WIDTH, FILM_HEIGHT = 640, 272
+    TEXT_INSET, TEXT_LIMIT = 4, 636
 
     def __init__(self, gpu: Gpu, scene: MovieScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
@@ -128,11 +136,14 @@ class MovieView(SceneView[MovieScene]):
             sound.set_volume(self.volume)
         self.next_cue = 0
         self.playing = 0
-        self.subtitles = SubtitleTimeline(scene.media, scene.texts)
+        self.subtitles = SpeechSubtitles(scene.media, scene.texts)
         self.subtitle_font = BitmapFont(scene.subtitle_font)
-        self.subtitle = gpu.text((640, 80), self.subtitle_font, color=(255, 255, 255),
-                                 background=None, padding=0)
-        self.subtitle_text: tuple[str, Any] | None = None
+        # notes/cutscene_subtitles.md 2: two blocks of two lines, each line one font line high (L).
+        self.line_height = self.subtitle_font.size("")[1]
+        self.block_lines = [[gpu.text((self.FILM_WIDTH, self.line_height), self.subtitle_font,
+                                      color=(255, 255, 255), background=None, padding=0) for _ in range(2)]
+                            for _ in range(SUBTITLE_BLOCKS)]
+        self.block_text: list[BlockText | None] = [None] * SUBTITLE_BLOCKS
         # The text page before the film (scene phase "narration"): white SUBTEXT at 1:1 on black, every line
         # centred, the block centred vertically (notes/cutscene_narration.md 3).
         self.narration = gpu.text((self.NARRATION_WIDTH, self.NARRATION_HEIGHT), self.subtitle_font,
@@ -198,19 +209,20 @@ class MovieView(SceneView[MovieScene]):
             if self.cues[self.next_cue][1].play() is not None:  # pyright: ignore[reportUnnecessaryComparison]
                 self.playing += 1
             self.next_cue += 1
-        # notes/cutscene_narration.md 4.3: a skip that fades clears the speech subtitles at once.
-        subtitle = None if self.scene.phase == "skip_fade" else self.subtitles.current(elapsed)
-        text = subtitle.text_at(elapsed) if subtitle else ""
-        style = (text, subtitle_color(subtitle.speaker) if subtitle else None)
-        if style != self.subtitle_text:
-            if subtitle and style[1] is not None:
-                self.subtitle.set_color(style[1])
-            self.subtitle.set_lines(self._wrap_subtitle(text))
-            self.subtitle_text = style
+        # notes/cutscene_subtitles.md 5: a skip that fades clears both blocks at once.
+        shown = ((None,) * SUBTITLE_BLOCKS if self.scene.phase == "skip_fade"
+                 else self.subtitles.at(elapsed, self._fits))
+        for block, text in enumerate(shown):
+            if text == self.block_text[block]:
+                continue
+            for label, line in zip(self.block_lines[block], (text.top, text.bottom) if text else ("", "")):
+                if text is not None:
+                    label.set_color(text.color)
+                label.set_lines((line,))
+            self.block_text[block] = text
 
-    def _wrap_subtitle(self, text: str) -> tuple[str, ...]:
-        """Keep subtitle text in the original film's narrow lower strip."""
-        return self._wrap(text, self.subtitle.size[0])
+    def _fits(self, line: str) -> bool:
+        return self.TEXT_INSET + self.subtitle_font.size(line)[0] < self.TEXT_LIMIT
 
     def _wrap(self, text: str, max_width: int) -> tuple[str, ...]:
         if not text:
@@ -246,27 +258,40 @@ class MovieView(SceneView[MovieScene]):
             self.narration.draw((screen_w - text_w) / 2, (screen_h - text_h) / 2)
             return
         left, top, width, height = self._film_rect()
-        scale = width / self.smk.w
         self.video.draw(left, top, width, height)
-        if self.subtitle_text is not None and self.subtitle_text[0]:
-            # The video can scale up for a better presentation, but the
-            # original subtitle bitmap remains 1:1.  Its left edge is the
-            # left edge of the original centered 640-pixel film box.
-            self.subtitle.draw((screen_w - self.smk.w) / 2, top + height + 5 * scale)
+        scale, origin_x, origin_y = self._layout()
+        line = self.line_height
+        for block, text in enumerate(self.block_text):
+            if text is None:
+                continue
+            # notes/cutscene_subtitles.md 2: one empty line under the film, then the upper block; one empty line,
+            # then the lower block; each block's lines at its y and y + L.
+            block_y = self._film_top() + self.FILM_HEIGHT + line + block * 3 * line
+            for row, label in enumerate(self.block_lines[block]):
+                label.draw(origin_x + self.TEXT_INSET * scale, origin_y + (block_y + row * line) * scale,
+                           self.FILM_WIDTH * scale, line * scale)
+
+    def _layout(self) -> tuple[float, float, float]:
+        """The 640x480 front end scaled into the window: (scale, left, top)."""
+        screen_w, screen_h = self.gpu.target.size
+        scale = min(screen_w / self.SCREEN[0], screen_h / self.SCREEN[1])
+        return scale, (screen_w - self.SCREEN[0] * scale) / 2, (screen_h - self.SCREEN[1] * scale) / 2
+
+    def _film_top(self) -> int:
+        """The film's y on the 640x480 front end: the film and seven text lines centred together
+        (notes/cutscene_narration.md 4.2, notes/cutscene_subtitles.md 2)."""
+        return (self.SCREEN[1] - (7 * self.line_height + self.FILM_HEIGHT)) // 2
 
     def _film_rect(self) -> tuple[float, float, float, float]:
         """Where the film is drawn: (left, top, width, height) in target pixels."""
-        screen_w, screen_h = self.gpu.target.size
-        # Reserve the original subtitle strip under the 640x272 film before
-        # choosing a scale, so captions never obscure the video itself.
-        subtitle_strip = 32
-        scale = min(screen_w / self.smk.w, screen_h / (self.smk.h + subtitle_strip))
-        width, height = self.smk.w * scale, self.smk.h * scale
-        return (screen_w - width) / 2, (screen_h - (self.smk.h + subtitle_strip) * scale) / 2, width, height
+        scale, origin_x, origin_y = self._layout()
+        return (origin_x, origin_y + self._film_top() * scale, self.FILM_WIDTH * scale, self.FILM_HEIGHT * scale)
 
     def release(self) -> None:
         self.video.release()
-        self.subtitle.release()
+        for labels in self.block_lines:
+            for label in labels:
+                label.release()
         self.narration.release()
         for _, sound in self.cues:
             sound.stop()
