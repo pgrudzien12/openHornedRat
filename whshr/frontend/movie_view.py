@@ -67,16 +67,16 @@ class VideoQuad:
             topology="triangle_strip", vertex_count=4,
         )
 
-    def write(self, indices: bytes | bytearray, palette_rgb: Sequence[int], level: int = 100) -> None:
-        """``indices``: w*h palette-index bytes. ``palette_rgb``: 256*3 RGB bytes. ``level``: the film's
-        brightness percentage; the fades darken only the film's own colours, never the first and last ten
-        palette entries (the system colours, notes/cutscene_narration.md 4.3)."""
+    def write(self, indices: bytes | bytearray, palette_rgb: Sequence[int], darken: int = 0) -> None:
+        """``indices``: w*h palette-index bytes. ``palette_rgb``: 256*3 RGB bytes. ``darken``: subtracted from
+        every component (clamped at 0) of the film's own colours, never the first and last ten palette entries
+        (the system colours, notes/cutscene_narration.md 4.3)."""
         self.indices.write(bytes(indices))
         rgba = bytearray(256 * 4)
         for i in range(256):
             rgb = palette_rgb[i * 3:i * 3 + 3]
-            if level < 100 and SYSTEM_COLOURS <= i < 256 - SYSTEM_COLOURS:
-                rgb = [value * level // 100 for value in rgb]
+            if darken and SYSTEM_COLOURS <= i < 256 - SYSTEM_COLOURS:
+                rgb = [max(0, value - darken) for value in rgb]
             rgba[i * 4:i * 4 + 3] = rgb
             rgba[i * 4 + 3] = 255
         self.palette.write(bytes(rgba))
@@ -151,7 +151,7 @@ class MovieView(SceneView[MovieScene]):
         self.narration.set_lines(self._wrap(scene.narration, self.NARRATION_WIDTH))
         # notes/cutscene_narration.md 4.1: the page appears and disappears at once, with no fade.
         self.fade_in = scene.phase != "narration"
-        self.level = 100
+        self.darken, self.film_volume = 0, 100
         self.click_started = False  # a left press on the film area, waiting for its release (4.2)
         if scene.phase == "movie":
             self._sync(0.0)
@@ -195,16 +195,16 @@ class MovieView(SceneView[MovieScene]):
 
     def _sync(self, elapsed: float) -> None:
         frame = frame_index_at(elapsed, self.smk.nframes)
-        level = self.scene.level
-        if frame != self.last_frame or level != self.level:
+        darken, volume = self.scene.darken, self.scene.volume
+        if frame != self.last_frame or darken != self.darken:
             if frame != self.last_frame:
                 self.smk.decode_to(frame)
-            self.video.write(self.smk.img, self.smk.pal, level)
-            self.last_frame = frame
-        if level != self.level:
+            self.video.write(self.smk.img, self.smk.pal, darken)
+            self.last_frame, self.darken = frame, darken
+        if volume != self.film_volume:
             for _, sound in self.cues:
-                sound.set_volume(self.volume * level / 100)
-            self.level = level
+                sound.set_volume(self.volume * volume / 100)
+            self.film_volume = volume
         while self.next_cue < len(self.cues) and self.cues[self.next_cue][0] <= elapsed:
             if self.cues[self.next_cue][1].play() is not None:  # pyright: ignore[reportUnnecessaryComparison]
                 self.playing += 1

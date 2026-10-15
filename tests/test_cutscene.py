@@ -112,16 +112,27 @@ class FilmFadeTests(unittest.TestCase):
         8: {"evt": {"fields": 2, "rows": [[4000, 10, 10]]}},
     }}
 
-    def test_given_anim_done_then_the_level_follows_its_records(self):
+    def test_given_anim_done_then_each_record_sets_the_volume_and_darkens_by_five(self):
         fades = FilmFades(self.MEDIA)
-        self.assertEqual([fades.level(t) for t in (0.0, 12.499, 12.5, 12.7, 20.0)], [100, 100, 98, 96, 0])
+        times = (0.0, 12.499, 12.5, 12.7, 20.0)
+        self.assertEqual([fades.volume(t) for t in times], [100, 100, 98, 96, 0])
+        self.assertEqual([fades.darken(t) for t in times], [0, 0, 5, 10, 15])
 
-    def test_given_the_fade_marker_then_only_a_skip_after_it_fades(self):
+    def test_given_the_fade_marker_then_only_a_skip_after_it_and_before_the_end_fade_fades(self):
         fades = FilmFades(self.MEDIA)
         self.assertFalse(fades.skip_fades(3.9))
         self.assertTrue(fades.skip_fades(4.0))
+        self.assertTrue(fades.skip_fades(12.499))
+        self.assertFalse(fades.skip_fades(12.5))  # the first AnimDone record removes the mark
         self.assertFalse(FilmFades({}).skip_fades(10.0))
 
+    def test_given_the_skip_fade_then_each_step_darkens_by_16_and_then_lowers_the_volume(self):
+        steps = [FilmFades.skip_step(k) for k in range(1, 11)]
+        self.assertEqual([volume for _, volume in steps], [100, 90, 80, 70, 60, 50, 40, 30, 20, 10])
+        colour = (200, 120, 40)  # the report's vector
+        dimmed = [tuple(max(0, c - darken) for c in colour) for darken, _ in steps]
+        self.assertEqual(dimmed[:3], [(184, 104, 24), (168, 88, 8), (152, 72, 0)])
+        self.assertEqual(dimmed[-1], (40, 0, 0))
 
 if __name__ == "__main__":
     unittest.main()

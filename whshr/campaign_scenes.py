@@ -65,8 +65,9 @@ class MovieScene(Scene):
     view sends it for Enter or a left press over the film area), and the film's clock does not run before that.
     "skip" during the page ends the whole cutscene (``--skip-intro``). During the film (notes/cutscene_narration.md
     4.2, 4.3) a skip before the film's Fade marker cuts at once; after it, the subtitles are cleared and the film
-    fades out quickly (``phase`` "skip_fade") before the cutscene ends. ``level`` is the film's current
-    volume/brightness percentage, the AnimDone fade-out and the skip fade combined.
+    fades out quickly (``phase`` "skip_fade") before the cutscene ends; a second skip then ends it at once.
+    ``darken`` (subtracted from every film colour component) and ``volume`` (a percentage) combine the AnimDone
+    fade-out and the skip fade; the film's event records are ignored during the skip fade.
     """
 
     NARRATION_SECONDS = 9.9
@@ -95,6 +96,7 @@ class MovieScene(Scene):
         self.narration_seconds = 0.0
         self.fades = FilmFades({})
         self.skip_fade_seconds = 0.0
+        self.skip_base = 0  # the darkening when the skip fade began
 
     def enter(self, context: SceneAssets) -> None:
         self.container = context.load(self.cutscene_id)
@@ -118,10 +120,9 @@ class MovieScene(Scene):
         if event == "skip":
             if self.phase == "movie" and self.fades.skip_fades(self.elapsed_seconds):
                 self.phase = "skip_fade"
+                self.skip_base = self.fades.darken(self.elapsed_seconds)
                 return None
-            if self.phase == "skip_fade":
-                return None  # already fading out
-            return self._finish("movie skipped")
+            return self._finish("movie skipped")  # notes/cutscene_narration.md 4.3: a second skip ends the fade
         if event == "continue" and self.phase == "narration":
             self.phase = "movie"
         return None
@@ -135,8 +136,8 @@ class MovieScene(Scene):
             return None
         if self.phase == "skip_fade":
             self.skip_fade_seconds += seconds
-            if self._skip_fade_steps() >= FilmFades.SKIP_FADE_STEPS:
-                return self._finish("movie skipped")
+            if self.skip_fade_seconds >= FilmFades.SKIP_FADE_STEPS * FilmFades.SKIP_FADE_STEP_SECONDS - 1e-9:
+                return self._finish("movie skipped")  # cut from the dimmed picture
         self.elapsed_seconds += seconds
         if self.duration_seconds is not None and self.elapsed_seconds >= self.duration_seconds:
             return self._finish("movie completed")
@@ -144,17 +145,23 @@ class MovieScene(Scene):
 
 
     @property
-    def level(self) -> int:
-        """The film's volume/brightness percentage now (notes/cutscene_narration.md 4.3)."""
-        level = self.fades.level(self.elapsed_seconds)
+    def darken(self) -> int:
+        """How much is subtracted from every film colour component now (notes/cutscene_narration.md 4.3)."""
         if self.phase == "skip_fade":
-            steps = self._skip_fade_steps() + 1
-            level = min(level, max(0, 100 * (FilmFades.SKIP_FADE_STEPS - steps) // FilmFades.SKIP_FADE_STEPS))
-        return level
+            return self.skip_base + FilmFades.skip_step(self._skip_fade_step())[0]
+        return self.fades.darken(self.elapsed_seconds)
 
-    def _skip_fade_steps(self) -> int:
-        """Whole skip-fade steps done (tolerant of float accumulation of the fixed ticks)."""
-        return int(self.skip_fade_seconds / FilmFades.SKIP_FADE_STEP_SECONDS + 1e-6)
+    @property
+    def volume(self) -> int:
+        """The film's volume percentage now (notes/cutscene_narration.md 4.3)."""
+        if self.phase == "skip_fade":
+            return FilmFades.skip_step(self._skip_fade_step())[1]
+        return self.fades.volume(self.elapsed_seconds)
+
+    def _skip_fade_step(self) -> int:
+        """The skip-fade step shown now: the first runs at the skip, then one per step length."""
+        done = int(self.skip_fade_seconds / FilmFades.SKIP_FADE_STEP_SECONDS + 1e-6)
+        return min(FilmFades.SKIP_FADE_STEPS, 1 + done)
 
 
 class MainMenuScene(Scene):
