@@ -58,7 +58,7 @@ the target's reference figure (AI). Then:
    (hostile = one of the two is player-army or allied and the other is enemy-army; neutral/furniture is never
    hostile). Failure: as every launch failure (power lost; `GMTXT 2021` for player-army casters).
 2. Success, all in the same tick T:
-   - the effect is created with target = that unit, timer **180**; a particle sits above the unit and follows it;
+   - the effect is created with target = that unit, timer **180**; a particle sits above the unit and follows it (artwork, position and timing: `spell_madness_visuals.md`);
    - **event 0x31** ("you are maddened", no source unit, no parameters) is queued to the target (not queued if the
      target is a building pseudo-unit 🟡);
    - the target's **side is saved** (the whole side value, including its low bits) and then swapped:
