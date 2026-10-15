@@ -152,8 +152,8 @@ a straight 18-tick flight, `spell_effects.md` §2). It is turned to the bearing.
 | 8 … 5 | 40 … 52 (> 36) | 2 (535) |
 | 4 … 0 | 56 … 72 (> 54) | 3 (536) |
 
-The stage rises on the first tick with `4·(N − r)` strictly greater than N, 2N, 3N. 🟡 The stage is updated after
-the tick's drawing, so the frame may lag one tick behind this table.
+The stage rises on the first tick with `4·(N − r)` strictly greater than N, 2N, 3N. There is no lag: the
+table is exact per drawn position (tick-by-tick vectors and the trail frames: `spell_plague_monk_breath_visuals.md` §3).
 
 ## 3. Notes for the engine
 
