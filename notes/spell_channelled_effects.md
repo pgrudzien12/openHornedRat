@@ -85,7 +85,9 @@ Schedule (all in effect steps):
 
 **Wind-up (🟡):** the wind-up is meant to last **4 ticks** (W = 4), but the original is inconsistent: in many casts it
 is skipped (W = 0, bolt 1 leaves in tick T), and the closing animation lasts 1 or 2 ticks. Engine suggestion: W = 4
-and a 1-tick close; keep both as named constants.
+and a **2-tick** close (the storm sprite's 399–400 closing, end in tick E_last + 9); keep both as named constants.
+The skipped wind-up and 1-tick close happen only when other spell effects were already running when the Storm was
+cast (`spell_storm_visuals.md` §6).
 
 Per-bolt cycle on a clear line: `(N − 1) + 7` ticks (terminal at r = 2, see `spell_effects.md` §2.4). A full 24"
 Storm with 13 bolts therefore lasts about 13 × 35 ≈ 450 ticks (≈ 2.4 turns).
