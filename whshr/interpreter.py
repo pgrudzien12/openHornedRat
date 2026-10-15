@@ -2596,6 +2596,7 @@ class ScriptInterpreter:
         regiment.avoid_target = None
         regiment.route_side, regiment.route_planned_for = 0, None
         regiment.route_follows_unit = False
+        regiment.charge_run_armed = True  # the charge run (distance budget) starts here
 
     def op_FireAtTarget(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
             tick_count: int, rng: random.Random) -> int | None:

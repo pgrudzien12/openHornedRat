@@ -307,6 +307,14 @@ class Regiment:
     # Combat/order state (whshr.combat).
     attack_target: str | None = None  # identifier of an enemy regiment this regiment is approaching or charging
     charge_started_target: str | None = None  # target whose current charge already froze its models
+    # The straight charge run (game_rules.md "Turning"): the target this run is for, the distance covered and
+    # whether its one halfway re-aim has been made.
+    charge_run_for: str | None = None
+    charge_travelled: float = 0.0
+    charge_reaimed: bool = False
+    charge_reaim_pending: bool = False
+    charge_run_armed: bool = False  # a real charge start happened (ChargeTarget, or the unscripted reach test)
+    charge_aim: tuple[float, float] | None = None  # the frozen aim point of the running charge
     assaulting_building: str | None = None  # identifier of the building this regiment is fighting (whshr.buildings)
     free_charging: bool = False  # straight-ahead ChargeForward until its point is reached or contact ends it
     turn_order_key: TurnKey | None = None
@@ -2512,6 +2520,9 @@ class Battle:
                             model.start_pause((model.stagger & 7) + 1)
                             model.current_speed = 0.0
                         regiment.charge_started_target = target.identifier
+                        # PROVISIONAL: without behaviour scripts there is no ChargeTarget; the charge is taken to
+                        # start when the target comes within charge reach (the reach test of the approach script).
+                        regiment.charge_run_armed = True
                     # A pursuer runs straight at the chase point set at the last segment tick
                     # (notes/pursuit_map_edge.md 2); a charge re-aims at its target every update.
                     chase = (regiment.pursuit_point if regiment.pursuing and regiment.pursuit_point is not None
@@ -2526,8 +2537,33 @@ class Battle:
                         # instead of circling it.
                         facing = regiment.direction * math.tau / 512
                         chase = (regiment.x + 256 * math.sin(facing), regiment.y + 256 * math.cos(facing))
+                    # game_rules.md "Charge" / "Turning": the charge run (distance budget, one re-aim) starts at the
+                    # charge start (`charge_run_armed`), not during an ordinary approach walk.
+                    # An attack target set by other means (e.g. AttackTagged from afar) is not a charge start in the
+                    # notes (PROVISIONAL): such a unit keeps the old, budget-free behaviour.
+                    run_started = not regiment.pursuing and regiment.charge_run_armed
+                    if run_started:
+                        if regiment.charge_run_for != target.identifier or regiment.charge_aim is None:
+                            regiment.charge_run_for = target.identifier
+                            regiment.charge_travelled, regiment.charge_reaimed = 0.0, False
+                            regiment.charge_reaim_pending = False
+                            regiment.charge_aim = (target.x, target.y)
+                        elif (not regiment.charge_reaimed
+                              and regiment.charge_travelled >= regiment.charge_reach / 2):
+                            # The one re-read of the aim point, at the halfway point; between re-reads the run goes
+                            # straight at the frozen aim point, however the target moves.
+                            regiment.charge_aim = (target.x, target.y)
+                            regiment.charge_reaimed = regiment.charge_reaim_pending = True
+                        chase = regiment.charge_aim
                     moved = self._advance_toward(regiment, chase, speed * move_scale, arrive=False,
                                                  order_key=("charge", target.identifier), scale=scale)
+                    if run_started:
+                        regiment.charge_travelled += regiment.route_speed
+                        if (regiment.charge_travelled >= regiment.charge_reach
+                                or (regiment.charge_aim is not None
+                                    and math.dist(regiment.charge_aim, (regiment.x, regiment.y)) < 1.0)):
+                            self._end_charge_run(regiment)  # budget spent, or the aim point reached without contact
+                            moved = False
             elif regiment.target_x is not None and regiment.target_y is not None and regiment.free_charging:
                 moved = self._advance_toward(regiment, (regiment.target_x, regiment.target_y),
                                              regiment.speed_for_mode(CHARGING_K) * move_scale, arrive=True,
@@ -2551,6 +2587,9 @@ class Battle:
                 moved = self._resolve_latched_step(regiment, state, latch_snapshot) and moved
             if regiment.in_melee or not (regiment.routing or regiment.attack_target or regiment.moving):
                 regiment.route_speed = 0.0
+            if (regiment.charge_run_for is not None or regiment.charge_run_armed) and (
+                    regiment.attack_target is None or regiment.in_melee or regiment.pursuing):
+                self._reset_charge_run(regiment)  # contact, obstruction, redirect-free end or pursuit: the run is over
             if regiment.attack_target is None and not regiment.in_melee:
                 for model in regiment.melee_models:
                     model.freeze_ticks = 0
@@ -2737,6 +2776,7 @@ class Battle:
             return False
         goal = round(math.atan2(dx, dy) * 512 / math.tau) % 512
         new_order = order_key != regiment.turn_order_key
+        reaim_due, regiment.charge_reaim_pending = regiment.charge_reaim_pending, False
         if new_order:
             # game_rules.md "Real time and movement": the 90/180 snap happens only at the moment a move order is
             # issued (every order clears `turn_order_key`). A destination changed under a running move -- the next
@@ -2746,7 +2786,10 @@ class Battle:
             if issued and order_key[0] in ("move", "charge"):
                 self._snap_order_turn(regiment, goal)
             self._plan_turn(regiment, goal, charge=order_key[0] == "charge")
-        elif order_key[0] == "charge" and self.tick_count % combat.SEGMENT_TICKS == 0:
+        elif order_key[0] == "charge" and regiment.pursuing and self.tick_count % combat.SEGMENT_TICKS == 0:
+            self._plan_turn(regiment, goal, charge=True)
+        elif order_key[0] == "charge" and reaim_due:
+            # game_rules.md "Turning": a charge re-reads its aim point once, at the halfway point.
             self._plan_turn(regiment, goal, charge=True)
         elif regiment.turn_mode is None and order_key[0] != "charge":
             self._plan_turn(regiment, goal, charge=order_key[0] == "charge")
@@ -3867,6 +3910,28 @@ class Battle:
         regiment.x += dx
         regiment.y += dy
         regiment.positions = [(x + dx, y + dy) for x, y in regiment.positions]
+
+    @staticmethod
+    def _reset_charge_run(regiment: Regiment) -> None:
+        regiment.charge_run_armed = False
+        regiment.charge_run_for = regiment.charge_aim = None
+        regiment.charge_travelled = 0.0
+        regiment.charge_reaimed = regiment.charge_reaim_pending = False
+
+    def _end_charge_run(self, regiment: Regiment) -> None:
+        """game_rules.md "Charge" and "Turning": a charge covers at most `charge_reach` and then ends, halted,
+        whether or not it arrived (notes/attack_order_flow.md 5: 0x09 to the target; the unit's script then
+        re-forms and waits for orders)."""
+        target_id = regiment.attack_target
+        if target_id is None:
+            return
+        regiment.attack_target = regiment.charge_started_target = None
+        regiment.turn_order_key = regiment.turn_mode = None
+        regiment.route_speed = 0.0
+        self._reset_charge_run(regiment)
+        self.event_bus.queue_event(target_id, interpreter.Event(code=0x09, source=regiment.identifier))
+        self.events.append(BattleEvent(f"{regiment.name}'s charge runs out of reach.", "charge_end",
+                                       regiment=regiment.identifier))
 
     def _end_charge_on_obstruction(self, regiment: Regiment, description: str) -> None:
         target_id = regiment.attack_target

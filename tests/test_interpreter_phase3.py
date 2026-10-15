@@ -451,3 +451,24 @@ class ArrivalFlagTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class AttackTaggedHasNoChargeBudgetTests(unittest.TestCase):
+    """notes/attack_order_flow.md 1: only a charge start (ChargeTarget) begins the distance-budgeted charge run."""
+
+    def test_given_attack_tagged_from_afar_then_the_unit_keeps_going_past_charge_reach(self):
+        hunter = Regiment("hunter_1", "Hunter", 100, 100, 0, Side.ENEMY, models=10, ranks=2)
+        prey = Regiment("prey_1", "Prey", 100, 900, 0, Side.PLAYER, models=10, ranks=2)
+        battle = Battle(1000, 1000, [hunter, prey], seed=1995)
+        interp = interpreter.ScriptInterpreter(battle, battle.event_bus, None)
+        tag = 0xABC0
+        interp.op_SetTag(battle.event_bus.unit_states["prey_1"], tag, [], "prey_1", 0, None)
+        interp.op_AttackTagged(battle.event_bus.unit_states["hunter_1"], tag, [], "hunter_1", 0, None)
+        battle.interpreter = interp
+
+        for _ in range(300):
+            battle.tick()
+
+        self.assertGreater(hunter.y - 100, hunter.charge_reach)
+        self.assertEqual(hunter.attack_target, "prey_1")
+        self.assertFalse([e for e in battle.events if e.kind == "charge_end"])
