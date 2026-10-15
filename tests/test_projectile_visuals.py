@@ -7,8 +7,8 @@ from whshr.frontend.spell_visuals import (DirectionalSprite, ProjectileVisuals, 
 
 
 def shot(code, x, y=0.0, height=8.0, start=(0.0, 0.0), dest=(1000.0, 0.0), remaining=0, steps=18, ending=False,
-         key=(1, 0)):
-    return Shot(key, code, x, y, height, start, dest, remaining, steps, ending)
+         key=(1, 0), aim_height=0.0):
+    return Shot(key, code, x, y, height, start, dest, remaining, steps, ending, aim_height)
 
 
 def mesh_names(visuals):
@@ -81,6 +81,70 @@ class BeamTest(unittest.TestCase):
             self.assertEqual([s.frame for s in visuals.sprites() if isinstance(s, Sprite)], [first])
 
 
+class BeamFlashTest(unittest.TestCase):
+    """notes/spell_doomwheel_visuals.md 4 and 6: the flash height, the common removal, the early-stop timing."""
+    WARP = spell_effects.WARP_LIGHTNING
+
+    def bolt(self, ticks, stop=None, dest=(0.0, 400.0), aim_height=4.0, steps=21):
+        """A bolt flying up +y from (0,0), 20 per tick; `stop` = (tick, y) ends it early, else it arrives at tick 19."""
+        visuals = ProjectileVisuals()
+        history = []
+        for tick in range(ticks):
+            if stop is not None and tick == stop[0]:
+                shots = [shot(self.WARP, 0.0, stop[1], 0.0, (0.0, 0.0), dest, ending=True, aim_height=aim_height)]
+            elif stop is None and tick == 19:
+                shots = [shot(self.WARP, 0.0, 362.0, 0.0, (0.0, 0.0), dest, ending=True, aim_height=aim_height)]
+            elif tick < (stop[0] if stop else 19):
+                shots = [shot(self.WARP, 0.0, 20.0 * tick, 0.0, (0.0, 0.0), dest, aim_height=aim_height)]
+            else:
+                shots = []
+            visuals.advance(shots)
+            flashes = [(s.frame, s.x, s.y, s.height) for s in visuals.sprites() if isinstance(s, Sprite)]
+            history.append((flashes, len(visuals.meshes())))
+        return visuals, history
+
+    def test_the_flash_is_drawn_at_the_destination_aim_height_not_on_the_ground(self):
+        _, history = self.bolt(20, aim_height=9.0)
+        self.assertEqual(history[19][0], [(522, 0.0, 400.0, 9.0)])
+
+    def test_segments_and_flash_are_removed_together_four_ticks_after_arrival(self):
+        _, history = self.bolt(24)
+        self.assertEqual([history[t][0][0][0] for t in (19, 20, 21, 22)], [522, 523, 524, 525])
+        self.assertTrue(all(history[t][1] > 0 for t in (19, 22)))
+        self.assertEqual(history[23], ([], 0))
+
+    def test_a_beam_stopped_early_flashes_one_tick_later_at_the_scattered_destination(self):
+        _, history = self.bolt(16, stop=(10, 191.0))
+        self.assertEqual(history[10][0], [])
+        self.assertEqual(history[11][0], [(522, 0.0, 400.0, 4.0)])  # not at the stop point, y 191
+        self.assertEqual(history[14][0][0][0], 525)
+        self.assertEqual(history[15], ([], 0))  # everything gone at H + 5
+
+    def test_a_segment_may_still_be_left_at_the_stop_point_the_tick_after(self):
+        _, history = self.bolt(12, stop=(10, 260.0))
+        self.assertEqual(history[11][1], history[10][1] + 1)
+
+    def test_a_failed_bolt_draws_nothing(self):
+        visuals = ProjectileVisuals()
+        visuals.advance([])  # no effect was started: no shot at all
+        self.assertEqual((visuals.meshes(), visuals.sprites()), ([], []))
+
+    def test_the_three_doomwheel_bolts_are_separate_beams_from_one_point_at_height_0(self):
+        visuals = ProjectileVisuals()
+        dests = [(0.0, 300.0), (200.0, 0.0), (-200.0, 0.0)]
+        visuals.advance([shot(self.WARP, 5.0, 7.0, 0.0, (5.0, 7.0), dest, key=(n, 0))
+                         for n, dest in enumerate(dests, 1)])
+        items = visuals.meshes()
+        self.assertEqual(len(visuals.shots), 3)
+        self.assertEqual({(item.x, item.y, item.height) for item in items}, {(5.0, 7.0, 0.0)})
+        self.assertEqual(sorted((item.dx, item.dy) for item in items[::2]), sorted((d[0] - 5.0, d[1] - 7.0) for d in dests))
+
+    def test_removing_the_caster_never_cuts_an_innate_bolt_short(self):
+        # The effect keeps reporting its flight whoever fired it, so the presentation just goes on.
+        _, history = self.bolt(24)
+        self.assertEqual(history[22][0][0][0], 525)
+
+
 class SpriteProjectileTest(unittest.TestCase):
     def test_the_burning_head_is_a_directional_skull_with_a_fire_trail(self):
         visuals = ProjectileVisuals()
@@ -135,19 +199,20 @@ class EffectsToShotsTest(unittest.TestCase):
         bolt.tail = 7
         self.assertEqual(projectile_shots([bolt], memory)[0], [])
 
-    def test_storm_bolts_are_lightning_shots_and_start_the_storm_sprite_runs(self):
+    def test_storm_bolts_are_lightning_shots_and_the_storm_reports_its_sprite_frame(self):
         memory = {}
-        storm = self.effect(spell_effects.STORM)
-        shots, runs = projectile_shots([storm], memory)
-        self.assertEqual((shots, runs), ([], [(1, "W", True)]))
+        storm = self.effect(spell_effects.STORM, timer=4)
+        shots, frames = projectile_shots([storm], memory)
+        self.assertEqual((shots, frames), ([], [(1, "W", 391)]))
         storm.flying = True
-        shots, runs = projectile_shots([storm], memory)
-        self.assertEqual(([(s.key, s.code) for s in shots], runs), ([((1, 1), spell_effects.LIGHTNING)], [(1, "W", False)]))
+        storm.elapsed = 5
+        shots, frames = projectile_shots([storm], memory)
+        self.assertEqual(([(s.key, s.code) for s in shots], frames), ([((1, 1), spell_effects.LIGHTNING)], [(1, "W", 395)]))
         storm.flying = False
         self.assertEqual([s.ending for s in projectile_shots([storm], memory)[0]], [True])
         storm.flying = True  # the next bolt, from the same start point
-        shots, runs = projectile_shots([storm], memory)
-        self.assertEqual(([s.key for s in shots], runs), ([(1, 2)], [(1, "W", False)]))
+        shots, frames = projectile_shots([storm], memory)
+        self.assertEqual([s.key for s in shots], [(1, 2)])
 
 
 if __name__ == "__main__":

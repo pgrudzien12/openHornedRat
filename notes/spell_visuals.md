@@ -65,7 +65,7 @@ tick of the flight. **Trail** = objects left behind along the path. **Flash** = 
 | **Piercing Bolts of Burning** (6) | mesh, cycle `BOLTBUR1→4` (12–15) | none | none | – |
 | **The Burning Head** (7) | **directional sprite 32–39** (a flaming skull, one frame per direction, no phase cycle) | fire puffs **40–59**, 20 frames each (like Fireball puffs) | no explosion; the effect ends when the last puff has faded | 0 |
 | **Pestilent Breath** (24) | sprite **533–536**, chosen by flight progress (§2.6) | **static** cloud sprites, one per tick, each frozen at the head's frame when it was left | trail removed one sprite per tick, oldest first | +32 |
-| Storm of Shemtek, extra | a **storm sprite at the wizard** (SPELLS 391–394 forming, 395–398 at each bolt) 🟡 | – | – | +16 |
+| Storm of Shemtek, extra | a **storm sprite at the caster's first figure's launch point** (SPELLS 391–394 wind-up, 395–398 continuous loop, 399–400 closing; `spell_storm_visuals.md`) | – | – | +16 |
 
 ## 2. Per spell
 
@@ -108,18 +108,21 @@ are already public: Lightning 4 above ground; Warp from ground level; Gaze 4, or
    a **last segment** is placed at the aim point, turned back along the beam (bearing + 256), and the head is
    removed.
 4. **Flash**: the end sprite plays once at the aim point (the scattered destination), one frame per tick: Lightning
-   / Banner / Storm bolt **433–439**, Warp **522–525**, Gaze **464–469**. All use colour bank +16. Then the segments
-   and flash are removed. 🟡 The exact number of ticks the segments stay after the flash starts is not settled: keep
-   them until the flash ends.
-5. A beam stopped early (hit in flight, `spell_effects.md` §2.3) skips 3. It still shows the flash at its end point
-   🟡.
+   / Banner / Storm bolt **433–439**, Warp **522–525**, Gaze **464–469**. All use colour bank +16. The flash is drawn at
+   the destination's **aim height** (not on the ground). The segments stay exactly as long as the flash: both are
+   removed together on the tick after the last flash frame (`spell_doomwheel_visuals.md` §4).
+5. A beam stopped early (hit in flight or below the ground, `spell_effects.md` §2.3) skips 3. It still shows the
+   flash, starting **one tick later** and **at the scattered destination**, not at the stop point
+   (`spell_doomwheel_visuals.md` §4).
 
 ### 2.3 Storm of Shemtek
 
 Each bolt is §2.2 with the Lightning meshes and the 433–439 flash, launched from the wizard's leader at 4 above the
-ground (timing: `spell_channelled_effects.md` §1). 🟡 A storm sprite also sits on the ground at the wizard's leader
-figure. It plays **391–394** once when the spell starts and **395–398** as each bolt is released (colour bank +16).
-The exact phase-by-phase cycle was not traced.
+ground (timing: `spell_channelled_effects.md` §1). A storm sprite (SPELLS 391–400, colour bank +16, nondirectional, bottom-centre anchor) stands on the ground at the
+point where the caster's first figure stood at the launch, and stays there: **391–394** once (T…T+3, bolt 1 leaves
+at T+4), then **395–398 looping without a break** through all bolts and flashes, then **399–400** once after the
+last flash, gone when the effect ends at E_last+9; any cancellation removes it at once. Full rules, the overlap
+exception and test vectors: `spell_storm_visuals.md`.
 
 ### 2.4 Piercing Bolts of Burning
 
