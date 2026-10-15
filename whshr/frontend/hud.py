@@ -113,7 +113,7 @@ COMMAND_FRAMES: dict[str, tuple[int, int]] = {
 # Commands whshr.engine.Battle can actually carry out today; everything else in COMMAND_FRAMES
 # renders (and, where it is a set-entry button, still navigates the panel) but is disabled.
 ORDER_SUPPORTED: set[str] = {"move", "attack", "charge", "fire", "halt", "ranks_up", "ranks_down",
-                   "turn_left", "turn_right", "about_face", "face_point", "independent", "fight_harder", "items", "rally"}
+                   "turn_left", "turn_right", "about_face", "face_point", "independent", "fight_harder", "items", "rally", "withdraw"}
 # Buttons that only change which sub-panel is shown (pure HUD state, always clickable when present).
 SET_ENTRY: dict[str, str] = {"move": "move", "attack": "attack", "ranks_subset": "ranks", "facing_subset": "facing",
             "back": "idle"}

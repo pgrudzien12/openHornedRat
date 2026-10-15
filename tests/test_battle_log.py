@@ -121,6 +121,21 @@ class RecordAndReplayTests(SyntheticInstallation):
         self.assertEqual(replayed.battle.tick_count, scene.battle.tick_count)
         self.assertEqual(replayed.battle.regiments["Player_Cav"].x, scene.battle.regiments["Player_Cav"].x)
 
+    def test_given_a_withdraw_order_when_recorded_then_the_log_holds_it_and_the_replay_matches(self):
+        context = self._context()
+        scene = BattleScene(log_dir=self.log_dir, seed=7)
+        machine = SceneMachine(scene, context)
+        scene.handle(("select", "Player_Cav"), context)
+        scene.handle(("withdraw",), context)  # outside melee: refused, but still part of the recorded input
+        for _ in range(10):
+            machine.update(BATTLE_TICK_SECONDS)
+        machine.active.exit(context)
+
+        self.assertIn('"withdraw"', scene.logger.path.read_text())
+        _replayed, _header, divergence, _timeline = battle_replay.replay(
+            self.root, scene.logger.path, context=self._context())
+        self.assertIsNone(divergence)
+
     def test_given_the_debug_win_key_when_replayed_then_the_terminal_tick_and_result_match(self):
         context = self._context()
         context.debug = True

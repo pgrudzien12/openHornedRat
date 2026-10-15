@@ -1459,6 +1459,43 @@ class Battle:
             raise ValueError("fight harder requires an active player regiment in melee")
         regiment.fight_harder = True
 
+    def order_withdraw(self, identifier: str) -> None:
+        """The player's Withdraw order (game_rules.md "Player orders", order 0x13; battle_attack_charge_buttons.md).
+
+        Accepted while in melee or braced. When the unit's only opponents are rolling stock, furniture or a
+        building, with no other enemy unit fighting its models, it just disengages: it leaves the fight, drops
+        its target and re-forms. Against any living enemy the withdrawal is a voluntary rout, started exactly like
+        any other rout (the opponents see event 0x0F, lone_unit_on_grid.md). A unit that is already broken refuses
+        it; a pursuing unit accepts the order but nothing is documented about its effect there, so it is ignored
+        (PROVISIONAL, pursuit_restraint.md "Other orders while pursuing")."""
+        self._require_battle_order()
+        regiment = self.regiments[identifier]
+        if regiment.side != Side.PLAYER or not regiment.active or regiment.routing:
+            raise ValueError("withdraw requires an active, unbroken player regiment")
+        if regiment.pursuing:
+            return  # PROVISIONAL: accepted by the order gate, no documented effect
+        if not (regiment.in_melee or regiment.braced or regiment.assaulting_building is not None):
+            raise ValueError("withdraw requires a regiment in melee or braced")
+        opponents = [other for other in self.regiments.values()
+                     if other.active and other is not regiment and regiment.melee_group is not None
+                     and other.melee_group == regiment.melee_group and may_engage(other, regiment)]
+        if regiment.braced_target is not None and regiment.braced_target in self.regiments:
+            braced_against = self.regiments[regiment.braced_target]
+            if braced_against.active and braced_against not in opponents:
+                opponents.append(braced_against)  # PROVISIONAL: a braced unit's opponent is the charger it braced against
+        if any(not (other.is_wagon or other.unit_class == 9) for other in opponents):
+            combat.start_rout(regiment, self)  # a voluntary rout (R48)
+            return
+        # Only rolling stock, furniture or a building: disengage and re-form (building_units.md 6).
+        regiment.assaulting_building = None
+        regiment.braced = False
+        regiment.braced_target = None
+        regiment.attack_target = regiment.charge_started_target = None
+        regiment.target_x = regiment.target_y = None
+        regiment.waypoints.clear()
+        combat.leave_grid(self, regiment)
+        self.reform_to_ranks(regiment, regiment.script_ranks)
+
     def arm_item(self, identifier: str, item: str) -> bool:
         """Spend an activated item on selection; return whether it needs a battlefield point."""
         self._require_battle_order()

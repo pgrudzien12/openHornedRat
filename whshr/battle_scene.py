@@ -207,6 +207,12 @@ class BattleScene(Scene):
                     self.battle.order_fight_harder(self.selected_id)
                 except ValueError:
                     pass
+        elif kind == "withdraw":
+            if self.selected_id is not None:
+                try:
+                    self.battle.order_withdraw(self.selected_id)
+                except ValueError:
+                    pass  # not an unbroken player regiment in melee or braced (game_rules.md, order 0x13)
         elif kind == "charge":
             if self.selected_id is not None:
                 try:
