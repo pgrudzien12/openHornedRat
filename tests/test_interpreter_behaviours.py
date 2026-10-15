@@ -205,6 +205,15 @@ class InnateWeaponTests(BehaviourTestCase):
         self.run_code(26)  # just stamped: not ready
         self.assertEqual(len(self.battle.events), before)
 
+    def test_doomwheel_bolts_do_not_depend_on_its_animation(self):
+        from whshr import animation
+        wheel = unit("W", 0, 0, Side.ENEMY, sprite="DoomWheel")
+        self.make(wheel)
+        table = animation.family_table(animation.family_for(wheel.sprite, wheel.unit_class))
+        self.assertTrue(all(script.fire_at is None and not script.extra_posts for script in table.values()))
+        self.run_code(26)
+        self.assertEqual(len([e for e in self.battle.events if e.kind == "doomwheel_bolts"]), 1)
+
 
 class CaseEventTests(unittest.TestCase):
     def test_skip_lands_after_the_break_and_its_label(self):

@@ -3420,8 +3420,8 @@ class Battle:
     def _drawn_facing_target(self, regiment: Regiment, model: ModelState) -> float:
         """Facing a model's drawn direction turns toward: the unit's for stand/weapon-ready/shoot, its own
         heading (or its opponent) for walk/fight."""
-        if (animation.facing_follows_unit(model.action)
-                or animation.family_table(regiment.model_family(model))[model.action].faces_unit):
+        script = animation.family_table(regiment.model_family(model))[model.action]
+        if not script.faces_heading and (animation.facing_follows_unit(model.action) or script.faces_unit):
             return regiment.direction
         if model.action == animation.FIGHT and model.opponent is not None:
             other = self.regiments.get(model.opponent[0])
