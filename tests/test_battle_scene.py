@@ -276,23 +276,23 @@ class BattleSceneTests(unittest.TestCase):
         self.assertIs(machine.active, scene)
         self.assertIsNone(scene.battle.result)
 
-    def test_given_a_running_battle_when_the_win_key_is_used_then_it_ends_at_once_as_a_lossless_victory(self):
+    def test_given_a_running_battle_when_the_win_key_is_used_then_it_ends_at_once_as_a_victory_with_current_losses(self):
         self.context.debug = True
         scene = BattleScene()
         machine = SceneMachine(scene, self.context)
         machine.update(BATTLE_TICK_SECONDS)
         self.assertIs(machine.active, scene)  # an ordinary battle is under way
+        player = next(r for r in scene.battle.regiments.values() if "Grudgebringer" in r.name)
+        player.models -= 3  # losses taken before the key press
 
-        machine.handle(("win_battle",))
+        machine.handle(("win_battle", None))
         machine.update(BATTLE_TICK_SECONDS)
 
         self.assertIsInstance(machine.active, ResultScene)
         self.assertEqual(machine.active.result, "victory")
-        for line in machine.active.summary:
-            if "Grudgebringer" in line:
-                self.assertIn("16/16", line)
+        self.assertEqual(player.models, player.original_models - 3)  # the losses stay
 
-    def test_given_a_campaign_battle_when_the_win_key_is_used_then_the_flow_resumes_with_a_flawless_win(self):
+    def test_given_a_campaign_battle_when_the_win_key_is_used_then_the_flow_resumes_with_the_played_result(self):
         self.context.debug = True
         self.context.glue = GlueContent.from_data(resources={
             "FLOW": "[RUN]\n[START]\nplaygame:bf001\n[END]",
@@ -311,9 +311,9 @@ class BattleSceneTests(unittest.TestCase):
 
         from whshr.debrief_scene import DebriefScene
         self.assertIsInstance(machine.active, DebriefScene)  # the campaign flow goes on to the debrief
-        self.assertTrue(battle_scene.no_battle)
-        flawless.assert_called_once()  # paid in full, like no-battle mode
-        played.assert_not_called()
+        self.assertFalse(battle_scene.no_battle)
+        played.assert_called_once()  # the player's real losses go to the debrief
+        flawless.assert_not_called()
 
     def test_given_a_mission_with_objectives_when_the_win_key_is_used_then_they_decide_and_are_marked_completed(self):
         script = {**SCRIPT, "mission": {"objectives": [["A", 2, 2], ["B", 80, 12]]}}

@@ -114,6 +114,34 @@ class ObjectiveWinItemTests(unittest.TestCase):
         self.assertEqual(full.items, ("a", "b", "c", "d", "e"))
         self.assertEqual(dead.items, ())
 
+    def test_given_a_selected_regiment_when_the_battle_is_won_then_it_carries_the_items(self):
+        # Given the first marching regiment selected when F10 is pressed
+        first = regiment("p1", Side.PLAYER, whoami=4)
+        last = regiment("p2", Side.PLAYER, whoami=7)
+        entries = [["A", 20, 1], ["K", 0, 10], ["X", 1, 3]]
+        battle = make(entries, first, last, regiment("e", Side.ENEMY, x=500, y=500), nodes=self.NODES)
+
+        # When the debug win settles the battle
+        battle.win_by_objectives(entries, bearer="p1")
+
+        # Then the selected regiment carries both items
+        self.assertEqual((len(first.items), last.items), (2, ()))
+        self.assertTrue(battle.objectives.get("K").met and battle.objectives.get("X").met)
+
+    def test_given_a_selected_regiment_that_cannot_carry_then_the_last_marching_one_does(self):
+        full = regiment("p1", Side.PLAYER, whoami=4, items=("a", "b", "c", "d", "e"))
+        last = regiment("p2", Side.PLAYER, whoami=7)
+        enemy = regiment("e", Side.ENEMY, x=500, y=500)
+        entries = [["A", 20, 1], ["K", 0, 10]]
+        for selected in ("p1", "e", "missing"):
+            with self.subTest(selected=selected):
+                last.items = ()
+                battle = make(entries, full, last, enemy, nodes=self.NODES)
+
+                battle.win_by_objectives(entries, bearer=selected)
+
+                self.assertEqual(last.items, ("ItemSwordOfMight",))
+
     def test_given_no_free_slot_anywhere_then_the_item_stays_and_its_letter_is_unmet(self):
         full = regiment("p", Side.PLAYER, items=("a", "b", "c", "d", "e"))
         entries = [["A", 20, 1], ["K", 0, 10]]

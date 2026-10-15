@@ -221,10 +221,11 @@ class Objectives:
 
     # ------------------------------------------------------------------ testing aid (--debug F10)
 
-    def complete(self, battle: Battle, entries: Iterable[Sequence[Any]] | None = None) -> None:
+    def complete(self, battle: Battle, entries: Iterable[Sequence[Any]] | None = None,
+                 bearer: str | None = None) -> None:
         """Testing aid: finish the battle through its objectives and mark them completed.
 
-        Items still on the field are carried off first (`_hand_out_items`). The segment check then runs once (so an
+        Items still on the field are carried off first (`_hand_out_items`, preferring ``bearer``). The segment check then runs once (so an
         eliminated enemy decides A, F and the like through their own evaluators); if no battle-ending letter decided,
         the first one that can end the battle without being a defeat is met by fiat and decides. The final pass then
         runs. Every other letter that is not a defeat, information or item letter is marked met; each value the
@@ -232,7 +233,7 @@ class Objectives:
         are kept."""
         from .payments import DEFEAT_LETTERS, NEVER_MET_LETTERS, flawless_results
 
-        self._hand_out_items(battle)
+        self._hand_out_items(battle, bearer)
         self.segment(battle)
         if self.decided is None:
             winning = next((r for r in self.records if r.flags & ENDS_BATTLE and r.letter not in DEFEAT_LETTERS), None)
@@ -248,17 +249,22 @@ class Objectives:
             if record.letter in full:  # a value the battle left at zero takes the completed value
                 record.values = [value or filled for value, filled in zip(record.values, full[record.letter][1])]
 
-    def _hand_out_items(self, battle: Battle) -> None:
-        """Testing aid: every item still lying on the field goes to the last player regiment in marching order that
-        is alive and has a free slot, as if it had walked into the item's node (`_give_item`). An item nobody can
-        carry stays where it is, its letter unmet."""
+    def _hand_out_items(self, battle: Battle, preferred: str | None = None) -> None:
+        """Testing aid: every item still lying on the field goes to the ``preferred`` regiment (the one selected when
+        F10 was pressed) if it is a player regiment that is alive and has a free slot, else to the last such regiment
+        in marching order, as if it had walked into the item's node (`_give_item`). An item nobody can carry stays
+        where it is, its letter unmet."""
+        def can_carry(regiment: Regiment) -> bool:
+            return regiment.active and regiment.models > 0 and len(regiment.items) < ITEM_SLOTS
+
         for record in self.records:
             if record.letter not in self.item_marks:
                 continue
-            bearer = next((r for r in reversed(_side(battle, Side.PLAYER))
-                           if r.active and r.models > 0 and len(r.items) < ITEM_SLOTS), None)
-            if bearer is not None:
-                _give_item(self, battle, record, bearer)
+            chosen = battle.regiments.get(preferred) if preferred is not None else None
+            if chosen is None or chosen.side != Side.PLAYER or not can_carry(chosen):
+                chosen = next((r for r in reversed(_side(battle, Side.PLAYER)) if can_carry(r)), None)
+            if chosen is not None:
+                _give_item(self, battle, record, chosen)
                 record.met = True
 
     # ------------------------------------------------------------------ book button (section 8)

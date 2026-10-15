@@ -56,6 +56,7 @@ class BattleScene(Scene):
         self.no_battle = False
         self.npc_company: dict[int, Any] | None = npc_company  # the company's units, for objective G's army merge
         self.win_requested = False  # the debug win key was pressed; settled at the next tick
+        self.win_bearer: str | None = None  # the regiment selected at the key press: it takes the field items
 
     def enter(self, context: SceneAssets) -> None:
         if self.player_army is None and self.glue_scene is not None and self.glue_scene.campaign is not None:
@@ -173,11 +174,13 @@ class BattleScene(Scene):
                 self.captures.append(figure_capture.FigureCapture(self.log_dir, self.battle_id.name,
                                                                   self.battle, unit_id))
         elif kind == "win_battle":
-            # Testing aid (F10, --debug runs only): finish this battle as a win through its objectives (marked completed,
-            # real final pass), or as a no-battle shortcut when it has none. Only requested here; the
-            # settlement happens at the start of the next simulation tick (`update`), so a live run and its replay
-            # reach the same terminal tick and final snapshot.
+            # Testing aid (F10, --debug runs only): finish this battle as a win with the player's current losses,
+            # through its objectives (marked completed, real final pass) when it has any; field items go to the
+            # regiment selected at the key press (the order's argument, so a replay hands them out alike). Only
+            # requested here; the settlement happens at the start of the next simulation tick (`update`), so a live
+            # run and its replay reach the same terminal tick and final snapshot.
             self.win_requested = True
+            self.win_bearer = str(args[0]) if args and args[0] is not None else None
         elif kind == "fill_power":
             # Debug cheat (Ctrl+M), always available; logged like any order so a replay fills the pool on the same tick.
             self.battle.fill_player_power()
@@ -377,10 +380,9 @@ class BattleScene(Scene):
                     objectives = (self.field.script.get("mission") or {}).get("objectives", ())
                     # Through the mission's own objectives when it has any (the debrief then gets their records);
                     # a mission-less battle falls back to the no-battle shortcut.
-                    if not self.battle.win_by_objectives(objectives):
-                        self.no_battle = True
+                    if not self.battle.win_by_objectives(objectives, self.win_bearer):
                         self.battle.start_battle()
-                        self.battle.resolve_no_battle()
+                        self.battle.resolve_no_battle()  # the enemy is gone; the player's losses are kept
             tick_number = self.battle.update_count
             self.battle.tick(BATTLE_TICK_SECONDS)
             if self.logger is not None and self.logger.enabled:
