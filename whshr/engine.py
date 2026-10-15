@@ -948,7 +948,6 @@ class Battle:
         self.pending_feedback: list[BattleEvent] = []
         self.text_resources: dict[int, str] = {}
         self.projectiles: list[Any] = []
-        self.innate_projectiles: list[Any] = []
         self.spell_effects = spell_effects.EffectTable()  # active spell effects (whshr.spell_effects)
         self.impact_effects: list[Any] = []
         # Destroyed buildings whose scene piece is drawn as its ruin, and the collapses still running before the swap

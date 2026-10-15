@@ -71,20 +71,6 @@ class Projectile:
     slot: int = -1
 
 
-@dataclass
-class InnateProjectile:
-    source: str
-    code: int
-    x0: float
-    y0: float
-    x1: float
-    y1: float
-    elapsed: int = 0
-    x: float = 0
-    y: float = 0
-    struck: frozenset[str] = frozenset()
-
-
 def _message(battle: Battle, unit: Regiment, text_id: int) -> None:
     battle.events.append(BattleEvent(f"GMTXT {text_id}", "ranged_message",
                                      regiment=unit.identifier, text_id=text_id))
@@ -491,19 +477,8 @@ def _launch_innate(battle: Battle, unit: Regiment, code: int,
         from . import spell_effects
         spell_effects.launch(battle, spell_effects.STEAM_GUN, unit, -1, *aim, innate=True)
         return
-    count = battle.rng.randint(1, 6) if code == 15 else 1
-    for _ in range(count):
-        if len(battle.innate_projectiles) >= 64:
-            break
-        if code == 15:
-            x1 = aim[0] + battle.rng.randint(-24, 24)
-            y1 = aim[1] + battle.rng.randint(-24, 24)
-        else:
-            x1, y1 = aim
-        battle.innate_projectiles.append(InnateProjectile(unit.identifier, code, *origin, x1, y1,
-                                                        x=origin[0], y=origin[1]))
-    battle.events.append(BattleEvent("Innate projectiles launched.", "innate_launch",
-                                     regiment=unit.identifier, code=code, count=count))
+    if code == 15:
+        _warpfire(battle, unit, aim)
 
 
 def _breathe(battle: Battle, unit: Regiment, aim: tuple[float, float]) -> None:
@@ -539,50 +514,44 @@ def _breathe(battle: Battle, unit: Regiment, aim: tuple[float, float]) -> None:
                                      regiment=unit.identifier, code=14, count=count))
 
 
-def _damage_innate(battle: Battle, unit: Regiment, p: InnateProjectile) -> None:
-    from . import combat
+def _is_warpfire_set(sprite: str | None) -> bool:
+    return "warpfire" in (sprite or "").casefold()
+
+
+def _warpfire_pose(unit: Regiment) -> bool:
+    """The shoot pose of notes/spell_warpfire_visuals.md 2.1 step 2: requested for the whole unit when both its troop
+    and its leader sprite sets are the Warpfire Thrower's, else for the leader figure alone. False (no pose, and no
+    flames) for such another unit without a living leader."""
     unit.model_positions()
-    if not unit.active:
-        return
-    index = battle.rng.randrange(unit.models)
-    if "MagicResistent" in unit.psychology and battle.rng.randrange(2) == 0:
-        return
-    strength = 4
-    if battle.rng.randint(1, 6) < wfb_to_wound(strength, unit.toughness):
-        return
-    model = unit.melee_models[index]
-    model.wounds_taken += 1
-    if model.wounds_taken >= unit.wounds:
-        kind = animation.DEATH_WARPFIRE if p.code == 15 else animation.DEATH_MISSILE
-        combat.kill_models(unit, [index], battle, kind, killer=p.source)
-    battle.events.append(BattleEvent("Innate missile hit.", "innate_hit",
-                                     regiment=unit.identifier, code=p.code))
+    if _is_warpfire_set(unit.sprite) and _is_warpfire_set(unit.leader_sprite):
+        models = list(unit.melee_models)
+    else:
+        leader = unit.living_leader_index
+        if leader is None or leader >= len(unit.melee_models):
+            return False
+        models = [unit.melee_models[leader]]
+    for model in models:
+        if model.action != animation.SHOOT:
+            model.own_request = animation.SHOOT
+    return True
 
 
-def _step_innate(battle: Battle) -> None:
-    remaining = []
-    for p in battle.innate_projectiles:
-        p.elapsed += 1
-        t = min(1, p.elapsed / 9)
-        p.x = p.x0 + (p.x1-p.x0)*t
-        p.y = p.y0 + (p.y1-p.y0)*t
-        struck = set(p.struck)
-        for unit in battle.regiments.values():
-            if unit.identifier == p.source or unit.identifier in struck or not unit.active:
-                continue
-            if math.hypot(unit.x-p.x, unit.y-p.y) < unit.bounding_radius():
-                _damage_innate(battle, unit, p)
-                struck.add(unit.identifier)
-                break
-        p.struck = frozenset(struck)
-        if p.elapsed < 9 and not struck:
-            remaining.append(p)
-        elif p.elapsed >= 9 and not struck:
-            for unit in battle.regiments.values():
-                if unit.identifier != p.source and unit.active and math.hypot(unit.x-p.x1, unit.y-p.y1) < unit.bounding_radius():
-                    _damage_innate(battle, unit, p)
-                    break
-    battle.innate_projectiles = remaining
+def _warpfire(battle: Battle, unit: Regiment, aim: tuple[float, float]) -> None:
+    """The Warpfire Thrower's shot, special weapon 15 (notes/spell_warpfire_visuals.md 2): the flame count
+    (rand mod 6) + 1 is drawn first, even when the shot then fires nothing; then the pose; then per flame a y and an x
+    jitter of (rand mod 48) - 24 around the aim, each launched on this tick as an innate Fireball effect (which makes
+    its own four scatter draws before the next flame's jitter)."""
+    from . import spell_effects
+    rng = battle.rng
+    count = rng.randrange(6) + 1
+    if not _warpfire_pose(unit):
+        return
+    for _ in range(count):
+        ay = aim[1] + rng.randrange(48) - 24
+        ax = aim[0] + rng.randrange(48) - 24
+        spell_effects.launch(battle, spell_effects.FIREBALL, unit, -1, ax, ay, innate=True, warpfire=True)
+    battle.events.append(BattleEvent("Innate projectiles launched.", "innate_launch",
+                                     regiment=unit.identifier, code=15, count=count))
 
 
 def _damage_unit(battle: Battle, unit: Regiment, projectile: Projectile,
@@ -792,7 +761,6 @@ def _step_death_blasts(battle: Battle) -> None:
 
 def tick(battle: Battle) -> None:
     _step_projectiles(battle)
-    _step_innate(battle)
     _launch_posts(battle)
     _order_volleys(battle)
     _step_death_blasts(battle)
@@ -801,5 +769,4 @@ def tick(battle: Battle) -> None:
 def finish_tick(battle: Battle) -> None:
     """Continue existing effects after battle result, without accepting another volley."""
     _step_projectiles(battle)
-    _step_innate(battle)
     _step_death_blasts(battle)

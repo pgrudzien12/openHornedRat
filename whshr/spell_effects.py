@@ -128,6 +128,11 @@ BOLTS: dict[int, Bolt] = {
     STEAM_GUN: Bolt("unit", 8, 8, False, False, 4, 1, False, False),
 }
 STEAM_SCATTER = 144  # gyrocopter_steam_gun.md 5.1: the scatter divisor (not a range: the shot is never clamped)
+# notes/spell_warpfire_visuals.md 2.3 and 4: a warpfire flame is an innate Fireball (same numbers) that starts this far
+# ahead of the unit along its facing, scattered from the unit position at the Fireball's range, and whose effect ends
+# 40 ticks after the launch (the tail after the flight's last test).
+WARPFIRE_AHEAD = 16
+WARPFIRE_TAIL = 21
 STEAM_AHEAD = 24  # 5.1: the cloud starts this far ahead of the unit position along the unit's facing
 # notes/bf014_dragon_mission_audit.md 7: a Dragon breath flame is an innate Fireball effect with its own numbers: launch
 # elevation 20 and no arc, S8, 1 wound, no save, fire, and the rout event to every unit struck.
@@ -212,6 +217,8 @@ class Effect:
     # A Dragon breath flame (notes/bf014_dragon_mission_audit.md 7): flies as BREATH_FLAME, and its launch line starts
     # at the ground under the dragon's unit position, not under its moved start.
     breath: bool = False
+    warpfire: bool = False  # a Warpfire Thrower's flame (notes/spell_warpfire_visuals.md): an innate Fireball
+    terminal: bool = False  # the flight ended through its terminal impact (the head is still drawn on that tick)
     line_ground: int | None = None
     saved_initiative: int = 0
     saved_speed: float = 0.0
@@ -460,14 +467,15 @@ def _cos(angle: int) -> int:
 # ===== Launch =====
 
 def launch(battle: Battle, code: int, caster: Regiment, origin_model: int, x: float, y: float,
-           innate: bool = False, breath_start: tuple[float, float] | None = None) -> bool:
+           innate: bool = False, breath_start: tuple[float, float] | None = None, warpfire: bool = False) -> bool:
     """Create the effect of a launch that already passed the caster, range and arc checks (script_magic.md 0.4).
 
     Fails when a unit-target spell finds no unit under the point (B 0.1; Madness: no hostile, not-maddened unit,
     B 1.1); a failed launch of a player-army caster shows message 2021. Success un-hides the caster (A 1.6), replaces
     the caster's previous Wind Blast, Flamestorm, Tangling Thorn or Curse (C1 6, C2 4.1) and, for Dispel Magic, sets
     the once-per-battle selection (B 5.4). `breath_start` makes an innate Fireball a Dragon breath flame whose start is
-    then moved there (notes/bf014_dragon_mission_audit.md 7.1)."""
+    then moved there (notes/bf014_dragon_mission_audit.md 7.1). `warpfire` makes an innate Fireball a Warpfire
+    Thrower's flame (notes/spell_warpfire_visuals.md)."""
     effects = table(battle)
     spell = code % UNDISPELLABLE_MARKER
     target: Regiment | None = None
@@ -487,6 +495,7 @@ def launch(battle: Battle, code: int, caster: Regiment, origin_model: int, x: fl
     effect = Effect(effects.next_serial, spell, caster.identifier, innate, code >= UNDISPELLABLE_MARKER, (x, y),
                     target=target.identifier if target is not None else None)
     effect.breath = breath_start is not None and spell == FIREBALL
+    effect.warpfire = warpfire and spell == FIREBALL and not effect.breath
     effects.next_serial += 1
     caster.hidden = False
     if spell == DISPEL_MAGIC:
@@ -507,6 +516,8 @@ def _launch_sound(battle: Battle, effect: Effect, caster: Regiment, target: Regi
     if sound is None:
         return
     index, place = sound
+    if effect.warpfire:
+        place = "unit"  # spell_warpfire_visuals.md 2.1: one SFX_Cast_Fireball per flame at the unit position
     if place == "target" and target is not None:
         at = footprint_centre(target)
     elif place == "aim":
@@ -521,7 +532,9 @@ def _launch_sound(battle: Battle, effect: Effect, caster: Regiment, target: Regi
 def _start(battle: Battle, effect: Effect, caster: Regiment, origin_model: int, target: Regiment | None) -> None:
     """Per-spell launch state."""
     spell, rng = effect.code, battle.rng
-    if effect.breath:
+    if effect.warpfire:
+        _start_warpfire(battle, effect, caster)
+    elif effect.breath:
         # 7.1 step 2: scattered from the dragon's unit position, the scatter distance measured from there too.
         _start_projectile(battle, effect, (caster.x, caster.y), effect.aim, BREATH_FLAME, caster.bs, BREATH_RANGE,
                           beam=False)
@@ -586,6 +599,19 @@ def _start(battle: Battle, effect: Effect, caster: Regiment, origin_model: int, 
         # spell_transport_visuals.md 2.1: the take-off head flies from the casting figure to the unit's launch centre.
         effect.start, effect.dest = _origin(caster, origin_model, "origin"), footprint_centre(caster)
         effect.x, effect.y = effect.start
+
+
+def _start_warpfire(battle: Battle, effect: Effect, caster: Regiment) -> None:
+    """notes/spell_warpfire_visuals.md 2.3: scattered from the unit position like a Fireball (BS of the unit, range
+    576, distance measured from there), then only the start moves 16 ahead along the unit's facing with each axis
+    rounded down after scaling; the launch line keeps the ground under the unmoved position. Launch height 0, aim
+    height a flier's or 0 (the Fireball row)."""
+    origin = (float(math.trunc(caster.x)), float(math.trunc(caster.y)))
+    _start_projectile(battle, effect, origin, effect.aim, BOLTS[FIREBALL], caster.bs, BREATH_RANGE, beam=False)
+    facing = int(caster.direction)
+    ahead = (origin[0] + math.floor(WARPFIRE_AHEAD * _sin(facing) / 256),
+             origin[1] + math.floor(WARPFIRE_AHEAD * _cos(facing) / 256))
+    _move_breath_start(battle, effect, caster, ahead)
 
 
 def _start_steam(battle: Battle, effect: Effect, caster: Regiment) -> None:
@@ -725,6 +751,7 @@ class Impact:
     save: bool
     fire: bool
     routs: bool = False
+    death_kind: int | None = None  # the killing wound's kind when it is not the fire/ordinary one (warpfire)
 
 
 def _height_ok(unit: Regiment, height: float) -> bool:
@@ -792,7 +819,8 @@ def _wound(unit: Regiment, index: int, wounds: int, dead: set[int]) -> None:
 
 
 def _kill(battle: Battle, unit: Regiment, dead: Iterable[int], impact: Impact) -> None:
-    kind = animation.DEATH_FIRE if impact.fire else animation.DEATH_ORDINARY
+    kind = impact.death_kind if impact.death_kind is not None else (
+        animation.DEATH_FIRE if impact.fire else animation.DEATH_ORDINARY)
     combat.kill_models(unit, dead, battle, kind, killer=impact.caster)
 
 
@@ -999,8 +1027,9 @@ def _follow_target(battle: Battle, effect: Effect) -> None:
 
 
 def _finish(effect: Effect) -> None:
-    """The decisive part is over: the effect stays in the list for its visual tail (A 1.5)."""
-    effect.tail = TAIL_TICKS
+    """The decisive part is over: the effect stays in the list for its visual tail (A 1.5; a warpfire flame's runs
+    until 40 ticks after its launch, notes/spell_warpfire_visuals.md 3)."""
+    effect.tail = WARPFIRE_TAIL if effect.warpfire else TAIL_TICKS
 
 
 # ===== Projectiles (A 2) =====
@@ -1040,7 +1069,8 @@ def _fly(battle: Battle, effect: Effect, bolt: Bolt) -> bool:
     if (effect.code == FIREBALL and not effect.breath) or effect.arched:
         effect.arc += 1 if 2 * r > effect.steps else -1
     effect.height = height = _height_above_ground(battle, effect, bolt, x, y) + effect.arc
-    impact = Impact(effect.owner, bolt.strength, bolt.wound_die, bolt.save, bolt.fire, bolt.routs)
+    impact = Impact(effect.owner, bolt.strength, bolt.wound_die, bolt.save, bolt.fire, bolt.routs,
+                    animation.DEATH_WARPFIRE if effect.warpfire else None)
     hit = impact_test(battle, x, y, height, impact, effect.owner, messages=False, source=effect)
     if hit:
         _after_hit(battle, effect, bolt, x, y)
@@ -1055,6 +1085,7 @@ def _fly(battle: Battle, effect: Effect, bolt: Bolt) -> bool:
         return True
     terminal = (_d(x, y, dx, dy) < BEAM_TERMINAL) if bolt.beam else r == 0
     if terminal:
+        effect.terminal = True
         # notes/airborne_units.md A8.1: always at height 0, so it never strikes a unit airborne on that tick.
         if impact_test(battle, dx, dy, 0.0, impact, None, messages=True, source=effect):
             _after_hit(battle, effect, bolt, dx, dy)

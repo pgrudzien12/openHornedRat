@@ -155,6 +155,7 @@ class FlameDisplayTests(unittest.TestCase):
                 visuals.advance([Flight(effect.serial, effect.x, effect.y, breath_display_height(effect),
                                         effect.tail >= 0)])
                 if effect.tail >= 0:
+                    visuals.advance([])  # the explosion and the closing puff come on the tick after the end
                     break
         puffs = {(s.x, s.y) for s in visuals.sprites() if s.frame < 177}
         self.assertIn(effect.start, puffs)
