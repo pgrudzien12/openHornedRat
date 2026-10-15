@@ -95,6 +95,18 @@ def resource_files(game: Installation, categories: Iterable[str] | None = None) 
             if entry["file"] and (wanted is None or entry["category"] in wanted)}
 
 
+def portrait_sprite_names(game: Installation) -> dict[str, str]:
+    """The sprite-table name of each portrait set, by upper-case set name (``COMM`` -> ``Commander``)."""
+    table = legacy.module("spritemap_build")
+    records = [dict(entry) for entry in exe_tables(game.require("WHSHR.EXE"))[0]]
+    table.assign_categories(records)
+    names: dict[str, str] = {}
+    for entry in records:
+        if entry["file"] and entry["category"] == "portraits":
+            names.setdefault(str(entry["file"]).upper(), str(entry["name"]))
+    return names
+
+
 def sprite_direction(camera_yaw: float, script_dir: float | None) -> int:
     """Directional frame (0-7) of a unit with script ``dir`` seen by a camera with ``camera_yaw`` degrees.
 

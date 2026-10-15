@@ -82,6 +82,7 @@ class GlueContent:
         self._palette: list[Rgb] | None = None
         self._palette_tables: dict[str, RgbPalette] | None = None
         self._portraits: dict[tuple[int, int, Any], Any] = {}
+        self._portrait_names: dict[str, str] | None = None
 
     @classmethod
     def from_data(cls, *, resources: Mapping[str, Any] | None = None, bitmaps: Mapping[str, Any] | None = None,
@@ -237,6 +238,22 @@ class GlueContent:
         except (ValueError, FileNotFoundError, KeyError, OSError, IndexError):
             return False
         return int(position) in PORTRAIT_SPRITES
+
+    def portrait_sprite_name(self, position: int) -> str | None:
+        """The sprite-table name of the set at resident-list ``position`` (``Commander``, ``Scribe``), or None."""
+        from .portraits import PORTRAIT_SPRITES
+        if self._parent is not None:
+            return self._parent.portrait_sprite_name(position)
+        if self._portrait_names is None:
+            self._portrait_names = {}
+            if self.installation is not None:
+                from .battlefield import portrait_sprite_names
+                try:
+                    self._portrait_names = portrait_sprite_names(self.installation)
+                except (FileNotFoundError, OSError, ValueError, KeyError):
+                    pass
+        sprite = PORTRAIT_SPRITES.get(int(position))
+        return self._portrait_names.get(sprite) if sprite is not None else None
 
     def resolve_speaker_position(self, speaker: str | None) -> int:
         """List position an ``index=-1`` block behaves as for ``speaker`` (notes/glue_portraits.md §1.4)."""

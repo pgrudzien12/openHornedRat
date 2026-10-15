@@ -74,6 +74,7 @@ class RenderAnimation:
     index: int | None = None
     bkindex: int | None = None
     controlpanel: int | None = None
+    colour: str | None = None  # settextcolor: the hover name label's colour (notes/glue_portraits.md §3.6)
 
 
 @dataclass(frozen=True)
@@ -206,7 +207,8 @@ def build_render_model(content: GlueContent, window: WindowInstance,
                                               _integer(values.get("y")),
                                               _integer(values.get("index"), None) if "index" in values else None,
                                               _integer(values.get("bkindex"), None) if "bkindex" in values else None,
-                                              _integer(values.get("controlpanel"), None) if "controlpanel" in values else None))
+                                              _integer(values.get("controlpanel"), None) if "controlpanel" in values else None,
+                                              str(values["settextcolor"]).casefold() if values.get("settextcolor") else None))
         elif isinstance(record, MissionWindowRecord):
             mission_lists.append(RenderMissionList(_integer(values.get("x")), _integer(values.get("y")), ()))
         elif isinstance(record, MissionRecord) and record.mission_ref is not None:

@@ -45,6 +45,10 @@ MUSIC_VOLUME = 1  # engine-level mix setting, not game data: setmidivolume/setwa
 MISSION_ROW_HEIGHT = 88
 MISSION_TEXT_INSET = 12
 HINT_BOTTOM_MARGIN = 10
+# notes/glue_portraits.md §3.6: the portrait picture sits PORTRAIT_INSET px inside its window (§9.3 of
+# notes/mission_selection.md); the hover name label uses glue font slot 2 and is centred on the window.
+PORTRAIT_INSET = 12
+PORTRAIT_NAME_FONT = 2
 
 
 def _ensure_mixer() -> bool:
@@ -68,6 +72,11 @@ class GlueView(NativeScreenView[GlueScene]):
         self.quads: list[tuple[ScreenQuad, Point]] = []
         self.bitmap_quads = QuadCache(gpu)
         self.portrait_quads: list[tuple[ScreenQuad, Point]] = []
+        # Hover name labels (notes/glue_portraits.md §3.6): window, picture box (x, y, w, h), label text and colour.
+        self.portrait_names: list[tuple[str, tuple[int, int, int, int], str, str | None]] = []
+        self.pointer: Point | None = None  # native-coordinate pointer, None until it moves over the screen
+        self.name_label: tuple[TextLabel, Point] | None = None
+        self._drawn_name: tuple[str, str, str | None, Point] | None = None
         self.overlay_quads: list[tuple[ScreenQuad, Point]] = []
         self._overlay_frames: tuple[tuple[str, str], ...] = ()
         self.text_labels: list[tuple[TextLabel, Point]] = []
@@ -121,6 +130,7 @@ class GlueView(NativeScreenView[GlueScene]):
         self.models = models
         self._refresh_bitmaps(models, frames, palette)
         self._refresh_portraits(models, palette)
+        self._refresh_portrait_name()
         self._refresh_speech_overlays(models, palette)
         self._refresh_panel(models, palette)
         self._refresh_missions(models, palette)
@@ -277,6 +287,7 @@ class GlueView(NativeScreenView[GlueScene]):
             quad.release()
         self._portrait_animations, self._portrait_palette, self.portraits = animations, palette, portraits
         self.portrait_quads = []
+        self.portrait_names = []
         for model_name, animation in animations:
             model = next(model for model in models if model.name == model_name)
             animator = runtime.state.portrait_animators.get(model_name)
@@ -295,7 +306,48 @@ class GlueView(NativeScreenView[GlueScene]):
             quad.write(rgba)
             # The portrait sits inside the frame at a fixed offset, not at the [ANIM] block's own
             # x/y (always 0,0 in the data); notes/mission_selection.md §9.3.
-            self.portrait_quads.append((quad, (model.x + 12, model.y + 12)))
+            self.portrait_quads.append((quad, (model.x + PORTRAIT_INSET, model.y + PORTRAIT_INSET)))
+            label = runtime.portrait_label(model_name, animation.name, animation.index)
+            if label:
+                box = (model.x + PORTRAIT_INSET, model.y + PORTRAIT_INSET, width, height)
+                self.portrait_names.append((model_name, box, label, animation.colour))
+
+    def _refresh_portrait_name(self) -> None:
+        """Show the name label of the portrait under the pointer (notes/glue_portraits.md §3.6).
+
+        The picture box counts edges included. The label is centred on the window (picture width plus the two
+        insets), its bottom 12 px above the picture's bottom edge, in glue font slot 2 with a 2 px black outline.
+        Unlike the original, which keeps a label until the pointer next moves inside that window, the label goes as
+        soon as the pointer is off the picture (the report's recommendation)."""
+        wanted: tuple[str, str, str | None, Point] | None = None
+        if self.pointer is not None:
+            px, py = self.pointer
+            for name, (x, y, width, height), text, colour in reversed(self.portrait_names):
+                if x <= px <= x + width and y <= py <= y + height:
+                    wanted = (name, text, colour, (x - PORTRAIT_INSET, y + height - PORTRAIT_INSET))
+                    break
+        if wanted == self._drawn_name:
+            return
+        self._drawn_name = wanted
+        if self.name_label is not None:
+            self.name_label[0].release()
+            self.name_label = None
+        if wanted is None:
+            return
+        try:
+            font = BitmapFont(self.scene.font(PORTRAIT_NAME_FONT))
+        except (KeyError, ValueError):
+            return
+        _, text, colour, (left, bottom) = wanted
+        text_width, text_height = font.size(text)
+        picture_width = next(box[2] for name, box, _, _ in self.portrait_names if name == wanted[0])
+        label = self.gpu.text((max(1, text_width), max(1, text_height)), font,
+                              color=_TEXT_COLOURS.get(colour or "", (0, 0, 0)), background=None, padding=0,
+                              outline=True)
+        label.set_lines((text,))
+        x = left + (picture_width + 2 * PORTRAIT_INSET - text_width) // 2
+        y = bottom - text_height
+        self.name_label = (label, (x - OUTLINE, y - OUTLINE))
 
     def _refresh_panel(self, models: Models, palette: AppPalette) -> None:
         """Draw the speaker frame and its control-panel buttons (notes/mission_selection.md §9.3-9.4).
@@ -498,7 +550,13 @@ class GlueView(NativeScreenView[GlueScene]):
         return None
 
     def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
+        if event.type == pygame.WINDOWLEAVE:
+            self.pointer = None
+            self._refresh_portrait_name()
         if event.type == pygame.MOUSEMOTION:
+            native_x, native_y = self._native_point(event.pos)
+            self.pointer = (int(native_x // 1), int(native_y // 1))  # the native pixel under the pointer
+            self._refresh_portrait_name()
             hotspot = self.hotspot_at(self.models, self._native_point(event.pos))
             self.hover_hint = _caravan_hint(self.scene.campaign, self.models, hotspot)
             self._refresh_hint()
@@ -554,6 +612,9 @@ class GlueView(NativeScreenView[GlueScene]):
             quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
         for quad, (x, y) in self.portrait_quads:
             quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
+        if self.name_label is not None:
+            label, (x, y) = self.name_label
+            label.draw(left + x * scale, top + y * scale, label.size[0] * scale, label.size[1] * scale)
         for quad, (x, y) in self.panel_quads:
             quad.draw(left + x * scale, top + y * scale, quad.size[0] * scale, quad.size[1] * scale)
         for quad, (x, y) in self.mission_quads:
@@ -576,6 +637,9 @@ class GlueView(NativeScreenView[GlueScene]):
         self.bitmap_quads.release()
         for quad, _ in self.portrait_quads:
             quad.release()
+        if self.name_label is not None:
+            self.name_label[0].release()
+            self.name_label = None
         for quad, _ in self.overlay_quads:
             quad.release()
         for quad, _ in self.panel_quads:

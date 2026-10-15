@@ -1017,6 +1017,19 @@ class GlueRuntime:
             chosen = self.state.portrait_speakers[window_name] = (position, PORTRAIT_SPRITES[position])
         return chosen[0]
 
+    def portrait_label(self, window_name: str, name: str | None, index: Any) -> str | None:
+        """The hover name label of a window's portrait block (notes/glue_portraits.md §3.6): its ``name:`` as written;
+        for ``index=-1`` the speaker's sprite name (§1.4 item 5). None (no label) without a name."""
+        if not name:
+            return None
+        try:
+            speaker = int(index) == SPEAKER_INDEX
+        except (TypeError, ValueError):
+            speaker = False
+        if speaker:
+            return self.content.portrait_sprite_name(self.portrait_index(window_name, index)) or name
+        return name
+
     def _close_window(self, argument: str, effects: list[GlueEffect]) -> None:
         name = self._resource_argument(argument)
         self.state.windows = [window for window in self.state.windows if window.name != name]

@@ -159,6 +159,7 @@ class GlueViewCursorTests(unittest.TestCase):
             cursor_for_hotspots(hovered, pressed)))
         view._native_point = lambda position: position
         view._refresh_hint = lambda: None
+        view._refresh_portrait_name = lambda: None
         return view
 
     @staticmethod
