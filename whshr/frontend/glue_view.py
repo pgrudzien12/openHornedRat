@@ -30,7 +30,7 @@ from .bitmap_font import BitmapFont
 from .click_cues import set_speech_sound
 from .cursors import CursorController
 from .glue_bitmap import load_optional_bitmap
-from .gpu import Gpu, QuadCache, ScreenQuad, TextLabel
+from .gpu import OUTLINE, Gpu, QuadCache, ScreenQuad, TextLabel
 from .scene_view import NativeScreenView
 
 Point = tuple[int, int]
@@ -72,7 +72,7 @@ class GlueView(NativeScreenView[GlueScene]):
         self._overlay_frames: tuple[tuple[str, str], ...] = ()
         self.text_labels: list[tuple[TextLabel, Point]] = []
         self.dialogue_labels: list[tuple[TextLabel, Point]] = []
-        self.dialogue_state: tuple[str, tuple[Any, ...]] | None = None
+        self.dialogue_state: tuple[str, int, tuple[Any, ...]] | None = None
         self.panel_quads: list[tuple[ScreenQuad, Point]] = []
         self.panel_labels: list[tuple[TextLabel, Point]] = []
         self.panel_buttons: list[tuple[str, pygame.Rect, str]] = []
@@ -417,11 +417,13 @@ class GlueView(NativeScreenView[GlueScene]):
         quad.write(pygame.image.tobytes(surface, "RGBA"))
         self.panel_quads.append((quad, position))
 
-    def _refresh_dialogue(self, dialogue_state: tuple[str, tuple[Any, ...]]) -> None:
+    def _refresh_dialogue(self, dialogue_state: tuple[str, int, tuple[Any, ...]]) -> None:
         """Rebuild the bottom-anchored briefing dialogue block (notes/briefing_dialogue.md §3.3).
 
         Each logical line keeps the settextcolor it was queued under (one label per line) so an
-        older line from a previous speaker never gets repainted in the new speaker's colour.
+        older line from a previous speaker never gets repainted in the new speaker's colour. A line is
+        wrapped as a whole before its typed part is shown, so a word is placed on the line where it fits
+        before its first letter appears; only the last ``textlines`` screen lines are visible.
         """
         if dialogue_state == self.dialogue_state:
             return
@@ -429,7 +431,7 @@ class GlueView(NativeScreenView[GlueScene]):
         for label, _ in self.dialogue_labels:
             label.release()
         self.dialogue_labels = []
-        window_name, lines = dialogue_state
+        window_name, visible_lines, lines = dialogue_state
         if not lines:
             return
         model = next((model for model in self.models if model.name == window_name), None)
@@ -440,16 +442,25 @@ class GlueView(NativeScreenView[GlueScene]):
         except (KeyError, ValueError):
             return
         line_height = max(1, font.font.height)
+        ascent = int(getattr(font.font, "hdr", {}).get("dfAscent", line_height))
         left = model.x + max(0, round(model.width * 0.05))
         width = max(1, round(model.width * 0.90))  # wrap width, §3.3; each label is sized to fit
-        physical = [(row, colour) for text, colour in lines for row in _wrap(font, text, width)]
-        top = model.y + model.height - round(1.5 * line_height) - (len(physical) - 1) * line_height
-        for row, colour in physical:
+        physical: list[tuple[str, str]] = []
+        for text, typed, colour in lines:
+            for row, start in _wrap_offsets(font, text, width):
+                if start < typed:
+                    physical.append((row[:typed - start], colour))
+        physical = physical[-max(1, visible_lines):]
+        # §3.3: the bottom line's baseline is 1.5 line heights above the window's bottom edge; each line above
+        # it is 1.10 line heights higher.
+        bottom_baseline = model.y + model.height - 1.5 * line_height
+        for index, (row, colour) in enumerate(physical):
+            baseline = bottom_baseline - (len(physical) - 1 - index) * 1.10 * line_height
             label = self.gpu.text((width, line_height), font, color=_TEXT_COLOURS.get(colour, (0, 0, 0)),
                                   background=None, padding=0, outline=True)
             label.set_lines((row,))
-            self.dialogue_labels.append((label, (left, top)))
-            top += line_height
+            # The label reserves OUTLINE px around its glyphs: offset it so the glyphs sit at the computed spot.
+            self.dialogue_labels.append((label, (left - OUTLINE, round(baseline - ascent) - OUTLINE)))
 
     def _palette(self, models: Models) -> AppPalette:
         """Select the one application palette active for the runtime windows."""
@@ -641,28 +652,36 @@ def _place_text(gpu: Gpu, font: BitmapFont, value: str, text: RenderText,
 
 def _wrap(font: BitmapFont, text: str, width: int) -> list[str]:
     """Greedy word-wrap: a new word joins the current line unless it would exceed ``width`` (§3.3)."""
-    words = text.split(" ")
-    lines: list[str] = []
-    current = words[0] if words else ""
-    for word in words[1:]:
-        candidate = f"{current} {word}"
-        if font.size(candidate)[0] <= width:
-            current = candidate
-        else:
-            lines.append(current)
+    return [row for row, _ in _wrap_offsets(font, text, width)]
+
+
+def _wrap_offsets(font: BitmapFont, text: str, width: int) -> list[tuple[str, int]]:
+    """``_wrap`` with each row's start offset in ``text`` (a break consumes the one space before the word)."""
+    rows: list[tuple[str, int]] = []
+    current, start, position = "", 0, 0
+    for index, word in enumerate(text.split(" ")):
+        if index == 0:
             current = word
-    lines.append(current)
-    return lines
+        elif font.size(f"{current} {word}")[0] <= width:
+            current = f"{current} {word}"
+        else:
+            rows.append((current, start))
+            current, start = word, position
+        position += len(word) + 1
+    rows.append((current, start))
+    return rows
 
 
-def _dialogue_state(state: GlueRuntimeState) -> tuple[str, tuple[Any, ...]]:
-    """The (window, (text, colour) lines) fingerprint refresh() diffs against, §3.3's ring buffer."""
+def _dialogue_state(state: GlueRuntimeState) -> tuple[str, int, tuple[Any, ...]]:
+    """The (window, visible lines, (text, typed, colour) lines) fingerprint refresh() diffs against, §3.3's ring
+    buffer. The line being typed keeps its whole text so it can be wrapped before it is revealed."""
     if not state.windows:
-        return "", ()  # nothing is open (a request parked the windows): no stale text
-    typed = state.dialogue_text[:state.dialogue_typed]
-    current = (typed, state.dialogue_line_colour) if typed else None
-    lines = (*state.dialogue_lines, current) if current else state.dialogue_lines
-    return state.dialogue_window_name, lines
+        return "", 1, ()  # nothing is open (a request parked the windows): no stale text
+    visible = state.variables.get("textlines", 1)
+    lines = tuple((text, len(text), colour) for text, colour in state.dialogue_lines)
+    if state.dialogue_text and state.dialogue_typed:
+        lines = (*lines, (state.dialogue_text, state.dialogue_typed, state.dialogue_line_colour))
+    return state.dialogue_window_name, visible, lines
 
 
 def _bitmap_visible(bitmap: RenderBitmap, campaign: CampaignState | None) -> bool:

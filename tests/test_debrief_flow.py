@@ -217,7 +217,7 @@ class ResultCommandTests(unittest.TestCase):
 
         self.assertIsInstance(runtime.state.pending.kind, str)  # the debrief request parked the windows
 
-        self.assertEqual(_dialogue_state(runtime.state), ("", ()))
+        self.assertEqual(_dialogue_state(runtime.state), ("", 1, ()))
 
 
 if __name__ == "__main__":

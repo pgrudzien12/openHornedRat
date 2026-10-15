@@ -192,6 +192,39 @@ class GlueViewTests(unittest.TestCase):
         self.assertEqual((x, y), (10, 100 + (40 - label.text_size[1]) // 2))
 
 
+class _CharFont:
+    """Ten pixels per character."""
+
+    def size(self, text):
+        return len(text) * 10, 10
+
+
+@unittest.skipUnless(importlib.util.find_spec("pygame"), "Pygame is not installed in the headless test environment")
+class DialogueBlockTests(unittest.TestCase):
+    """The briefing/caravan dialogue block (notes/briefing_dialogue.md §3.3)."""
+
+    def test_given_a_long_line_then_rows_know_where_they_start_in_the_text(self):
+        from whshr.frontend.glue_view import _wrap_offsets
+
+        rows = _wrap_offsets(_CharFont(), "one two three four", 70)
+
+        self.assertEqual(rows, [("one two", 0), ("three", 8), ("four", 14)])
+
+    def test_given_a_line_being_typed_then_the_state_keeps_its_whole_text_so_words_never_jump(self):
+        from whshr.frontend.glue_view import _dialogue_state
+        from whshr.glue_runtime import GlueRuntimeState
+
+        state = GlueRuntimeState()
+        state.windows = ["BRIEF"]
+        state.dialogue_window_name = "BRIEF"
+        state.variables["textlines"] = 2
+        state.dialogue_lines = (("Earlier line.", "red"),)
+        state.dialogue_text, state.dialogue_typed, state.dialogue_line_colour = "Dietrich: My Lord", 5, "red"
+
+        self.assertEqual(_dialogue_state(state),
+                         ("BRIEF", 2, (("Earlier line.", 13, "red"), ("Dietrich: My Lord", 5, "red"))))
+
+
 class _FakeFont:
     def __init__(self, height):
         self.font = type("Font", (), {"height": height})()

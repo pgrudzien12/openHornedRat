@@ -157,16 +157,19 @@ class QuadCache:
         self._quads.clear()
 
 
+OUTLINE = 2  # px of black around outlined text (notes/briefing_dialogue.md §3.3)
+
+
 class TextLabel(ScreenQuad):
     """Lines of text rendered with pygame's font once per change and uploaded as a texture."""
 
     def __init__(self, gpu: "Gpu", size: Size, font: Font, color: Rgb = (235, 230, 210),
                  background: Rgba | None = (0, 0, 0, 150), padding: int = 6, align: str = "left",
                  fixed_width: bool = False, outline: bool = False) -> None:
-        # An outline stroke needs 1 px of room outside the glyph box on every side, or the top row
-        # of the first line (and either edge) gets clipped by the surface bounds; reserve it here
+        # An outline stroke needs OUTLINE px of room outside the glyph box on every side, or the top
+        # rows of the first line (and either edge) get clipped by the surface bounds; reserve it here
         # so callers can size a label to the text they actually want visible.
-        self._margin = 1 if outline else 0
+        self._margin = OUTLINE if outline else 0
         super().__init__(gpu, (size[0] + 2 * self._margin, size[1] + 2 * self._margin))
         if align not in ("left", "center"):
             raise ValueError(f"unsupported text alignment: {align!r}")
@@ -196,11 +199,11 @@ class TextLabel(ScreenQuad):
         for text, line in zip(texts, rendered):
             left = self._margin + (self.padding if self.align == "left" else (width - line.get_width()) // 2)
             if self.outline:
-                # A 1 px black outline in every direction approximates the original's 5x5 stamped
-                # outline (notes/briefing_dialogue.md §3.3) without rendering 24 extra offsets.
+                # notes/briefing_dialogue.md §3.3: the text is first stamped in black at every offset of a
+                # 5x5 square (-2..2 px), then drawn once in its colour: a 2 px black outline.
                 black = self.font.render(text, True, (0, 0, 0))
-                for dx in (-1, 0, 1):
-                    for dy in (-1, 0, 1):
+                for dx in range(-OUTLINE, OUTLINE + 1):
+                    for dy in range(-OUTLINE, OUTLINE + 1):
                         if dx or dy:
                             surface.blit(black, (left + dx, top + dy))
             surface.blit(line, (left, top))
