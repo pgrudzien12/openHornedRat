@@ -95,6 +95,7 @@ class ActionScript:
     faces_unit: bool = False
     drops_requests: bool = False
     keeps_facing: bool = False
+    faces_heading: bool = False  # the drawn facing follows the model's own heading/opponent even in idle or shoot
 
 
 # Standard infantry (notes/game_rules.md "Figure animation" table). Sprite groups per
@@ -207,6 +208,17 @@ THROWER = _machine_table(0, 32, _machine_shot(0, (0, 0, 0, 0, 0, 1, 1, 2, 3, 0),
 # Mortar: intact frames 40-47, wreck 0-7, the firing smoke 8-39. Addressed from group 8, so 40 is phase 4.
 MORTAR = _machine_table(40, 0, _machine_shot(8, (4, 4, 4, 4, 0, 1, 1, 2, 3, 3, 4), fire_at=6))
 
+# Doomwheel (notes/machine_figure_animation.md 2.5): group 8 (frames 8-39) is the rolling wheel. Stand and weapon
+# ready hold phase 0 facing the unit; idle, walk, fight and shoot share one flat 4-tick loop with no random entry,
+# facing the figure's own heading. No fire step: the bolts are not timed by the animation.
+_DWHEEL_ROLL = ActionScript(8, sequence=(0, 1, 2, 3), faces_heading=True)
+DOOMWHEEL: ActionTable = {
+    STAND: ActionScript(8, sequence=(0,), faces_unit=True),
+    IDLE: _DWHEEL_ROLL, WALK: _DWHEEL_ROLL, FIGHT: _DWHEEL_ROLL, SHOOT: _DWHEEL_ROLL,
+    WEAPON_READY: ActionScript(8, sequence=(0,), faces_unit=True),
+    DEAD: ActionScript(0, sequence=(0,), loop=False, locks_facing=True),
+}
+
 # Mesh pose numbers, not sprite phases (notes/bf014_dragon_rendering.md §3).
 DRAGON_FIGHT = tuple(pose for pose in (1, 2, 1, 3, 1, 4, 1, 2, 1, 4, 1, 3) for _ in range(2))
 MESH_DRAGON: ActionTable = {
@@ -240,7 +252,8 @@ def mesh_dragon_pose(model: "ModelState") -> int:
 
 FAMILY_TABLES: dict[str, ActionTable] = {"standard_infantry": STANDARD_INFANTRY, "peasants": PEASANTS, "slaves": SLAVES,
                  "mesh_dragon": MESH_DRAGON, "wagons": WAGONS, "carts": CARTS, "gun": GUN, "volley": VOLLEY,
-                 "thrower": THROWER, "mortar": MORTAR}
+                 "thrower": THROWER, "mortar": MORTAR,
+                 "doomwheel": DOOMWHEEL}
 # Script sprite resource names (casefolded) that select a decoded family; anything else is standard.
 SPRITE_FAMILIES = {"meshdragon": "mesh_dragon", "peasant": "peasants", "peasants": "peasants",
                    "ratslave": "slaves", "slave": "slaves",
@@ -249,7 +262,8 @@ SPRITE_FAMILIES = {"meshdragon": "mesh_dragon", "peasant": "peasants", "peasants
                    # War-machine figures, by the leader block's machine set (notes/machine_figure_animation.md 3).
                    "cannon": "gun", "impcanon": "gun", "grtcannon": "gun", "grtcanon": "gun", "volleygun": "volley",
                    "voleygun": "volley", "rocklobber": "thrower", "rocklob": "thrower", "doomdvrcatapult": "thrower",
-                   "ddcatplt": "thrower", "mortar": "mortar"}
+                   "ddcatplt": "thrower", "mortar": "mortar",
+                   "doomwheel": "doomwheel", "dwheel": "doomwheel"}
 WAGON_CLASS = 7  # s_race class RollingStock
 DEFAULT_FAMILY = "standard_infantry"
 
