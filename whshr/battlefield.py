@@ -80,6 +80,18 @@ def furniture_ruins(game: Installation) -> dict[str, str]:
     return ruins
 
 
+def furniture_fallen(game: Installation) -> dict[str, str]:
+    """Pine furniture name (casefolded) -> its dead variant's scenery mesh name: furniture record i + 59, the same
+    rule as the building ruins (notes/spell_plague_monk_breath_visuals.md 4.2)."""
+    _, furniture, _ = exe_tables(game.require("WHSHR.EXE"))
+    fallen: dict[str, str] = {}
+    for index, entry in enumerate(furniture):
+        dead = index + RUIN_RECORD_OFFSET
+        if entry["name"] in buildings.PINE_TYPES and dead < len(furniture) and furniture[dead]["file"]:
+            fallen[entry["name"].casefold()] = furniture[dead]["file"] + ".XOF"
+    return fallen
+
+
 def sprite_files(game: Installation, category: str) -> dict[str, str]:
     """Sprite resources in one sprite-table category -> FOL/BOP/PAL file base."""
     return resource_files(game, {category})
@@ -319,7 +331,8 @@ def build_atlas(sheets: Sequence[SpriteSheet], width: int = ATLAS_WIDTH) -> tupl
 @dataclass(frozen=True)
 class BuildingPiece:
     """A building-type furniture piece, drawn apart from the static scenery so that it can turn into its ruin:
-    the building identifier (`buildings.PREFIX` + file index), its placement, and the intact and ruin meshes."""
+    the building identifier (`buildings.PREFIX` + file index), its placement, and the intact and ruin meshes. A pine
+    is the same with `buildings.TREE_PREFIX` and its dead variant as the "ruin"."""
 
     identifier: str
     item: Item
@@ -429,6 +442,7 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
     meshes = {mesh["name"].casefold(): mesh for mesh in scenery["meshes"]}
     furniture = furniture_meshes(game)
     ruins = furniture_ruins(game)
+    fallen = furniture_fallen(game)
     missing: list[str] = []
     pieces: list[BuildingPiece] = []
     for index, item in enumerate(script["scenery"]):
@@ -441,6 +455,10 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
         if item["name"] in buildings.TYPES:  # drawn per state (Battlefield.building_vertices)
             ruin = meshes.get(ruins.get(item["name"].casefold(), "").casefold())
             pieces.append(BuildingPiece(f"{buildings.PREFIX}{index}", item, ground_height, mesh, ruin))
+            continue
+        dead = meshes.get(fallen.get(item["name"].casefold(), "").casefold())
+        if dead is not None:  # a pine with a dead variant is drawn per state too (it can be felled)
+            pieces.append(BuildingPiece(f"{buildings.TREE_PREFIX}{index}", item, ground_height, mesh, dead))
             continue
         vertex, normal = scenery_transform(item, ground_height)
         bake_mesh(mesh, len(ground["textures"]), len(scenery["textures"]), vertex, normal, ambient, light, vertices)

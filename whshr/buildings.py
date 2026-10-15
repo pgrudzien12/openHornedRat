@@ -17,6 +17,11 @@ from dataclasses import dataclass
 from typing import Any
 
 PREFIX = "building:"
+TREE_PREFIX = "tree:"  # identifier of a pine furniture piece: ``tree:N``, N = index in file order among the furniture
+# notes/spell_plague_monk_breath_visuals.md 4.2: the 18 pine furniture types (the plain, night and snow variants).
+PINE_TYPES = frozenset(prefix + name for name in ("Pine", "PineSml", "PineLrg", "TriPineSml", "TriPineMed", "TriPineLrg")
+                       for prefix in ("", "Nite", "Snw"))
+FELL_REACH = 64  # the innate breath fells every standing pine within this truncated distance of its last position
 SIDE_CODE = 0x20  # absolute side code script operands use for building/furniture pseudo-units
 NODE_REACH_FLOOR = 48  # AttackUnitAtNode looks within max(footprint radius, 48) of the node
 MISSILE_TOUGHNESS = 0  # notes/building_units.md 3: missiles wound a building as if its toughness were 0
