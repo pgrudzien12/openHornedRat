@@ -205,6 +205,22 @@ class BattleAnimationWiringTests(unittest.TestCase):
 
         self.assertEqual(regiment.rest_action(), animation.STAND)
 
+    def test_given_a_regiment_in_melee_then_models_still_moving_to_their_cells_walk(self):
+        # game_rules.md "the battle grid" 6: a model walks toward its cell and fights only once it has arrived.
+        regiment = Regiment("r", "R", 0, 0, 0, Side.PLAYER, models=4, ranks=1)
+        battle = Battle(2000, 2000, [regiment], seed=1)
+        battle.tick()  # the models are set up
+        regiment.in_melee = True
+        walking, fighting, waiting, paired_walking = regiment.melee_models
+        walking.at_rest = False
+        fighting.opponent, fighting.arrived = ("foe", 1), True
+        paired_walking.opponent, paired_walking.at_rest = ("foe", 2), False
+
+        battle._step_animations(regiment)
+
+        self.assertEqual([model.action for model in regiment.melee_models],
+                         [animation.WALK, animation.FIGHT, animation.WEAPON_READY, animation.WALK])
+
     def test_given_an_inactive_regiment_when_ticked_then_its_models_are_not_stepped(self):
         regiment = Regiment("r", "R", 0, 0, 0, Side.PLAYER, models=0, ranks=1)  # destroyed -> inactive
         battle = Battle(2000, 2000, [regiment], seed=1)

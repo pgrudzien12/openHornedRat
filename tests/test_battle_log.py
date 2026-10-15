@@ -283,7 +283,7 @@ class CombatEventLoggingTests(unittest.TestCase):
                             ws=4, strength=4, attacks=1, leadership=8, speed_per_tick=0.0)
         defender = Regiment("def", "Defender", 10, 0, 0, Side.ENEMY, models=20, ranks=4, initiative=10,
                             ws=3, toughness=3, armour=0, leadership=7, speed_per_tick=0.0)
-        battle = Battle(1000, 1000, [attacker, defender], seed=3)
+        battle = Battle(1000, 1000, [attacker, defender], seed=1)
         logger = BattleLogger(Path(tempfile.mkdtemp()) / "combat.jsonl")
 
         for _ in range(combat.SEGMENT_TICKS * combat.SEGMENTS_PER_TURN * 3):

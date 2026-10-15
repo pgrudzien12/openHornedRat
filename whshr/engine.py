@@ -3426,8 +3426,9 @@ class Battle:
 
     def _step_animations(self, regiment: Regiment) -> None:
         """Step every model's action program one battle tick (whshr.animation, game_rules.md "Figure
-        animation"). The requested action mirrors what the model is currently doing: fighting or
-        weapon-ready in melee (paired with an opponent or not), the shoot pose while the regiment
+        animation"). The requested action mirrors what the model is currently doing: walking while a
+        model in melee is still on its way to its grid cell, fighting or weapon-ready in melee once there (paired
+        with an opponent or not), the shoot pose while the regiment
         holds a missile stance and is not still reloading, walking while the model itself has not
         yet reached its slot (`ModelState.at_rest`), otherwise the unit's rest action (`Regiment.rest_action`). Then the drawn
         facing slews toward its action-dependent target (wagons snap; a facing-locked script
@@ -3460,6 +3461,10 @@ class Battle:
                 requested, model.own_request = model.own_request, 0
             elif regiment.script_action:
                 requested = regiment.script_action
+            elif regiment.in_melee and not model.at_rest and not (model.opponent is not None and model.arrived):
+                # game_rules.md "the battle grid" 6: a model still on its way to its cell walks there; it fights
+                # only once it has arrived.
+                requested = animation.WALK
             elif regiment.in_melee:
                 requested = animation.FIGHT if model.opponent is not None else animation.WEAPON_READY
             elif regiment.volley_countdown is not None and (regiment.hud_class != "art" and not special_shot or model_index == shooter_index):
