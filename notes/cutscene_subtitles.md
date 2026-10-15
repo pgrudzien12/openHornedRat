@@ -93,7 +93,8 @@ before its first letter appears. A space typed at the end of a line does not by 
 
 ## 5. Skip, fade and film end
 
-- **Skip with the fade marker set** (after 4 s, `notes/cutscene_narration.md` §4.3): both blocks are
+- **Skip with the fade marker set** (after 4 s and before the `AnimDone` fade starts,
+  `notes/cutscene_narration.md` §4.3): both blocks are
   cleared to black **at once**, before the picture/sound fade starts.
 - **Skip before the marker** or any stop: both blocks are hidden immediately and all blocks freed.
 - **`AnimDone` fade and skip fade do not dim the subtitles**: the picture fade darkens only the film's
