@@ -109,4 +109,6 @@ Expected state after the tick's effect update, before rendering.
 🟡 No original-game screen capture was made for Madness. A comparison should confirm the head's apparent height
 above a unit and on sloped ground. The frame schedule, frame range, anchor and colour map are specified independently of it.
 
-🟡 Frames 550–557 have no known use; keep them out of every spell's playback.
+Frames 550–557 (#279): no spell, item, innate attack or ground effect selects them. None of the spells'
+first frames points into the range, and no effect names a frame there. They are unused art (probably
+spare red/green versions of the 558–561 sparkles); keep them out of every playback.
