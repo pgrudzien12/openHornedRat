@@ -313,6 +313,7 @@ class Regiment:
     charge_travelled: float = 0.0
     charge_reaimed: bool = False
     charge_reaim_pending: bool = False
+    charge_run_armed: bool = False  # a real charge start happened (ChargeTarget, or the unscripted reach test)
     charge_aim: tuple[float, float] | None = None  # the frozen aim point of the running charge
     assaulting_building: str | None = None  # identifier of the building this regiment is fighting (whshr.buildings)
     free_charging: bool = False  # straight-ahead ChargeForward until its point is reached or contact ends it
@@ -2482,6 +2483,9 @@ class Battle:
                             model.start_pause((model.stagger & 7) + 1)
                             model.current_speed = 0.0
                         regiment.charge_started_target = target.identifier
+                        # PROVISIONAL: without behaviour scripts there is no ChargeTarget; the charge is taken to
+                        # start when the target comes within charge reach (the reach test of the approach script).
+                        regiment.charge_run_armed = True
                     # A pursuer runs straight at the chase point set at the last segment tick
                     # (notes/pursuit_map_edge.md 2); a charge re-aims at its target every update.
                     chase = (regiment.pursuit_point if regiment.pursuing and regiment.pursuit_point is not None
@@ -2497,11 +2501,10 @@ class Battle:
                         facing = regiment.direction * math.tau / 512
                         chase = (regiment.x + 256 * math.sin(facing), regiment.y + 256 * math.cos(facing))
                     # game_rules.md "Charge" / "Turning": the charge run (distance budget, one re-aim) starts at the
-                    # charge start -- with behaviour scripts ChargeTarget sets the attack target, without them the
-                    # charge starts once the target is within reach -- not during an ordinary approach walk.
-                    run_started = (not regiment.pursuing
-                                   and (self.interpreter is not None
-                                        or regiment.charge_started_target == target.identifier))
+                    # charge start (`charge_run_armed`), not during an ordinary approach walk.
+                    # An attack target set by other means (e.g. AttackTagged from afar) is not a charge start in the
+                    # notes (PROVISIONAL): such a unit keeps the old, budget-free behaviour.
+                    run_started = not regiment.pursuing and regiment.charge_run_armed
                     if run_started:
                         if regiment.charge_run_for != target.identifier or regiment.charge_aim is None:
                             regiment.charge_run_for = target.identifier
@@ -2547,7 +2550,7 @@ class Battle:
                 moved = self._resolve_latched_step(regiment, state, latch_snapshot) and moved
             if regiment.in_melee or not (regiment.routing or regiment.attack_target or regiment.moving):
                 regiment.route_speed = 0.0
-            if regiment.charge_run_for is not None and (
+            if (regiment.charge_run_for is not None or regiment.charge_run_armed) and (
                     regiment.attack_target is None or regiment.in_melee or regiment.pursuing):
                 self._reset_charge_run(regiment)  # contact, obstruction, redirect-free end or pursuit: the run is over
             if regiment.attack_target is None and not regiment.in_melee:
@@ -3873,6 +3876,7 @@ class Battle:
 
     @staticmethod
     def _reset_charge_run(regiment: Regiment) -> None:
+        regiment.charge_run_armed = False
         regiment.charge_run_for = regiment.charge_aim = None
         regiment.charge_travelled = 0.0
         regiment.charge_reaimed = regiment.charge_reaim_pending = False
