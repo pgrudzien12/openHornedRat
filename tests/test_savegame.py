@@ -99,7 +99,7 @@ class SaveStoreTests(unittest.TestCase):
                          [(2, 7, True, 77), (14, 3, False, 0)])
 
     def test_wizard_promotion_spells_price_and_worth_survive_save_and_reload(self):
-        wizard_rows = {**ROWS, 2: roster.RosterRow(2, False, False, True, False, 0)}
+        wizard_rows = {**ROWS, 2: roster.RosterRow(2, False, False, True, False, 10)}
         wizard_text = MRC.replace("banner:COMM,0", "addspell:GeneralDispel\naddspell:BrightFireball")
         wizard = roster.parse_company(wizard_text, wizard_rows)[0]
         with patch("whshr.debrief_rewards.random.choice", return_value=6):
@@ -115,9 +115,21 @@ class SaveStoreTests(unittest.TestCase):
         restored = fresh.company[0]
         self.assertEqual(script.unit_view(restored.raw)["spells"],
                          ["GeneralDispel", "BrightFireball", "BrightPiercingBoltsOfBurning"])
-        self.assertEqual((restored.row.base_price, restored.points), (15, wizard.points + 7))
+        self.assertEqual((restored.row.base_price, restored.points), (25, wizard.points + 7))
         fresh.march_units = {2}
         self.assertIn("BrightPiercingBoltsOfBurning", fresh.marching_army()["armies"][0]["units"][0]["spells"])
+
+    def test_given_an_older_save_that_priced_a_free_wizard_then_loading_keeps_it_free(self):
+        free_rows = {**ROWS, 2: roster.RosterRow(2, False, False, True, False, 0)}
+        company = roster.parse_company(MRC, free_rows)
+        played = CampaignState(GRAPH, mission_window="MAP", company=company, master=company)
+        played.company = (roster.with_base_price(company[0], 30), company[1])  # two spell promotions before the fix
+        self.store.write(0, "wizard", played)
+        fresh = CampaignState(GRAPH, mission_window="MAP", company=company, master=company)
+
+        self.store.load_into(0, fresh)
+
+        self.assertEqual(fresh.company[0].row.base_price, 0)
 
     def test_given_a_mission_in_progress_then_its_payment_terms_and_paid_flag_round_trip(self):
         from whshr.payments import CashTerms

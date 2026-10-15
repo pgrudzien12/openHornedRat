@@ -235,12 +235,14 @@ and the leader's copy.
 | troops, `roster.wizard == 0` | 2000 | **+1 WS** | price per model +5 (if not 0), `s_pntval` +7 |
 | | 4000 | **+1 S** | same |
 | | 6000 | **+1 W** | same (a developer message says "5000") |
-| wizard, `roster.wizard != 0` | every 1000 (each multiple crossed) | learns one new spell, if it knows fewer than 5 | price per model +15, `s_pntval` +7 |
+| wizard, `roster.wizard != 0` | every 1000 (each multiple crossed) | learns one new spell, if it knows fewer than 5 | price per model +15 (engine: if not 0), `s_pntval` +7 |
 
 - The game contains an alternative for missile troops (+1 BS instead of WS, +1 I instead of S), but it is never
   selected, so every troop type gets WS and S. ✅
   The engine deliberately uses +1 BS instead of +1 WS at 2000 XP for ranged regiments; their 4000 XP promotion
   remains +1 S.
+- The engine also keeps a free wizard free (the Amber and the other free college wizard serve without pay): the +15
+  price per model applies only to a wizard whose price is not 0, as for troops.
 - The spell promotion picks one of three college spell lists according to the college of the spells the wizard
   already knows, then draws random spells from it until it finds one the wizard does not know yet
   (`Unit gaining new spell (%d)`).

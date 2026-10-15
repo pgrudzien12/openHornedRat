@@ -105,8 +105,10 @@ def restore_campaign(campaign: "CampaignState", data: Mapping[str, Any], *, repa
     try:
         def priced(regiments: tuple[roster.Regiment, ...], key: str) -> tuple[roster.Regiment, ...]:
             prices = {int(whoami): int(price) for whoami, price in data.get(key, {}).items()}
+            # a regiment free in the static roster stays free: older saves raised it by wizard promotions
             return tuple(roster.with_base_price(regiment, prices[regiment.whoami])
-                         if regiment.whoami in prices else regiment for regiment in regiments)
+                         if regiment.whoami in prices and regiment.row.base_price else regiment
+                         for regiment in regiments)
 
         values: dict[str, Any] = {
             "company": priced(roster.parse_company(str(data["company"]), rows), "company_prices"),
