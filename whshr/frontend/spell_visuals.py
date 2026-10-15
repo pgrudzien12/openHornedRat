@@ -17,7 +17,7 @@ of Anraheir, Azure Blades, Ere We Go!, Mork Save Uz!) follow notes/spell_attache
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 import math
 import random
@@ -149,8 +149,10 @@ BREATH_FIRST = 533  # Pestilent Breath: 533 + flight stage
 # The cloud spells (spell_visuals.md 2.6): Pestilent Breath and the Gyrocopter's steam gun, which is drawn the same way
 # with its own grey puffs 591 + stage (notes/gyrocopter_steam_gun.md 6.1; frames from 529 decode with bank +32).
 CLOUD_FIRST: dict[int, int] = {spell_effects.PESTILENT_BREATH: BREATH_FIRST, spell_effects.STEAM_GUN: 591}
-# PROVISIONAL (spell_visuals.md 2.3): the storm sprite's cycle was not traced; each run plays once.
-STORM_FORMING, STORM_RELEASE = (391, 4), (395, 4)
+# spell_storm_visuals.md 3: 391-394 once (T..T+3), 395-398 looping from T+4 through every bolt and flash, then the
+# closing 399, 400 on the last two ticks before the effect ends.
+STORM_FORMING, STORM_LOOP, STORM_CLOSING = 391, 395, 399
+STORM_WINDUP_FRAMES = STORM_LOOP - STORM_FORMING  # 4 ticks of 391-394
 PROJECTILE_CODES = frozenset({*MESH_SETS, spell_effects.BURNING_HEAD, *CLOUD_FIRST})
 
 
@@ -230,7 +232,8 @@ def bearing(dx: float, dy: float) -> int:
 class ProjectileVisuals:
     """Presentation state of every non-Fireball projectile spell, keyed by shot and advanced once per battle tick."""
     shots: dict[tuple[int, int], _Projectile] = field(default_factory=dict[tuple[int, int], _Projectile])
-    storms: dict[int, list[float]] = field(default_factory=dict[int, list[float]])  # serial -> x, y, first, count, age
+    storm_points: dict[int, tuple[float, float]] = field(default_factory=dict[int, tuple[float, float]])  # fixed at launch
+    storm_frames: dict[int, int] = field(default_factory=dict[int, int])  # effect serial -> this tick's frame
 
     def advance(self, shots: Iterable[Shot]) -> None:
         for shot in self.shots.values():
@@ -247,15 +250,22 @@ class ProjectileVisuals:
                 shot.segments = []
         self.shots = {key: shot for key, shot in self.shots.items()
                       if shot.flying or shot.segments or shot.flash is not None or shot.puffs or shot.clouds}
-        for storm in self.storms.values():
-            storm[4] += 1
-        self.storms = {serial: storm for serial, storm in self.storms.items() if storm[4] < storm[3]}
 
-    def storm_sprite(self, serial: int, x: float, y: float, forming: bool) -> None:
-        """Start a storm sprite run at the wizard's leader (spell_visuals.md 2.3, PROVISIONAL cycle): the forming run
-        when the spell starts, the release run as each bolt leaves."""
-        first, count = STORM_FORMING if forming else STORM_RELEASE
-        self.storms[serial] = [x, y, first, count, -1]  # aged to 0 by this tick's advance
+    def set_storms(self, storms: Iterable[StormFrame], first_figure: Callable[[str], tuple[float, float] | None]) -> None:
+        """This tick's Storm sprites (spell_storm_visuals.md 2-4). A Storm that is no longer running (ended, dispelled,
+        cancelled, caster or target removed) loses its sprite in the same update. The sprite stands on the ground at
+        the caster's first figure as it was when first seen (the launch) and never follows the wizard;
+        `first_figure(owner)` gives that point."""
+        frames: dict[int, int] = {}
+        for serial, owner, frame in storms:
+            if serial not in self.storm_points:
+                point = first_figure(owner)
+                if point is None:
+                    continue
+                self.storm_points[serial] = point
+            frames[serial] = frame
+        self.storm_frames = frames
+        self.storm_points = {serial: point for serial, point in self.storm_points.items() if serial in frames}
 
     @staticmethod
     def _age(shot: _Projectile) -> None:
@@ -329,29 +339,42 @@ class ProjectileVisuals:
         for shot in self.shots.values():
             drawn += [Sprite(SKULL_PUFF_FIRST + int(age), x, y, h) for x, y, h, age in shot.puffs]
             drawn += [Sprite(frame, x, y, h) for x, y, h, frame in shot.clouds]
-        for x, y, first, _count, age in self.storms.values():
-            drawn.append(Sprite(int(first + max(0, age)), x, y, 0.0))
+        for serial, frame in self.storm_frames.items():
+            drawn.append(Sprite(frame, *self.storm_points[serial], 0.0))
         return drawn
 
 
+StormFrame = tuple[int, str, int]  # effect serial, caster, SPELLS frame
+
+
+def storm_frame(age: int, finished: bool, closing_left: int) -> int:
+    """The Storm sprite's frame at `age` ticks since the launch (spell_storm_visuals.md 3): 391-394, then 395 + (age mod
+    4) without a break; once the last bolt's flash is over (`finished`) the closing 399 and 400 on the last two ticks,
+    `closing_left` being the ticks still to wait before the effect ends (1 -> 399, 0 -> 400)."""
+    if age < STORM_WINDUP_FRAMES:
+        return STORM_FORMING + age
+    if finished and closing_left <= 1:
+        return STORM_CLOSING + (1 - closing_left)
+    return STORM_LOOP + age % 4
+
+
 def projectile_shots(effects: Iterable[spell_effects.Effect],
-                     memory: dict[int, list[Any]]) -> tuple[list[Shot], list[tuple[int, str, bool]]]:
-    """This tick's shots from the battle's active spell effects, and the Storm of Shemtek sprite runs to start as
-    (effect serial, caster, forming). `memory` (owned by the caller, per effect serial) remembers which flights
+                     memory: dict[int, list[Any]]) -> tuple[list[Shot], list[StormFrame]]:
+    """This tick's shots from the battle's active spell effects, and each running Storm of Shemtek's sprite frame as
+    (effect serial, caster, frame). `memory` (owned by the caller, per effect serial) remembers which flights
     already reported their ending and numbers the Storm of Shemtek's bolts."""
     shots: list[Shot] = []
-    storms: list[tuple[int, str, bool]] = []
+    storms: list[StormFrame] = []
     for effect in effects:
         if effect.ended or effect.elapsed == 0:
             continue
         code = effect.code
         if code == spell_effects.STORM:
-            if effect.serial not in memory:
-                storms.append((effect.serial, effect.owner, True))
+            storms.append((effect.serial, effect.owner, storm_frame(
+                effect.elapsed - 1, effect.value == 0 and not effect.flying, effect.timer)))
             state = memory.setdefault(effect.serial, [0, False])  # bolt number, was flying
-            if effect.flying and not state[1]:  # a new bolt leaves (each starts at the caster's leader)
+            if effect.flying and not state[1]:  # a new bolt leaves
                 state[0] += 1
-                storms.append((effect.serial, effect.owner, False))
             if effect.flying or state[1]:
                 shots.append(Shot((effect.serial, state[0]), spell_effects.LIGHTNING, effect.x, effect.y,
                                   max(0.0, effect.height), effect.start, effect.dest, effect.remaining,
