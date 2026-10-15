@@ -68,6 +68,10 @@ class SubtitleTimeline:
             text = strings.get(text_id)
             if text is None:
                 continue
+            if event.get("fields") == 6:
+                # notes/cutscene_narration.md 4.4: a six-field track's last field counts further ids joined to it
+                extra = int(rows[0][-1])
+                text += "".join(strings.get(text_id + offset, "") for offset in range(1, extra + 1))
             start = rows[0][0] / 1000
             source_end = (rows[-1][0] / 1000) + self.TICK_SECONDS
             cues.append(SubtitleCue(
@@ -88,45 +92,38 @@ class SubtitleTimeline:
         return cue.text_at(elapsed_seconds) if cue else ""
 
 
-# notes/pe_resources.md "ANTXT": the strings of movie M are M x 1000 + k; k = 10, 20 ... are speech lines and
-# k = 100, 101 ... narration captions; +510 is an alternative version's speech. PROVISIONAL: the captions are taken
-# as k = 100..499, and a caption a film's own event track already times (13100 in A13) is left to the subtitles.
-CAPTION_OFFSETS = range(100, 500)
-_MOVIE_NUMBER = re.compile(r"a(\d+)[a-z]?", re.IGNORECASE)
+# notes/cutscene_narration.md 2.2: the narration page of each film, as (first ANTXT id, number of further ids), keyed
+# by the film number (the digits after the leading "A"; letters after them are ignored). A film number with no row
+# (A9, A14, DEATH01/02 = 0) has no page. Row 21 belongs to no film: 21100-21101 are never shown.
+NARRATION_CAPTIONS: dict[int, tuple[int, int]] = {
+    1: (1100, 2), 2: (2100, 0), 3: (3100, 2), 4: (4100, 0), 5: (5100, 0), 6: (6100, 0), 7: (7100, 1),
+    8: (8100, 2), 10: (10100, 0), 11: (11100, 0), 12: (12100, 0), 13: (13200, 0), 15: (15100, 0),
+    16: (16100, 0), 17: (17100, 0), 18: (18100, 1), 20: (20100, 0), 21: (21100, 1), 22: (22100, 1),
+    23: (23100, 1), 24: (24100, 0), 25: (25100, 0), 26: (26100, 0), 27: (27100, 3),
+}
+# notes/cutscene_narration.md 2.1: the one name exception, film 16 with "B" right after the number (A16b).
+A16B_CAPTIONS = (16600, 1)
+_MOVIE_NAME = re.compile(r"a(\d+)(.?)", re.IGNORECASE)
 
 
-def movie_number(movie: str) -> int | None:
-    """The movie number M of a numbered cutscene name ("A12b" -> 12); None for the unnumbered ones (DEATH01)."""
-    match = _MOVIE_NUMBER.fullmatch(movie.strip())
-    return int(match.group(1)) if match else None
+def movie_number(movie: str) -> int:
+    """The film number (notes/cutscene_narration.md 2.1): "A12b" -> 12; 0 for a name without one (DEATH01)."""
+    match = _MOVIE_NAME.match(movie.strip())
+    return int(match.group(1)) if match else 0
 
 
-def timed_text_ids(media: Mapping[str, Any]) -> set[int]:
-    """The string ids a film's event tracks already show as timed subtitles."""
-    ids: set[int] = set()
-    for entry in media.get("objects", {}).values():
-        event = entry.get("evt")
-        rows = event.get("rows", ()) if event else ()
-        if event and event.get("fields") in (5, 6) and rows:
-            ids.add(rows[0][1])
-    return ids
-
-
-def narration_caption_ids(movie: str, strings: Mapping[int, str], media: Mapping[str, Any]) -> tuple[int, ...]:
-    """The narration captions shown as a text page before film ``movie``, in id order.
-
-    The user's observation of the original: almost every cutscene starts with a text page, then the film. The
-    captions are in no film's event track and no glue script names them, so they are found by the movie number.
-    PROVISIONAL for the films whose numbering is irregular (A12b, A16a/b, A18B, A20, A27): every film of a number
-    gets that number's captions."""
-    number = movie_number(movie)
-    if number is None:
+def narration_caption_ids(movie: str) -> tuple[int, ...]:
+    """The ANTXT ids of the page shown before film ``movie``, chosen from its name alone."""
+    match = _MOVIE_NAME.match(movie.strip())
+    number = int(match.group(1)) if match else 0
+    row = A16B_CAPTIONS if number == 16 and match and match.group(2).casefold() == "b" else NARRATION_CAPTIONS.get(number)
+    if row is None:
         return ()
-    timed = timed_text_ids(media)
-    first, last = number * 1000 + CAPTION_OFFSETS.start, number * 1000 + CAPTION_OFFSETS.stop
-    return tuple(sorted(text_id for text_id in strings if first <= text_id < last and text_id not in timed))
+    first, extra = row
+    return tuple(range(first, first + extra + 1))
 
 
-def narration_text(movie: str, strings: Mapping[int, str], media: Mapping[str, Any]) -> str:
-    """The text page before a film: its captions joined as they are stored (each fragment ends in its own space)."""
-    return "".join(strings[text_id] for text_id in narration_caption_ids(movie, strings, media)).strip()
+def narration_text(movie: str, strings: Mapping[int, str]) -> str:
+    """The page text: its captions concatenated with no separator (each continued fragment ends in its own space,
+    notes/cutscene_narration.md 3); leading white space is skipped when wrapping."""
+    return "".join(strings.get(text_id, "") for text_id in narration_caption_ids(movie))

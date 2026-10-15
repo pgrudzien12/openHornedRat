@@ -97,6 +97,16 @@ class MovieSceneTests(unittest.TestCase):
         self.assertIsInstance(machine.active, MovieScene)
         self.assertEqual(machine.active.elapsed_seconds, 0.0)
 
+    def test_given_the_text_page_when_9_9_seconds_pass_then_the_film_starts_from_its_first_frame(self):
+        machine = SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
+
+        machine.update(9.8)
+        self.assertEqual(machine.active.phase, "narration")
+        machine.update(0.2)
+
+        self.assertEqual(machine.active.phase, "movie")
+        self.assertEqual(machine.active.elapsed_seconds, 0.0)
+
     def test_given_the_text_page_when_clicked_then_the_film_plays(self):
         machine = SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
 

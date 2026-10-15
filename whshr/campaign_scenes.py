@@ -61,9 +61,12 @@ class MovieScene(Scene):
     original effect (notes/glue_interpreter.md §8.3: fade variants unused by shipped scripts).
 
     A film with narration captions (whshr.cutscene.narration_text) first shows them as a text-only page
-    (``phase`` "narration"); "continue" starts the film, whose clock does not run before that. "skip" ends the
-    whole cutscene from either phase.
+    (``phase`` "narration", notes/cutscene_narration.md 4.1): it stays up for 9.9 s or until "continue" (the
+    view sends it for Enter or a left press over the film area), and the film's clock does not run before that.
+    "skip" ends the whole cutscene from either phase.
     """
+
+    NARRATION_SECONDS = 9.9
 
     def __init__(self, movie: str, successor: Scene | None = None, glue_scene: GlueScene | None = None,
                  request_id: int | None = None, fade: bool = False) -> None:
@@ -86,6 +89,7 @@ class MovieScene(Scene):
         self.subtitle_font: Any = None
         self.narration = ""
         self.phase = "movie"
+        self.narration_seconds = 0.0
 
     def enter(self, context: SceneAssets) -> None:
         self.container = context.load(self.cutscene_id)
@@ -93,7 +97,7 @@ class MovieScene(Scene):
         self.media = context.load(self.media_id)
         self.texts = context.load(ANIMATION_TEXT)
         self.subtitle_font = context.load(SUBTITLE_FONT)
-        self.narration = narration_text(self.movie, self.texts, self.media)
+        self.narration = narration_text(self.movie, self.texts)
         self.phase = "narration" if self.narration else "movie"
 
     def _finish(self, reason: str) -> Transition:
@@ -114,6 +118,9 @@ class MovieScene(Scene):
     def update(self, seconds: float, context: SceneAssets) -> Transition | Quit | None:
         super().update(seconds, context)
         if self.phase == "narration":
+            self.narration_seconds += seconds
+            if self.narration_seconds >= self.NARRATION_SECONDS:
+                self.phase = "movie"  # the film starts from its first frame; the page's time is not carried over
             return None
         self.elapsed_seconds += seconds
         if self.duration_seconds is not None and self.elapsed_seconds >= self.duration_seconds:

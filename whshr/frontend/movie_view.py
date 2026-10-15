@@ -103,9 +103,11 @@ def _ensure_mixer() -> bool:
 
 class MovieView(SceneView[MovieScene]):
     """Plays one cutscene: upright, aspect-correct, letterboxed on black; skip on key or click. A film with
-    narration captions first shows them as a text-only page, which a key or click dismisses."""
+    narration captions first shows them as a text-only page (notes/cutscene_narration.md 3, 4.1)."""
 
-    NARRATION_WIDTH = 500
+    # notes/cutscene_narration.md 3: a 125-pixel margin on every side of the 640x480 front end.
+    NARRATION_WIDTH = 640 - 2 * 125
+    NARRATION_HEIGHT = 480 - 2 * 125
 
     def __init__(self, gpu: Gpu, scene: MovieScene, options: dict[str, Any] | None = None) -> None:
         super().__init__(gpu, scene, options)
@@ -121,9 +123,10 @@ class MovieView(SceneView[MovieScene]):
         self.subtitle = gpu.text((640, 80), self.subtitle_font, color=(255, 255, 255),
                                  background=None, padding=0)
         self.subtitle_text: tuple[str, Any] | None = None
-        # The text page before the film (scene phase "narration"): the original SUBTEXT face at 1:1, centred.
-        self.narration = gpu.text((self.NARRATION_WIDTH, 180), self.subtitle_font, color=(255, 250, 225),
-                                  background=None, padding=0, align="center")
+        # The text page before the film (scene phase "narration"): white SUBTEXT at 1:1 on black, every line
+        # centred, the block centred vertically (notes/cutscene_narration.md 3).
+        self.narration = gpu.text((self.NARRATION_WIDTH, self.NARRATION_HEIGHT), self.subtitle_font,
+                                  color=(255, 255, 255), background=None, padding=0, align="center")
         self.narration.set_lines(self._wrap(scene.narration, self.NARRATION_WIDTH))
         if scene.phase == "movie":
             self._sync(0.0)
@@ -144,8 +147,18 @@ class MovieView(SceneView[MovieScene]):
                 yield entry["start"] / 1000, sound
 
     def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
+        if self.scene.phase == "narration":
+            # notes/cutscene_narration.md 4.1: Enter, or the left button pressed over the film area, ends the page
+            # at once; the press is consumed, so it does not also skip the film.
+            if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                return ("continue",)
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                left, top, width, height = self._film_rect()
+                if left <= event.pos[0] < left + width and top <= event.pos[1] < top + height:
+                    return ("continue",)
+            return ()
         if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
-            return ("continue",) if self.scene.phase == "narration" else ("skip",)
+            return ("skip",)
         return ()
 
     def _sync(self, elapsed: float) -> None:
@@ -204,19 +217,24 @@ class MovieView(SceneView[MovieScene]):
             text_w, text_h = self.narration.text_size
             self.narration.draw((screen_w - text_w) / 2, (screen_h - text_h) / 2)
             return
-        # Reserve the original subtitle strip under the 640x272 film before
-        # choosing a scale, so captions never obscure the video itself.
-        subtitle_strip = 32
-        scale = min(screen_w / self.smk.w, screen_h / (self.smk.h + subtitle_strip))
-        width, height = self.smk.w * scale, self.smk.h * scale
-        left = (screen_w - width) / 2
-        top = (screen_h - (self.smk.h + subtitle_strip) * scale) / 2
+        left, top, width, height = self._film_rect()
+        scale = width / self.smk.w
         self.video.draw(left, top, width, height)
         if self.subtitle_text is not None and self.subtitle_text[0]:
             # The video can scale up for a better presentation, but the
             # original subtitle bitmap remains 1:1.  Its left edge is the
             # left edge of the original centered 640-pixel film box.
             self.subtitle.draw((screen_w - self.smk.w) / 2, top + height + 5 * scale)
+
+    def _film_rect(self) -> tuple[float, float, float, float]:
+        """Where the film is drawn: (left, top, width, height) in target pixels."""
+        screen_w, screen_h = self.gpu.target.size
+        # Reserve the original subtitle strip under the 640x272 film before
+        # choosing a scale, so captions never obscure the video itself.
+        subtitle_strip = 32
+        scale = min(screen_w / self.smk.w, screen_h / (self.smk.h + subtitle_strip))
+        width, height = self.smk.w * scale, self.smk.h * scale
+        return (screen_w - width) / 2, (screen_h - (self.smk.h + subtitle_strip) * scale) / 2, width, height
 
     def release(self) -> None:
         self.video.release()
