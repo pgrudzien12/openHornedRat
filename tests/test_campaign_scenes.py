@@ -132,6 +132,44 @@ class MovieSceneTests(unittest.TestCase):
         machine.update(1.75)
         self.assertIsInstance(machine.active, MainMenuScene)
 
+    def _film_with_fade_marker(self):
+        self.texts.clear()  # no caption page
+        self.media["objects"][8] = {"evt": {"fields": 2, "rows": [[500, 10, 10]]}}
+        self.media["objects"][9] = {"evt": {"fields": 1, "rows": [[1000, 50], [1125, 0]]}}
+        return SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
+
+    def test_given_a_film_before_its_fade_marker_when_skipped_then_it_cuts_at_once(self):
+        machine = self._film_with_fade_marker()
+        machine.update(0.4)
+
+        machine.handle("skip")
+
+        self.assertIsInstance(machine.active, MainMenuScene)
+
+    def test_given_a_film_past_its_fade_marker_when_skipped_then_it_fades_out_quickly_first(self):
+        machine = self._film_with_fade_marker()
+        machine.update(0.6)
+
+        machine.handle("skip")
+        self.assertEqual(machine.active.phase, "skip_fade")
+        machine.handle("skip")  # a second skip changes nothing
+        levels = []
+        for _ in range(9):
+            levels.append(machine.active.level)
+            machine.update(0.05)
+
+        self.assertEqual(levels, [90, 80, 70, 60, 50, 40, 30, 20, 10])
+        machine.update(0.05)
+        self.assertIsInstance(machine.active, MainMenuScene)
+        self.assertEqual(machine.history[-1].reason, "movie skipped")
+
+    def test_given_a_film_near_its_end_then_anim_done_sets_the_level(self):
+        machine = self._film_with_fade_marker()
+        machine.update(1.0)
+        self.assertEqual(machine.active.level, 50)
+        machine.update(0.125)
+        self.assertEqual(machine.active.level, 0)
+
     def test_given_intro_when_player_skips_then_main_menu_becomes_active(self):
         machine = SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
 

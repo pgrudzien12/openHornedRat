@@ -40,6 +40,7 @@ void main() {
 }
 """
 
+SYSTEM_COLOURS = 10  # palette entries 0-9 and 246-255 are left alone by the film fades
 MIXER_CHANNELS = 32  # the A1 intro layers up to ~28 overlapping wind/thunder/leaves cues
 
 
@@ -66,12 +67,17 @@ class VideoQuad:
             topology="triangle_strip", vertex_count=4,
         )
 
-    def write(self, indices: bytes | bytearray, palette_rgb: Sequence[int]) -> None:
-        """``indices``: w*h palette-index bytes. ``palette_rgb``: 256*3 RGB bytes."""
+    def write(self, indices: bytes | bytearray, palette_rgb: Sequence[int], level: int = 100) -> None:
+        """``indices``: w*h palette-index bytes. ``palette_rgb``: 256*3 RGB bytes. ``level``: the film's
+        brightness percentage; the fades darken only the film's own colours, never the first and last ten
+        palette entries (the system colours, notes/cutscene_narration.md 4.3)."""
         self.indices.write(bytes(indices))
         rgba = bytearray(256 * 4)
         for i in range(256):
-            rgba[i * 4:i * 4 + 3] = palette_rgb[i * 3:i * 3 + 3]
+            rgb = palette_rgb[i * 3:i * 3 + 3]
+            if level < 100 and SYSTEM_COLOURS <= i < 256 - SYSTEM_COLOURS:
+                rgb = [value * level // 100 for value in rgb]
+            rgba[i * 4:i * 4 + 3] = rgb
             rgba[i * 4 + 3] = 255
         self.palette.write(bytes(rgba))
 
@@ -102,8 +108,9 @@ def _ensure_mixer() -> bool:
 
 
 class MovieView(SceneView[MovieScene]):
-    """Plays one cutscene: upright, aspect-correct, letterboxed on black; skip on key or click. A film with
-    narration captions first shows them as a text-only page (notes/cutscene_narration.md 3, 4.1)."""
+    """Plays one cutscene: upright, aspect-correct, letterboxed on black. A film with narration captions first
+    shows them as a text-only page (notes/cutscene_narration.md 3, 4.1). The film is skipped with Enter or a left
+    click (press and release) on the film area (4.2) and follows the scene's fade level (4.3)."""
 
     # notes/cutscene_narration.md 3: a 125-pixel margin on every side of the 640x480 front end.
     NARRATION_WIDTH = 640 - 2 * 125
@@ -116,6 +123,9 @@ class MovieView(SceneView[MovieScene]):
         self.last_frame = -1
         self.audio_ok = _ensure_mixer()
         self.cues = sorted(self._find_cues(scene.media), key=lambda cue: cue[0]) if self.audio_ok else []
+        self.volume = audio_settings.volume("dialogue")
+        for _, sound in self.cues:
+            sound.set_volume(self.volume)
         self.next_cue = 0
         self.playing = 0
         self.subtitles = SubtitleTimeline(scene.media, scene.texts)
@@ -128,6 +138,10 @@ class MovieView(SceneView[MovieScene]):
         self.narration = gpu.text((self.NARRATION_WIDTH, self.NARRATION_HEIGHT), self.subtitle_font,
                                   color=(255, 255, 255), background=None, padding=0, align="center")
         self.narration.set_lines(self._wrap(scene.narration, self.NARRATION_WIDTH))
+        # notes/cutscene_narration.md 4.1: the page appears and disappears at once, with no fade.
+        self.fade_in = scene.phase != "narration"
+        self.level = 100
+        self.click_started = False  # a left press on the film area, waiting for its release (4.2)
         if scene.phase == "movie":
             self._sync(0.0)
 
@@ -143,7 +157,6 @@ class MovieView(SceneView[MovieScene]):
         for entry in media["objects"].values():
             if "wav" in entry and "blob" in entry:
                 sound = pygame.mixer.Sound(io.BytesIO(entry["blob"]))
-                sound.set_volume(audio_settings.volume("dialogue"))
                 yield entry["start"] / 1000, sound
 
     def events(self, event: pygame.event.Event) -> Sequence[SceneEvent]:
@@ -152,26 +165,41 @@ class MovieView(SceneView[MovieScene]):
             # at once; the press is consumed, so it does not also skip the film.
             if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 return ("continue",)
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                left, top, width, height = self._film_rect()
-                if left <= event.pos[0] < left + width and top <= event.pos[1] < top + height:
-                    return ("continue",)
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and self._on_film(event.pos):
+                return ("continue",)
             return ()
-        if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+        if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             return ("skip",)
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self.click_started = self._on_film(event.pos)
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            clicked, self.click_started = self.click_started and self._on_film(event.pos), False
+            if clicked:
+                return ("skip",)
         return ()
+
+    def _on_film(self, pos: tuple[int, int]) -> bool:
+        left, top, width, height = self._film_rect()
+        return left <= pos[0] < left + width and top <= pos[1] < top + height
 
     def _sync(self, elapsed: float) -> None:
         frame = frame_index_at(elapsed, self.smk.nframes)
-        if frame != self.last_frame:
-            self.smk.decode_to(frame)
-            self.video.write(self.smk.img, self.smk.pal)
+        level = self.scene.level
+        if frame != self.last_frame or level != self.level:
+            if frame != self.last_frame:
+                self.smk.decode_to(frame)
+            self.video.write(self.smk.img, self.smk.pal, level)
             self.last_frame = frame
+        if level != self.level:
+            for _, sound in self.cues:
+                sound.set_volume(self.volume * level / 100)
+            self.level = level
         while self.next_cue < len(self.cues) and self.cues[self.next_cue][0] <= elapsed:
             if self.cues[self.next_cue][1].play() is not None:  # pyright: ignore[reportUnnecessaryComparison]
                 self.playing += 1
             self.next_cue += 1
-        subtitle = self.subtitles.current(elapsed)
+        # notes/cutscene_narration.md 4.3: a skip that fades clears the speech subtitles at once.
+        subtitle = None if self.scene.phase == "skip_fade" else self.subtitles.current(elapsed)
         text = subtitle.text_at(elapsed) if subtitle else ""
         style = (text, subtitle_color(subtitle.speaker) if subtitle else None)
         if style != self.subtitle_text:
@@ -200,7 +228,7 @@ class MovieView(SceneView[MovieScene]):
         return (*lines, current) if current else tuple(lines)
 
     def animate(self, seconds: float) -> None:
-        if self.scene.phase == "movie":
+        if self.scene.phase != "narration":
             self._sync(self.scene.elapsed_seconds)
 
     def status(self) -> Sequence[str]:
