@@ -255,8 +255,9 @@ Beam vector (Lightning: L = 4, A = 4; flat ground 0 at start and destination; st
 - **Trail.** See §8.4 for the exact rule. In short: the first puff appears on the launch tick at the start point.
   After that a puff is left at the head's previous position only when that position differs from the newest puff's
   position. A new puff is drawn at frame 125 on the tick it appears.
-- **End tick.** On the tick the flight ends (the tick of the final in-flight test), the head is **no longer drawn**
-  and the explosion **starts that same tick**, showing frame 177. It sits on the ground under the last tested
+- **End tick.** On the tick the flight ends (the tick of the final in-flight test), the head is **no longer drawn**.
+  The explosion starts on the **next** tick, showing frame 177 (corrected: earlier text said the same tick;
+  `spell_warpfire_visuals.md` §3 and §7, which use the same flight). It sits on the ground under the last tested
   position and shows frames 177–185 on that tick and the 8 following ones.
 - **Anchor.** Every frame used (125–144, 177–185) is 32 × 32. Its `.FOL` entry gives anchor x = 16 (the centre) and
   anchor row 0 counted from the bottom (`FORMATS.md` `.FOL`, the same fields as unit figures). Read as for unit
