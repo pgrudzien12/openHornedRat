@@ -110,6 +110,14 @@ class BattleSounds:
             else:
                 channel.unpause()
 
+    def release(self) -> None:
+        """Stop every sound the battle started when the battle scene goes: a running loop (a Curse, which has no
+        natural end) would otherwise go on playing over the next screen."""
+        for channel in (*self.handles.values(), *self.channels.values()):
+            channel.stop()
+        self.handles.clear()
+        self.channels.clear()
+
     def handle(self, events: Iterable[Any]) -> None:
         for event in events:
             if getattr(event, "kind", None) == "sound":

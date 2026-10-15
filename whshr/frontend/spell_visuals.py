@@ -241,7 +241,10 @@ class ProjectileVisuals:
             self._step(self.shots.setdefault(shot.key, _Projectile(shot.code)), shot)
         for key, shot in self.shots.items():
             if key not in seen and shot.flying and shot.flights:
-                shot.flying = False  # the effect is gone (a spent spear, a cancelled bolt): the head just stops
+                # The effect is gone without an ending (a spent spear, a bolt cancelled by a dispel or its caster's
+                # removal): the head stops and a beam's segments go with it, with no flash (spell_effects.md 1.4).
+                shot.flying = False
+                shot.segments = []
         self.shots = {key: shot for key, shot in self.shots.items()
                       if shot.flying or shot.segments or shot.flash is not None or shot.puffs or shot.clouds}
         for storm in self.storms.values():

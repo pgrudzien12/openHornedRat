@@ -101,6 +101,15 @@ class CueTests(unittest.TestCase):
         sounds.handle([cue("loop_start", 14, 0), cue("loop_start", 14, 1)])
         self.assertEqual([channel.stopped for *_, channel in sounds.played], [True, False])
 
+    def test_leaving_the_battle_stops_a_curse_loop_that_never_ended(self):
+        sounds = FakeSounds(("spells",))
+        sounds.handle([SimpleNamespace(kind="sound", data={"cue": "loop_start", "packet": 3, "effect": 15,
+                                                           "regiment": "w", "handle": "spell 3 0"}),
+                       cue("at_unit", 3, 2)])
+        sounds.release()
+        self.assertEqual([channel.stopped for *_, channel in sounds.played], [True, True])
+        self.assertEqual(sounds.handles, {})
+
 
 if __name__ == "__main__":
     unittest.main()
