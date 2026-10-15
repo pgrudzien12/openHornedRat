@@ -181,18 +181,15 @@ def narration_text(movie: str, strings: Mapping[int, str]) -> str:
 class FilmFades:
     """A film's own fade events (notes/cutscene_narration.md 4.3).
 
-    Both fades darken the picture by subtracting a fixed amount from every red, green and blue component of the
-    film's colours (clamped at 0), not by scaling them. ``AnimDone`` (one field, 98, 96 ... 0 every 125 ms) sets the
-    film's sound volume to its value and subtracts 5 more per record, so both fade out together at the end.
-    ``Fade (10, 10)`` marks the moment from which a skip fades out quickly instead of cutting; the first ``AnimDone``
-    record removes that mark again. The skip fade is ten steps run back to back: step ``k`` subtracts 16 more and
-    then sets the volume to ``(11 - k) * 10`` %."""
+    ``AnimDone`` (one field, 98, 96 ... 0 every 125 ms) sets the film's level to its value, so picture and sound
+    fade out together at the end. ``Fade (10, 10)`` marks the moment from which a skip fades out instead of
+    cutting; the first ``AnimDone`` record removes that mark again.
 
-    ANIM_DONE_DARKEN = 5
-    SKIP_FADE_STEPS = 10
-    SKIP_FADE_DARKEN = 16
-    # The steps have no timer of their own (one repaint each); the engine shows one per 60 Hz display frame.
-    SKIP_FADE_STEP_SECONDS = 1 / 60
+    The look is the engine's own, not the original's: the level scales the film's colours (the original subtracts a
+    fixed amount per step and cuts the skip fade from a half-dimmed picture after ten repaints). The skip fade runs
+    smoothly from the current level to black and silence over ``SKIP_FADE_SECONDS``."""
+
+    SKIP_FADE_SECONDS = 0.5
 
     def __init__(self, media: Mapping[str, Any]) -> None:
         anim_done: list[tuple[float, int]] = []
@@ -209,25 +206,16 @@ class FilmFades:
         self.anim_done = tuple(sorted(anim_done))
         self.fade_mark: float | None = min(fade_marks) if fade_marks else None
 
-    def _records(self, elapsed_seconds: float) -> int:
-        """How many ``AnimDone`` records have been reached by ``elapsed_seconds``."""
-        return sum(1 for time, _ in self.anim_done if time <= elapsed_seconds)
-
-    def volume(self, elapsed_seconds: float) -> int:
-        """The film's volume percentage at ``elapsed_seconds``: 100 until AnimDone's first record."""
-        reached = self._records(elapsed_seconds)
-        return self.anim_done[reached - 1][1] if reached else 100
-
-    def darken(self, elapsed_seconds: float) -> int:
-        """How much has been subtracted from every film colour component by ``elapsed_seconds``."""
-        return self.ANIM_DONE_DARKEN * self._records(elapsed_seconds)
+    def level(self, elapsed_seconds: float) -> int:
+        """The volume/brightness percentage at ``elapsed_seconds``: 100 until AnimDone's first record."""
+        level = 100
+        for time, value in self.anim_done:
+            if time > elapsed_seconds:
+                break
+            level = value
+        return level
 
     def skip_fades(self, elapsed_seconds: float) -> bool:
         """Whether a skip at ``elapsed_seconds`` fades out: past the Fade marker and before the end fade began."""
         return (self.fade_mark is not None and elapsed_seconds >= self.fade_mark
-                and self._records(elapsed_seconds) == 0)
-
-    @classmethod
-    def skip_step(cls, step: int) -> tuple[int, int]:
-        """The extra darkening and the volume after skip-fade step ``step`` (1 ... 10)."""
-        return cls.SKIP_FADE_DARKEN * step, (cls.SKIP_FADE_STEPS + 1 - step) * 10
+                and not any(time <= elapsed_seconds for time, _ in self.anim_done))

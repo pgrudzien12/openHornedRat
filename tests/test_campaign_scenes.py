@@ -147,21 +147,20 @@ class MovieSceneTests(unittest.TestCase):
 
         self.assertIsInstance(machine.active, MainMenuScene)
 
-    def test_given_a_film_past_its_fade_marker_when_skipped_then_it_fades_out_quickly_first(self):
+    def test_given_a_film_past_its_fade_marker_when_skipped_then_it_fades_smoothly_to_black_first(self):
         machine = self._film_with_fade_marker()
         machine.update(0.6)
 
         machine.handle("skip")
         self.assertEqual(machine.active.phase, "skip_fade")
-        shown = []
-        for _ in range(9):
-            shown.append((machine.active.darken, machine.active.volume))
-            machine.update(FilmFades.SKIP_FADE_STEP_SECONDS)
-        shown.append((machine.active.darken, machine.active.volume))
+        quarter = FilmFades.SKIP_FADE_SECONDS / 4
+        levels = []
+        for _ in range(4):
+            levels.append(round(machine.active.level))
+            machine.update(quarter)
 
-        self.assertEqual(shown, [(16 * k, (11 - k) * 10) for k in range(1, 11)])
-        machine.update(FilmFades.SKIP_FADE_STEP_SECONDS)
-        self.assertIsInstance(machine.active, MainMenuScene)  # cut from the dimmed picture
+        self.assertEqual(levels, [100, 75, 50, 25])
+        self.assertIsInstance(machine.active, MainMenuScene)  # ends on black
         self.assertEqual(machine.history[-1].reason, "movie skipped")
 
     def test_given_a_skip_fade_when_skipped_again_then_the_cutscene_ends_at_once(self):
@@ -180,7 +179,7 @@ class MovieSceneTests(unittest.TestCase):
         machine.update(0.05)  # past the AnimDone record at 1.0 s
 
         self.assertEqual(machine.active.phase, "skip_fade")
-        self.assertEqual(machine.active.darken, 16 * 4)
+        self.assertEqual(machine.active.level, 100 * (1 - 0.05 / FilmFades.SKIP_FADE_SECONDS))
 
     def test_given_the_end_fade_has_begun_when_skipped_then_it_cuts_at_once(self):
         machine = self._film_with_fade_marker()
@@ -190,12 +189,12 @@ class MovieSceneTests(unittest.TestCase):
 
         self.assertIsInstance(machine.active, MainMenuScene)
 
-    def test_given_a_film_near_its_end_then_anim_done_sets_volume_and_darkening(self):
+    def test_given_a_film_near_its_end_then_anim_done_sets_the_level(self):
         machine = self._film_with_fade_marker()
         machine.update(1.0)
-        self.assertEqual((machine.active.volume, machine.active.darken), (50, 5))
+        self.assertEqual(machine.active.level, 50)
         machine.update(0.125)
-        self.assertEqual((machine.active.volume, machine.active.darken), (0, 10))
+        self.assertEqual(machine.active.level, 0)
 
     def test_given_intro_when_player_skips_then_main_menu_becomes_active(self):
         machine = SceneMachine(MovieScene("a1", successor=MainMenuScene()), self.context)
