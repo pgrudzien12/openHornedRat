@@ -123,6 +123,19 @@ class DoomwheelTests(unittest.TestCase):
         self.assertEqual(battle._drawn_facing_target(wheel, model), wheel.direction)
 
 
+class DoomDiverCrewFacingTests(unittest.TestCase):
+    def test_the_crew_faces_its_own_heading_while_idle_and_the_unit_while_standing(self):  # 2.6
+        from whshr.engine import Battle
+        crew = Regiment("c", "C", 0, 0, 96, Side.ENEMY, models=3, ranks=1, sprite="DoomDiver")
+        battle = Battle(5000, 5000, [crew], seed=1995)
+        crew.model_positions()
+        model = crew.melee_models[0]
+        model.action, model.heading_x, model.heading_y = IDLE, 1.0, 0.0
+        self.assertEqual(battle._drawn_facing_target(crew, model), 128)
+        model.action = STAND
+        self.assertEqual(battle._drawn_facing_target(crew, model), crew.direction)
+
+
 class WreckTests(unittest.TestCase):
     def test_a_machine_wreck_keeps_its_facing_and_shows_the_wreck_group(self):
         lobber = Regiment("l", "L", 0, 0, 96, Side.ENEMY, models=3, ranks=1, sprite="OrcBoyz",

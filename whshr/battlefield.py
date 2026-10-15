@@ -15,7 +15,7 @@ from pathlib import Path
 import struct
 from typing import Any
 
-from . import buildings, control_piece, legacy, pbx
+from . import animation, buildings, control_piece, legacy, pbx
 from .image import load_rgb_palette
 from .paths import Installation
 from .script import View, load_battle, resource_name
@@ -471,6 +471,12 @@ def load_battlefield(installation: Installation | str | PathLike[str], battle_fi
     # A leader block names its own troop sprite set, drawn for the leader figure (notes/leader_sprites.md).
     troop_resources = [resource_name(sprites) or "" for unit in script_units(script)
                        for sprites in (unit["sprites"], (unit.get("leader") or {}).get("sprites"))]
+    # A dead script that switches to another set's wreck (the limbered mortar's Wagon wreck, notes/machine_figure_animation.md
+    # 2.8) needs that set loaded too.
+    for resource in list(troop_resources):
+        wreck = animation.family_table(animation.family_for(resource))[animation.DEAD].wreck_sprite
+        if wreck:
+            troop_resources.append(wreck)
     for resource in troop_resources:
         base = names.get(resource.casefold())
         if base is None:
