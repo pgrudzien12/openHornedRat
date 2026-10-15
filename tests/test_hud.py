@@ -515,6 +515,13 @@ class PanelStateTests(unittest.TestCase):
         self.assertTrue(hud._button_enabled("fight_harder", hud.battle.regiments["player"]))
         self.assertEqual(hud.press("fight_harder"), "fight_harder")
 
+    def test_given_a_regiment_in_melee_then_the_withdraw_button_is_enabled_and_pressable(self):
+        regiments = [Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf", in_melee=True)]
+        hud = _hud(regiments=regiments)
+
+        self.assertTrue(hud._button_enabled("withdraw", hud.battle.regiments["player"]))
+        self.assertEqual(hud.press("withdraw"), "withdraw")
+
     def test_given_a_routing_regiment_then_the_rally_set_is_used(self):
         regiments = [Regiment("player", "P", 0, 0, 0, Side.PLAYER, hud_class="inf", routing=True)]
         hud = _hud(regiments=regiments)
@@ -667,11 +674,11 @@ class PressAndOrderTests(unittest.TestCase):
 
         self.assertEqual(order, "halt")
 
-    def test_charge_and_rally_are_orders_while_unimplemented_commands_issue_none(self):
+    def test_charge_withdraw_and_rally_are_orders(self):
         hud = _hud()
 
         self.assertEqual(hud.press("charge"), "charge")
-        self.assertIsNone(hud.press("withdraw"))
+        self.assertEqual(hud.press("withdraw"), "withdraw")
         self.assertEqual(hud.press("rally"), "rally")
 
     def test_given_order_completed_then_pending_order_clears_and_navigation_returns_to_idle(self):

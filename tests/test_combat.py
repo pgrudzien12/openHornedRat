@@ -42,6 +42,72 @@ def _join_fight(battle, group_id, *regiments, turn=0):
             r.identifier for r in regiments if r.side != regiment.side)
 
 
+class WithdrawTests(unittest.TestCase):
+    """game_rules.md "Player orders" (order 0x13, R48), building_units.md 6, lone_unit_on_grid.md."""
+
+    def _fight(self, enemy_kwargs):
+        player = _regiment("player", 0, 0, Side.PLAYER)
+        enemy = _regiment("enemy", 20, 0, Side.ENEMY, **enemy_kwargs)
+        battle = Battle(1000, 1000, [player, enemy], seed=1)
+        _join_fight(battle, "g", player, enemy)
+        return battle, player, enemy
+
+    def test_given_a_living_enemy_when_withdrawing_then_the_unit_routs_and_the_enemy_is_told(self):
+        battle, player, enemy = self._fight({})
+
+        battle.order_withdraw("player")
+
+        self.assertTrue(player.routing)
+        self.assertFalse(player.in_melee)
+        self.assertTrue(any(e.kind == "rout_start" for e in battle.events))
+
+    def test_given_only_a_wagon_opponent_when_withdrawing_then_the_unit_disengages_without_routing(self):
+        battle, player, wagon = self._fight({"unit_class": 7})
+
+        battle.order_withdraw("player")
+
+        self.assertFalse(player.routing)
+        self.assertFalse(player.in_melee)
+        self.assertIsNone(player.melee_group)
+
+    def test_given_a_wagon_and_a_living_enemy_when_withdrawing_then_the_unit_routs(self):
+        player = _regiment("player", 0, 0, Side.PLAYER)
+        wagon = _regiment("wagon", 20, 0, Side.ENEMY, unit_class=7)
+        enemy = _regiment("enemy", 20, 20, Side.ENEMY)
+        battle = Battle(1000, 1000, [player, wagon, enemy], seed=1)
+        _join_fight(battle, "g", player, wagon, enemy)
+
+        battle.order_withdraw("player")
+
+        self.assertTrue(player.routing)
+
+    def test_given_only_a_building_opponent_when_withdrawing_then_the_unit_disengages(self):
+        player = _regiment("player", 0, 0, Side.PLAYER)
+        battle = Battle(1000, 1000, [player], seed=1)
+        player.assaulting_building = "building:0"
+
+        battle.order_withdraw("player")
+
+        self.assertIsNone(player.assaulting_building)
+        self.assertFalse(player.routing)
+
+    def test_given_a_unit_neither_in_melee_nor_braced_when_withdrawing_then_the_order_is_refused(self):
+        player = _regiment("player", 0, 0, Side.PLAYER)
+        battle = Battle(1000, 1000, [player], seed=1)
+
+        with self.assertRaises(ValueError):
+            battle.order_withdraw("player")
+
+    def test_given_a_braced_unit_when_withdrawing_from_a_living_charger_then_it_routs(self):
+        player = _regiment("player", 0, 0, Side.PLAYER, braced=True, braced_target="enemy")
+        enemy = _regiment("enemy", 100, 0, Side.ENEMY)
+        battle = Battle(1000, 1000, [player, enemy], seed=1)
+
+        battle.order_withdraw("player")
+
+        self.assertTrue(player.routing)
+
+
 class FightHarderTests(unittest.TestCase):
     def test_focused_player_unit_in_melee_gains_strength_and_leadership_until_segment_resolves(self):
         player = _regiment("player", 0, 0, Side.PLAYER, strength=4, leadership=6, in_melee=True)
