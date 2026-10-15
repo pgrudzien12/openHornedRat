@@ -1159,24 +1159,61 @@ class GradualTurningTests(unittest.TestCase):
         self.assertLessEqual(abs(Battle._turn_delta(regiment.direction, first_direction)), 10)
         self.assertEqual((regiment.ranks, regiment.frontage), (5, 4))
 
-    def test_given_a_charging_target_changes_bearing_then_the_charge_reaims_at_the_next_segment(self):
+    def _charge_setup(self, target_y=240):
+        # the charge reach (144 world units here) comes from the movement stat
         charger = Regiment("charger", "Charger", 100, 100, 0, Side.PLAYER,
                            models=20, ranks=4, speed_per_tick=speed_per_tick(4, 3))
-        target = Regiment("target", "Target", 100, 400, 0, Side.ENEMY)
+        target = Regiment("target", "Target", 100, target_y, 0, Side.ENEMY)
         battle = Battle(1000, 1000, [charger, target])
+        return battle, charger, target
+
+    def test_given_a_charging_target_moves_then_the_charge_reaims_once_at_the_halfway_point(self):
+        battle, charger, target = self._charge_setup(target_y=240)
         battle.order_attack("charger", "target")
         battle.tick()
         self.assertEqual(charger.direction, 0)
-        target.x = 300
-
-        for _ in range(18):
+        target.x = 400  # moves away sideways: ignored until the halfway point
+        halfway = None
+        for tick in range(200):
             battle.tick()
+            if charger.charge_reaimed and halfway is None:
+                halfway = charger.charge_travelled
+                self.assertGreaterEqual(halfway, charger.charge_reach / 2)
+                self.assertEqual(charger.charge_aim, (400, target.y))
+            if halfway is None:
+                self.assertEqual(charger.direction, 0)  # straight at the frozen aim point until then
+            if charger.charge_run_for is None and halfway is not None:
+                break
+        self.assertIsNotNone(halfway)
 
-        self.assertEqual(charger.direction, 0)
-        battle.tick()  # tick 19 begins a new segment
+    def test_given_a_target_out_of_reach_then_the_charge_ends_halted_at_the_budget(self):
+        battle, charger, target = self._charge_setup(target_y=240)
+        battle.order_attack("charger", "target")
+        battle.tick()
+        target.y = 900  # the target is gone far away mid-charge (the Flying Bower case)
+        for _ in range(400):
+            battle.tick()
+        self.assertIsNone(charger.attack_target)
+        self.assertFalse(charger.charging)
+        self.assertIsNone(charger.charge_run_for)
+        self.assertLessEqual(charger.y - 100, charger.charge_reach + 1)
+        self.assertLess(charger.y, 400)
 
-        self.assertEqual(charger.turn_mode, "charge_reaim")
-        self.assertGreater(charger.direction, 0)
+    def test_given_a_normal_charge_within_reach_then_it_makes_contact(self):
+        battle, charger, target = self._charge_setup(target_y=200)
+        battle.order_attack("charger", "target")
+        for _ in range(100):
+            battle.tick()
+        self.assertTrue(charger.in_melee)
+        self.assertIsNone(charger.charge_run_for)
+
+    def test_given_an_unscripted_approach_walk_then_no_charge_budget_is_spent(self):
+        battle, charger, target = self._charge_setup(target_y=600)
+        battle.order_attack("charger", "target")
+        for _ in range(20):
+            battle.tick()
+        self.assertIsNone(charger.charge_run_for)
+        self.assertEqual(charger.charge_travelled, 0.0)
 
 
 def formation_positions(regiment):
