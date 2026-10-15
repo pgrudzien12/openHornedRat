@@ -3,7 +3,7 @@ import tempfile
 import unittest
 
 from whshr import script
-from whshr.roster import COST_PERCENT, Regiment, RosterRow, load_company, scaled_price
+from whshr.roster import COST_PERCENT, Regiment, RosterRow, load_company, rank_icon, scaled_price
 from whshr.script import resource_name
 
 MRC = """[MERCARMY]
@@ -94,6 +94,18 @@ class RosterTests(unittest.TestCase):
         cavalry = Regiment(2, "Grudgebringer Cavalry", True, 0, 12, 13, self.roster[2])
 
         self.assertTrue(cavalry.destroyed)
+
+
+
+class RankIconTests(unittest.TestCase):
+    """notes/troop_selection.md 3.2: the Skull<n> rank icon grows with s_pntval."""
+
+    def test_given_point_values_below_31_when_ranked_then_the_original_steps_apply(self):
+        self.assertEqual([rank_icon(p) for p in (0, 7, 8, 15, 16, 23, 24, 30, 31)], [0, 0, 1, 1, 2, 2, 3, 3, 4])
+
+    def test_given_a_regiment_promoted_past_31_points_when_ranked_then_it_keeps_the_big_skull(self):
+        self.assertEqual(rank_icon(38), 4)  # the original's 5-bit mask would wrap 38 back to Skull0
+        self.assertEqual(rank_icon(66), 4)
 
 
 if __name__ == "__main__":

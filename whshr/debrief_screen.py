@@ -12,6 +12,7 @@ from . import debrief_rules
 from .campaign_runtime import ObjectiveResult
 from .debrief_rules import Evaluation, evaluate
 from .payments import CashTerms, Settlement, settle
+from .roster import rank_icon
 
 Strings = Callable[..., str]  # strings("BKTXT", id, *format arguments)
 Rgb = tuple[int, int, int]
@@ -83,7 +84,7 @@ class DebriefUnit:
     @property
     def skull(self) -> int:
         """The rank icon: notes/troop_selection.md 3.3."""
-        return min(4, (self.points & 31) * 4 // 31)
+        return rank_icon(self.points)
 
 
 @dataclass(frozen=True)

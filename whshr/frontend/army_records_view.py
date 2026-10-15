@@ -15,7 +15,7 @@ from ..campaign_scenes import ArmyRecordsScene
 from ..glue_palette import AppPalette
 from ..legacy import module
 from ..portraits import BACKGROUND_SET, CROP_WINDOWS, LEADER_BOX_SIZE, NO_MATCH_CROP_WINDOW, load_sprite_sheet
-from ..roster import Regiment
+from ..roster import Regiment, rank_icon
 from ..scenes import SceneEvent
 from ..script import resource_name
 from .bitmap_font import BitmapFont
@@ -265,7 +265,7 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
 
     def _status_line(self, regiment: Regiment) -> None:
         """Draw the right-page skull/status group at the documented bottom line (§2.2)."""
-        level = min(4, (regiment.points & 31) * 4 // 31)
+        level = rank_icon(regiment.points)
         self._bitmap_centered(f"Skull{level}", (380, 385))
         wounded = self.scene.model.ledger.wounded.get(regiment.whoami, 0)
         self._label(self._string("BKTXT", 502, regiment.models, wounded), 395, 385, BLACK)
