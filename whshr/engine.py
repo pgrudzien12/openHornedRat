@@ -3420,8 +3420,8 @@ class Battle:
     def _drawn_facing_target(self, regiment: Regiment, model: ModelState) -> float:
         """Facing a model's drawn direction turns toward: the unit's for stand/weapon-ready/shoot, its own
         heading (or its opponent) for walk/fight."""
-        if (animation.facing_follows_unit(model.action)
-                or animation.family_table(regiment.model_family(model))[model.action].faces_unit):
+        script = animation.family_table(regiment.model_family(model))[model.action]
+        if not script.faces_heading and (animation.facing_follows_unit(model.action) or script.faces_unit):
             return regiment.direction
         if model.action == animation.FIGHT and model.opponent is not None:
             other = self.regiments.get(model.opponent[0])
@@ -3461,7 +3461,10 @@ class Battle:
             regiment.volley_age += 1
             if regiment.volley_age >= 6 and regiment.hud_class != "art":
                 regiment.volley_countdown = None
-        special_shot = regiment.shooting_code == 14 or (regiment.shooting_code == 17 and regiment.hud_class != "arch")
+        # Neither the Gyrocopter's steam gun (code 17: its Fire order and scripted volley launch the shot directly,
+        # notes/gyrocopter_steam_gun.md 3, 6.1, 7) nor the Warpfire Thrower (code 15: the flames launch with the
+        # order, notes/spell_warpfire_visuals.md 2.1) waits on a fire event; their shoot actions have no fire step.
+        special_shot = regiment.shooting_code == 14
         volley_divisor = 1 if regiment.hud_class == "art" or special_shot else 4
         # A script's broadcast holds until the unit's activity changes (notes/script_animation_sound.md,
         # 0.1); a model's own request beats it for one update (0.2).
