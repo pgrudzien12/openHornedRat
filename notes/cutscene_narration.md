@@ -129,8 +129,8 @@ Higher numbers have no row (no such films).
 For completeness (these are the film's own rules, already partly in `notes/si_omni.md`):
 
 - The film plays in a **640 × 272** area centred horizontally; vertically the film plus seven text lines
-  of the subtitle font are centred together, `y = (H − (7 × line_height + 272)) // 2`; the two speech
-  subtitle lines sit below the film. The "film area" of §4.1 is this rectangle.
+  of the subtitle font are centred together, `y = (H − (7 × line_height + 272)) // 2`; two speech
+  subtitle blocks of two lines each sit below the film (details: `notes/cutscene_subtitles.md`). The "film area" of §4.1 is this rectangle.
 - **Skipping the film:** Enter, or a left click (press **and** release) on the film area, ends it.
 - **Natural end:** when the film's final event track (`AnimDone`) has counted down to 0 the film is
   finished and the game continues.
