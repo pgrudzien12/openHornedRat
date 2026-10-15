@@ -239,6 +239,20 @@ THROWER = _machine_table(0, 32, _machine_shot(0, (0, 0, 0, 0, 0, 1, 1, 2, 3, 0),
 # Mortar: intact frames 40-47, wreck 0-7, the firing smoke 8-39. Addressed from group 8, so 40 is phase 4.
 MORTAR = _machine_table(40, 0, _machine_shot(8, (4, 4, 4, 4, 0, 1, 1, 2, 3, 3, 4), fire_at=6))
 
+# Warpfire Thrower (notes/machine_figure_animation.md 2.7): a single figure with no machine model. 1/4/5 hold stand
+# group 48 phase 1 facing the unit; idle loops group 48; walk loops group 0 with a random entry; dead is the corpse
+# group 32 with a random facing; the shot is locked, group 40 phase 0 for 10 - r ticks, with NO fire step (the flames
+# are launched with the order, notes/spell_warpfire_visuals.md 2.1).
+_WARPFIRE_HELD = ActionScript(48, sequence=(1,), faces_unit=True)
+WARPFIRE: ActionTable = {
+    STAND: _WARPFIRE_HELD, FIGHT: _WARPFIRE_HELD, WEAPON_READY: _WARPFIRE_HELD,
+    IDLE: ActionScript(48, sequence=(0, 0, 0, 1, 1, 2, 2, 2, 3, 3)),
+    WALK: ActionScript(0, sequence=(0, 0, 1, 1, 2, 2, 3, 3), random_entry=8),
+    DEAD: ActionScript(32, sequence=(0,), loop=False, locks_facing=True),
+    SHOOT: ActionScript(40, sequence=(0,) * 10, random_entry=4, next_action=STAND, skip_ahead=True,
+                        drops_requests=True),
+}
+
 # Gyrocopter (notes/machine_figure_animation.md 2.9, airborne_units.md A3.2): one flying figure, no random entry, and
 # its shoot has no fire step. The take-off and landing laps and the altitude steps are flight_rules'/FlightState's
 # (they depend on whether the craft is flying); these are the loops that follow them. Actions 2, 3 and 7 loop the
@@ -296,7 +310,7 @@ FAMILY_TABLES: dict[str, ActionTable] = {"standard_infantry": STANDARD_INFANTRY,
                  "mesh_dragon": MESH_DRAGON, "wagons": WAGONS, "carts": CARTS, "gun": GUN, "volley": VOLLEY,
                  "thrower": THROWER, "mortar": MORTAR, "gyrocopter": GYROCOPTER,
                  "doom_diver_crew": DOOM_DIVER_CREW, "limbered_mortar": LIMBERED_MORTAR,
-                 "limbered_gun": LIMBERED_GUN, "doomwheel": DOOMWHEEL}
+                 "limbered_gun": LIMBERED_GUN, "doomwheel": DOOMWHEEL, "warpfire": WARPFIRE}
 # Script sprite resource names (casefolded) that select a decoded family; anything else is standard.
 SPRITE_FAMILIES = {"meshdragon": "mesh_dragon", "peasant": "peasants", "peasants": "peasants",
                    "ratslave": "slaves", "slave": "slaves",
@@ -309,7 +323,8 @@ SPRITE_FAMILIES = {"meshdragon": "mesh_dragon", "peasant": "peasants", "peasants
                    "voleygun": "volley", "rocklobber": "thrower", "rocklob": "thrower", "doomdvrcatapult": "thrower",
                    "ddcatplt": "thrower", "mortar": "mortar",
                    "gyrocopt": "gyrocopter", "gyrocopter": "gyrocopter",
-                   "doomwheel": "doomwheel", "dwheel": "doomwheel"}
+                   "doomwheel": "doomwheel", "dwheel": "doomwheel",
+                   "warpfire": "warpfire", "warpfirethrower": "warpfire"}
 WAGON_CLASS = 7  # s_race class RollingStock
 DEFAULT_FAMILY = "standard_infantry"
 

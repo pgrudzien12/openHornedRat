@@ -184,6 +184,42 @@ class PoseTests(unittest.TestCase):
         self.assertEqual([model.own_request for model in unit.melee_models], [0, 0])
 
 
+class RepeatedShotTests(unittest.TestCase):
+    """With the Warpfire table the pose has no fire step, so nothing waits for a fire event: the flames leave on the
+    tick of the order and the thrower shoots again after its reload."""
+
+    def test_two_shots_across_a_reload_each_launch_flames_and_no_countdown_hangs(self):
+        unit = thrower()
+        unit.initiative = 9  # short reload
+        battle = Battle(2000, 2000, [unit, Regiment("e", "Enemy", 1000, 1200, 256, Side.ENEMY, models=4, ranks=2)])
+        battle.rng = Scripted([], default=0)
+        unit.shooting_mode, unit.shooting_target = "target", "e"
+        battle.tick()
+        first = len(flames(battle))
+        self.assertGreaterEqual(first, 1)
+        self.assertIsNone(unit.volley_countdown)
+        battle.tick()  # the pose request made with the order is applied by the next tick's animation step
+        self.assertEqual([model.action for model in unit.melee_models], [animation.SHOOT] * 2)
+        for _ in range(300):
+            battle.tick()
+            if len(flames(battle)) > first:
+                break
+        self.assertGreater(len(flames(battle)), first)
+        self.assertIsNone(unit.volley_countdown)
+
+    def test_the_shot_pose_plays_ten_minus_r_ticks_and_ends_in_the_rest_action(self):
+        unit = thrower()
+        battle = Battle(2000, 2000, [unit, Regiment("e", "Enemy", 1000, 1200, 256, Side.ENEMY, models=4, ranks=2)])
+        battle.rng = Scripted([], default=0)
+        unit.shooting_mode, unit.shooting_target = "target", "e"
+        battle.tick()
+        battle.tick()  # the pose request made with the order is applied by the next tick's animation step
+        self.assertEqual(unit.melee_models[0].action, animation.SHOOT)
+        for _ in range(12):
+            battle.tick()
+        self.assertEqual(unit.melee_models[0].action, animation.WEAPON_READY)  # the unit still has a target
+
+
 class FlightTests(unittest.TestCase):
     def test_the_flame_flies_18_ticks_along_the_report_example_with_the_fireball_arc(self):
         battle, _ = one_flame_battle()

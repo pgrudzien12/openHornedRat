@@ -260,9 +260,14 @@ def _order_volleys(battle: Battle) -> None:
         if not _ready(unit) or unit.moving or unit.turn_order_key is not None:
             continue
         unit.volley_aim = aim
-        unit.volley_countdown = 1 if unit.hud_class == "art" or code in {14, 15} else unit.models
+        unit.volley_countdown = 1 if unit.hud_class == "art" or code == 14 else unit.models
         unit.volley_age = 0
         unit.reload_ticks = reload_time(unit)
+        if code == 15:
+            # notes/spell_warpfire_visuals.md 2.1: the Warpfire pose has no fire step, so nothing waits for a fire
+            # event; the flames leave on the tick of the order, together with the pose request.
+            unit.volley_countdown = None
+            _launch_innate(battle, unit, code, (unit.x, unit.y), aim)
         battle.events.append(BattleEvent(f"{unit.name} prepares a volley.", "volley",
                                          regiment=unit.identifier, code=code))
         if ground:
