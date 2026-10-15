@@ -49,6 +49,7 @@ HUMBTL_PACKET, HUM_COMPLETE, HUM_FAILED = 5, 9, 15
 ZHUFBAR_PACKET = 11
 ALL_UNITS_EVENT = 0x38
 FOUND_ITEM_REACT, RETREAT_REACT = 16, 15
+ITEM_LETTERS = ("K", "X")
 # Section 5.2 tree pieces for Q: the pine furniture types and their night and snow variants.
 _PINES = ("Pine", "PineSml", "PineLrg", "TriPineSml", "TriPineMed", "TriPineLrg")
 TREE_TYPES = frozenset(prefix + name for name in _PINES for prefix in ("", "Nite", "Snw"))
@@ -223,13 +224,15 @@ class Objectives:
     def complete(self, battle: Battle, entries: Iterable[Sequence[Any]] | None = None) -> None:
         """Testing aid: finish the battle through its objectives and mark them completed.
 
-        The segment check runs once (so an eliminated enemy decides A, F and the like through their own
-        evaluators); if no battle-ending letter decided, the first one that can end the battle without being a
-        defeat is met by fiat and decides. The final pass then runs. Every other letter that is not a defeat or
-        information letter is marked met; each value the battle left at zero takes the flawless value of its
-        `.BTS` line (payments.flawless_results), measured values are kept."""
+        Items still on the field are carried off first (`_hand_out_items`). The segment check then runs once (so an
+        eliminated enemy decides A, F and the like through their own evaluators); if no battle-ending letter decided,
+        the first one that can end the battle without being a defeat is met by fiat and decides. The final pass then
+        runs. Every other letter that is not a defeat, information or item letter is marked met; each value the
+        battle left at zero takes the flawless value of its `.BTS` line (payments.flawless_results), measured values
+        are kept."""
         from .payments import DEFEAT_LETTERS, NEVER_MET_LETTERS, flawless_results
 
+        self._hand_out_items(battle)
         self.segment(battle)
         if self.decided is None:
             winning = next((r for r in self.records if r.flags & ENDS_BATTLE and r.letter not in DEFEAT_LETTERS), None)
@@ -239,11 +242,24 @@ class Objectives:
         self.finish(battle)
         full = flawless_results(entries)
         for record in self.records:
-            if record.letter in DEFEAT_LETTERS or record.letter in NEVER_MET_LETTERS:
-                continue
+            if record.letter in DEFEAT_LETTERS or record.letter in NEVER_MET_LETTERS or record.letter in ITEM_LETTERS:
+                continue  # an item letter is met only if `_hand_out_items` found a bearer
             record.met = True
             if record.letter in full:  # a value the battle left at zero takes the completed value
                 record.values = [value or filled for value, filled in zip(record.values, full[record.letter][1])]
+
+    def _hand_out_items(self, battle: Battle) -> None:
+        """Testing aid: every item still lying on the field goes to the last player regiment in marching order that
+        is alive and has a free slot, as if it had walked into the item's node (`_give_item`). An item nobody can
+        carry stays where it is, its letter unmet."""
+        for record in self.records:
+            if record.letter not in self.item_marks:
+                continue
+            bearer = next((r for r in reversed(_side(battle, Side.PLAYER))
+                           if r.active and r.models > 0 and len(r.items) < ITEM_SLOTS), None)
+            if bearer is not None:
+                _give_item(self, battle, record, bearer)
+                record.met = True
 
     # ------------------------------------------------------------------ book button (section 8)
 
@@ -511,12 +527,17 @@ def _check_k(objectives: Objectives, battle: Battle, record: Objective) -> bool:
         return False
     for regiment in _side(battle, Side.PLAYER):
         if regiment.active and in_node(battle, regiment, record.a) and len(regiment.items) < ITEM_SLOTS:
-            regiment.items = (*regiment.items, ITEM_NUMBERS[record.values[3] - ITEM_TABLE_BASE])
-            del objectives.item_marks[record.letter]
-            record.values[2] = regiment.whoami
+            _give_item(objectives, battle, record, regiment)
             battle.react(regiment.identifier, FOUND_ITEM_REACT)
             return True
     return False
+
+
+def _give_item(objectives: Objectives, battle: Battle, record: Objective, regiment: Regiment) -> None:
+    """The regiment takes the item of a K/X record: it joins its item list, the marker goes, v3 names the bearer."""
+    regiment.items = (*regiment.items, ITEM_NUMBERS[record.values[3] - ITEM_TABLE_BASE])
+    del objectives.item_marks[record.letter]
+    record.values[2] = regiment.whoami
 
 
 def _u_eligible(regiment: Regiment) -> bool:

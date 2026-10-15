@@ -3,6 +3,7 @@
 import unittest
 
 from tests.test_objectives import make, regiment
+from whshr.nodes import ScriptNode
 from whshr.rules import Side
 
 
@@ -76,6 +77,53 @@ class ObjectiveWinTests(unittest.TestCase):
         battle.win_by_objectives([["A", 20, 1]])
 
         self.assertTrue(battle.objectives.finished)
+
+
+class ObjectiveWinItemTests(unittest.TestCase):
+    """Items still lying on the field go to the last regiment in marching order with a free slot."""
+
+    NODES = [ScriptNode(2000.0, 2000.0, radius=40)] * 2
+
+    def test_given_an_item_on_the_field_when_the_battle_is_won_then_the_last_marching_regiment_carries_it(self):
+        # Given two marching regiments far from the Sword of Might's node
+        first = regiment("p1", Side.PLAYER, whoami=4)
+        last = regiment("p2", Side.PLAYER, whoami=7)
+        entries = [["A", 20, 1], ["K", 0, 10]]
+        battle = make(entries, first, last, regiment("e", Side.ENEMY, x=500, y=500), nodes=self.NODES)
+
+        # When the debug win settles the battle
+        battle.win_by_objectives(entries)
+
+        # Then the last one carries it and K records the pickup like a real one
+        self.assertEqual((first.items, last.items), ((), ("ItemSwordOfMight",)))
+        met, values = battle.objectives.results()["K"]
+        self.assertTrue(met)
+        self.assertEqual(values, (0, 10, 7, 39))
+        self.assertNotIn("K", battle.objectives.item_marks)
+
+    def test_given_the_last_regiment_full_or_destroyed_then_an_earlier_one_takes_the_item(self):
+        first = regiment("p1", Side.PLAYER, whoami=4)
+        full = regiment("p2", Side.PLAYER, whoami=5, items=("a", "b", "c", "d", "e"))
+        dead = regiment("p3", Side.PLAYER, 0, whoami=6)
+        entries = [["A", 20, 1], ["K", 0, 10], ["X", 1, 3]]
+        battle = make(entries, first, full, dead, regiment("e", Side.ENEMY, x=500, y=500), nodes=self.NODES)
+
+        battle.win_by_objectives(entries)
+
+        self.assertEqual(len(first.items), 2)
+        self.assertEqual(full.items, ("a", "b", "c", "d", "e"))
+        self.assertEqual(dead.items, ())
+
+    def test_given_no_free_slot_anywhere_then_the_item_stays_and_its_letter_is_unmet(self):
+        full = regiment("p", Side.PLAYER, items=("a", "b", "c", "d", "e"))
+        entries = [["A", 20, 1], ["K", 0, 10]]
+        battle = make(entries, full, regiment("e", Side.ENEMY, x=500, y=500), nodes=self.NODES)
+
+        battle.win_by_objectives(entries)
+
+        self.assertEqual(battle.result, "victory")
+        self.assertFalse(battle.objectives.get("K").met)
+        self.assertIn("K", battle.objectives.item_marks)
 
 
 if __name__ == "__main__":
