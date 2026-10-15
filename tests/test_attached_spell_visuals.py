@@ -126,6 +126,26 @@ class SparkleTests(unittest.TestCase):
         self.assertEqual({s.height for s in self.sparkle(spell_effects.MORK_SAVE_UZ, 0)}, {0.0})
 
 
+class MadnessVisualTests(unittest.TestCase):
+    """notes/spell_madness_visuals.md: one horned head per maddened unit, 48 above the ground at the unit's position."""
+
+    def heads(self, age: int, count: int = 12, position=(200.0, 300.0)) -> list[Sprite]:
+        visuals = AttachedVisuals()
+        visuals.advance([Attachment(1, spell_effects.MADNESS, age, figures(count), 0, position)])
+        return [sprite for sprite in visuals.sprites() if isinstance(sprite, Sprite)]
+
+    def test_given_a_maddened_unit_of_twelve_then_one_head_48_above_the_unit_position(self):
+        [head] = self.heads(0)
+        self.assertEqual((head.frame, head.x, head.y, head.height), (537, 200.0, 300.0, 48.0))
+
+    def test_the_head_loops_537_to_540_one_frame_per_tick_from_the_launch(self):
+        self.assertEqual([self.heads(age)[0].frame for age in (0, 1, 2, 3, 4, 10, 179)],
+                         [537, 538, 539, 540, 537, 539, 540])
+
+    def test_casualties_do_not_change_the_single_head(self):
+        self.assertEqual(len(self.heads(5, count=7)), 1)
+
+
 class BattleEffectTests(unittest.TestCase):
     """The attached effects as the battle reports them after its effect update."""
 
@@ -154,6 +174,25 @@ class BattleEffectTests(unittest.TestCase):
     def test_given_the_effect_cancelled_then_nothing_is_attached(self):
         self.cast(spell_effects.AZURE_BLADES)
         spell_effects.cancel(self.battle, self.battle.spell_effects.active[0])
+        self.assertEqual(attached_effects(self.battle), [])
+
+    def test_given_madness_then_the_head_follows_the_unit_and_goes_when_the_effect_ends(self):
+        self.target.side = Side.ENEMY
+        self.cast(spell_effects.MADNESS)
+        [seen] = attached_effects(self.battle)
+        self.assertEqual((seen.code, seen.age, seen.position), (spell_effects.MADNESS, 0, (0.0, 200.0)))
+        self.target.x = 30
+        self.assertEqual(attached_effects(self.battle)[0].position, (30, 200.0))
+        for _ in range(179):
+            spell_effects.tick(self.battle)
+        self.assertEqual(attached_effects(self.battle)[0].age, 179)
+        spell_effects.tick(self.battle)  # T+180: the effect ends in this update
+        self.assertEqual(attached_effects(self.battle), [])
+
+    def test_given_a_maddened_unit_removed_then_its_head_is_gone(self):
+        self.target.side = Side.ENEMY
+        self.cast(spell_effects.MADNESS)
+        self.target.models = 0
         self.assertEqual(attached_effects(self.battle), [])
 
     def test_given_dispel_magic_or_fists_of_gork_then_no_effect_art_is_drawn(self):
