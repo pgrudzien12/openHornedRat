@@ -50,7 +50,8 @@ def promote(regiment: Regiment, before: int, after: int) -> tuple[Regiment, list
             known.append(code)
             regiment = roster.with_spell(regiment, magic.SPELLS[code].name)
             regiment = roster.with_points(regiment, regiment.points + PROMOTION_POINTS)
-            regiment = roster.with_base_price(regiment, regiment.row.base_price + WIZARD_PRICE)
+            if regiment.row.base_price:  # a wizard who serves for free stays free (as troops do, §1.3)
+                regiment = roster.with_base_price(regiment, regiment.row.base_price + WIZARD_PRICE)
             notes.append(f"{regiment.name}: learned {magic.SPELLS[code].name}")
         return regiment, notes, []
     for threshold, stat in PROMOTION_THRESHOLDS:

@@ -224,6 +224,14 @@ class RewardTests(unittest.TestCase):
                           "AmberHuntingSpear", "AmberCurseOfAnraheir"])
         self.assertEqual((promoted.points, promoted.row.base_price), (14, 50))
 
+    def test_a_free_wizard_learning_a_spell_stays_free(self):
+        wizard = self.make(wizard=True, spells=("GeneralDispel", "AmberFlyingBower"))
+        wizard = replace(wizard, row=replace(wizard.row, base_price=0))
+        with patch("whshr.debrief_rewards.random.choice", side_effect=lambda candidates: candidates[0]):
+            promoted, _, _ = debrief_rewards.promote(wizard, 900, 2100)
+
+        self.assertEqual((promoted.points, promoted.row.base_price), (14, 0))
+
     def test_wizard_without_a_known_college_does_not_gain_an_unrelated_spell(self):
         wizard = self.make(wizard=True, spells=("GeneralDispel",))
 
