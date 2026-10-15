@@ -2055,10 +2055,11 @@ class Battle:
             event = interpreter.Event(code=0x21, x=int(x), y=int(y))
         self.event_bus.queue_event(unit.identifier, event)
 
-    def win_by_objectives(self, entries: Any = None) -> bool:
+    def win_by_objectives(self, entries: Any = None, bearer: str | None = None) -> bool:
         """Testing aid (--debug F10): destroy the enemy, run the mission's objectives, mark them completed and leave
-        through the tent, so the debrief gets the objectives' own records (`Objectives.complete`). False, doing
-        nothing, for a battle without objectives or one that is already over."""
+        through the tent, so the debrief gets the objectives' own records (`Objectives.complete`); items still on the
+        field go to ``bearer`` when it can carry them. The player's losses stay as they are. False, doing nothing,
+        for a battle without objectives or one that is already over."""
         if self.objectives is None or self.result is not None:
             return False
         self.start_battle()
@@ -2066,7 +2067,7 @@ class Battle:
         for regiment in self.regiments.values():
             if regiment.side == Side.ENEMY:
                 regiment.models = 0
-        self.objectives.complete(self, entries)
+        self.objectives.complete(self, entries, bearer)
         self.objectives.tent = True  # the tent is offered even if no letter decided the battle
         self.leave()
         # The next tick replaces `events` with the pending feedback: carry the decision message, speech cue and

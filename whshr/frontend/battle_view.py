@@ -380,8 +380,9 @@ class BattleView(SceneView[BattleScene]):
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_HOME:
             self.camera = replace(self.initial_camera)
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_F10:
-            # Testing aid: win the battle at once (BattleScene "win_battle"), settled like no-battle mode.
-            return (("win_battle",),)
+            # Testing aid: win the battle at once with the current losses (BattleScene "win_battle"); field items go
+            # to the selected regiment.
+            return (("win_battle", self.scene.selected_id),)
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_m and self._control_held(event):
             # Debug cheat: fill the player's power pool to 8 (BattleScene "fill_power").
             return (("fill_power",),)
