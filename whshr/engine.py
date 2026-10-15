@@ -3461,7 +3461,9 @@ class Battle:
             regiment.volley_age += 1
             if regiment.volley_age >= 6 and regiment.hud_class != "art":
                 regiment.volley_countdown = None
-        special_shot = regiment.shooting_code in {14, 15} or (regiment.shooting_code == 17 and regiment.hud_class != "arch")
+        # The Gyrocopter's steam gun (code 17) never waits on a fire event: its Fire order and its scripted volley launch
+        # the shot directly and its shoot action has no fire step (notes/gyrocopter_steam_gun.md 3, 6.1, 7).
+        special_shot = regiment.shooting_code in {14, 15}
         volley_divisor = 1 if regiment.hud_class == "art" or special_shot else 4
         # A script's broadcast holds until the unit's activity changes (notes/script_animation_sound.md,
         # 0.1); a model's own request beats it for one update (0.2).
