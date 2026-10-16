@@ -13,7 +13,7 @@ from ..campaign_scenes import (
 from ..confirm_scene import ConfirmScene
 from ..message_scene import MessageScene
 from ..credits_scene import CreditsScene
-from ..debrief_scene import DebriefScene
+from ..debrief_scene import DebriefScene, EndScreenScene
 from ..glue_scene import GlueScene
 from ..load_save_scene import LoadSaveScene
 from ..name_prompt_scene import NamePromptScene
@@ -26,6 +26,7 @@ from .confirm_view import ConfirmView
 from .message_view import MessageView
 from .credits_view import CreditsView
 from .debrief_view import DebriefView
+from .end_screen_view import EndScreenView
 from .glue_view import GlueView
 from .load_save_view import LoadSaveView
 from .menu_view import MainMenuView
@@ -57,6 +58,7 @@ VIEWS: dict[type[Scene], type[SceneView[Any]]] = {
     CreditsScene: CreditsView,
     OptionsScene: OptionsView,
     DebriefScene: DebriefView,
+    EndScreenScene: EndScreenView,
     BattleScene: BattleView,
     ResultScene: ResultView,
 }

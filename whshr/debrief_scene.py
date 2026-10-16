@@ -7,6 +7,7 @@ from typing import Any
 from .campaign_state import CampaignState
 from .casualties import commit_wounded
 from .debrief import report_for
+from .debrief_rules import end_screen
 from .debrief_screen import DebriefScreen
 from .glue import MissionRef
 from .glue_runtime import StartDebrief
@@ -123,3 +124,59 @@ class DebriefScene(Scene):
         self.finished = True
         self.glue_scene.resolve_debrief(self.effect)
         return Transition(self.glue_scene, "debrief done")
+
+
+# PROVISIONAL: how long the end picture stays up when nobody clicks.  The original shows it while the front end
+# re-initialises and then about one timer tick (notes/native-windows.md 9.3.1, hold time still open); this stands in
+# for that re-initialisation time.
+END_SCREEN_HOLD = 1.5
+
+
+def post_battle_transition(glue_scene: GlueScene, effect: StartDebrief, no_battle: bool = False) -> Transition | None:
+    """Where a debrief request goes after any end picture: a battle that lost the campaign plays its death movie and
+    returns to the main menu with no debrief, payment or merge (notes/native-windows.md 9.9.5); otherwise the
+    debrief screen opens.  ``None`` in no-battle mode, where the request completes without a screen."""
+    from .campaign_scenes import MainMenuScene, MovieScene
+
+    campaign = glue_scene.campaign
+    movie = campaign.campaign_over_movie if campaign is not None and effect.mode in (2, 6) else None
+    if campaign is not None and movie is not None:
+        campaign.campaign_over_movie = None
+        return Transition(MovieScene(movie, successor=MainMenuScene()), "campaign over")
+    if no_battle:
+        return None
+    return Transition(DebriefScene(glue_scene, effect), "debrief opened")
+
+
+class EndScreenScene(Scene):
+    """The end picture between a campaign battle and its debrief (notes/native-windows.md 9.3.1 (b)): the
+    evaluator's key picks the neutral, success or failure picture (whshr.debrief_rules.end_screen); a click or
+    Enter, or the hold time, goes on to the post-battle step."""
+
+    def __init__(self, glue_scene: GlueScene, effect: StartDebrief) -> None:
+        self.glue_scene = glue_scene
+        self.effect = effect
+        campaign = glue_scene.campaign
+        self.bitmap = end_screen(effect.debrief_index, dict(campaign.objective_results) if campaign else {})
+        self.elapsed = 0.0
+        self.finished = False
+
+    def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
+        if event == "dismiss" and not self.finished:
+            return self._finish()
+        return None
+
+    def update(self, seconds: float, context: SceneAssets) -> Transition | Quit | None:
+        super().update(seconds, context)
+        self.elapsed += seconds
+        if not self.finished and self.elapsed >= END_SCREEN_HOLD:
+            return self._finish()
+        return None
+
+    def _finish(self) -> Transition:
+        self.finished = True
+        transition = post_battle_transition(self.glue_scene, self.effect)
+        if transition is not None:
+            return transition
+        self.glue_scene.resolve_debrief(self.effect)
+        return Transition(self.glue_scene, "end screen closed")

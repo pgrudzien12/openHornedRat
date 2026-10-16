@@ -197,6 +197,7 @@ class EncounterSceneTests(unittest.TestCase):
                 regiment.models = 0
         self.machine.update(BATTLE_TICK_SECONDS)
         self.assertNotIsInstance(self.machine.active, ResultScene)
+        self.machine.handle("dismiss")  # the end picture (notes/native-windows.md 9.3.1)
 
         self.machine.handle("done")  # the debrief screen closes
 
