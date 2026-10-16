@@ -331,3 +331,41 @@ class FoundItemNameTests(unittest.TestCase):
         scene._string = lambda table, text_id, *arguments: ""
 
         self.assertIsNone(scene._item_name(39))
+
+
+class AlliedNpcRowTests(unittest.TestCase):
+    """notes/native-windows.md 9.13.2: the allied NPCs of a G or I battle are troop-page rows like any regiment."""
+
+    def setUp(self):
+        from whshr.debrief_screen import UnitOutcome
+
+        self.campaign = campaign_with(BF003_WON, terms=CashTerms(0))
+        self.campaign.company = (regiment(2), regiment(4, models=20), regiment(3))
+        self.campaign.march_units, self.campaign.march_order = {2, 3}, (2, 3)
+        self.campaign.battle_outcome = {2: UnitOutcome(10, 0, 0), 3: UnitOutcome(0, 0, 10),
+                                        4: UnitOutcome(15, 0, 5, kills=3, experience_gained=1500)}
+        self.campaign.debrief_rows = ((2, False), (4, True), (3, False))
+
+    def test_given_a_battle_with_an_allied_npc_then_it_is_listed_in_row_order_and_not_hired(self):
+        from whshr.debrief import report_for
+
+        units = report_for(self.campaign).units
+
+        self.assertEqual([(unit.whoami, unit.hired) for unit in units], [(2, True), (4, False), (3, True)])
+        self.assertEqual(units[1].gained, 1500)
+
+    def test_given_an_allied_npc_then_done_credits_its_experience_to_its_company_regiment(self):
+        from whshr.debrief import report_for
+
+        company, applied, _ = debrief_rewards.apply_rewards(self.campaign.company, report_for(self.campaign).units, 1,
+                                                            False)
+
+        self.assertEqual(company[1].experience, 1500)
+        self.assertIn("Regiment4: +1500 experience", applied)
+
+    def test_given_no_recorded_rows_then_the_marching_regiments_are_listed_in_march_order(self):
+        from whshr.debrief import report_for
+
+        self.campaign.debrief_rows = ()
+
+        self.assertEqual([unit.whoami for unit in report_for(self.campaign).units], [2, 3])

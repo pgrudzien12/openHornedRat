@@ -194,6 +194,9 @@ class CampaignState:
     # What each marching regiment (by whoami) came out of the latest played battle with; empty when no battle was
     # played (no-battle mode), in which case the debrief shows every marching regiment unharmed.
     battle_outcome: "dict[int, UnitOutcome]" = field(default_factory=dict, repr=False, compare=False)
+    # The troop page's rows of the latest played battle, ``(whoami, allied NPC)`` in the battle's unit order with the
+    # survivors first, then the dead or routed (notes/native-windows.md 9.13.2); empty: the marching order.
+    debrief_rows: tuple[tuple[int, bool], ...] = field(default=(), repr=False, compare=False)
     # The death movie of a campaign the latest played battle ended (whshr.casualties.campaign_over_movie); the debrief
     # is skipped and the movie leads to the main menu. Transient: never saved.
     campaign_over_movie: str | None = field(default=None, repr=False, compare=False)
@@ -226,6 +229,7 @@ class CampaignState:
         self.objective_results = {}
         self.flawless_result = False
         self.battle_outcome = {}
+        self.debrief_rows = ()
         self.campaign_over_movie = None
 
     def is_unit_in_army(self, unit_id: int) -> bool:

@@ -88,7 +88,9 @@ def apply_rewards(company: Iterable[Regiment], units: Iterable[DebriefUnit], mul
                   armour_rewards: bool) -> tuple[tuple[Regiment, ...], list[str], list[str]]:
     """The company after armour rewards, experience (times ``multiplier``) and promotions, with what was applied
     and what was skipped."""
-    fought = {unit.whoami: unit for unit in units}
+    fought: dict[int, DebriefUnit] = {}
+    for unit in units:  # the first unit with a whoami gets its rewards (notes/native-windows.md 9.13.2)
+        fought.setdefault(unit.whoami, unit)
     applied: list[str] = []
     skipped: list[str] = []
     updated: list[Regiment] = []
