@@ -28,32 +28,49 @@ def _shooting_regiment(regiment: Regiment) -> bool:
     return (race is not None and race >> 3 in (3, 4)) or weapon in MISSILE_RANGES
 
 
+def _learn_spell(regiment: Regiment) -> tuple[Regiment, str | None, str | None]:
+    """One wizard level's spell (notes/native-windows.md 9.13.1); returns the regiment, the learned spell's name and a
+    diagnostic.  The college is that of the first college spell in list order (Dispel Magic, the Waaagh and the Skaven
+    spells are skipped); the new spell is uniform over the college's unknown spells, and the list is then re-sorted by
+    casting cost, highest first, keeping the order of equal costs.  A wizard without a college spell learns nothing
+    (undefined in the original; the report recommends a diagnostic)."""
+    known = list(magic.spell_codes(script.unit_view(regiment.raw)["spells"])) if regiment.raw else []
+    if len(known) >= MAX_WIZARD_SPELLS:
+        return regiment, None, None
+    college = next(((code - 1) // 5 for code in known if 1 <= code <= 15), None)
+    if college is None:
+        return regiment, None, f"{regiment.name}: no known spell college for promotion"
+    candidates = [code for code in range(college * 5 + 1, college * 5 + 6) if code not in known]
+    code = random.choice(candidates)
+    ordered = sorted([*known, code], key=lambda spell: -magic.SPELLS[spell].cost)
+    regiment = roster.with_spell(regiment, magic.SPELLS[code].name)
+    regiment = roster.with_spell_order(regiment, [magic.SPELLS[spell].name for spell in ordered])
+    return regiment, magic.SPELLS[code].name, None
+
+
 def promote(regiment: Regiment, before: int, after: int) -> tuple[Regiment, list[str], list[str]]:
     """Apply every promotion whose threshold ``before < T <= after`` crosses; returns the regiment, what applied and
     what was skipped.
 
-    Wizards learn one unknown spell from their existing college at each 1000 XP threshold, up to five spells."""
+    A wizard (the roster's ``wizard`` field) gains, at each 1000 XP threshold, one unknown spell of its college while it
+    knows fewer than five, then +15 price per model (only when the price is not 0) and +7 ``s_pntval`` whether or not
+    a spell was learned (notes/native-windows.md 9.13.1)."""
     notes: list[str] = []
     if regiment.row.wizard:
         crossed = after // 1000 - before // 1000
         if crossed <= 0:
             return regiment, notes, []
-        known = list(magic.spell_codes(script.unit_view(regiment.raw)["spells"])) if regiment.raw else []
-        college = next(((code - 1) // 5 for code in known if 1 <= code <= 15), None)
-        if college is None:
-            return regiment, notes, [f"{regiment.name}: no known spell college for promotion"]
+        skipped: list[str] = []
         for _ in range(crossed):
-            candidates = [code for code in range(college * 5 + 1, college * 5 + 6) if code not in known]
-            if len(known) >= MAX_WIZARD_SPELLS or not candidates:
-                break
-            code = random.choice(candidates)
-            known.append(code)
-            regiment = roster.with_spell(regiment, magic.SPELLS[code].name)
-            regiment = roster.with_points(regiment, regiment.points + PROMOTION_POINTS)
+            regiment, learned, problem = _learn_spell(regiment)
+            if learned is not None:
+                notes.append(f"{regiment.name}: learned {learned}")
+            if problem is not None and problem not in skipped:
+                skipped.append(problem)
             if regiment.row.base_price:  # a wizard who serves for free stays free (as troops do, §1.3)
                 regiment = roster.with_base_price(regiment, regiment.row.base_price + WIZARD_PRICE)
-            notes.append(f"{regiment.name}: learned {magic.SPELLS[code].name}")
-        return regiment, notes, []
+            regiment = roster.with_points(regiment, regiment.points + PROMOTION_POINTS)
+        return regiment, notes, skipped
     for threshold, stat in PROMOTION_THRESHOLDS:
         if not before < threshold <= after:
             continue
