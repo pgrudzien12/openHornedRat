@@ -4,7 +4,7 @@ import unittest
 
 from whshr import debrief_rules
 from whshr.debrief_rules import ENTRIES, evaluate
-from whshr.debrief_screen import DebriefReport, DebriefScreen, DebriefUnit
+from whshr.debrief_screen import BLACK, GREY, RED, DebriefReport, DebriefScreen, DebriefUnit
 from whshr.payments import CashTerms
 
 
@@ -208,6 +208,40 @@ class TroopPageTests(unittest.TestCase):
 
         self.assertEqual(at(layout, "Gone 0 (16)").colour, (255, 0, 0))
         self.assertEqual(at(layout, "Away 10 (16)").colour, (127, 127, 127))
+
+    def test_row_colours_follow_hired_and_destroyed_with_red_overriding_grey(self):
+        # notes/native-windows.md 9.13.4: (hired, models, routed, line colour, number colour)
+        cases = ((True, 5, 0, BLACK, BLACK), (True, 0, 0, RED, BLACK), (False, 5, 0, GREY, BLACK),
+                 (False, 0, 0, RED, GREY), (True, 0, 3, BLACK, BLACK))  # routed models count as present
+        for hired, models, routed, line, numbers in cases:
+            with self.subTest(hired=hired, models=models, routed=routed):
+                view = screen(mode=2, results=BF003_WON,
+                              units=[unit(name="U", models=models, routed=routed, kills=4, hired=hired)])
+                view.next()
+
+                layout = view.layout()
+
+                self.assertEqual(at(layout, f"U {models + routed} (16)").colour, line)
+                self.assertEqual(next(item for item in layout.texts if (item.x, item.y) == (345, 62)).colour, numbers)
+
+    def test_given_no_units_then_p3_draws_no_rows_and_mode_2_pages_on_to_p4(self):
+        results = {**BF003_WON, "Z": (True, (28, 2, 2, 0))}
+        view = screen(mode=2, index=0, results=results, units=[])
+        view.next()
+
+        self.assertEqual((view.page, view.buttons().next, view.buttons().back), ("p3", True, True))
+        self.assertEqual(view.layout().rows, ())
+        self.assertEqual(at(view.layout(), "BKTXT611").y, 50)
+        view.next()
+        self.assertEqual(view.page, "p4")
+        view.back()
+        self.assertEqual(view.page, "p3")
+
+    def test_given_no_units_in_mode_6_then_next_is_disabled_on_p3(self):
+        view = screen(mode=6, results=BF003_WON, units=[])
+        view.next()
+
+        self.assertEqual((view.page, view.buttons().next, view.buttons().back), ("p3", False, True))
 
     def test_given_z_met_then_the_wounded_lost_line_shows_below_the_last_row(self):
         results = {**BF003_WON, "Z": (True, (28, 2, 2, 0))}
