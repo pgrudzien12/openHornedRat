@@ -113,8 +113,8 @@ class SaveStoreTests(unittest.TestCase):
         self.store.load_into(0, fresh)
 
         restored = fresh.company[0]
-        self.assertEqual(script.unit_view(restored.raw)["spells"],
-                         ["GeneralDispel", "BrightFireball", "BrightPiercingBoltsOfBurning"])
+        self.assertEqual(script.unit_view(restored.raw)["spells"],  # in the promotion's cost order
+                         ["BrightPiercingBoltsOfBurning", "GeneralDispel", "BrightFireball"])
         self.assertEqual((restored.row.base_price, restored.points), (25, wizard.points + 7))
         fresh.march_units = {2}
         self.assertIn("BrightPiercingBoltsOfBurning", fresh.marching_army()["armies"][0]["units"][0]["spells"])
