@@ -222,6 +222,15 @@ class DebriefScreen:
         else:
             self.page, self.unit_page = "p3", self.unit_pages - 1
 
+    def unit_at(self, y: float) -> int | None:
+        """The ``whoami`` of the P3 row a Ctrl+click at native ``y`` picks (notes/native-windows.md 9.3.5): row
+        ``floor((y - 50) / (4h))`` of the current unit page, only rows actually present; ``None`` on P2/P4."""
+        if self.page != "p3" or y < 50:
+            return None
+        row = int((y - 50) // (4 * self.body_height))
+        shown = self.report.units[self.unit_page * PAGE_ROWS:(self.unit_page + 1) * PAGE_ROWS]
+        return shown[row].whoami if row < len(shown) else None
+
     def layout(self) -> Layout:
         """The drawing list of the current page."""
         title = Text(self._string("BKTXT", 403, self._mission_name()), 25, align="center")

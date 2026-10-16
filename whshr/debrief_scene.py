@@ -4,6 +4,7 @@ for it (notes/native-windows.md section 9, issue #123)."""
 
 from typing import Any
 
+from .campaign_state import CampaignState
 from .casualties import commit_wounded
 from .debrief import report_for
 from .debrief_screen import DebriefScreen
@@ -78,11 +79,39 @@ class DebriefScene(Scene):
             return None
         if event == "done":
             return self._complete()
+        if self.screen is not None and isinstance(event, tuple) and len(event) == 2 and event[0] == "view-unit":
+            return self._open_roster_book(float(event[1]))
         if self.screen is not None and event == "page:next":
             self.screen.next()
         elif self.screen is not None and event == "page:back":
             self.screen.back()
         return None
+
+    @property
+    def campaign(self) -> CampaignState | None:
+        return self.glue_scene.campaign
+
+    def _open_roster_book(self, y: float) -> Transition | None:
+        """Ctrl+click on a P3 row: the roster book, view only, over the battle's unit list and opened at that unit
+        (notes/native-windows.md 9.3.5). The book shows each regiment as the debrief reports it (models still
+        standing or routed, experience with this battle's gain, wounded by option ``dead``); nothing is written."""
+        from .campaign_scenes import ArmyRecordsScene
+        from .roster import with_experience, with_models
+        from .roster_book import RosterBook
+
+        campaign = self.campaign
+        whoami = self.screen.unit_at(y) if self.screen is not None else None
+        if campaign is None or self.screen is None or whoami is None:
+            return None
+        company = {regiment.whoami: regiment for regiment in campaign.company}
+        units = [unit for unit in self.screen.report.units if unit.whoami in company]
+        if whoami not in {unit.whoami for unit in units}:
+            return None
+        regiments = [with_experience(with_models(company[unit.whoami], unit.shown_models), unit.experience)
+                     for unit in units]
+        wounded = {unit.whoami: unit.wounded(self.screen.dead_percent) for unit in units}
+        model = RosterBook(regiments, coffers=campaign.coffers, reinforcements={}, pays=False, wounded=wounded)
+        return Transition(ArmyRecordsScene(self, whoami, model, view_only=True), "roster book opened (view only)")
 
     def update(self, seconds: float, context: SceneAssets) -> Transition | Quit | None:
         super().update(seconds, context)

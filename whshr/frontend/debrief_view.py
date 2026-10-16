@@ -187,6 +187,9 @@ class DebriefView(NativeScreenView[DebriefScene]):
             self.pressed_button = next((action for rect, action in self.buttons if rect.collidepoint(point)), None)
             if self.pressed_button is not None:
                 self._click_cue(4)
+            elif pygame.key.get_mods() & pygame.KMOD_CTRL:
+                # Ctrl is tested at click time; the scene picks the P3 row (notes/native-windows.md 9.3.5).
+                return (("view-unit", point[1]),)
             self.refresh()
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             point = self._native_point(event.pos)
