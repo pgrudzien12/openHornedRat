@@ -22,6 +22,7 @@ from tkinter import filedialog, messagebox
 
 from whshr.launcher import config as config_module
 from whshr.launcher import discovery, engine_launch, gog_installer, reaction, updates, validate
+from whshr.launcher.external import external_process_environment
 from whshr.launcher.theme import ACCENT, BACKGROUND, TEXT, ImageButton, Theme, scrolled
 from whshr.launcher.battles import list_battles
 from whshr.paths import Installation
@@ -424,7 +425,8 @@ class LauncherApp:
         A poke while the reaction is still showing is ignored.
         """
         if self._on_notice(event.x, event.y) and self._notice is not None:
-            webbrowser.open(self._notice.url)
+            with external_process_environment():  # the browser must not load the bundled libraries
+                webbrowser.open(self._notice.url)
             return
         if self._line_kind == "reaction" or not self._on_face(event.x, event.y):
             return
