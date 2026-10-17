@@ -8,6 +8,7 @@ License:        GPL-3.0-or-later
 URL:            https://github.com/pgrudzien12/openHornedRat
 AutoReqProv:    no
 Requires:       glibc >= 2.34, libglvnd-glx, libX11
+Recommends:     innoextract
 
 %description
 An open-source engine for a legally owned copy of Warhammer: Shadow of the

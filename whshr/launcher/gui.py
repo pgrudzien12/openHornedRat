@@ -10,6 +10,7 @@ back to the main thread through a queue polled with ``Tk.after``.
 """
 
 import queue
+import sys
 import threading
 import tkinter as tk
 from collections.abc import Callable
@@ -18,16 +19,18 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 from whshr.launcher import config as config_module
-from whshr.launcher import discovery, engine_launch, validate
+from whshr.launcher import discovery, engine_launch, gog_installer, validate
 from whshr.launcher.theme import ACCENT, BACKGROUND, TEXT, ImageButton, Theme, scrolled
 from whshr.launcher.battles import list_battles
 from whshr.paths import Installation
+from whshr.user_dirs import default_game_dir
 
 PathArg = str | PathLike[str]
 CheckResult = tuple[bool, list[str], str]  # (passed, report lines, checked path)
+# What the unpacking thread reports: (files done, total), the unpacked installation, or the failure.
+UnpackUpdate = tuple[int, int] | Path | gog_installer.ExtractionFailed
 
 COLUMN_WIDTH = 480  # the right-hand column: screens plus padding
-WRAP_WIDTH = 420  # long discovered paths wrap inside the column instead of widening the window
 VALIDATING_INTERVAL_MS = 400  # how often the "Validating..." dots advance
 PATH_CHARS = 54  # the launch screen shows only the tail of the installation path
 
@@ -53,9 +56,9 @@ class InstallScreen(tk.Frame):
         if self._candidates:
             theme.label(self, "Found automatically:", muted=True).pack(anchor="w", pady=(6, 0))
             for candidate in self._candidates:
-                radio = theme.radio(self, str(candidate), self._selected, str(candidate))
-                radio.configure(wraplength=WRAP_WIDTH, justify="left")
-                radio.pack(anchor="w", fill="x")
+                # One line each, so the log keeps its room; the full path is the selected value.
+                theme.radio(self, shorten_path(candidate, PATH_CHARS - 4), self._selected,
+                            str(candidate)).pack(anchor="w", fill="x")
         else:
             theme.label(self, "No installation found automatically.", muted=True).pack(anchor="w", pady=(6, 0))
 
@@ -65,11 +68,20 @@ class InstallScreen(tk.Frame):
         self._path_entry.pack(side="left", fill="x", expand=True, ipady=4)
         ImageButton(browse_row, theme, "Browse...", self._browse, size="small").pack(side="left", padx=(8, 0))
 
+        self._unpack_queue: queue.Queue[UnpackUpdate] = queue.Queue()
+        self._unpack_button: ImageButton | None = None
+        if sys.platform != "win32":  # Windows runs the GOG installer itself
+            unpack_row = theme.frame(self)
+            unpack_row.pack(fill="x", pady=(6, 0))
+            self._unpack_button = ImageButton(unpack_row, theme, "Unpack...", self._unpack, size="small")
+            self._unpack_button.pack(side="right")
+            theme.label(unpack_row, "Only have GOG's setup_*.exe installer?", muted=True).pack(side="left")
+
         self._continue_button = ImageButton(self, theme, "Validate & continue", self._validate)
         self._continue_button.pack(pady=(10, 0))
         # Fixed width with the text pinned left, so the growing dots do not shift "Validating".
         self._status = tk.Label(self, text="", bg=BACKGROUND, fg=ACCENT, font=theme.heading_font, anchor="w",
-                                width=len(validating_text(2)) + 1)
+                                width=len(unpacking_text(100, 100)) + 1)
         self._status.pack()
         self._validating_step: int | None = None
 
@@ -81,6 +93,74 @@ class InstallScreen(tk.Frame):
         chosen = filedialog.askdirectory(title="Select the WARFB installation directory")
         if chosen:
             self._selected.set(chosen)
+
+    def _unpack(self) -> None:
+        """Unpacks the game from a GOG installer into the engine's data directory, then validates it."""
+        innoextract = gog_installer.find_innoextract()
+        if innoextract is None:
+            messagebox.showerror("Open Horned Rat Launcher",
+                                 "Unpacking the GOG installer needs the innoextract tool, which was not found.\n\n"
+                                 + gog_installer.install_hint())
+            return
+        installer = filedialog.askopenfilename(
+            title="Select the GOG installer",
+            filetypes=[("GOG installer", "setup_*.exe"), ("Windows programs", "*.exe"), ("All files", "*")])
+        if not installer:
+            return
+        target = default_game_dir()
+        if not messagebox.askokcancel("Open Horned Rat Launcher",
+                                      f"Unpack the game files (about 330 MB) into\n{target}?\n\n"
+                                      "Files already there are replaced."):
+            return
+        self._set_busy(True)
+        self._clear_log()
+        self._log_line(f"Unpacking {installer} into {target} ...")
+        self._status.configure(text=unpacking_text(0, 1))
+        threading.Thread(target=self._run_unpack, args=(innoextract, installer, target), daemon=True).start()
+        self.after(100, self._poll_unpack)
+
+    def _run_unpack(self, innoextract: str, installer: str, target: Path) -> None:
+        try:
+            game = gog_installer.extract(innoextract, installer, target,
+                                         lambda done, total: self._unpack_queue.put((done, total)))
+        except gog_installer.ExtractionFailed as error:
+            self._unpack_queue.put(error)
+        except OSError as error:  # e.g. the target is not writable
+            self._unpack_queue.put(gog_installer.ExtractionFailed(str(error)))
+        else:
+            self._unpack_queue.put(game)
+
+    def _poll_unpack(self) -> None:
+        while True:
+            try:
+                update = self._unpack_queue.get_nowait()
+            except queue.Empty:
+                self.after(100, self._poll_unpack)
+                return
+            if isinstance(update, tuple):
+                self._status.configure(text=unpacking_text(*update))
+                continue
+            self._status.configure(text="")
+            self._set_busy(False)
+            if isinstance(update, Path):
+                self._log_line(f"Unpacked into {update}.")
+                self._selected.set(str(update))
+                self._validate()
+            else:
+                for line in str(update).splitlines():
+                    self._log_line(line)
+                messagebox.showerror("Open Horned Rat Launcher", "Unpacking the GOG installer failed; see the log.")
+            return
+
+    def _set_busy(self, busy: bool) -> None:
+        self._continue_button.set_enabled(not busy)
+        if self._unpack_button is not None:
+            self._unpack_button.set_enabled(not busy)
+
+    def _clear_log(self) -> None:
+        self._log.configure(state="normal")
+        self._log.delete("1.0", "end")
+        self._log.configure(state="disabled")
 
     def _log_line(self, line: str) -> None:
         self._log.configure(state="normal")
@@ -100,10 +180,8 @@ class InstallScreen(tk.Frame):
                 "(missing FILE/BINARY or REMOTE/BINARY).",
             )
             return
-        self._continue_button.set_enabled(False)
-        self._log.configure(state="normal")
-        self._log.delete("1.0", "end")
-        self._log.configure(state="disabled")
+        self._set_busy(True)
+        self._clear_log()
         self._log_line(f"Checking {path} ...")
         self._validating_step = 0
         self._animate_validating()
@@ -136,7 +214,7 @@ class InstallScreen(tk.Frame):
         self._status.configure(text="")
         for line in lines:
             self._log_line(line)
-        self._continue_button.set_enabled(True)
+        self._set_busy(False)
         if passed:
             self._log_line("Installation looks good.")
             self._on_validated(path)
@@ -147,6 +225,11 @@ class InstallScreen(tk.Frame):
 def validating_text(step: int) -> str:
     """The busy message at animation ``step``: "Validating" with one, two, then three dots, repeating."""
     return "Validating" + "." * (step % 3 + 1)
+
+
+def unpacking_text(done: int, total: int) -> str:
+    """The progress message while a GOG installer is unpacked: "Unpacking 42%"."""
+    return f"Unpacking {done * 100 // max(total, 1)}%"
 
 
 def shorten_path(path: PathArg, limit: int = PATH_CHARS) -> str:

@@ -24,17 +24,29 @@ SAVE_DIR_ENV = "OSH_SAVE_DIR"
 def default_save_dir(environ: Mapping[str, str] | None = None, platform: str | None = None,
                      home: Path | None = None) -> Path:
     """The platform's per-user data directory for this engine's saves."""
+    return data_dir(environ, platform, home) / "saves"
+
+
+def default_game_dir(environ: Mapping[str, str] | None = None, platform: str | None = None,
+                     home: Path | None = None) -> Path:
+    """Where the launcher unpacks game files from a GOG installer by default (beside the saves)."""
+    return data_dir(environ, platform, home) / "game"
+
+
+def data_dir(environ: Mapping[str, str] | None = None, platform: str | None = None,
+             home: Path | None = None) -> Path:
+    """The platform's per-user data directory for this engine: ``.../ohr``."""
     environ = os.environ if environ is None else environ
     platform = sys.platform if platform is None else platform
     home = Path.home() if home is None else home
     if platform == "win32":
-        return Path(environ.get("APPDATA") or (home / "AppData" / "Roaming")) / APP_NAME / "saves"
+        return Path(environ.get("APPDATA") or (home / "AppData" / "Roaming")) / APP_NAME
     if platform == "darwin":
-        return home / "Library" / "Application Support" / APP_NAME / "saves"
+        return home / "Library" / "Application Support" / APP_NAME
     data_home = environ.get("XDG_DATA_HOME")
     # The XDG spec ignores a relative XDG_DATA_HOME.
     base = Path(data_home) if data_home and Path(data_home).is_absolute() else home / ".local" / "share"
-    return base / APP_NAME / "saves"
+    return base / APP_NAME
 
 
 def resolve_save_dir(explicit: str | PathLike[str] | None = None, environ: Mapping[str, str] | None = None,

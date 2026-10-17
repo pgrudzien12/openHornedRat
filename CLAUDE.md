@@ -107,7 +107,8 @@ whshr/             - unified package and CLI: python3 -m whshr check|extract|cat
   launcher/        - standalone pre-game launcher (python3 -m whshr.launcher), stdlib-only (tkinter):
                      discovery.py (finds an installation across GOG/Steam/Proton default locations),
                      config.py (persists the recognized path), validate.py (quick + full `whshr check`
-                     reuse), battles.py (lists playable battles), engine_launch.py (locates the engine's
+                     reuse), gog_installer.py (unpacks WARFB from GOG's setup_*.exe with innoextract on
+                     Linux/macOS), battles.py (lists playable battles), engine_launch.py (locates the engine's
                      own .venv interpreter and starts `whshr engine` as a subprocess), gui.py (tkinter UI),
                      theme.py (colours, fonts, image buttons, arrow scrollbar), art/ (project-made PNGs, built by
                      tools/launcher_art/build_art.py, which needs Pillow; none of it comes from the game)
