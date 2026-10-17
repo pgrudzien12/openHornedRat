@@ -26,7 +26,7 @@ Please [open an issue](https://github.com/pgrudzien12/openHornedRat/issues) for 
 
 ## What you can play today
 
-With your own copy of the game, you can watch or skip the opening movies, start a campaign, use the caravan and mission screens, and enter battles. You can deploy regiments and give movement, attack, and firing orders. Battles produce results and return to the campaign flow. A campaign can currently reach Nuln, about halfway through the game. This is still a development prototype: expect some rough edges in battles and later campaign missions, and a full campaign has not been played through to the end.
+With your own copy of the game, you can watch or skip the opening movies, start a campaign, use the caravan and mission screens, and enter battles. You can deploy regiments and give movement, attack, and firing orders. Battles produce results and return to the campaign flow. The campaign is playable to the end. This is still a development prototype: expect some rough edges and bugs along the way, in battles and in later campaign missions.
 
 | Area | What to expect |
 |---|---|
@@ -34,10 +34,10 @@ With your own copy of the game, you can watch or skip the opening movies, start 
 | ✅ Opening and menu | Prologue, intro movie, main menu, and mission briefings. |
 | ✅ Campaign screens | Caravan, army records, troop selection, reinforcements, and mission selection are in place; minor bugs may remain. |
 | ✅ Saving and loading | Manual save slots and a loadable automatic slot work during a playthrough. Saves use the engine's own directory (never your game installation), are incompatible with the original game's saves, and may not work across engine versions. |
-| 🟡 Battles | Deployment, movement, charges, ranged attacks, morale and routing, magic, enemy AI, and victory or defeat results are in place. Most battle rules have been recreated with substantial effort to match the original experience; mission scripts also drive battles, though rough edges remain. |
-| 🟡 Campaign progress | You can reach Nuln, about halfway through the campaign; the remainder has not been verified. |
+| ✅ Battles | Deployment, movement, charges, ranged attacks, morale and routing, magic, enemy AI, and victory or defeat results are in place. Most battle rules have been recreated with substantial effort to match the original experience; mission scripts also drive battles, though rough edges remain. |
+| ✅ Campaign progress | The campaign is playable to the end, though some bugs may still turn up along the way. |
 | ✅ Audio and presentation | Opening movies, speech, music, and effects are mostly done. The Options screen saves separate volume levels for music, dialogue, and effects; minor gaps may remain. |
-| 🟡 Packaged downloads | Windows, Debian, RPM, AppImage, and Apple Silicon macOS installers are built and available as prereleases. Installation and play have not yet been tested on players' machines; there is no stable release. |
+| ✅ Packaged downloads | Windows, Debian, RPM, AppImage, and Apple Silicon macOS installers are built and available as prereleases. Installation and play have not yet been tested on players' machines; there is no stable release. |
 
 ## Install a playtest package
 
@@ -127,6 +127,57 @@ innoextract does not create a missing output folder, hence the `mkdir -p`. The g
 
 You can also run the GOG installer with Wine, or as a non-Steam game through Proton. The launcher looks for `GOG Games` inside `~/.wine`, Steam's Proton prefixes, Bottles and Lutris prefixes, and in Heroic's `~/Games/Heroic`.
 
+## Battle controls
+
+| Action | Control |
+|---|---|
+| Select a regiment | Left-click it |
+| Move, attack, or fire | Select a player regiment, click the matching command button, then click a destination or target |
+| Direct move or attack | With a player regiment selected, right-click the ground or an enemy regiment |
+| Deselect | Escape |
+| Pan camera | Arrow keys, WASD, or right-drag |
+| Rotate camera | Q/E or middle-drag |
+| Tilt camera | Page Up / Page Down |
+| Zoom | Mouse wheel |
+| Reset camera | Home |
+
+Battle sessions create a JSON Lines log in `logs/` by default. Attach the relevant log to a bug report when possible; it helps us reproduce deterministic battle behaviour. You can begin directly in the first battle for a quick test with `--battle BF001`.
+
+## Automated battle captures
+
+These tools need a source checkout; see [Run it from source](#run-it-from-source) below.
+
+`battle-auto` keeps one hidden battle open and accepts one JSON command per line on stdin. It returns
+one JSON response per command on stdout. It uses the same battle scene and GPU view as the normal
+engine and advances one 100 ms simulation update per requested tick. For example:
+
+```sh
+.venv/bin/python -m whshr battle-auto /path/to/WARFB --battle BF001
+{"op":"state"}
+{"op":"capture","path":"samples/bf001-start.png"}
+{"op":"order","event":["start_battle"]}
+{"op":"order","event":["select","Grudgebringer<Infantry"]}
+{"op":"order","event":["attack","Clanrat_Warriors"]}
+{"op":"step","ticks":20}
+{"op":"capture","path":"samples/bf001-20.png"}
+```
+
+The `state` response lists each regiment's side, position, figures, ranks, and orders. `camera`
+accepts `{"op":"camera","values":[225,45,120]}` (yaw, pitch, distance); `target` accepts
+`{"op":"target","point":[500,500]}` in battlefield coordinates. Closing stdin ends the session.
+The automated camera is for captures; battle rules use the same camera-independent state as
+`battle-replay`, so camera changes do not alter the recorded simulation. Captures and battle logs
+contain derived game data and belong in ignored local directories.
+
+For a repeatable example pilot, run `.venv/bin/python -m scripts.auto_play_battle --ticks 200`. It reads
+the launcher-configured installation, orders active player regiments toward their nearest visible enemy,
+and writes frames, a battle log, and final state under ignored `samples/auto-play/`.
+
+Direct `--battle` entry reads the battle's own `loadmerc` `.MRC` file. It supplies the player
+units in file order and their initial figures and ranks. A battle reached through a running campaign
+instead receives the selected campaign marching army, preserving its current roster and marching order.
+The `state.player_army` field identifies which source the automated session used.
+
 ## Run it from source
 
 ### You need
@@ -179,55 +230,6 @@ The window opens with the prologue and intro. Any key or click skips the intro; 
 
 The **Options** button opens audio levels for Music, Dialogue, and Sound Effects. Each cycles through Off, 25%,
 50%, 75%, and 100%; OK saves the levels in the engine's save directory, and Cancel discards the edits.
-
-### Battle controls
-
-| Action | Control |
-|---|---|
-| Select a regiment | Left-click it |
-| Move, attack, or fire | Select a player regiment, click the matching command button, then click a destination or target |
-| Direct move or attack | With a player regiment selected, right-click the ground or an enemy regiment |
-| Deselect | Escape |
-| Pan camera | Arrow keys, WASD, or right-drag |
-| Rotate camera | Q/E or middle-drag |
-| Tilt camera | Page Up / Page Down |
-| Zoom | Mouse wheel |
-| Reset camera | Home |
-
-Battle sessions create a JSON Lines log in `logs/` by default. Attach the relevant log to a bug report when possible; it helps us reproduce deterministic battle behaviour. You can begin directly in the first battle for a quick test with `--battle BF001`.
-
-### Automated battle captures
-
-`battle-auto` keeps one hidden battle open and accepts one JSON command per line on stdin. It returns
-one JSON response per command on stdout. It uses the same battle scene and GPU view as the normal
-engine and advances one 100 ms simulation update per requested tick. For example:
-
-```sh
-.venv/bin/python -m whshr battle-auto /path/to/WARFB --battle BF001
-{"op":"state"}
-{"op":"capture","path":"samples/bf001-start.png"}
-{"op":"order","event":["start_battle"]}
-{"op":"order","event":["select","Grudgebringer<Infantry"]}
-{"op":"order","event":["attack","Clanrat_Warriors"]}
-{"op":"step","ticks":20}
-{"op":"capture","path":"samples/bf001-20.png"}
-```
-
-The `state` response lists each regiment's side, position, figures, ranks, and orders. `camera`
-accepts `{"op":"camera","values":[225,45,120]}` (yaw, pitch, distance); `target` accepts
-`{"op":"target","point":[500,500]}` in battlefield coordinates. Closing stdin ends the session.
-The automated camera is for captures; battle rules use the same camera-independent state as
-`battle-replay`, so camera changes do not alter the recorded simulation. Captures and battle logs
-contain derived game data and belong in ignored local directories.
-
-For a repeatable example pilot, run `.venv/bin/python -m scripts.auto_play_battle --ticks 200`. It reads
-the launcher-configured installation, orders active player regiments toward their nearest visible enemy,
-and writes frames, a battle log, and final state under ignored `samples/auto-play/`.
-
-Direct `--battle` entry reads the battle's own `loadmerc` `.MRC` file. It supplies the player
-units in file order and their initial figures and ranks. A battle reached through a running campaign
-instead receives the selected campaign marching army, preserving its current roster and marching order.
-The `state.player_army` field identifies which source the automated session used.
 
 ## Original game required
 
