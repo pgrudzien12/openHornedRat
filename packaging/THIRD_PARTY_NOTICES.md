@@ -131,7 +131,9 @@ LGPL-2.1-or-later rather than LGPL-2.1-only.
   Agreement** (https://docs.python.org/3/license.html), a permissive license compatible with
   GPLv3. Its complete license and copyright notices are in
   `packaging/licenses/third-party/LICENSE.python.txt`
-  ([CPython 3.12.12 `LICENSE`](https://raw.githubusercontent.com/python/cpython/v3.12.12/LICENSE)).
+  ([CPython 3.12.12 `LICENSE`](https://raw.githubusercontent.com/python/cpython/v3.12.12/LICENSE), bundled by the
+  Linux packages; the Windows and macOS packages bundle CPython 3.12.10, whose
+  [CPython 3.12.10 `LICENSE`](https://raw.githubusercontent.com/python/cpython/v3.12.10/LICENSE) is the same text).
 - **Tcl/Tk** (`_tkinter`'s libraries, used by the launcher window) is under the **Tcl/Tk
   License**, a BSD-style permissive license (https://www.tcl-lang.org/software/tcltk/license.html).
   Linux's uv Python bundle uses Tcl/Tk 9.0; `LICENSE.tcl-9.0.txt` and `LICENSE.tk-9.0.txt`
