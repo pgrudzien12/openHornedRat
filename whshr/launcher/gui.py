@@ -32,9 +32,13 @@ PATH_CHARS = 54  # the launch screen shows only the tail of the installation pat
 
 
 class InstallScreen(tk.Frame):
-    """Lets the user pick an installation path (discovered or manual) and validates it."""
+    """Lets the user pick an installation path (discovered or manual) and validates it.
 
-    def __init__(self, parent: tk.Misc, theme: Theme, on_validated: Callable[[str], None]) -> None:
+    ``current`` is the path already in use, if any; it starts selected so changing it begins from there.
+    """
+
+    def __init__(self, parent: tk.Misc, theme: Theme, on_validated: Callable[[str], None],
+                 current: PathArg | None = None) -> None:
         super().__init__(parent, bg=BACKGROUND)
         self.pack(fill="both", expand=True)
         self._on_validated = on_validated
@@ -43,7 +47,8 @@ class InstallScreen(tk.Frame):
 
         theme.label(self, "Game installation", heading=True).pack(anchor="w")
 
-        self._selected = tk.StringVar(value=str(self._candidates[0]) if self._candidates else "")
+        initial = str(current) if current else str(self._candidates[0]) if self._candidates else ""
+        self._selected = tk.StringVar(value=initial)
         if self._candidates:
             theme.label(self, "Found automatically:", muted=True).pack(anchor="w", pady=(6, 0))
             for candidate in self._candidates:
@@ -263,7 +268,8 @@ class LauncherApp:
 
     def _show_install_screen(self) -> None:
         self._clear()
-        InstallScreen(self._container, self.theme, on_validated=self._on_installation_chosen)
+        InstallScreen(self._container, self.theme, on_validated=self._on_installation_chosen,
+                      current=self.config.installation_path)
 
     def _on_installation_chosen(self, path: PathArg) -> None:
         self.config.installation_path = str(path)
