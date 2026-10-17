@@ -286,6 +286,12 @@ class Regiment:
     leader_uid: int | None = None  # stable figure identity; never replaced after its death
     move: int | None = None  # tabletop M, distinct from world-space speed
     leader_name: str | None = None
+    # The HUD's unit-information lines (notes/battle_statistics_panel.md "Unit-information text block"): the unit and
+    # leader names split at their '<' line break, and the `s_weponame` codes of the troop and leader blocks.
+    name_lines: tuple[str, ...] = ()
+    leader_name_lines: tuple[str, ...] = ()
+    weapon_name: int | None = None
+    leader_weapon_name: int | None = None
     leader_move: int | None = None
     leader_bs: int | None = None
     leader_ws: int | None = None
@@ -811,6 +817,14 @@ def _shooting_code(unit: Mapping[str, Any]) -> int | None:
     return leaders or own
 
 
+def name_lines(raw: str | None) -> tuple[str, ...]:
+    """A script name as the HUD lays it out: '<' is a line break, '_' a space
+    (notes/battle_statistics_panel.md "Unit-information text block")."""
+    if not raw:
+        return ()
+    return tuple(part.replace("_", " ") for part in str(raw).split("<", 1))
+
+
 def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
     """Decode a regiment's speed, WS/BS/S/T/W/I/A/Ld, armour, weapon and missile stats from its raw script
     setstats lines (game_rules.md section 3), stdlib-only (no GAMEF.DLL access needed at battle time:
@@ -839,6 +853,10 @@ def _decode_combat_profile(unit: Mapping[str, Any]) -> dict[str, Any]:
         "strength": int(profile.get("S", DEFAULT_PROFILE["S"])),
         "move": int(profile["M"]) if "M" in profile else None,
         "leader_name": leader.get("name"),
+        "name_lines": name_lines(unit.get("id") or unit.get("name")),
+        "leader_name_lines": name_lines(leader.get("id") or leader.get("name")),
+        "weapon_name": stat_int(fields, "s_weponame"),
+        "leader_weapon_name": stat_int(stat_fields(leader.get("stats") or {})[0], "s_weponame") if leader else None,
         "leader_move": int(leader_profile["M"]) if "M" in leader_profile else None,
         "leader_bs": int(leader_profile["BS"]) if "BS" in leader_profile else None,
         "leader_ws": int(leader_profile["WS"]) if "WS" in leader_profile else None,

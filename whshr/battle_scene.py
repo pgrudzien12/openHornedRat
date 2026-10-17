@@ -20,6 +20,7 @@ from .scenes import Quit, Scene, SceneAssets, SceneEvent, SceneManifest, Transit
 
 BATTLE_TICK_SECONDS = 0.1  # the original battle clock ticks every 100 ms
 FIRST_BATTLE = AssetId("vanilla", "battle", "bf001")
+HUD_FONT = AssetId("vanilla", "font", "pctexta")  # the battle's second font (notes/battle_statistics_panel.md)
 
 
 class BattleScene(Scene):
@@ -35,6 +36,8 @@ class BattleScene(Scene):
     field: Battlefield
     battle: Battle
     initial_models: dict[str, int]
+    hud_font: Any = None  # parsed PCTEXTA.FON, or None
+    weapon_texts: dict[int, str] = {}  # BRTXT strings by id; replaced per instance on enter
 
     def __init__(self, battle: AssetId = FIRST_BATTLE, log_dir: str | PathLike[str] | None = None, seed: int = DEFAULT_SEED,
                  glue_scene: GlueScene | None = None, request_id: int | None = None,
@@ -83,6 +86,11 @@ class BattleScene(Scene):
             regiment.model_positions()
         if context.glue is not None:
             self.battle.text_resources = context.glue.strings("GMTXT")
+            self.weapon_texts = context.glue.strings("BRTXT")  # the HUD's weapon names (BRTXT 200 + s_weponame)
+        try:
+            self.hud_font = context.load(HUD_FONT)  # the unit-information block's battle font
+        except Exception:
+            self.hud_font = None  # a synthetic or partial installation: the view keeps its fallback font
         self.initial_models = {identifier: regiment.models for identifier, regiment in self.battle.regiments.items()}
         self.no_battle = bool(getattr(context, "no_battle", False))
         if self.no_battle:
