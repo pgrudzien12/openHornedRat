@@ -55,23 +55,18 @@ def engine_dependencies_available(python_path: PathArg, modules: Sequence[str] =
 
 @dataclass(frozen=True)
 class LaunchOptions:
-    """Optional switches chosen on the launcher's options tab."""
+    """Optional switches chosen on the launcher's launch screen (they set the engine's environment)."""
 
-    no_battles: bool = False
     trace: bool = False
 
 
-def build_command(installation: PathArg, battle_id: str | None = None, options: LaunchOptions | None = None,
-                  python_path: PathArg | None = None) -> list[str]:
+def build_command(installation: PathArg, battle_id: str | None = None, python_path: PathArg | None = None) -> list[str]:
     """The ``whshr engine`` command line: a normal start, or a direct battle when ``battle_id`` is given."""
-    options = options or LaunchOptions()
     executable = str(python_path or find_engine_python())
     command = ([executable, "--engine", str(installation)] if getattr(sys, "frozen", False) else
                [executable, "-c", ENGINE_BOOTSTRAP.format(root=str(REPOSITORY_ROOT)), "engine", str(installation)])
     if battle_id:
         command += ["--battle", battle_id]
-    if options.no_battles:
-        command.append("--no-battle")
     return command
 
 
@@ -91,7 +86,7 @@ def launch_engine(installation: PathArg, battle_id: str | None = None, options: 
                   python_path: PathArg | None = None) -> subprocess.Popen[bytes]:
     """Starts the engine as an independent process (a normal game, or one battle)."""
     return subprocess.Popen(
-        build_command(installation, battle_id, options, python_path),
+        build_command(installation, battle_id, python_path),
         cwd=None if getattr(sys, "frozen", False) else str(REPOSITORY_ROOT),
         env=build_environment(options),
     )
