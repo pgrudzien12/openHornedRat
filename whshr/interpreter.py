@@ -187,9 +187,6 @@ class UnitScriptState:
     # CallInterruptScript; None when not currently inside an interrupt call
     outer_returns: list[tuple[int, int]] = field(default_factory=lambda: list[tuple[int, int]]())  # interrupted points of the handlers a nested
     # handler is running inside (innermost last); notes/unit_script_control.md 1, "Event handlers can nest"
-    last_attack_target: str | None = None  # this unit's own attack_target as of the last tick, used
-    # by ScriptInterpreter.raise_charge_events to detect a *fresh* charge (event 0x07) rather than
-    # re-raising it every tick the same charge continues
 
     # Script metadata (loaded once at init)
     script_dll: behaviour.ScriptDll | None = None  # for script lookup
@@ -495,52 +492,6 @@ class ScriptInterpreter:
         unit.collision_recheck = False
         state.contact_record = other.identifier
         self.event_bus.queue_event(unit.identifier, Event(code=0x0B), checked=True)
-
-    def raise_charge_events(self) -> None:
-        """Queue event 0x07 ("you are being charged") to any regiment an attacker has closed to
-        within actual charge reach of (game_rules.md event table: 0x07 = charge start; "Charge":
-        a real charge reaches at most `12 * (s_rlmv + 1)` units -- a short final rush, not the whole
-        approach). NOT the moment `attack_target` is merely set: this engine (a documented
-        simplification, `engine.py`'s `CLOSING_K` note) drives the entire approach through
-        `attack_target` at charging speed from wherever the AI first picks a target, which can be
-        the length of the battlefield -- so gating on `attack_target` alone braced the target for
-        the whole approach (tens of real seconds) instead of only the real charge's short final
-        rush, making every targeted player regiment uncommandable for most of the battle.
-
-        Called once per tick from Battle.tick(), after every unit's script has run -- centralized
-        here rather than duplicated in every opcode that can set attack_target (ChargeTarget,
-        AttackNearestEnemy and its many variants, AttackTagged, LibraryBehaviors.track_threat, ...)
-        so they all raise it consistently. Fires once per fresh charge that has reached this range
-        (None/other -> this target), not every tick the same charge continues, and fires again if
-        the same target is charged a second time after an intervening gap (target lost, then
-        re-acquired) -- `last_attack_target` is left untouched while still out of reach, so entering
-        reach is what marks the notification as sent, not merely acquiring the target.
-
-        This is what a charged unit's own event-handling frame (GetEvent; CaseEvent 7; ...) reacts
-        to -- typically a fear/terror test (op 0x42, FearWhenCharged) then bracing in place, per
-        game_rules.md's documented default handling for this event. Without this, a charged unit's
-        script never learns it is being charged at all and keeps running whatever it was already
-        doing (e.g. its own independent TrackThreat-driven approach), which looked like both units
-        charging each other instead of the charged one holding -- exactly the discrepancy from the
-        original this was written to fix.
-        """
-        for attacker_id, attacker in self.battle.regiments.items():
-            state = self.event_bus.unit_states.get(attacker_id)
-            if state is None:
-                continue
-            target_id = attacker.attack_target
-            if target_id is None or not attacker.active:
-                state.last_attack_target = None
-                continue
-            target = self.battle.regiments.get(target_id)
-            if target is None or not target.active:
-                continue
-            distance = math.hypot(target.x - attacker.x, target.y - attacker.y)
-            if distance > attacker.charge_reach:
-                continue  # still closing, not yet within an actual charge's reach
-            if target_id != state.last_attack_target:
-                self.event_bus.queue_event(target_id, Event(code=0x07, source=attacker_id), route="self")
-            state.last_attack_target = target_id
 
     @staticmethod
     def _preempt_for_pending_event(state: UnitScriptState) -> None:
@@ -2555,7 +2506,10 @@ class ScriptInterpreter:
         At a regiment it clears fear-passed and then runs the fear/terror test (notes/terror_contact_charge.md 3):
         a terror causer, or a failed fear test, refuses the charge with "My men fear the beast!" (React 5) and the
         unit halts and re-forms, so no charge ever starts at a terror causer; a passed fear test leaves
-        fear-passed on, which skips the contact test later.
+        fear-passed on, which skips the contact test later. An accepted charge at a regiment queues event 0x07
+        ("you are being charged") to it from this script step; 0x07 is never sent from movement or the collision
+        pass, so a contact 0x0B from the charger's same run is newer and handled first (notes/terror_contact_charge.md
+        8.5).
         """
         regiment = self.battle.regiments.get(unit_id)
         state.cond_flags = False
@@ -2582,6 +2536,7 @@ class ScriptInterpreter:
                 regiment.attack_target = target_id
                 self._hand_over_to_charge(regiment)
                 state.cond_flags = True
+                self.event_bus.queue_event(target_id, Event(code=0x07, source=unit_id), checked=True)
                 # Battle.tick() handles the actual charging movement
         return state.pc + 1
 

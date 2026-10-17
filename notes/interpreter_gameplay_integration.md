@@ -127,9 +127,10 @@ Landed against this document's "Proposed" section:
     of an event handler: return to the interrupted script or apply a pending switch").
   - `ScriptInterpreter.raise_charge_events()`: nothing in the engine ever raised event 0x07 ("you
     are being charged", per game_rules.md's event table) in the first place, so even with the above
-    working, a charged unit's script had nothing to react to. Now called once per tick from
-    `Battle.tick()`, after every unit's script has run: queues event 0x07 to a regiment the moment
-    another regiment's `attack_target` freshly names it (not every tick the same charge continues).
+    working, a charged unit's script had nothing to react to. Since superseded (issue #343,
+    `terror_contact_charge.md` 8.5): 0x07 is sent only from script steps -- `ChargeTarget` when a
+    charge at a regiment is accepted, the contact handler's redirect and first-contact branches, and
+    `ReactToThreat` -- never centrally after the scripts, so a charger's contact 0x0B is handled first.
     Once queued, the target's own already-implemented event-handling opcodes (`GetEvent`,
     `CaseEvent`, `FearWhenCharged`, `SwitchScript`, ...) drive whatever reaction its real script
     data specifies -- no "freeze" behavior is hardcoded here, it should fall out of the real
