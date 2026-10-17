@@ -281,6 +281,98 @@ off.
 | C `CantBreak`, queue [0x0D] | C's run | `React 7`, no switch from this arm, not broken; a later 0x0D gives `React 7` again |
 | C broken, 0x0C queued later | C's run | silent |
 
+### 8.5 Follow-up: event order at contact (the engine trace of BF026, update 2526)
+
+The engine trace handled C's events in this order (head first):
+
+1. 0x07 (W) → `FearWhenCharged` → 0x0D;
+2. 0x0D → shout, pending 162;
+3. 0x0B (the reciprocal from W's collision pass) → `Query 8` engages C;
+4. 0x0A → `SwitchScript 165`, which replaces 162.
+
+The pass ends with C unbroken and in melee on 165. C's own collision pass then queues a new 0x0D, which shouts again
+on the next tick. In the original this order cannot arise. Each step below would behave the same if that order did
+happen; the difference is the order itself.
+
+**Where 0x07 is sent.** 0x07 is only ever sent during a **script step** (the sender's, or for `ReactToThreat` the
+receiver's own), never from movement or from a collision pass. The senders are:
+
+| Sender's script step | Condition | Target's later `FearWhenCharged` |
+|---|---|---|
+| `ChargeTarget` starts a charge (`game_rules.md` "Fear and terror", situation 2) | charge accepted | sender charging → fear/terror test runs |
+| `ReactToThreat` (the **reacting unit's own** script step, AI handler on event 3): the threat is charging this unit | the unit is not charging, pursuing, broken or braced, and not in melee | the unit queues 0x07 **to itself**, source = the threat (charging) → test runs in the same pass |
+| the contact handler (`Query 8`, while the sender handles **its own** 0x0B): sender charging (or pursuing) and the touched enemy is **not** its target → the charge is redirected to the touched enemy (0x1A to the old target) | — | sender charging → test runs |
+| the contact handler: sender not charging, not in melee, **no target**, not broken → sender's target := touched enemy ("first contact", `game_rules.md` "Engagement") | no engagement yet | sender **not** charging → `FearWhenCharged` does nothing (condition false, no test) |
+
+A charger that touches **its own target** engages; it sends no 0x07.
+
+**Why the order cannot arise.**
+1. Within one unit's run, the steps are script → movement → collision pass. So a 0x07 and a reciprocal 0x0B from
+   the same sender's run reach C with the **0x0B newer**. LIFO then hands C the 0x0B **first**.
+2. Every unit runs once per tick, and C's handler drains its whole queue (§8.1). C therefore always runs between W's
+   collision pass and W's next script step. W's reciprocal 0x0B is gone before W's next 0x07 can be queued.
+3. Hence, in C's pass, an engagement from W's 0x0B (and its 0x0A → 165) comes **before** the 0x0D that W's 0x07
+   produces. The switch recorded last is 162.
+4. A 0x0D from C's **own** collision pass is queued just before that pass's own 0x0B. It lies **under** its 0x0B and
+   is handled after any engagement that 0x0B makes. 162 is again recorded last.
+
+Here, "each step would behave the same" means:
+
+- `Query 8` is not refused because a switch is pending.
+- 0x0A's `SwitchScript 165` does replace a pending 162: the `SwitchScript` family does not lock, and only
+  `IfSwitchScriptHigh` does (`unit_script_control.md` §1).
+- `RoutAllowed` does not look at the pending switch.
+
+Two edge cases could still put a fresh 0x0D above an engaging 0x0B. Both are 🟡 rare and not constructed in shipped
+data:
+
+- two fear causers in the same tick: W (any monster) touches C, then a **second** terror or fear causer X starts
+  a charge at C before C runs;
+- an AI unit whose handler meets event 3 (`ReactToThreat`) above an older 0x0B: the self-queued 0x07 → 0x0D →
+  162 comes first, then the older 0x0B engages and its 0x0A → 165 replaces 162.
+
+**The contact fear test while in melee (question C).** The test in the collision pass has **no** guard for "in
+melee", "already engaged with this enemy" or "same grid", and no first-contact latch. When C's collision pass runs
+with C overlapping a terror causer, and C is not broken with fear-passed off, the test refuses again, sets the target
+and queues 0x0D, every time. The pass, however, runs only while C's **re-check** state is on (`fanatic_collisions.md`;
+`game_rules.md` unit tick).
+
+- A unit in melee does not translate, so its own movement does not arm re-check.
+- Another unit's pass arms the touched unit's re-check only if that mover is **not** in melee.
+- So in a settled melee the test does not repeat every tick. It repeats when something re-arms re-check: a
+  moving unit's pass touching C, a turn or footprint change, a push, the contact handler's first-contact and
+  redirect branches.
+- In practice none of this matters, because C is broken by the end of the pass that handles the first 0x0D (§8.1).
+
+**Answer to question D.** In the original, this BF026 situation does **not** shout on two consecutive ticks. C routs
+in the tick in which it first handles the fear 0x0D. That tick can carry **two** shouts in one pass, when both a
+0x07-derived 0x0D and its own pass's 0x0D are queued (trace below). The engine needs two rules:
+
+- (a) send 0x07 only from the sender's script step (`ChargeTarget`, `ReactToThreat`, contact handling of the
+  sender's own 0x0B). Never send it from movement or from the collision pass.
+- (b) the collision pass queues its 0x0D **before** its 0x0B.
+
+With both, the switch to 162 is always recorded after any 0x0A of the same pass.
+
+Original order, the BF026 shape. W = Wyvern, charging with no target (e.g. `ChargeForward`) or with another target.
+Unit order W before C. C idle, fear-passed off. Lists are written **head first**.
+
+| Before | Action | After |
+|---|---|---|
+| tick t: W overlaps C | W's collision pass | 0x0B to W; reciprocal 0x0B to C; C re-check on. C queue [0x0B] |
+| C queue [0x0B], C no target | C's run, tick t | 0x0B → `Query 8`, first contact: C.target := W, 0x07 to **W** (W's `FearWhenCharged` later does nothing: C is not charging). C not engaged |
+| C overlapping W, re-check on | C's collision pass, tick t | fear test refused (terror): C.target W, **0x0D**; then contact: 0x0B to C (no reciprocal: W is a monster). C queue [0x0B, 0x0D] |
+| W queue [0x0B, 0x07(C)] | W's run, tick t+1 | 0x0B → `Query 8`: W charging, C is not its target → redirect: W.target := C, **0x07 to C**. 0x07 → nothing. W's pass: 0x0B to W, reciprocal 0x0B to C. C queue [0x0B(W), 0x07(W), 0x0B(own), 0x0D(own)] |
+| that queue | C's run, tick t+1 | 0x0B(W): C.target = W → engagement, C in melee, 0x0A → `SwitchScript 165`. 0x07: W charging → terror, C in melee → 0x0D queued (condition false, no 161). 0x0D → **shout 1**, 162 replaces 165. 0x0B(own): already on the grid, nothing. 0x0D(own) → `RoutAllowed` still true → **shout 2** (same pass), 162. `ReturnInterrupt` → 162 → **C broken** |
+| C broken | C's collision pass, tick t+1 | no fear test |
+| C broken, any later 0x0D/0x0C | later ticks | silent |
+
+| Before | Action | After |
+|---|---|---|
+| (engine order, impossible in the original) C queue [0x07(W), 0x0D, 0x0B(W)] | C's run | 0x07 → 0x0D (head), shout, 162; 0x0D → shout, 162; 0x0B → engage, 0x0A → 165 **replaces 162**; ends on 165, unbroken. This is the reported bug; fix the send order, not the switch rules |
+| C in melee with W, not broken, fear-passed off, re-check on | C's collision pass | refused again: 0x0D queued (no latch, no in-melee guard) |
+| same, re-check off | tick | no pass, no 0x0D |
+
 ## 🟡 Uncertainties
 
 - Whether a cast already in its animation finishes when 0x30 switches a busy-casting causer to 163 (§2).
