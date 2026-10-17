@@ -61,12 +61,12 @@ class BuildCommandTests(unittest.TestCase):
         self.assertEqual(command, ["py", "-m", "whshr", "engine", "/game"])
 
     def test_given_a_battle_and_all_options_when_building_the_command_then_every_flag_is_present(self):
-        options = engine_launch.LaunchOptions(no_battles=True, trace=True, skip_intro=True)
+        options = engine_launch.LaunchOptions(no_battles=True, trace=True)
 
         command = engine_launch.build_command("/game", "BF001", options, python_path="py")
 
         self.assertEqual(command, ["py", "-m", "whshr", "engine", "/game", "--battle", "BF001",
-                                   "--skip-intro", "--no-battle"])
+                                   "--no-battle"])
 
     def test_frozen_launcher_starts_the_bundled_engine_mode(self):
         with patch.object(sys, "frozen", True, create=True):

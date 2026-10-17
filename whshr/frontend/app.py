@@ -104,7 +104,7 @@ class FrameProfile:
               file=sys.stderr)
 
 
-def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), skip_intro: bool = False,
+def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800),
         hidden: bool = False, frames: int | None = None, screenshot: str | PathLike[str] | None = None,
         frame_time: float | None = None, battle: str | None = None, camera: Sequence[float] | None = None,
         log_dir: str | PathLike[str] | None = None, seed: int = DEFAULT_SEED, glue_program: str | None = None,
@@ -141,7 +141,7 @@ def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), 
         campaign_log = campaign_log_module.CampaignLogger(campaign_log_module.default_log_path(campaign_log_dir))
         context.campaign_log = campaign_log
         campaign_log.session_start(no_battle=no_battle, save_dir=save_dir, glue_program=glue_program,
-                                   battle=battle, skip_intro=skip_intro, seed=seed,
+                                   battle=battle, seed=seed,
                                    battle_log_dir=log_dir, trace_glue=campaign_log.trace_glue)
     ctx = open_window(size, hidden)
     gpu = Gpu(ctx, size)
@@ -192,9 +192,6 @@ def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800), 
         sync_profile()
         return next_view
 
-    if skip_intro and not battle:
-        machine.handle("skip")
-        view = synchronise(view)
     frame, last, overlay_time, running, show_overlay = 0, time.perf_counter(), float("-inf"), True, False
     battle_log_path = None  # tracked across scene transitions so it survives a battle -> result switch
     try:

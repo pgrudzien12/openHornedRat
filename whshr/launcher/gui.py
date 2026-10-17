@@ -296,7 +296,6 @@ class LaunchScreen(tk.Frame):
 
         self._no_battles = tk.BooleanVar(value=False)
         self._trace = tk.BooleanVar(value=True)
-        self._skip_intro = tk.BooleanVar(value=False)
 
         header = theme.frame(self)
         header.pack(fill="x")
@@ -309,13 +308,12 @@ class LaunchScreen(tk.Frame):
 
         theme.label(self, "Options", heading=True).pack(anchor="w", pady=(16, 4))
         for text, variable in (("No battles (every battle settles as an instant win)", self._no_battles),
-                               ("Trace mission scripts (WHSHR_TRACE_SCRIPTS=1)", self._trace),
-                               ("Skip intro (start in the main menu)", self._skip_intro)):
+                               ("Trace mission scripts (WHSHR_TRACE_SCRIPTS=1)", self._trace)):
             theme.check(self, text, variable).pack(anchor="w", pady=(2, 0))
 
     def options(self) -> engine_launch.LaunchOptions:
         return engine_launch.LaunchOptions(
-            no_battles=self._no_battles.get(), trace=self._trace.get(), skip_intro=self._skip_intro.get(),
+            no_battles=self._no_battles.get(), trace=self._trace.get(),
         )
 
     def _start_game(self) -> None:

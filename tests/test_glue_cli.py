@@ -12,7 +12,7 @@ class GlueCliTests(unittest.TestCase):
             ])
 
         self.assertEqual(result, 0)
-        self.assertIn("FLOWSCRIPTBP01", run.call_args.args)
+        self.assertEqual(run.call_args.kwargs["glue_program"], "FLOWSCRIPTBP01")
 
     def test_engine_rejects_battle_and_glue_program_together(self):
         with self.assertRaises(SystemExit):
@@ -22,7 +22,7 @@ class GlueCliTests(unittest.TestCase):
         with patch("whshr.frontend.app.run", return_value={"frames": 1, "ticks": 1, "scene": "GlueScene", "quit": None}) as run:
             __main__.main(["engine", "/tmp", "--hidden", "--frames", "1", "--profile-frames"])
 
-        self.assertIs(run.call_args.args[-1], True)
+        self.assertIs(run.call_args.kwargs["profile_frames"], True)
 
     def test_engine_debug_option_reaches_the_frontend_runner(self):
         with patch("whshr.frontend.app.run", return_value={"frames": 1, "ticks": 1, "scene": "GlueScene", "quit": None}) as run:
