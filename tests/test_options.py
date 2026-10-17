@@ -8,6 +8,7 @@ import unittest
 
 from whshr.audio_settings import AudioSettings, audio_settings
 from whshr.campaign_scenes import MainMenuScene
+from whshr.difficulty import difficulty_setting
 from whshr.glue_content import GlueContent
 from whshr.glue_runtime import GlueInput
 from whshr.glue_scene import GlueScene
@@ -33,26 +34,27 @@ class OptionsTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         audio_settings.configure(None)
+        difficulty_setting.configure(None)  # opening Options with a save directory sets the shared level too
         self.directory.cleanup()
 
     def test_saved_levels_survive_reopening_and_cancel_discards_edits(self) -> None:
         parent = Scene()
         machine = SceneMachine(OptionsScene(parent), self.context)
-        machine.handle(("options:cycle", "music"))  # 100 -> Off
+        machine.handle(("options:cycle", "music"))  # a new player's 25 -> 50
         machine.handle(("options:cycle", "dialogue"))
         machine.handle("options:ok")
 
         self.assertIs(machine.active, parent)
         self.assertEqual(json.loads((self.context.save_dir / "options.json").read_text()),
-                         {"music": 0, "dialogue": 0, "effects": 100})
-        self.assertEqual(audio_settings.volume("music"), 0)
+                         {"music": 50, "dialogue": 50, "effects": 25})
+        self.assertEqual(audio_settings.volume("music"), 0.5)
 
         reopened = SceneMachine(OptionsScene(parent), self.context)
-        self.assertEqual(reopened.active.values["dialogue"], 0)
+        self.assertEqual(reopened.active.values["dialogue"], 50)
         reopened.handle(("options:cycle", "dialogue"))
         reopened.handle("options:cancel")
-        self.assertEqual(audio_settings.volume("dialogue"), 0)
-        self.assertEqual(json.loads((self.context.save_dir / "options.json").read_text())["dialogue"], 0)
+        self.assertEqual(audio_settings.volume("dialogue"), 0.5)
+        self.assertEqual(json.loads((self.context.save_dir / "options.json").read_text())["dialogue"], 50)
 
     def test_levels_cycle_through_five_choices(self) -> None:
         scene = OptionsScene(Scene())
@@ -61,15 +63,20 @@ class OptionsTests(unittest.TestCase):
         for _ in range(5):
             scene.handle(("options:cycle", "effects"), self.context)
             values.append(scene.values["effects"])
-        self.assertEqual(values, [0, 25, 50, 75, 100])
+        self.assertEqual(values, [50, 75, 100, 0, 25])  # from a new player's 25, round all five
 
-    def test_missing_or_invalid_settings_use_full_volume(self) -> None:
+    def test_missing_or_invalid_settings_use_the_new_player_level(self) -> None:
         settings = AudioSettings()
         settings.configure(self.context.save_dir)
-        self.assertEqual(settings.values, {"music": 100, "dialogue": 100, "effects": 100})
-        (self.context.save_dir / "options.json").write_text('{"music": 25, "dialogue": 42, "effects": false}')
+        self.assertEqual(settings.values, {"music": 25, "dialogue": 25, "effects": 25})
+        (self.context.save_dir / "options.json").write_text('{"music": 75, "dialogue": 42, "effects": false}')
         settings.configure(self.context.save_dir)
-        self.assertEqual(settings.values, {"music": 25, "dialogue": 100, "effects": 100})
+        self.assertEqual(settings.values, {"music": 75, "dialogue": 25, "effects": 25})
+
+    def test_without_a_save_directory_audio_plays_at_full_volume(self) -> None:
+        settings = AudioSettings()
+        settings.configure(None)
+        self.assertEqual(settings.values, {"music": 100, "dialogue": 100, "effects": 100})
 
     def test_caravan_and_mission_panel_open_options_and_return_to_same_scene(self) -> None:
         for event in (GlueInput("hotspot-release", "OptionsDialog"),

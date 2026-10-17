@@ -12,6 +12,9 @@ a unit's characteristics or a mission's payments (briefings quote the mission pa
 The level is a player setting saved beside the audio levels and read at the moment a rule applies: prices when the
 troop selection or the hire book opens, reinforcements when a script grants them, the wounded rule at the debrief and
 the battle rules when a battle starts. Changing it in the caravan's Options therefore reprices the next mission.
+
+A new player (an engine save directory without a saved, readable level) starts on Soldier. A run without a save
+directory (tests, replays, tools) keeps Commander, the original rules.
 """
 
 import json
@@ -42,6 +45,7 @@ SERGEANT = Difficulty("sergeant", "Sergeant", 90, 140, False, 0, 10)
 COMMANDER = Difficulty("commander", "Commander", 100, 100, False, 0, None)
 LEVELS = (SOLDIER, SERGEANT, COMMANDER)
 BY_NAME = {level.name: level for level in LEVELS}
+NEW_PLAYER_LEVEL = SOLDIER  # until the player picks a level in Options
 
 
 class DifficultySetting:
@@ -56,9 +60,10 @@ class DifficultySetting:
         self.level = COMMANDER
         if self.path is None:
             return
+        self.level = NEW_PLAYER_LEVEL
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-            self.level = BY_NAME.get(raw.get("difficulty"), COMMANDER)
+            self.level = BY_NAME.get(raw.get("difficulty"), NEW_PLAYER_LEVEL)
         except (OSError, ValueError, TypeError, AttributeError):
             pass
 
