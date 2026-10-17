@@ -223,7 +223,10 @@ WIND_CYCLE_MS, WIND_WARNING_MS = 50000, 40000
 # The player's power pool on the compass: one marker per point, compass-local positions, first point leftmost
 # (notes/player_magic_panel.md 2, battle_compass.md 3).
 POWER_MARKER_FRAME = 107
-POWER_MARKER_POSITIONS = ((34, 63), (40, 58), (47, 54), (55, 52), (63, 52), (71, 54), (78, 58), (84, 63))
+POWER_MARKER_POSITIONS = ((34, 63), (40, 58), (47, 54), (55, 52), (63, 52), (71, 54), (78, 58), (84, 63),
+                          # PROVISIONAL engine extension for the easier difficulty levels' pools of up to 12
+                          # (whshr.difficulty): the arc continues two steps down on each side, left and right in turn.
+                          (29, 69), (89, 69), (25, 76), (93, 76))
 # The list area's rows: the focused wizard's spells or the regiment's items, one list with the same look and
 # behaviour (notes/player_magic_panel.md 1.1; positions as the item rows, notes/battlefield_items.md).
 LIST_AREA = (200, 64)

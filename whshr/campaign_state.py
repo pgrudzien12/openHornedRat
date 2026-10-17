@@ -17,7 +17,7 @@ from .encyclopedia import DEFAULT_KEYS
 from .glue import MissionRecord, MissionRef
 from .glue_content import GlueContent
 from .paths import Installation
-from . import roster, script
+from . import difficulty, roster, script
 from .portraits import first_leader_speaker
 from .roster import Regiment, load_company, load_master, with_hired
 
@@ -204,6 +204,9 @@ class CampaignState:
     # latest battle each regiment fought, and the wounded that rejoin at the current debrief's Done.
     wounded_last: dict[int, int] = field(default_factory=dict[int, int])
     returning: dict[int, int] = field(default_factory=dict[int, int])
+    # Regiments (by whoami) that sit out the next battle: kept by the Soldier difficulty's wounded rule
+    # (whshr.casualties.heal_and_disband); troop selection shows them as wounded until it is confirmed.
+    sitting_out: set[int] = field(default_factory=set[int])
     # Missions whose release step has run (complete()), by mission record: a taken mission outside this set was
     # committed to but is still waiting for its release, i.e. the player is in its after-mission caravan.
     released_missions: set[MissionRef] = field(default_factory=set[MissionRef])
@@ -239,8 +242,10 @@ class CampaignState:
         return int(unit_id) in self.march_units
 
     def add_reinforcements(self, unit_id: int, count: int) -> None:
+        """``addtroop``: the grant is scaled by the difficulty level in force when it is made (whshr.difficulty)."""
         unit_id = int(unit_id)
-        self.reinforcements[unit_id] = self.reinforcements.get(unit_id, 0) + int(count)
+        self.reinforcements[unit_id] = (self.reinforcements.get(unit_id, 0)
+                                        + difficulty.current().reinforcements(int(count)))
 
     def join_mission(self, unit_id: int) -> None:
         """``unitjoinmission``: the regiment is copied into the company (always hired) and marches."""
@@ -423,6 +428,7 @@ class CampaignState:
         # Point 5: regiments that were not hired leave the company, unused reinforcements are cleared.
         self.company = tuple(with_hired(regiment, True) for regiment in self.company if regiment.whoami in deployment.hired)
         self.reinforcements.clear()
+        self.sitting_out.clear()  # they have sat this battle out
         by_whoami = {regiment.whoami: regiment for regiment in self.company}
         self.refresh_speaker([by_whoami[whoami] for whoami in deployment.units if whoami in by_whoami])
 

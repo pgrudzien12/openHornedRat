@@ -412,7 +412,7 @@ class TroopSelectionScene(Scene):
         self.model = TroopSelection(self.campaign.company, forced=forced, excluded=excluded,
                                     coffers=self.campaign.coffers, prepaid=_prepaid_payment(self.record),
                                     reinforcements=self.campaign.reinforcements,
-                                    wounded=self.campaign.wounded_last)
+                                    wounded=self.campaign.wounded_last, sitting_out=self.campaign.sitting_out)
         if self.model.bankrupt:
             self.phase = "bankrupt"
 

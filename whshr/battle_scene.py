@@ -5,7 +5,7 @@ import os
 from os import PathLike
 from collections.abc import Sequence
 from typing import Any
-from . import battle_log, behaviour, casualties, combat, figure_capture, npc_merge, payments, roster, skirmish_log
+from . import battle_log, behaviour, casualties, combat, difficulty, figure_capture, npc_merge, payments, roster, skirmish_log
 from .assets import AssetId
 from .battlefield import Battlefield, WORLD_PER_MESH, sprite_files
 from .clock import FixedStepClock
@@ -41,8 +41,12 @@ class BattleScene(Scene):
 
     def __init__(self, battle: AssetId = FIRST_BATTLE, log_dir: str | PathLike[str] | None = None, seed: int = DEFAULT_SEED,
                  glue_scene: GlueScene | None = None, request_id: int | None = None,
-                 player_army: View | None = None, npc_company: dict[int, Any] | None = None) -> None:
+                 player_army: View | None = None, npc_company: dict[int, Any] | None = None,
+                 difficulty_level: difficulty.Difficulty | None = None) -> None:
         self.battle_id = battle
+        # The engine difficulty level; None: the player's setting when the battle is entered (a replay passes the
+        # recorded one).
+        self.difficulty_level = difficulty_level
         self.manifest = SceneManifest(immediate=(battle,) if glue_scene is None and player_army is None else ())
         self.player_army = player_army
         self.clock = FixedStepClock(BATTLE_TICK_SECONDS, max_steps=1)
@@ -83,6 +87,9 @@ class BattleScene(Scene):
         self.battle = Battle.from_script(self.field.script, seed=self.seed, script_dll=script_dll,
                                          script_logger=self.logger, company=self.npc_company)
         self.battle.ground_height = lambda x, y: self.field.ground_height(x, y) * WORLD_PER_MESH
+        if self.difficulty_level is None:
+            self.difficulty_level = difficulty.current()
+        self.battle.apply_difficulty(self.difficulty_level)
         # Seed every regiment's figures now, in battle order, so the first draw never has to (seeding draws from the
         # battle-wide stagger sequence; doing it lazily in draw order would make live play and replay differ).
         for regiment in self.battle.regiments.values():
@@ -109,7 +116,7 @@ class BattleScene(Scene):
             self.logger.write_header(
                 battle_asset=str(self.battle_id), bts_path=self.field.script.get("file"), seed=self.seed,
                 width=self.battle.width, height=self.battle.height,
-                player_army=self.player_army, npc_company=self.npc_company,
+                player_army=self.player_army, npc_company=self.npc_company, difficulty=self.battle.difficulty.name,
                 regiments=battle_log.regiment_header_rows(self.battle, sprite_bases))
 
     def _load_script_dll(self, context: SceneAssets) -> behaviour.ScriptDll | None:

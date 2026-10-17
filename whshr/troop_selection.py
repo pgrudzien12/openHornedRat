@@ -48,8 +48,9 @@ class TroopSelection:
     def __init__(self, company: Iterable[Regiment], forced: Iterable[int] = (), excluded: Iterable[int] = (),
                  limit: int = DEFAULT_LIMIT, coffers: int = 0, prepaid: int = 0,
                  reinforcements: Mapping[int, int] | None = None,
-                 wounded: Mapping[int, int] | None = None) -> None:
+                 wounded: Mapping[int, int] | None = None, sitting_out: Iterable[int] = ()) -> None:
         self.company: dict[int, Regiment] = {regiment.whoami: regiment for regiment in company}
+        self.sitting_out = frozenset(sitting_out)  # kept by the Soldier difficulty's wounded rule (whshr.difficulty)
         # a forced regiment that is not in the company file (it has not joined yet) cannot be selected or paid for
         self.forced = (frozenset(forced) | {ALWAYS_FORCED_WHOAMI}) & self.company.keys()
         self.excluded = frozenset(excluded)
@@ -62,10 +63,11 @@ class TroopSelection:
         self.hired = {whoami: regiment.hired or whoami in self.forced
                       for whoami, regiment in self.company.items()}
         self.selection: list[int] = [whoami for whoami in self.company
-                          if whoami in self.forced and self.hired[whoami] and not self.company[whoami].destroyed]
+                          if whoami in self.forced and self.hired[whoami] and not self._destroyed(whoami)]
 
     def _destroyed(self, whoami: int) -> bool:
-        return self.company[whoami].destroyed
+        """Destroyed, or sitting out this battle: both show as wounded and cannot march."""
+        return self.company[whoami].destroyed or whoami in self.sitting_out
 
     def status(self, whoami: int) -> str:
         """notes/troop_selection.md §3.4, checked in this order."""

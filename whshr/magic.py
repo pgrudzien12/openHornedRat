@@ -95,8 +95,12 @@ class PowerPools:
     whshr.spell_effects.blow_wind."""
 
     def __init__(self, player: int, enemy: int) -> None:
+        self.player_max = MAX_POWER  # raised by an easier engine difficulty level (whshr.difficulty)
         self.player = max(0, min(MAX_POWER, player))
         self.enemy = max(0, min(MAX_POWER, enemy))
+
+    def maximum(self, enemy_army: bool) -> int:
+        return MAX_POWER if enemy_army else self.player_max
 
     @classmethod
     def rolled(cls, rng: random.Random) -> "PowerPools":
@@ -107,7 +111,7 @@ class PowerPools:
         return self.enemy if enemy_army else self.player
 
     def add(self, enemy_army: bool, amount: int) -> None:
-        value = max(0, min(MAX_POWER, self.get(enemy_army) + amount))
+        value = max(0, min(self.maximum(enemy_army), self.get(enemy_army) + amount))
         if enemy_army:
             self.enemy = value
         else:

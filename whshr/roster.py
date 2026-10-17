@@ -16,7 +16,7 @@ from os import PathLike
 from .magic import SPELL_CODES
 from .paths import Installation
 from .rules import EXPECTED_STATS, PeImage, StatFields, stat_fields, stat_int
-from . import script
+from . import difficulty, script
 
 # WHSHR.EXE .data VA of the 39-record RMYI table (record 38 is the -1 terminator); notes/campaign.md §4.5.
 RMYI_VA, RMYI_COUNT, RMYI_STRIDE = 0x5B95F0, 39, 0x34
@@ -92,13 +92,14 @@ class Regiment:
 
     @property
     def price(self) -> int:
-        """notes/campaign.md §2.3: price per model x current models.
+        """notes/campaign.md §2.3: price per model x current models, scaled by the engine difficulty level
+        (whshr.difficulty), read at each call so a level change reprices the next selection.
 
         Routed models (``s_routed``) are not tracked yet: a freshly loaded company always has
         0 routed, and updating a regiment's model count after a battle is not implemented
         (notes/glue_engine_integration.md GEI8, debrief).
         """
-        return self.row.base_price * self.models
+        return difficulty.current().price(self.row.base_price * self.models)
 
     @property
     def retainer(self) -> int:

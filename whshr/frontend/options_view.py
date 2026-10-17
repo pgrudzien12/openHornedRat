@@ -14,9 +14,9 @@ from .gpu import Gpu
 
 WHITE = (255, 255, 255)
 BUTTON_SIZE = (41, 41)
-ROWS = tuple((name, 203, 106 + index * 54) for index, name in enumerate(CHANNELS))
+ROWS = tuple((name, 203, 106 + index * 54) for index, name in enumerate((*CHANNELS, "difficulty")))
 EXITS = (("options:ok", 203, 335), ("options:cancel", 397, 335))
-LABELS = {"music": "Music", "dialogue": "Dialogue", "effects": "Sound Effects"}
+LABELS = {"music": "Music", "dialogue": "Dialogue", "effects": "Sound Effects", "difficulty": "Difficulty"}
 
 
 class OptionsView(DialogView[OptionsScene]):
@@ -39,7 +39,7 @@ class OptionsView(DialogView[OptionsScene]):
         self.labels.append((label, (x, y + (41 - self.font.font.height) // 2)))
 
     def refresh(self) -> None:
-        state = (tuple(self.scene.values.items()), self.pressed, self.scene.error)
+        state = (tuple(self.scene.values.items()), self.scene.difficulty, self.pressed, self.scene.error)
         if state == self.drawn:
             return
         self.drawn = state
@@ -47,8 +47,12 @@ class OptionsView(DialogView[OptionsScene]):
         self._bitmap("MoreOptionScreen", (0, 0))
         for name, x, y in ROWS:
             self._bitmap("OptionButtonDown" if self.pressed == name else "OptionButtonUp", (x, y))
-            value = self.scene.values[name]
-            self._label(f"{LABELS[name]}: {'Off' if value == 0 else f'{value}%'}", 0, y, 190, "right")
+            if name == "difficulty":
+                text = self.scene.difficulty.label
+            else:
+                value = self.scene.values[name]
+                text = 'Off' if value == 0 else f'{value}%'
+            self._label(f"{LABELS[name]}: {text}", 0, y, 190, "right")
             self.buttons.append((pygame.Rect(x, y, *BUTTON_SIZE), name))
         for action, x, y in EXITS:
             self._bitmap("OptionButtonDown" if self.pressed == action else "OptionButtonUp", (x, y))
@@ -72,7 +76,7 @@ class OptionsView(DialogView[OptionsScene]):
             self.refresh()
             if pressed is not None and pressed == self._action_at(event.pos):
                 self._click_cue(3)
-                return (("options:cycle", pressed),) if pressed in CHANNELS else (pressed,)
+                return (("options:cycle", pressed),) if pressed in (*CHANNELS, "difficulty") else (pressed,)
         return ()
 
     def release(self) -> None:

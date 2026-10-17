@@ -6,7 +6,7 @@ import math
 import random
 from typing import Any, Callable, Literal, cast
 
-from . import animation, battle_grid, behaviour, buildings, combat, deployment, formation, interpreter, map_objects, navigation, npc_merge, ranged, visibility
+from . import animation, battle_grid, behaviour, buildings, combat, deployment, difficulty, formation, interpreter, map_objects, navigation, npc_merge, ranged, visibility
 from . import birds as bird_flock, camera_shake as camera_shakes, flight as flight_rules, control_piece as control_pieces, magic, objectives as objective_table, spell_effects, steering
 from . import nodes as node_table
 from .battle_events import BattleEvent
@@ -250,6 +250,9 @@ class Regiment:
     flight: "flight_rules.FlightState | None" = None  # a flying sprite set's state (`flight_state`)
     falling: list["flight_rules.FallingFlier"] = field(default_factory=list["flight_rules.FallingFlier"])
     waypoints: list[Point] = field(default_factory=list[Point])
+    # Added to WS and BS in close combat and shooting, never to the profile the HUD shows: the player's regiments on
+    # an easier engine difficulty level (whshr.difficulty, Battle.apply_difficulty).
+    skill_bonus: int = 0
     # The player's clicked stops still ahead, next first (notes/move_routes.md 3-4); `waypoints` also holds the
     # route finder's detour points, which are neither counted nor drawn.
     route_stops: list[Point] = field(default_factory=list[Point])
@@ -961,6 +964,7 @@ class Battle:
             regiment.update_counter = slot
         self.tick_count = 0
         self.update_count = 0  # monotonic input/replay time, including deployment
+        self.difficulty = difficulty.COMMANDER  # the engine difficulty level (apply_difficulty); the original rules
         self.phase: Literal["deployment", "battle"] = "deployment" if deploy else "battle"
         self.paused = False
         # The battle state: script choreography, independent of the player-visible phase. A gate-type piece (the
@@ -1637,13 +1641,25 @@ class Battle:
 
     @property
     def player_power(self) -> int:
-        """The player army's (and allies') power pool, 0-8; the compass shows it (player_magic_panel.md 2)."""
+        """The player army's (and allies') power pool, 0-8 (more on an easier difficulty level); the compass shows it
+        (player_magic_panel.md 2)."""
         return self.event_bus.power.player
+
+    def apply_difficulty(self, level: difficulty.Difficulty) -> None:
+        """The engine difficulty level's battle rules (whshr.difficulty), applied once the battle is built so the
+        random sequence is the same at every level: the player's regiments fight with the skill bonus, and a raised
+        player pool starts full at its new maximum."""
+        self.difficulty = level
+        for regiment in self.regiments.values():
+            regiment.skill_bonus = level.skill_bonus if regiment.side == Side.PLAYER else 0
+        if level.player_power is not None:
+            power = self.event_bus.power
+            power.player_max = power.player = level.player_power
 
     def fill_player_power(self) -> None:
         """Debug cheat (Ctrl+M): fill the player's pool to its maximum, like the original's developer key that sets
         the pools to 8 (notes/player_magic_panel.md 7). Only the player's pool; the enemy's is untouched."""
-        self.event_bus.power.add(False, magic.MAX_POWER)
+        self.event_bus.power.add(False, self.event_bus.power.player_max)
 
     def casting(self, identifier: str) -> bool:
         """A Wizard-class unit is casting: its cast pose is running, a spell is pending or ordered, or it is
