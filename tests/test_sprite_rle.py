@@ -35,8 +35,8 @@ class ZeroRunRepairTests(unittest.TestCase):
         self.assertEqual(nonzero(packed_frame("1200DF00FF00010000")), {(0, 0): 0x12})
 
     def test_given_a_short_run_followed_by_a_literal_then_it_is_not_repaired(self) -> None:
-        self.assertEqual(nonzero(packed_frame("00DF1200FF21 0000".replace(" ", ""))),
-                         {(6, 31): 0x12, (14, 31): 0x21})
+        self.assertEqual(len(unzero(bytes.fromhex("00DF1200FF00210000"))[0]), FRAME_BYTES)
+        self.assertEqual(nonzero(packed_frame("00DF1200FF00210000")), {(6, 31): 0x12})
 
     def test_given_a_short_run_followed_by_the_end_marker_then_it_is_not_repaired(self) -> None:
         self.assertEqual(unzero(bytes.fromhex("12000300 00".replace(" ", ""))), (b"\x12\x00\x00\x00", 5))
