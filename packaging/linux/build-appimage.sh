@@ -22,22 +22,21 @@ if [ ! -x "$APPIMAGETOOL" ] || [ ! -f "$APPIMAGE_RUNTIME_FILE" ]; then
     echo "appimagetool or type 2 runtime is missing" >&2
     exit 2
 fi
-command -v rsvg-convert >/dev/null 2>&1 || {
-    echo "rsvg-convert is required to render the AppImage icon" >&2
-    exit 2
-}
 
 appdir=build/appimage/ohr-engine.AppDir
 rm -rf "$appdir"
 install -d "$appdir/usr/bin/ohr-engine" "$appdir/usr/share/applications" \
-    "$appdir/usr/share/icons/hicolor/256x256/apps" "$appdir/usr/share/doc/ohr-engine" dist/appimage
+    "$appdir/usr/share/doc/ohr-engine" dist/appimage
 rm -f dist/appimage/*.AppImage
 cp -a dist/ohr-engine/. "$appdir/usr/bin/ohr-engine/"
 install -m 755 packaging/linux/appimage/AppRun "$appdir/AppRun"
 install -m 644 packaging/linux/appimage/ohr-engine.desktop "$appdir/ohr-engine.desktop"
 install -m 644 packaging/linux/appimage/ohr-engine.desktop "$appdir/usr/share/applications/ohr-engine.desktop"
-rsvg-convert -w 256 -h 256 packaging/linux/appimage/ohr-engine.svg -o "$appdir/ohr-engine.png"
-install -m 644 "$appdir/ohr-engine.png" "$appdir/usr/share/icons/hicolor/256x256/apps/ohr-engine.png"
+install -m 644 whshr/icons/ohr-256.png "$appdir/ohr-engine.png"
+for size in 16 24 32 48 64 128 256 512; do
+    install -d "$appdir/usr/share/icons/hicolor/${size}x${size}/apps"
+    install -m 644 "whshr/icons/ohr-${size}.png" "$appdir/usr/share/icons/hicolor/${size}x${size}/apps/ohr-engine.png"
+done
 ln -s ohr-engine.png "$appdir/.DirIcon"
 install -m 644 LICENSE "$appdir/usr/share/doc/ohr-engine/LICENSE"
 install -m 644 LEGAL.md "$appdir/usr/share/doc/ohr-engine/LEGAL.md"

@@ -36,6 +36,8 @@ datas = [
 ]
 # The launcher's own art (whshr/launcher/theme.py loads it next to the module).
 datas += [(str(path), "whshr/launcher/art") for path in (REPO_ROOT / "whshr" / "launcher" / "art").glob("*.png")]
+# Application icon PNGs (loaded at runtime next to the whshr package).
+datas += [(str(path), "whshr/icons") for path in (REPO_ROOT / "whshr" / "icons").glob("*.png")]
 
 a = Analysis(
     [str(REPO_ROOT / "packaging" / "entrypoint.py")],
@@ -62,6 +64,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="ohr-engine",
+    icon=str(REPO_ROOT / "whshr" / "icons" / "ohr.ico"),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

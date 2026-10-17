@@ -198,7 +198,8 @@ not been tested against an actual game installation in CI.
 ## AppImage
 
 `.github/workflows/appimage.yml` builds an x86_64 AppImage in a Debian 12 container. Its
-AppDir contains the frozen launcher and engine, a relative `AppRun`, a desktop file, a PNG icon, and
+AppDir contains the frozen launcher and engine, a relative `AppRun`, a desktop file, a PNG icon
+(the project's icon set from `whshr/icons`, built by `tools/launcher_art/build_art.py`), and
 license notices. The workflow uses versioned upstream appimagetool and type 2 runtime
 releases. Run the resulting file with no arguments to open the launcher, or pass
 `/path/to/WARFB` to start the engine directly. The AppImage still needs a compatible host graphics
@@ -208,7 +209,7 @@ If FUSE is unavailable, set `APPIMAGE_EXTRACT_AND_RUN=1` when launching it; see 
 [AppImage FUSE guide](https://docs.appimage.org/user-guide/troubleshooting/fuse.html).
 
 For a local build on Debian 12, first create `dist/ohr-engine` with the PyInstaller command
-above. Install `librsvg2-bin` for the icon, and provide the pinned upstream
+above. Provide the pinned upstream
 `appimagetool-x86_64.AppImage` and `runtime-x86_64` files. Make appimagetool executable:
 
 ```sh
