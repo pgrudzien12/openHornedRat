@@ -388,6 +388,7 @@ class LauncherApp:
 
 
 def main() -> None:
+    config_module.migrate_legacy_files()
     root = tk.Tk()
     LauncherApp(root)
     root.mainloop()
