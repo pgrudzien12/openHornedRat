@@ -55,6 +55,11 @@ Source: "{#DistDir}\*"; DestDir: "{app}"; Excludes: "__pycache__\*,__pycache__";
 Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+; An upgrade installs over the old version; without this it would leave libraries the new
+; version no longer ships in _internal.
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"

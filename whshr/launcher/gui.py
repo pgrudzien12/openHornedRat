@@ -13,6 +13,7 @@ import queue
 import sys
 import threading
 import time
+import webbrowser
 import tkinter as tk
 from collections.abc import Callable
 from os import PathLike
@@ -20,11 +21,12 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 from whshr.launcher import config as config_module
-from whshr.launcher import discovery, engine_launch, gog_installer, reaction, validate
+from whshr.launcher import discovery, engine_launch, gog_installer, reaction, updates, validate
 from whshr.launcher.theme import ACCENT, BACKGROUND, TEXT, ImageButton, Theme, scrolled
 from whshr.launcher.battles import list_battles
 from whshr.paths import Installation
 from whshr.user_dirs import default_game_dir
+from whshr.version import version
 
 PathArg = str | PathLike[str]
 CheckResult = tuple[bool, list[str], str]  # (passed, report lines, checked path)
@@ -37,6 +39,7 @@ VALIDATING_INTERVAL_MS = 400  # how often the "Validating..." dots advance
 FACE_BOX = (100, 65, 345, 255)
 REACTION_MARGIN = 24  # the reaction line is centred, this far above the portrait's bottom edge and clear of its sides
 REACTION_TICK_MS = 25
+NOTICE_RETURN_MS = 1000  # the update notice comes back this long after the reaction line clears
 PATH_CHARS = 54  # the launch screen shows only the tail of the installation path
 
 
@@ -327,13 +330,19 @@ class LauncherApp:
     """Top-level window: shows the launch screen directly once a path is already recognized."""
 
     def __init__(self, root: tk.Tk, config_path: PathArg | None = None,
-                 reaction_text: Callable[[str], str | None] = reaction.load_reaction_text) -> None:
+                 reaction_text: Callable[[str], str | None] = reaction.load_reaction_text,
+                 update_check: Callable[[], updates.Release | None] | None = None) -> None:
+        """``update_check`` (none by default; :func:`main` passes the GitHub check) runs once in the background."""
         self.root = root
         self._config_path = config_path
         self._reaction_text = reaction_text
         self._reaction_cache: dict[str, str | None] = {}
-        self._reaction: reaction.ReactionLine | None = None
-        self._reaction_clock = 0.0
+        # The portrait's one line slot: the rat's reaction, or the update notice.
+        self._line: reaction.ReactionLine | None = None
+        self._line_kind: str | None = None  # "reaction" or "notice" while a line is showing
+        self._line_clock = 0.0
+        self._notice: updates.Release | None = None
+        self._notice_job: str | None = None
         self.portrait: tk.Canvas | None = None
         self._reaction_items: tuple[int, ...] = ()
         self.config = config_module.load_config(config_path)
@@ -342,6 +351,8 @@ class LauncherApp:
         self.theme = Theme(root)
         self._build_frame()
         self._show_initial_screen()
+        if update_check is not None:
+            self._start_update_check(update_check)
 
     def _build_frame(self) -> None:
         """Portrait on the left; header, title, the current screen and footer in a column on the right."""
@@ -359,7 +370,7 @@ class LauncherApp:
             tk.Label(column, image=header, bg=BACKGROUND, bd=0).pack()
         tk.Label(column, text="Open Horned Rat", bg=BACKGROUND, fg=TEXT,
                  font=theme.title_font).pack(pady=(4, 0))
-        tk.Label(column, text="Launcher", bg=BACKGROUND, fg=ACCENT, font=theme.body_font).pack()
+        tk.Label(column, text=f"Launcher {version()}", bg=BACKGROUND, fg=ACCENT, font=theme.body_font).pack()
         footer = theme.image("footer")
         if footer is not None:
             tk.Label(column, image=footer, bg=BACKGROUND, bd=0).pack(side="bottom", pady=(4, 0))
@@ -396,43 +407,89 @@ class LauncherApp:
         left, top, right, bottom = FACE_BOX
         return left <= x < right and top <= y < bottom
 
+    def _on_notice(self, x: int, y: int) -> bool:
+        if self._line_kind != "notice" or self.portrait is None:
+            return False
+        left, top, right, bottom = self.portrait.bbox(self._reaction_items[-1])
+        return left <= x < right and top <= y < bottom
+
     def _on_portrait_motion(self, event: tk.Event) -> None:
         assert self.portrait is not None
         pokeable = self._on_face(event.x, event.y) and self._current_reaction_text() is not None
-        self.portrait.configure(cursor="hand2" if pokeable else "")
+        self.portrait.configure(cursor="hand2" if pokeable or self._on_notice(event.x, event.y) else "")
 
     def _on_portrait_press(self, event: tk.Event) -> None:
-        """Poking the face starts the reaction line; a poke while it is still showing is ignored."""
-        if self._reaction is not None or not self._on_face(event.x, event.y):
+        """Poking the face types the reaction line over any update notice; clicking the notice opens the release.
+
+        A poke while the reaction is still showing is ignored.
+        """
+        if self._on_notice(event.x, event.y) and self._notice is not None:
+            webbrowser.open(self._notice.url)
+            return
+        if self._line_kind == "reaction" or not self._on_face(event.x, event.y):
             return
         text = self._current_reaction_text()
         if text is None:
             return
-        self._reaction = reaction.ReactionLine(text)
-        self._reaction_clock = time.monotonic()
+        if self._notice_job is not None:
+            self.root.after_cancel(self._notice_job)
+            self._notice_job = None
+        self._start_line(text, "reaction")
+
+    def _start_line(self, text: str, kind: str) -> None:
+        """Type ``text`` in the portrait's line slot: a ``reaction`` clears after its hold, a ``notice`` stays."""
+        restart = self._line_kind is None
+        self._line = reaction.ReactionLine(text, None if kind == "notice" else reaction.HOLD_MILLISECONDS)
+        self._line_kind = kind
+        self._line_clock = time.monotonic()
         # Centre the finished line, then type it from its left end, so the text does not drift while it grows.
-        width = int(self.portrait["width"]) if self.portrait is not None else 0
-        line = min(self.theme.speech_font.measure(text), width - 2 * REACTION_MARGIN)
-        left = (width - line) // 2
         if self.portrait is not None:
+            width = int(self.portrait["width"])
+            line = min(self.theme.speech_font.measure(text), width - 2 * REACTION_MARGIN)
+            left = (width - line) // 2
             shadow, front = self._reaction_items
             bottom = int(self.portrait["height"]) - REACTION_MARGIN
             self.portrait.coords(shadow, left + 2, bottom + 2)
             self.portrait.coords(front, left, bottom)
-        self._tick_reaction()
+        if restart:
+            self._tick_line()
 
-    def _tick_reaction(self) -> None:
-        if self._reaction is None or self.portrait is None:
+    def _tick_line(self) -> None:
+        if self._line is None or self.portrait is None:
             return
         now = time.monotonic()
-        visible = self._reaction.advance((now - self._reaction_clock) * 1000)
-        self._reaction_clock = now
+        visible = self._line.advance((now - self._line_clock) * 1000)
+        self._line_clock = now
         for item in self._reaction_items:
             self.portrait.itemconfigure(item, text=visible or "")
-        if visible is None:
-            self._reaction = None
-        else:
-            self.root.after(REACTION_TICK_MS, self._tick_reaction)
+        if visible is not None:
+            self.root.after(REACTION_TICK_MS, self._tick_line)
+            return
+        self._line, self._line_kind = None, None
+        if self._notice is not None:  # the notice comes back a moment after the reaction has cleared
+            self._notice_job = self.root.after(NOTICE_RETURN_MS, self._show_notice)
+
+    def _show_notice(self) -> None:
+        self._notice_job = None
+        if self._notice is not None and self._line_kind is None:
+            self._start_line(updates.notice_text(self._notice), "notice")
+
+    def _start_update_check(self, check: Callable[[], updates.Release | None]) -> None:
+        """Run ``check`` in the background; a newer release becomes the portrait's notice line."""
+        found: queue.Queue[updates.Release | None] = queue.Queue()
+        threading.Thread(target=lambda: found.put(check()), daemon=True).start()
+
+        def poll() -> None:
+            try:
+                release = found.get_nowait()
+            except queue.Empty:
+                self.root.after(200, poll)
+                return
+            if release is not None:
+                self._notice = release
+                self._show_notice()
+
+        self.root.after(200, poll)
 
     def _clear(self) -> None:
         for child in self._container.winfo_children():
@@ -463,5 +520,5 @@ class LauncherApp:
 def main() -> None:
     config_module.migrate_legacy_files()
     root = tk.Tk()
-    LauncherApp(root)
+    LauncherApp(root, update_check=updates.newer_release)
     root.mainloop()

@@ -12,6 +12,17 @@ block_cipher = None
 # SPECPATH is injected by PyInstaller into the spec file's exec namespace.
 REPO_ROOT = Path(SPECPATH).resolve().parents[1]
 
+# The engine reports this version (whshr/_build_version.py is generated, untracked). Package workflows pass
+# OHR_VERSION; a local build asks git. whshr/version.py is loaded by path so the whshr package is not imported.
+import importlib.util
+import os
+
+_spec = importlib.util.spec_from_file_location("_ohr_version", REPO_ROOT / "whshr" / "version.py")
+_version_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_version_module)
+BUILD_VERSION = os.environ.get("OHR_VERSION") or _version_module.from_git(REPO_ROOT) or _version_module.UNKNOWN
+(REPO_ROOT / "whshr" / "_build_version.py").write_text("VERSION = %r\n" % BUILD_VERSION, encoding="utf-8")
+
 # whshr/legacy.py loads a handful of scripts/ modules (stdlib-only tools shared with
 # the CLI, e.g. pe_resources/pe_missions/fon_parse) by name via importlib at runtime;
 # PyInstaller's static import analysis cannot see those, so the whole scripts/
@@ -35,7 +46,7 @@ a = Analysis(
     # internally; PyInstaller can't see that from a compiled binary and zengl ships no
     # PyInstaller hook of its own, so it must be listed here explicitly (found by actually
     # running the frozen build and hitting ModuleNotFoundError: No module named '_zengl').
-    hiddenimports=["_zengl"],
+    hiddenimports=["_zengl", "whshr._build_version"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

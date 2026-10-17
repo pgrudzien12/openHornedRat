@@ -5,6 +5,11 @@ import sys
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    if args in (["--version"], ["--engine", "--version"]):  # the macOS command wrapper adds --engine
+        from whshr.version import version
+
+        print(f"Open Horned Rat {version()}")
+        return 0
     if args == ["--check-bundle"]:
         import tkinter
         import pygame

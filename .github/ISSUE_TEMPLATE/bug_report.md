@@ -26,7 +26,7 @@ source checkout). Mention the mission or battle if the problem happened in one.
 
 - Operating system and version:
 - How you installed Open Horned Rat (Windows installer, .deb, .rpm, AppImage, macOS package, source checkout):
-- Open Horned Rat version or package file name (for a source checkout, the commit and `python3 --version`):
+- Open Horned Rat version (shown under the launcher's title; for a source checkout also `python3 --version`):
 - Original game edition (GOG v1.0, CD-ROM, Steam/SNEG, other):
 - How you got the game files (installed normally, Wine/Proton, launcher's **Unpack...**, innoextract):
 - GPU / graphics driver, if the problem is visual:

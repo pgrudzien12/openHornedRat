@@ -7,13 +7,13 @@
 
 ## Join the discussion
 
-Questions, playtest reports, or just want to talk about the game? Join the community in [GitHub Discussions](https://github.com/pgrudzien12/openHornedRat/discussions).
+Questions, feedback, or just want to talk about the game? Join the community in [GitHub Discussions](https://github.com/pgrudzien12/openHornedRat/discussions).
 
 Please [open an issue](https://github.com/pgrudzien12/openHornedRat/issues) for a reproducible problem. Screenshots and short screen recordings are welcome, but do not upload or distribute original game assets. If you would like to help with code, research, documentation, or compatibility testing, start with an issue or a [Discussion](https://github.com/pgrudzien12/openHornedRat/discussions) so we can coordinate work.
 
 ## Help us test
 
-Campaign games take hours, so early feedback is incredibly valuable. Please try the build if you own the original game and tell us:
+Campaign games take hours, so feedback from players is incredibly valuable. If you own the original game, please play and tell us:
 
 - whether it starts on your system and which version of the original game you used;
 - where the campaign flow, controls, visuals, audio, or battle rules feel wrong;
@@ -28,7 +28,7 @@ Please [open an issue](https://github.com/pgrudzien12/openHornedRat/issues) for 
 2. Otherwise [open a new issue](https://github.com/pgrudzien12/openHornedRat/issues/new/choose) with the bug report template and fill in:
    - what happened, and what you expected instead;
    - the steps that lead to it, starting with how you launched the game (launcher, package, or a command from source);
-   - your operating system, the Open Horned Rat version or package file name, and your edition of the original game (GOG v1.0, CD-ROM, Steam/SNEG);
+   - your operating system, the Open Horned Rat version (shown under the launcher's title), and your edition of the original game (GOG v1.0, CD-ROM, Steam/SNEG);
    - for a crash, the error text if a window or terminal showed one.
 3. Attach the logs from the session where it happened (below), plus a screenshot or a short recording if it helps.
 
@@ -58,7 +58,7 @@ If GitHub refuses a `.jsonl` file, zip the logs (or rename them to end in `.txt`
 
 ## What you can play today
 
-With your own copy of the game, you can watch or skip the opening movies, start a campaign, use the caravan and mission screens, and enter battles. You can deploy regiments and give movement, attack, and firing orders. Battles produce results and return to the campaign flow. The campaign is playable to the end. This is still a development prototype: expect some rough edges and bugs along the way, in battles and in later campaign missions.
+With your own copy of the game, you can watch or skip the opening movies, start a campaign, use the caravan and mission screens, and enter battles. You can deploy regiments and give movement, attack, and firing orders. Battles produce results and return to the campaign flow. The campaign is playable to the end. Expect some rough edges and bugs along the way, in battles and in later campaign missions; please [report them](#report-a-bug).
 
 | Area | What to expect |
 |---|---|
@@ -69,11 +69,15 @@ With your own copy of the game, you can watch or skip the opening movies, start 
 | ✅ Battles | Deployment, movement, charges, ranged attacks, morale and routing, magic, enemy AI, and victory or defeat results are in place. Most battle rules have been recreated with substantial effort to match the original experience; mission scripts also drive battles, though rough edges remain. |
 | ✅ Campaign progress | The campaign is playable to the end, though some bugs may still turn up along the way. |
 | ✅ Audio and presentation | Opening movies, speech, music, and effects are mostly done. The Options screen saves separate volume levels for music, dialogue, and effects; minor gaps may remain. |
-| ✅ Packaged downloads | Windows, Debian, RPM, AppImage, and Apple Silicon macOS installers are built and available as prereleases. Installation and play have not yet been tested on players' machines; there is no stable release. |
+| ✅ Packaged downloads | Windows, Debian, RPM, AppImage, and Apple Silicon macOS packages come with every release. They are unsigned, so Windows and macOS may ask you to confirm before installing. |
 
-## Install a playtest package
+## Install a package
 
-Download the most recent package for your system from [GitHub Releases](https://github.com/pgrudzien12/openHornedRat/releases). Windows, Debian, RPM, and AppImage packages appear in **daily** prereleases; the Apple Silicon macOS package appears in **weekly** prereleases. A prerelease contains the formats rebuilt that day, so you may need to look at an earlier one for your system. These packages are unsigned and have not yet had a full installation and play test. You also need your own legally owned game files. When the launcher first opens, select the original game's `WARFB` directory if it is not found automatically. If you only have GOG's Windows installer on Linux or macOS, see [Get the game files](#get-the-game-files).
+Download the package for your system from the [latest release](https://github.com/pgrudzien12/openHornedRat/releases/latest). The packages are unsigned, so your system may ask you to confirm before installing. You also need your own legally owned game files. When the launcher first opens, select the original game's `WARFB` directory if it is not found automatically. If you only have GOG's Windows installer on Linux or macOS, see [Get the game files](#get-the-game-files).
+
+**Upgrading:** install the newer package the same way, over the old one (on Linux, `apt install` or `dnf install` the newer file; replace an AppImage file). Saves, settings, logs and unpacked game files live outside the installation and are kept, though saves may not carry over between engine versions. The launcher shows its version under the title and tells you, in red under the portrait, when a newer release is out; click that line to open the download page. Set `OHR_NO_UPDATE_CHECK=1` to turn the check off.
+
+Builds of the current development version are also published on the [Releases](https://github.com/pgrudzien12/openHornedRat/releases) page as dated prereleases (daily; weekly for macOS). They have the newest fixes but are less tested.
 
 ### Windows (64-bit)
 
@@ -112,7 +116,7 @@ Later, run the same AppImage file again. If your system cannot run AppImages thr
 
 ### macOS (Apple Silicon)
 
-Download `ohr-engine-*-macos-arm64.pkg` from the weekly prerelease and open it with Installer. After installation, open **Open Horned Rat** from Applications. The package is unsigned and not notarized, so macOS may ask you to approve it before installation. An Intel Mac package is not available yet.
+Download `ohr-engine-*-macos-arm64.pkg` from the release and open it with Installer. After installation, open **Open Horned Rat** from Applications. The package is unsigned and not notarized, so macOS may ask you to approve it before installation. An Intel Mac package is not available yet.
 
 The launcher starts the bundled engine when you select **Start game**. On Windows and Linux, you can also run the engine directly from a terminal with `ohr-engine --engine /path/to/WARFB`; on macOS, `/usr/local/bin/ohr-engine /path/to/WARFB` is the engine command. Original game files, launcher settings, and saves are outside the package; uninstalling does not remove them.
 

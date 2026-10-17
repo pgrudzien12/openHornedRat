@@ -134,6 +134,35 @@ The macOS workflow checks once a week and publishes changed default-branch build
 `weekly-YYYYMMDD` (UTC). It can also be run manually at any time. A scheduled run with no
 package-source changes does not start the macOS runner.
 
+## Versioning and releases
+
+A release is a git tag `vX.Y.Z` (or `vX.Y.Z-rc1` for a prerelease) and its packages carry `X.Y.Z`.
+A build between releases carries `X.Y.Z+gitN.SHA`: the last release tag, the number of commits
+since it and the commit (`python3 whshr/version.py` prints it for a checkout; before the first tag
+the base is `0.0.0`). Such a version sorts after its release and after every earlier build, so
+each package upgrades the previous one in place; the workflows compute it in their plan job and
+pass it to PyInstaller in `OHR_VERSION`. The specs write it into the untracked
+`whshr/_build_version.py`, which is what the frozen engine and launcher report (a local spec
+build without `OHR_VERSION` asks git). The macOS receipt version is numeric only: `X.Y.Z.N` for a
+build between releases, `X.Y.Z` for a release or prerelease.
+
+Upgrading: run the Windows installer over the old install (it clears the old `_internal`
+folder first); `apt install ./newer.deb` or `dnf install ./newer.rpm`; replace the AppImage
+file; run the macOS `.pkg` over the installed app. Settings and saves live outside the
+package and are kept.
+
+Making a release:
+
+1. Tag the commit on `master` and push the tag: `git tag -a vX.Y.Z -m "Open Horned Rat X.Y.Z"`,
+   `git push origin vX.Y.Z`.
+2. Create the GitHub release with notes: `gh release create vX.Y.Z --title "X.Y.Z" --notes-file notes.md`.
+3. A tag push does not start the workflows (they pick up a pending tag on their schedule, the
+   macOS one only weekly), so run each now:
+   `gh workflow run appimage.yml --ref vX.Y.Z`, and the same for `debian-package.yml`,
+   `rpm-package.yml`, `windows-installer.yml` and `macos-package.yml`.
+4. When they finish, check that all five assets (installer, `.deb`, `.rpm`, AppImage, `.pkg`)
+   are attached to the release.
+
 ## Debian package (#98)
 
 `.github/workflows/debian-package.yml` checks once a day for package source changes and
@@ -157,7 +186,7 @@ python3 -m venv /tmp/ohr-bootstrap
 /tmp/ohr-bootstrap/bin/uv venv --python 3.12 /tmp/ohr-build-venv
 /tmp/ohr-bootstrap/bin/uv pip install --python /tmp/ohr-build-venv/bin/python -r requirements-engine.txt pyinstaller
 /tmp/ohr-build-venv/bin/pyinstaller packaging/linux/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
-sh packaging/linux/build-deb.sh 0.0.0~dev1
+sh packaging/linux/build-deb.sh 0.0.0+git1.local
 ```
 
 The package is written to `dist/debian/`. Install with
@@ -186,7 +215,7 @@ above. Install `librsvg2-bin` for the icon, and provide the pinned upstream
 chmod +x /path/to/appimagetool-x86_64.AppImage
 APPIMAGETOOL=/path/to/appimagetool-x86_64.AppImage \
 APPIMAGE_RUNTIME_FILE=/path/to/runtime-x86_64 \
-sh packaging/linux/build-appimage.sh 0.0.0~dev1
+sh packaging/linux/build-appimage.sh 0.0.0+git1.local
 ```
 
 The output is in `dist/appimage/`.
@@ -210,7 +239,7 @@ python3.11 -m venv /tmp/ohr-bootstrap
 /tmp/ohr-bootstrap/bin/uv venv --python 3.12 /tmp/ohr-build-venv
 /tmp/ohr-bootstrap/bin/uv pip install --python /tmp/ohr-build-venv/bin/python -r requirements-engine.txt pyinstaller
 /tmp/ohr-build-venv/bin/pyinstaller packaging/linux/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
-sh packaging/linux/build-rpm.sh 0.0.0~dev1
+sh packaging/linux/build-rpm.sh 0.0.0+git1.local
 ```
 
 The output is in `dist/rpm/`; install it with `sudo dnf install ./dist/rpm/*.rpm`.
@@ -238,7 +267,7 @@ To build locally on Apple Silicon with Python 3.12 and Xcode command-line tools:
 python3.12 -m venv /tmp/ohr-build-venv
 /tmp/ohr-build-venv/bin/pip install --only-binary=:all: -r requirements-engine.txt pyinstaller
 /tmp/ohr-build-venv/bin/pyinstaller packaging/macos/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
-sh packaging/macos/build-pkg.sh 0.0.0-dev1
+sh packaging/macos/build-pkg.sh 0.0.0+git1.local
 ```
 
 The output is in `dist/macos/`. Intel macOS is not built because the pinned `zengl` release
