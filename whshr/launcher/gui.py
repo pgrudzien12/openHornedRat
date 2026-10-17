@@ -12,6 +12,7 @@ back to the main thread through a queue polled with ``Tk.after``.
 import queue
 import sys
 import threading
+import time
 import tkinter as tk
 from collections.abc import Callable
 from os import PathLike
@@ -19,7 +20,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 from whshr.launcher import config as config_module
-from whshr.launcher import discovery, engine_launch, gog_installer, validate
+from whshr.launcher import discovery, engine_launch, gog_installer, reaction, validate
 from whshr.launcher.theme import ACCENT, BACKGROUND, TEXT, ImageButton, Theme, scrolled
 from whshr.launcher.battles import list_battles
 from whshr.paths import Installation
@@ -32,6 +33,10 @@ UnpackUpdate = tuple[int, int] | Path | gog_installer.ExtractionFailed
 
 COLUMN_WIDTH = 480  # the right-hand column: screens plus padding
 VALIDATING_INTERVAL_MS = 400  # how often the "Validating..." dots advance
+# The rat's face on the launcher's own portrait art (art/portrait.png pixels): poking it shows the reaction line.
+FACE_BOX = (100, 65, 345, 255)
+REACTION_MARGIN = 24  # the reaction line sits this far from the portrait's left and bottom edges
+REACTION_TICK_MS = 25
 PATH_CHARS = 54  # the launch screen shows only the tail of the installation path
 
 
@@ -326,9 +331,16 @@ class LaunchScreen(tk.Frame):
 class LauncherApp:
     """Top-level window: shows the launch screen directly once a path is already recognized."""
 
-    def __init__(self, root: tk.Tk, config_path: PathArg | None = None) -> None:
+    def __init__(self, root: tk.Tk, config_path: PathArg | None = None,
+                 reaction_text: Callable[[str], str | None] = reaction.load_reaction_text) -> None:
         self.root = root
         self._config_path = config_path
+        self._reaction_text = reaction_text
+        self._reaction_cache: dict[str, str | None] = {}
+        self._reaction: reaction.ReactionLine | None = None
+        self._reaction_clock = 0.0
+        self.portrait: tk.Canvas | None = None
+        self._reaction_items: tuple[int, ...] = ()
         self.config = config_module.load_config(config_path)
         root.title("Open Horned Rat Launcher")
         root.configure(bg=BACKGROUND)
@@ -341,7 +353,7 @@ class LauncherApp:
         theme = self.theme
         portrait = theme.image("portrait")
         if portrait is not None:
-            tk.Label(self.root, image=portrait, bg=BACKGROUND, bd=0).pack(side="left", anchor="n")
+            self._build_portrait(portrait)
             # A fixed size keeps the portrait filling the window height on every screen.
             self.root.geometry(f"{portrait.width() + COLUMN_WIDTH}x{portrait.height()}")
             self.root.minsize(portrait.width() + COLUMN_WIDTH, portrait.height())
@@ -358,6 +370,65 @@ class LauncherApp:
             tk.Label(column, image=footer, bg=BACKGROUND, bd=0).pack(side="bottom", pady=(4, 0))
         self._container = theme.frame(column, pady=8)
         self._container.pack(fill="both", expand=True)
+
+    def _build_portrait(self, image: tk.PhotoImage) -> None:
+        """The portrait as a canvas, so the rat's reaction line can be typed over it."""
+        width, height = image.width(), image.height()
+        canvas = tk.Canvas(self.root, width=width, height=height, bg=BACKGROUND, highlightthickness=0, bd=0)
+        canvas.create_image(0, 0, image=image, anchor="nw")
+        x, y, wrap = REACTION_MARGIN, height - REACTION_MARGIN, width - 2 * REACTION_MARGIN
+        self._reaction_items = (
+            canvas.create_text(x + 2, y + 2, anchor="sw", text="", fill="#000000", width=wrap,
+                               font=self.theme.speech_font),
+            canvas.create_text(x, y, anchor="sw", text="", fill=reaction.REACTION_COLOUR, width=wrap,
+                               font=self.theme.speech_font),
+        )
+        canvas.bind("<Motion>", self._on_portrait_motion)
+        canvas.bind("<ButtonPress-1>", self._on_portrait_press)
+        canvas.pack(side="left", anchor="n")
+        self.portrait = canvas
+
+    def _current_reaction_text(self) -> str | None:
+        path = self.config.installation_path
+        if not path:
+            return None
+        if path not in self._reaction_cache:
+            self._reaction_cache[path] = self._reaction_text(path)
+        return self._reaction_cache[path]
+
+    @staticmethod
+    def _on_face(x: int, y: int) -> bool:
+        left, top, right, bottom = FACE_BOX
+        return left <= x < right and top <= y < bottom
+
+    def _on_portrait_motion(self, event: tk.Event) -> None:
+        assert self.portrait is not None
+        pokeable = self._on_face(event.x, event.y) and self._current_reaction_text() is not None
+        self.portrait.configure(cursor="hand2" if pokeable else "")
+
+    def _on_portrait_press(self, event: tk.Event) -> None:
+        """Poking the face starts the reaction line; a poke while it is still showing is ignored."""
+        if self._reaction is not None or not self._on_face(event.x, event.y):
+            return
+        text = self._current_reaction_text()
+        if text is None:
+            return
+        self._reaction = reaction.ReactionLine(text)
+        self._reaction_clock = time.monotonic()
+        self._tick_reaction()
+
+    def _tick_reaction(self) -> None:
+        if self._reaction is None or self.portrait is None:
+            return
+        now = time.monotonic()
+        visible = self._reaction.advance((now - self._reaction_clock) * 1000)
+        self._reaction_clock = now
+        for item in self._reaction_items:
+            self.portrait.itemconfigure(item, text=visible or "")
+        if visible is None:
+            self._reaction = None
+        else:
+            self.root.after(REACTION_TICK_MS, self._tick_reaction)
 
     def _clear(self) -> None:
         for child in self._container.winfo_children():
