@@ -22,13 +22,15 @@ if TYPE_CHECKING:
 
 
 def report_for(campaign: "CampaignState") -> DebriefReport:
-    """The battle result the debrief shows: the objective records and every marching regiment with its outcome
-    (unharmed and gaining nothing when no battle was played)."""
+    """The battle result the debrief shows: the objective records and every written regiment with its outcome, in the
+    battle's row order (``CampaignState.debrief_rows``: allied NPCs of a G or I battle among them, never hired;
+    notes/native-windows.md 9.13.2), else every marching regiment unharmed and gaining nothing (no battle played)."""
     company = {regiment.whoami: regiment for regiment in campaign.company}
     units: list[DebriefUnit] = []
-    for whoami in campaign.ordered_march_units:
+    rows = campaign.debrief_rows or tuple((whoami, False) for whoami in campaign.ordered_march_units)
+    for whoami, npc in rows:
         regiment = company.get(whoami)
-        if regiment is None:
+        if regiment is None:  # PROVISIONAL: an allied NPC whose regiment is not in the company is not listed
             continue
         outcome = campaign.battle_outcome.get(whoami)
         models, routed, casualties, kills, gained = ((regiment.models, 0, 0, 0, 0) if outcome is None else
@@ -37,7 +39,7 @@ def report_for(campaign: "CampaignState") -> DebriefReport:
         units.append(DebriefUnit(whoami, regiment.name, models, routed, casualties, kills,
                                  regiment.experience + gained, regiment.experience, regiment.orgsize,
                                  regiment.weapon_name, regiment.armour, regiment.points, regiment.banner,
-                                 regiment.hired, regiment.row.artillery))
+                                 regiment.hired and not npc, regiment.row.artillery))
     return DebriefReport(dict(campaign.objective_results), tuple(units))
 
 

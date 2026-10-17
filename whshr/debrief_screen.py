@@ -222,6 +222,15 @@ class DebriefScreen:
         else:
             self.page, self.unit_page = "p3", self.unit_pages - 1
 
+    def unit_at(self, y: float) -> int | None:
+        """The ``whoami`` of the P3 row a Ctrl+click at native ``y`` picks (notes/native-windows.md 9.3.5): row
+        ``floor((y - 50) / (4h))`` of the current unit page, only rows actually present; ``None`` on P2/P4."""
+        if self.page != "p3" or y < 50:
+            return None
+        row = int((y - 50) // (4 * self.body_height))
+        shown = self.report.units[self.unit_page * PAGE_ROWS:(self.unit_page + 1) * PAGE_ROWS]
+        return shown[row].whoami if row < len(shown) else None
+
     def layout(self) -> Layout:
         """The drawing list of the current page."""
         title = Text(self._string("BKTXT", 403, self._mission_name()), 25, align="center")
@@ -271,14 +280,17 @@ class DebriefScreen:
         shown = self.report.units[start:start + PAGE_ROWS]
         for number, unit in enumerate(shown):
             y = 50 + h + 4 * h * number
-            colour = GREY if not unit.hired else RED if unit.destroyed else BLACK
+            # notes/native-windows.md 9.13.4: red (destroyed) overrides grey (not hired); the numbers stay black
+            # except on a destroyed row that is not hired, which keeps the grey.
+            colour = RED if unit.destroyed else GREY if not unit.hired else BLACK
+            numbers = GREY if unit.destroyed and not unit.hired else BLACK
             texts.append(Text(f"{unit.name} {unit.shown_models} ({unit.orgsize})", y, x=105, colour=colour))
             texts.append(Text(f"{self._string('BRTXT', 200 + unit.weapon_name)}/"
                               f"{self._string('BRTXT', 100 + unit.armour)}", y + h, x=105, colour=colour))
             rows.append(RowArt(y, unit.skull, unit.banner))
             for value, x in ((unit.kills, 345), (unit.dead(self.dead_percent), 405),
                              (unit.wounded(self.dead_percent), 465), (unit.gained, 530)):
-                texts.append(Text(str(value), y, x=x))
+                texts.append(Text(str(value), y, x=x, colour=numbers))
         record = self.report.results.get("Z")
         if record is not None and record[0]:
             texts.append(Text(self._string("BKTXT", 611), 50 + 4 * h * len(shown), x=345))

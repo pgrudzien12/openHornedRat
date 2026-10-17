@@ -49,8 +49,6 @@ PROGRAMS: dict[int, tuple[str, ...]] = {
 }
 # Line items the notes do not fully specify for the engine: skipped with a diagnostic.
 UNMODELLED: dict[str, str] = {
-    "elder": "High Elder not rescued penalty: the notes leave its condition open",
-    "hiln": "Hiln killed penalty: the notes leave its condition open",
     "experience": "doubled experience: experience awards are not part of the payment",
     "armour": "+1 armour rewards: not part of the payment",
 }
@@ -143,6 +141,10 @@ def settle(terms: CashTerms, results: Mapping[str, ObjectiveResult], bonus_count
             amount = terms.completion
         elif op == "received":
             amount = -terms.initial
+        elif op in ("elder", "hiln"):
+            # "High Elder not rescued" / "Hiln killed": unconditional -A, whatever the outcome; only the label names
+            # a condition (notes/native-windows.md 9.13.3).
+            amount = -terms.rate_a
         elif op == "skaven":
             amount = terms.rate_a * bonus_counter
         elif op in ("villagers", "livestock"):

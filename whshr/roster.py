@@ -13,6 +13,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from os import PathLike
 
+from .magic import SPELL_CODES
 from .paths import Installation
 from .rules import EXPECTED_STATS, PeImage, StatFields, stat_fields, stat_int
 from . import script
@@ -268,6 +269,24 @@ def with_spell(regiment: Regiment, spell: str) -> Regiment:
         return regiment
     raw = raw.copy()
     raw["cmds"] = [*raw["cmds"], ("addspell", spell)]
+    return replace(regiment, raw=raw)
+
+
+def with_spell_order(regiment: Regiment, spells: Sequence[str]) -> Regiment:
+    """The same regiment whose spell lines (the ``addspell`` lines naming a known spell) list ``spells`` in this order;
+    other ``addspell`` lines, such as casting-mode markers, keep their places."""
+    raw = regiment.raw
+    if raw is None:
+        return regiment
+    cmds = list(raw["cmds"])
+    slots = [index for index, (command, value) in enumerate(cmds)
+             if command == "addspell" and str(value).casefold() in SPELL_CODES]
+    if len(slots) != len(spells):
+        raise ValueError("the new spell order must name every spell line of the regiment")
+    for index, name in zip(slots, spells):
+        cmds[index] = ("addspell", name)
+    raw = raw.copy()
+    raw["cmds"] = cmds
     return replace(regiment, raw=raw)
 
 

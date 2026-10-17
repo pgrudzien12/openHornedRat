@@ -93,6 +93,7 @@ class BattleSceneTests(unittest.TestCase):
         self.assertIs(machine.active.glue_scene, glue)
         machine.active.battle.result = "victory"
         machine.update(0)
+        machine.handle("dismiss")  # the end picture (notes/native-windows.md 9.3.1)
         self.assertIsInstance(machine.active, DebriefScene)  # no result screen of its own
 
         machine.handle("done")  # the debrief screen closes
@@ -308,6 +309,7 @@ class BattleSceneTests(unittest.TestCase):
                 mock.patch.object(battle_scene, "_store_played_results") as played:
             machine.handle(("win_battle",))
             machine.update(BATTLE_TICK_SECONDS)
+        machine.handle("dismiss")  # the end picture
 
         from whshr.debrief_scene import DebriefScene
         self.assertIsInstance(machine.active, DebriefScene)  # the campaign flow goes on to the debrief

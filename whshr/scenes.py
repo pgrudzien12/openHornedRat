@@ -278,25 +278,21 @@ class SceneMachine:
         """A debrief request opens the debrief screen (whshr.debrief_scene); Done applies its effects and the script
         goes on.  In no-battle mode there is no screen: the request completes at once (notes/activity_results.md
         section 5)."""
+        from .debrief_scene import EndScreenScene, post_battle_transition
         from .glue_scene import GlueScene
 
+        no_battle = bool(getattr(self.context, "no_battle", False))
         while isinstance(self.active, GlueScene):
             effect = self.active.take_debrief_effect()
             if effect is None:
                 return
-            campaign = self.active.campaign
-            movie = campaign.campaign_over_movie if campaign is not None and effect.mode in (2, 6) else None
-            if campaign is not None and movie is not None:
-                # notes/native-windows.md 9.9.5: the death movie, then the main menu; no debrief, payment or merge.
-                from .campaign_scenes import MainMenuScene, MovieScene
-
-                campaign.campaign_over_movie = None
-                self._apply(Transition(MovieScene(movie, successor=MainMenuScene()), "campaign over"))
+            if effect.mode in (2, 6) and not no_battle:
+                # A played battle shows its end picture first (notes/native-windows.md 9.3.1 (b)).
+                self._apply(Transition(EndScreenScene(self.active, effect), "end screen shown"))
                 return
-            if not getattr(self.context, "no_battle", False):
-                from .debrief_scene import DebriefScene
-
-                self._apply(Transition(DebriefScene(self.active, effect), "debrief opened"))
+            transition = post_battle_transition(self.active, effect, no_battle)
+            if transition is not None:
+                self._apply(transition)
                 return
             self.active.resolve_debrief(effect)
 

@@ -211,3 +211,26 @@ def program_lines(program: Sequence[Token], results: Results,
             line = measured_line(str(value), results)
             lines.append("" if line is None else text(line[0], line[1]))
     return tuple(lines)
+
+
+# notes/native-windows.md 9.4: the three 640x480 end pictures shown after a battle, each with its own palette.
+END_SCREEN_NEUTRAL, END_SCREEN_SUCCESS, END_SCREEN_FAILURE = "GameEndScreen", "GameEndScreenSuccess", "GameEndScreenFailure"
+
+
+def end_screen(index: int, results: Results) -> str:
+    """The end picture of a battle whose evaluator is table row ``index``, chosen by the row's key
+    (notes/debrief_evaluation.md 4.2, 4.4): ``A`` success when A is present and met, else neutral; ``T`` success
+    when the evaluator's T-result is 1, else failure; ``Z`` failure when Z is met, else success; ``z`` failure when
+    Z is met, else neutral; ``0`` always neutral.  An index outside the table shows the neutral picture."""
+    if not 0 <= index < len(ENTRIES):
+        return END_SCREEN_NEUTRAL
+    key = ENTRIES[index].key
+    if key == "A":
+        return END_SCREEN_SUCCESS if _met(results, "A") else END_SCREEN_NEUTRAL
+    if key == "T":
+        return END_SCREEN_SUCCESS if evaluate(index, results).victory else END_SCREEN_FAILURE
+    if key == "Z":
+        return END_SCREEN_FAILURE if _met(results, "Z") else END_SCREEN_SUCCESS
+    if key == "z":
+        return END_SCREEN_FAILURE if _met(results, "Z") else END_SCREEN_NEUTRAL
+    return END_SCREEN_NEUTRAL

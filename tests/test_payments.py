@@ -89,11 +89,19 @@ class BalanceSheetTests(unittest.TestCase):
         self.assertEqual(men.final, 500 + 25 * 28)
         self.assertEqual(dwarfs.final, 200 * 12)
 
-    def test_given_a_line_the_notes_leave_open_when_settled_then_it_is_skipped_with_a_reason(self):
-        sheet = settle(parse_cash("14,0,1500,200,0,A"), {"A": _met(0, 0, 0, 0)})
+    def test_the_elder_and_hiln_penalties_subtract_rate_a_whatever_the_outcome(self):
+        # notes/native-windows.md 9.13.3: (cash line, A met, Total Final Payment)
+        cases = (("13,0,500,1000,0,A", True, 0), ("13,0,500,1000,0,A", False, 0), ("13,0,500,500,0,A", True, 0),
+                 ("14,0,1500,200,0,A", True, 1300), ("14,0,1500,200,0,A", False, 0))
+        for line, met, final in cases:
+            with self.subTest(line=line, met=met):
+                result = _met(0, 0, 0, 0) if met else (False, (0, 0, 0, 0))
+                sheet = settle(parse_cash(line), {"A": result})
 
-        self.assertEqual(sheet.final, 1500)
-        self.assertTrue(any(text.startswith("hiln") for text in sheet.skipped))
+                self.assertEqual(sheet.final, final)
+                self.assertFalse(sheet.skipped)
+                self.assertEqual(sheet.lines[1], ("elder" if line.startswith("13") else "hiln",
+                                                  -int(line.split(",")[3])))
 
     def test_given_a_line_whose_objective_is_absent_when_settled_then_only_that_line_is_skipped(self):
         sheet = settle(parse_cash("10,0,600,10,0,A"), {"A": _met(0, 0, 0, 0)})
