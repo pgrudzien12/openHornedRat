@@ -253,9 +253,22 @@ EMPTY_ARMOUR_FRAME = 224
 # laid exactly over the bare plate in ICONS 98. Its cells are 32x13 on a 38x19 pitch, the first at (5, 4).
 STATS_GRID_FRAME = 211
 STATS_GRID_POS = (250, 112)
-STAT_CELL_ORIGIN = (STATS_GRID_POS[0] + 5, STATS_GRID_POS[1] + 4)
-STAT_CELL_PITCH = (38, 19)
+STATS_GRID_SIZE = (118, 60)
+# "Characteristic cells": per cell one 28x11 text rectangle (grid-local), inset 2 px left, top and right of the cell;
+# the names are GMTXT 32000-32008 in grid order (M, WS, BS / S, T, W / I, A, Ld).
+STAT_TEXT_RECTS = tuple((left, top, 28, 11) for top in (6, 25, 44) for left in (7, 45, 83))
+STAT_NAME_TEXT_BASE = 32000
+STAT_FALLBACK_NAMES = ("M", "WS", "BS", "S", "T", "W", "I", "A", "Ld")  # without the installation's GMTXT
 
+
+
+def stat_cells(values: Sequence[int | None] | None, texts: Mapping[int, str]) -> list[tuple[str, str | None]]:
+    """The nine characteristic cells as (name, value text) (notes/battle_statistics_panel.md "Characteristic cells"):
+    the value as plain decimal, 0 and a missing value as "-"; no values at all with nothing selected."""
+    names = [texts.get(STAT_NAME_TEXT_BASE + index, fallback) for index, fallback in enumerate(STAT_FALLBACK_NAMES)]
+    if values is None:
+        return [(name, None) for name in names]
+    return [(name, str(value) if value else "-") for name, value in zip(names, values)]
 
 
 @dataclass(frozen=True)
@@ -394,7 +407,7 @@ class Hud:
         self._unit_info_panel: Any = None
         self.text_font: Any = None  # the battle's PCTEXTA font, set by the view when the installation provides it
         self.weapon_texts: Mapping[int, str] = {}  # BRTXT strings, by id
-        self._stat_labels: list[Any] = []
+        self._stat_grid: Any = None  # the characteristic cells' text, made on first draw (the font is set late)
         self._armour_quads: dict[int, ScreenQuad] = {}
 
     def _size(self) -> Size:
@@ -1069,27 +1082,25 @@ class Hud:
     def statistics(self, regiment: "Regiment") -> tuple[int | None, ...]:
         """The nine tabletop characteristics, in the reference's row-major order."""
         names = ("move", "ws", "bs", "strength", "toughness", "wounds", "initiative", "attacks", "leadership")
-        prefix = "leader_" if self._shows_leader_stats(regiment) else ""
-        return tuple(getattr(regiment, prefix + name) for name in names)
+        leader = self._shows_leader_stats(regiment)
+        prefix = "leader_" if leader else ""
+        values: list[int | None] = [getattr(regiment, prefix + name) for name in names]
+        if leader and regiment.potion_strength and values[3] is not None:
+            values[3] += 3  # the leader's S shows the active Potion of Strength ("Characteristic cells")
+        return tuple(values)
 
     def _draw_statistics(self, regiment: "Regiment | None") -> None:
         if self.list_kind is not None:
             return
         self._draw_panel(self._armour_quad(self.armour_frame(regiment)), *ARMOUR_RECT)
         self._draw_panel(self._icon(STATS_GRID_FRAME), *STATS_GRID_POS)
+        if self._stat_grid is None:
+            self._stat_grid = self.gpu.stat_grid(STATS_GRID_SIZE, STAT_TEXT_RECTS, font=self.text_font)
+        texts: Mapping[int, str] = getattr(self.battle, "text_resources", None) or {}
+        self._stat_grid.set_cells(stat_cells(None if regiment is None else self.statistics(regiment), texts))
+        self._draw_panel(self._stat_grid, *STATS_GRID_POS)
         if regiment is None:
             return
-        # Each value sits inside its parchment cell; the text baseline was measured from the
-        # user's 640x480 reference.
-        for index, (name, value) in enumerate(zip(("M", "WS", "BS", "S", "T", "W", "I", "A", "Ld"),
-                                                self.statistics(regiment))):
-            if len(self._stat_labels) <= index:
-                self._stat_labels.append(self.gpu.text((34, 16), self.gpu.battle_log_font,
-                                                      color=BLACK, background=None, padding=0))
-            label = self._stat_labels[index]
-            label.set_lines((f"{name}  {value if value is not None else '–'}",))
-            self._draw_panel(label, STAT_CELL_ORIGIN[0] + 1 + index % 3 * STAT_CELL_PITCH[0],
-                             STAT_CELL_ORIGIN[1] + 1 + index // 3 * STAT_CELL_PITCH[1])
         sheet = self._sheet(regiment.portrait if self._shows_leader_stats(regiment) else regiment.banner)
         if sheet is not None and sheet.frames:
             quad = self._sheet_frame_quad(sheet.frames[0])
@@ -1290,8 +1301,8 @@ class Hud:
             self._unit_info_panel.release()
         for quad in self._armour_quads.values():
             quad.release()
-        for label in self._stat_labels:
-            label.release()
+        if self._stat_grid is not None:
+            self._stat_grid.release()
         for labels in self._list_labels:
             for label in labels:
                 label.release()

@@ -296,6 +296,33 @@ class UnitInfoPanel(ScreenQuad):
         self.write(pygame.image.tobytes(surface, "RGBA"))
 
 
+class StatGridPanel(ScreenQuad):
+    """The characteristic cells' text over the ICONS 211 grid (notes/battle_statistics_panel.md "Characteristic
+    cells"): per cell a name left-aligned and a value right-aligned in one rectangle, both at its top and clipped to
+    it. Transparent; black text."""
+
+    def __init__(self, gpu: "Gpu", size: Size, font: Font, rects: Sequence[tuple[int, int, int, int]],
+                 color: Rgb = (0, 0, 0)) -> None:
+        super().__init__(gpu, size)
+        self.font = font
+        self.rects = tuple(rects)
+        self.color = color
+        self._cells: tuple[tuple[str, str | None], ...] | None = None
+
+    def set_cells(self, cells: Sequence[tuple[str, str | None]]) -> None:
+        if tuple(cells) == self._cells:
+            return
+        self._cells = tuple(cells)
+        surface = pygame.Surface(self.size, pygame.SRCALPHA)
+        for (name, value), (x, y, width, height) in zip(cells, self.rects):
+            clip = surface.subsurface(pygame.Rect(x, y, width, height))
+            clip.blit(self.font.render(name, False, self.color), (0, 0))
+            if value:
+                rendered = self.font.render(value, False, self.color)
+                clip.blit(rendered, (width - rendered.get_width(), 0))
+        self.write(pygame.image.tobytes(surface, "RGBA"))
+
+
 class Gpu:
     """The zengl context, the frame render target and shared fonts."""
 
@@ -319,3 +346,7 @@ class Gpu:
 
     def unit_info(self, size: Size, font: Font | None = None, **options: Any) -> UnitInfoPanel:
         return UnitInfoPanel(self, size, font or self.battle_log_font, **options)
+
+    def stat_grid(self, size: Size, rects: Sequence[tuple[int, int, int, int]], font: Font | None = None,
+                  **options: Any) -> StatGridPanel:
+        return StatGridPanel(self, size, font or self.battle_log_font, rects, **options)

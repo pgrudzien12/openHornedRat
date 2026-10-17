@@ -49,7 +49,7 @@ from whshr.battlefield import WORLD_PER_MESH
 from whshr.camera import BattleCamera
 from whshr.engine import Battle, Regiment
 from whshr.frontend.battle_view import BattleView
-from whshr.frontend.hud import FIXED_BUTTONS, MINIMAP_RECT, PANEL_RECT, Hud
+from whshr.frontend.hud import FIXED_BUTTONS, MINIMAP_RECT, PANEL_RECT, STAT_TEXT_RECTS, Hud, stat_cells
 from whshr.frontend import hud as hud_module
 from whshr.rules import Side
 
@@ -70,6 +70,7 @@ def _hud(selected="player", regiments=None, **overrides):
     instance.pending_order = None
     instance.marker_mode = 0
     instance._marker_order = []
+    instance._stat_grid = Mock(name="cells")
     for key, value in overrides.items():
         setattr(instance, key, value)
     return instance
@@ -141,7 +142,7 @@ class PanelStateTests(unittest.TestCase):
         hud = _hud(regiments=[regiment])
         hud._armour_quad = Mock(return_value="armour")
         hud._icon = Mock(return_value="grid")
-        hud._stat_labels = [Mock() for _ in range(9)]
+        hud._stat_grid = Mock()
         hud._sheet = Mock(return_value=SimpleNamespace(frames=[object()]))
         hud._sheet_frame_quad = Mock(return_value="art")
         hud._draw_panel = Mock()
@@ -246,17 +247,34 @@ class PanelStateTests(unittest.TestCase):
         hud = _hud(regiments=[regiment])
         hud._armour_quad = Mock(return_value="armour")
         hud._icon = Mock(side_effect=lambda frame: f"icon{frame}")
-        hud._stat_labels = [Mock(name=f"stat{i}") for i in range(9)]
+        hud._stat_grid = Mock(name="cells")
         hud._draw_panel = Mock()
         hud._draw_statistics(regiment)
-        hud._draw_panel.assert_any_call("icon211", 250, 112)
         calls = [call.args for call in hud._draw_panel.call_args_list]
-        grid = calls.index(("icon211", 250, 112))
-        for index, label in enumerate(hud._stat_labels):
-            with self.subTest(index=index):
-                position = calls.index((label, 256 + index % 3 * 38, 117 + index // 3 * 19))
-                # Values are painted over the grid, inside cells 32x13 on a 38x19 pitch from (255, 116).
-                self.assertGreater(position, grid)
+        # The cell text is one transparent layer over the grid, at the grid's own origin.
+        self.assertGreater(calls.index((hud._stat_grid, 250, 112)), calls.index(("icon211", 250, 112)))
+
+    def test_characteristic_cells_name_each_value_and_show_a_dash_for_zero(self):
+        cells = stat_cells((4, 3, 0, 3, 3, 1, 20, 1, 10), {32000 + i: f"n{i}" for i in range(9)})
+        self.assertEqual(cells, [("n0", "4"), ("n1", "3"), ("n2", "-"), ("n3", "3"), ("n4", "3"), ("n5", "1"),
+                                 ("n6", "20"), ("n7", "1"), ("n8", "10")])
+
+    def test_characteristic_cells_show_names_only_with_nothing_selected(self):
+        self.assertEqual(stat_cells(None, {})[1], ("WS", None))
+
+    def test_cell_text_rectangles_are_inset_two_pixels_in_each_cell(self):
+        self.assertEqual(STAT_TEXT_RECTS[0], (7, 6, 28, 11))
+        self.assertEqual(STAT_TEXT_RECTS[5], (83, 25, 28, 11))
+        self.assertEqual(STAT_TEXT_RECTS[8], (83, 44, 28, 11))
+
+    def test_leader_strength_shows_an_active_potion_of_strength(self):
+        regiment = Regiment("player", "Troops", 0, 0, 0, Side.PLAYER, models=10, has_leader=True, portrait="leader",
+                            leader_strength=4)
+        regiment.potion_strength = True
+        hud = _hud(regiments=[regiment])
+        hud.set_selected("player")
+        hud.press("toggle_b")
+        self.assertEqual(hud.statistics(regiment)[3], 7)
 
     def test_empty_selection_still_shows_the_empty_grid(self):
         hud = _hud(selected=None)
@@ -265,7 +283,9 @@ class PanelStateTests(unittest.TestCase):
         hud._draw_panel = Mock()
         hud._draw_statistics(None)
         hud._draw_panel.assert_any_call("icon211", 250, 112)
-        self.assertEqual(hud._draw_panel.call_count, 2)
+        # Armour, grid and the names-only cell text ("Characteristic cells": no values with nothing selected).
+        self.assertEqual(hud._draw_panel.call_count, 3)
+        hud._stat_grid.set_cells.assert_called_once_with([(name, None) for name in hud_module.STAT_FALLBACK_NAMES])
 
     def test_item_popup_is_painted_after_the_unit_name(self):
         hud = _hud()
