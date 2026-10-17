@@ -41,6 +41,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
 LicenseFile=..\..\LICENSE
+SetupIconFile=..\..\whshr\icons\ohr.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

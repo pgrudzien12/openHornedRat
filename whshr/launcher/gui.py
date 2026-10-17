@@ -20,6 +20,7 @@ from os import PathLike
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
+from whshr.app_icon import WINDOW_CLASS, WINDOW_ICON_SIZES, icon_path
 from whshr.launcher import config as config_module
 from whshr.launcher import discovery, engine_launch, gog_installer, reaction, updates, validate
 from whshr.launcher.theme import ACCENT, BACKGROUND, TEXT, ImageButton, Theme, scrolled
@@ -348,11 +349,23 @@ class LauncherApp:
         self.config = config_module.load_config(config_path)
         root.title("Open Horned Rat Launcher")
         root.configure(bg=BACKGROUND)
+        self._set_window_icon()
         self.theme = Theme(root)
         self._build_frame()
         self._show_initial_screen()
         if update_check is not None:
             self._start_update_check(update_check)
+
+    def _set_window_icon(self) -> None:
+        """The application icon (whshr.app_icon) in several sizes, for the title bar, taskbar and task switcher."""
+        self._icons: list[tk.PhotoImage] = []
+        for size in WINDOW_ICON_SIZES:
+            try:
+                self._icons.append(tk.PhotoImage(master=self.root, file=str(icon_path(size))))
+            except tk.TclError:  # a missing or unreadable file just leaves that size out
+                continue
+        if self._icons:
+            self.root.iconphoto(True, *self._icons)
 
     def _build_frame(self) -> None:
         """Portrait on the left; header, title, the current screen and footer in a column on the right."""
@@ -519,6 +532,6 @@ class LauncherApp:
 
 def main() -> None:
     config_module.migrate_legacy_files()
-    root = tk.Tk()
+    root = tk.Tk(className=WINDOW_CLASS)
     LauncherApp(root, update_check=updates.newer_release)
     root.mainloop()

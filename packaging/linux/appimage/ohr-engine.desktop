@@ -4,5 +4,6 @@ Name=Open Horned Rat
 Comment=Play Shadow of the Horned Rat with your own game files
 Exec=AppRun
 Icon=ohr-engine
+StartupWMClass=ohr-engine
 Terminal=false
 Categories=Game;StrategyGame;

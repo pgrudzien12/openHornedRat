@@ -9,7 +9,9 @@ Usage:
     python build_art.py SOURCE_DIR [OUT_DIR]
 
 SOURCE_DIR holds portrait.png, top_bar.png, bottom_bar.png, scroll_up.png and scroll_down.png;
-the decorations sit on a plain black background, which is keyed out to transparency.
+the decorations sit on a plain black background, which is keyed out to transparency. When it also holds
+necklace.png (the skull pendant on its chain), the application icon is built too: PNGs in every size the
+desktops use, a Windows .ico and a macOS .icns, in whshr/icons/.
 """
 
 import sys
@@ -17,7 +19,7 @@ from collections import deque
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFilter
 
 BACKGROUND = (20, 15, 11)  # launcher window colour; keep in sync with gui.py's BACKGROUND
 PORTRAIT_SIZE = (544, 680)
@@ -28,6 +30,9 @@ BUTTON_SIZES = {"wide": (300, 56), "small": (128, 40)}
 # The rust panel's middle, as a fraction of a button's height (the spikes and cloth below it make the
 # image taller than the plate); keep in sync with theme.py's BUTTON_TEXT_CENTRE.
 PLATE_CENTRE = 0.37
+# The pendant with its chains running to the top corners, in necklace.png's own pixels; it reads at 16 px too.
+ICON_CROP = (200, 300, 1080, 1180)
+ICON_SIZES = (16, 24, 32, 48, 64, 128, 256, 512)
 PRESSED_BRIGHTNESS = 0.6
 HOVER_BRIGHTNESS = 1.18
 
@@ -130,10 +135,43 @@ def plate_button(top_bar: Image.Image, size: tuple[int, int]) -> Image.Image:
     return Image.alpha_composite(button, shade)
 
 
+def full_canvas_keyed(image: Image.Image) -> Image.Image:
+    """``key_black`` without its crop: the keyed image at the source's own size and coordinates."""
+    level = np.asarray(image.convert("RGB")).max(axis=2)
+    ys, xs = np.nonzero(level > 14)
+    canvas = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    canvas.paste(key_black(image), (int(xs.min()), int(ys.min())))
+    return canvas
+
+
+def icons(source: Image.Image, out: Path) -> None:
+    """The application icon in every size, plus the Windows .ico and the macOS .icns built from them."""
+    out.mkdir(parents=True, exist_ok=True)
+    crop = full_canvas_keyed(source).crop(ICON_CROP)
+    side = max(crop.size)
+    square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    square.paste(crop, ((side - crop.width) // 2, (side - crop.height) // 2))
+    sizes: dict[int, Image.Image] = {}
+    for size in (*ICON_SIZES, 1024):
+        icon = square.resize((size, size), Image.Resampling.LANCZOS)
+        if size <= 48:  # small sizes lose the bone texture; a light sharpen keeps the outline readable
+            alpha = icon.getchannel("A")
+            icon = icon.filter(ImageFilter.UnsharpMask(radius=1, percent=80, threshold=2))
+            icon.putalpha(alpha)
+        sizes[size] = icon
+    for size in ICON_SIZES:
+        sizes[size].save(out / f"ohr-{size}.png", optimize=True)
+    sizes[256].save(out / "ohr.ico", sizes=[(s, s) for s in (16, 24, 32, 48, 64, 128, 256)],
+                    append_images=[sizes[s] for s in (16, 24, 32, 48, 64, 128)])
+    sizes[1024].save(out / "ohr.icns")
+
+
 def main(argv: list[str]) -> int:
     source = Path(argv[1])
     out = Path(argv[2]) if len(argv) > 2 else Path(__file__).resolve().parents[2] / "whshr" / "launcher" / "art"
     out.mkdir(parents=True, exist_ok=True)
+    if (source / "necklace.png").is_file():
+        icons(Image.open(source / "necklace.png"), out.parents[1] / "icons")
 
     portrait(Image.open(source / "portrait.png")).save(out / "portrait.png", optimize=True)
     top_bar = key_black(Image.open(source / "top_bar.png"))

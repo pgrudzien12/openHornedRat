@@ -14,6 +14,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame  # noqa: E402
 import zengl  # noqa: E402
 
+from ..app_icon import ENGINE_WINDOW_ICON_SIZE, WINDOW_CLASS, icon_path  # noqa: E402
 from ..assets import AssetId  # noqa: E402
 from ..audio_settings import audio_settings  # noqa: E402
 from ..difficulty import difficulty_setting  # noqa: E402
@@ -39,13 +40,25 @@ WINDOW_TITLE = "openHornedRat"
 FADE_SECONDS = 0.3  # short fade-in from black after every scene switch
 
 
+def set_window_icon() -> None:
+    """Give the game window the application icon (whshr.app_icon); without the file it keeps the default."""
+    try:
+        pygame.display.set_icon(pygame.image.load(str(icon_path(ENGINE_WINDOW_ICON_SIZE))))
+    except (pygame.error, FileNotFoundError):
+        pass
+
+
 def open_window(size: tuple[int, int], hidden: bool = False) -> zengl.Context:
     """Open an OpenGL 3.3 core window and return its zengl context."""
+    # The window class the desktop entry expects (whshr.app_icon); read by SDL when the video system starts.
+    os.environ.setdefault("SDL_VIDEO_X11_WMCLASS", WINDOW_CLASS)
+    os.environ.setdefault("SDL_VIDEO_WAYLAND_WMCLASS", WINDOW_CLASS)
     pygame.init()
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
     flags = pygame.OPENGL | pygame.DOUBLEBUF | (pygame.HIDDEN if hidden else 0)
+    set_window_icon()  # before set_mode, so the window and taskbar entry start with it
     try:
         pygame.display.set_mode(size, flags, vsync=0 if hidden else 1)
     except pygame.error:  # Some drivers refuse a vsync request; run without it.

@@ -27,6 +27,10 @@ cp -a dist/ohr-engine/. "$stage/opt/ohr-engine/"
 install -m 755 packaging/linux/ohr-engine-launch "$stage/usr/bin/ohr-engine-launch"
 ln -s /opt/ohr-engine/ohr-engine "$stage/usr/bin/ohr-engine"
 install -m 644 packaging/linux/ohr-engine.desktop "$stage/usr/share/applications/ohr-engine.desktop"
+for size in 16 24 32 48 64 128 256 512; do
+    install -d "$stage/usr/share/icons/hicolor/${size}x${size}/apps"
+    install -m 644 "whshr/icons/ohr-${size}.png" "$stage/usr/share/icons/hicolor/${size}x${size}/apps/ohr-engine.png"
+done
 install -m 644 LICENSE "$stage/usr/share/doc/ohr-engine/LICENSE"
 install -m 644 LEGAL.md "$stage/usr/share/doc/ohr-engine/LEGAL.md"
 install -m 644 packaging/THIRD_PARTY_NOTICES.md "$stage/usr/share/doc/ohr-engine/THIRD_PARTY_NOTICES.md"
