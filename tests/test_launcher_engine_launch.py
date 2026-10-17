@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -6,6 +7,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from whshr.launcher import engine_launch
+
+BOOTSTRAP = engine_launch.ENGINE_BOOTSTRAP.format(root=str(engine_launch.REPOSITORY_ROOT))
 
 
 class EngineLaunchTests(unittest.TestCase):
@@ -58,15 +61,28 @@ class BuildCommandTests(unittest.TestCase):
     def test_given_no_battle_or_options_when_building_the_command_then_it_is_a_plain_engine_start(self):
         command = engine_launch.build_command("/game", python_path="py")
 
-        self.assertEqual(command, ["py", "-m", "whshr", "engine", "/game"])
+        self.assertEqual(command, ["py", "-c", BOOTSTRAP, "engine", "/game"])
 
     def test_given_a_battle_and_all_options_when_building_the_command_then_every_flag_is_present(self):
         options = engine_launch.LaunchOptions(no_battles=True, trace=True)
 
         command = engine_launch.build_command("/game", "BF001", options, python_path="py")
 
-        self.assertEqual(command, ["py", "-m", "whshr", "engine", "/game", "--battle", "BF001",
+        self.assertEqual(command, ["py", "-c", BOOTSTRAP, "engine", "/game", "--battle", "BF001",
                                    "--no-battle"])
+
+    def test_given_a_source_checkout_when_the_command_runs_elsewhere_without_pythonpath_then_whshr_starts(self):
+        # The VS Code debugger's subprocess hook drops both the working directory and PYTHONPATH from the
+        # module lookup, so the command itself must find the checkout.
+        command = engine_launch.build_command("/game", python_path=sys.executable)
+        environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+
+        with tempfile.TemporaryDirectory() as elsewhere:
+            result = subprocess.run(command[:3] + ["--help"], cwd=elsewhere, env=environment,
+                                    capture_output=True, text=True, timeout=60)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("usage: whshr", result.stdout)
 
     def test_frozen_launcher_starts_the_bundled_engine_mode(self):
         with patch.object(sys, "frozen", True, create=True):
