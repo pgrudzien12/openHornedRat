@@ -10,8 +10,8 @@ Usage:
 
 SOURCE_DIR holds portrait.png, top_bar.png, bottom_bar.png, scroll_up.png and scroll_down.png;
 the decorations sit on a plain black background, which is keyed out to transparency. When it also holds
-necklace.png (the skull pendant on its chain), the application icon is built too: PNGs in every size the
-desktops use, a Windows .ico and a macOS .icns, in whshr/icons/.
+icon.png (the application icon's artwork on black), the icon is built too: PNGs in every size the desktops
+use, a Windows .ico and a macOS .icns, in whshr/icons/.
 """
 
 import sys
@@ -30,15 +30,40 @@ BUTTON_SIZES = {"wide": (300, 56), "small": (128, 40)}
 # The rust panel's middle, as a fraction of a button's height (the spikes and cloth below it make the
 # image taller than the plate); keep in sync with theme.py's BUTTON_TEXT_CENTRE.
 PLATE_CENTRE = 0.37
-# The pendant with its chains running to the top corners, in necklace.png's own pixels; it reads at 16 px too.
-ICON_CROP = (200, 300, 1080, 1180)
 ICON_SIZES = (16, 24, 32, 48, 64, 128, 256, 512)
+ICON_HOLE_AREA = 5000  # enclosed black areas this large (source pixels; the star's eight ring gaps are 7700-10000) turn see-through
 PRESSED_BRIGHTNESS = 0.6
 HOVER_BRIGHTNESS = 1.18
 
 
-def key_black(image: Image.Image, threshold: int = 14, soft: int = 48) -> Image.Image:
-    """Turns the black background (reachable from the border) transparent, with a soft edge."""
+def _dark_regions(level: np.ndarray, threshold: int, seeds: list[tuple[int, int]],
+                  done: np.ndarray) -> list[list[tuple[int, int]]]:
+    """Each connected area of pixels at most ``threshold`` bright, flooded from ``seeds``; marks ``done``."""
+    height, width = level.shape
+    regions: list[list[tuple[int, int]]] = []
+    for seed in seeds:
+        if done[seed] or level[seed] > threshold:
+            continue
+        region: list[tuple[int, int]] = []
+        pending: deque[tuple[int, int]] = deque([seed])
+        done[seed] = True
+        while pending:
+            y, x = pending.popleft()
+            region.append((y, x))
+            for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                if 0 <= ny < height and 0 <= nx < width and not done[ny, nx] and level[ny, nx] <= threshold:
+                    done[ny, nx] = True
+                    pending.append((ny, nx))
+        regions.append(region)
+    return regions
+
+
+def key_black(image: Image.Image, threshold: int = 14, soft: int = 48, hole_area: int | None = None) -> Image.Image:
+    """Turns the black background (reachable from the border) transparent, with a soft edge.
+
+    With ``hole_area``, enclosed black areas of at least that many pixels (the gaps inside a ring) go too;
+    smaller dark spots, such as shadows in a texture, stay.
+    """
     rgb = np.asarray(image.convert("RGB")).astype(np.float32)
     level = rgb.max(axis=2)
     height, width = level.shape
@@ -61,6 +86,13 @@ def key_black(image: Image.Image, threshold: int = 14, soft: int = 48) -> Image.
             pending.append((y, x - 1))
         if x < width - 1:
             pending.append((y, x + 1))
+    if hole_area is not None:
+        done = background.copy()
+        seeds = [(int(y), int(x)) for y, x in zip(*np.nonzero((level <= threshold) & ~background))]
+        for region in _dark_regions(level, threshold, seeds, done):
+            if len(region) >= hole_area:
+                ys, xs = zip(*region)
+                background[list(ys), list(xs)] = True
     # Pixels next to the background fade in with their brightness (they were blended with black).
     near = background.copy()
     for _ in range(3):
@@ -135,19 +167,13 @@ def plate_button(top_bar: Image.Image, size: tuple[int, int]) -> Image.Image:
     return Image.alpha_composite(button, shade)
 
 
-def full_canvas_keyed(image: Image.Image) -> Image.Image:
-    """``key_black`` without its crop: the keyed image at the source's own size and coordinates."""
-    level = np.asarray(image.convert("RGB")).max(axis=2)
-    ys, xs = np.nonzero(level > 14)
-    canvas = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    canvas.paste(key_black(image), (int(xs.min()), int(ys.min())))
-    return canvas
-
-
 def icons(source: Image.Image, out: Path) -> None:
-    """The application icon in every size, plus the Windows .ico and the macOS .icns built from them."""
+    """The application icon in every size, plus the Windows .ico and the macOS .icns built from them.
+
+    The artwork is keyed off its black background and centred on a square just large enough to hold it.
+    """
     out.mkdir(parents=True, exist_ok=True)
-    crop = full_canvas_keyed(source).crop(ICON_CROP)
+    crop = key_black(source, hole_area=ICON_HOLE_AREA)
     side = max(crop.size)
     square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
     square.paste(crop, ((side - crop.width) // 2, (side - crop.height) // 2))
@@ -170,8 +196,8 @@ def main(argv: list[str]) -> int:
     source = Path(argv[1])
     out = Path(argv[2]) if len(argv) > 2 else Path(__file__).resolve().parents[2] / "whshr" / "launcher" / "art"
     out.mkdir(parents=True, exist_ok=True)
-    if (source / "necklace.png").is_file():
-        icons(Image.open(source / "necklace.png"), out.parents[1] / "icons")
+    if (source / "icon.png").is_file():
+        icons(Image.open(source / "icon.png"), out.parents[1] / "icons")
 
     portrait(Image.open(source / "portrait.png")).save(out / "portrait.png", optimize=True)
     top_bar = key_black(Image.open(source / "top_bar.png"))
