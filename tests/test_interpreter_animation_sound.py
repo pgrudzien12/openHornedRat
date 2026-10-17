@@ -132,12 +132,13 @@ class EngineAnimationTests(AnimationTestCase):
         self.assertEqual(self.unit.script_action, 0)
         self.assertFalse(any(model.action == FIGHT for model in self.unit.melee_models))
 
-    def test_model_in_a_one_shot_queues_the_broadcast(self):
+    def test_a_broadcast_interrupts_a_standard_shoot_pose(self):
+        # notes/script_animation_sound.md 0.5: the shoot pose has no lock.
         model = self.unit.melee_models[0]
         animation.step(model, SHOOT, self.battle.rng, self.unit.animation_family)
         self.call("SetActionState", STAND)
         self.battle._step_animations(self.unit)
-        self.assertEqual((model.action, model.pending_action), (SHOOT, STAND))
+        self.assertEqual((model.action, model.pending_action), (STAND, None))
 
 
 class CastingStateTests(AnimationTestCase):
