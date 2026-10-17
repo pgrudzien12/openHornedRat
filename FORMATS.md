@@ -38,6 +38,7 @@ from game data; they are not part of the repository.
 | Game rules: unit stats, combat, morale, shooting | `GAMEF.DLL` code and tables, `setstats` | ✅ stat layout, close combat, morale; 🟡 missile constants, some flags | Unit stat fields, Game rules | `notes/game_rules.md` |
 | Mission logic, unit behaviour | `SCRIPT/BFxxx.DLL` | ✅ bytecode scripts, interpreter, all 232 opcodes, script decoder (`whshr scripts`); 🟡 per-mission semantics | Mission logic, Game rules | `notes/game_rules.md` |
 | Save games, campaign files | `SAVE/savegame.*`, `ARMY/PLAY/MARCH.MRC`, `debrief.dbf` | ✅ RIFF `WHSV` container, regiment roster, embedded army files, mission availability and caravan scroll rules; 🟡 some `Result:` values | Save games and campaign files | `notes/campaign.md` |
+| Steam "Classic" edition | whole installation | ✅ differences catalogued; sprite repair rule | Steam edition | `notes/steam_edition.md` |
 
 ## `.PAL` — two different formats under the same extension
 
@@ -1096,6 +1097,18 @@ Campaign rules in short: kills give the victim's `s_pntval` as experience; promo
 19 balance-sheet programs (`BKTXT` 5000–5042 lines); a deployed regiment costs price per model × models, one left
 in camp 10 %; routed models return, 65 % of the killed are wounded and return a mission later; regiments below
 20 % are disbanded unless protected.
+
+## Steam edition
+
+Full report: `notes/steam_edition.md` (issue #466). The Steam "Classic" edition has no `WARFB` folder, merges
+`REMOTE/` and `UPDATE/` into `FILE/`, and moves the MIDI files to `MUSIC/MIDI/` (FM) and `MUSIC/MIDI/GEN/` (General
+MIDI), adding `<TRACK>.MP3` and `<TRACK>CD.MP3` recordings. Inside the files, about 3 500 isolated bytes `FF` became
+`DF` (rarely `CF`/`EF`); sizes never change. This damages 26 type-4 sprite frames in 14 `.BOP` files (a `00 FF` zero
+run becomes `00 DF`, so the frame unpacks short and later pixels shift), and puts single-sample clicks into speech and
+film audio. Film video, scripts, meshes and rule tables are unchanged. A decoder repairs the sprites exactly:
+**a zero run shorter than 255 that is immediately followed by another zero run counts as 255** (this never occurs in
+GOG data), then a frame that still unpacks short is padded with transparent bytes. `BITMAP.DLL` replaces the
+Mindscape logo picture with a disclaimer screen, and `GMTXT.DLL` relabels the music modes to "MIDI"/"CD".
 
 ## Other files
 
