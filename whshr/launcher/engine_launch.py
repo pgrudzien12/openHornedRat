@@ -20,6 +20,12 @@ from pathlib import Path
 PathArg = str | PathLike[str]
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+# How a source checkout starts the engine: like ``python -m whshr``, but putting the checkout on the import
+# path itself. A plain ``-m whshr`` child fails with "No module named whshr" when the launcher runs under the
+# VS Code debugger, whose subprocess hook rewrites ``-m`` children and loses PYTHONPATH and the working
+# directory for the module lookup.
+ENGINE_BOOTSTRAP = ("import runpy, sys; sys.path.insert(0, {root!r}); "
+                    "runpy.run_module('whshr', run_name='__main__', alter_sys=True)")
 
 
 def find_engine_python(repository_root: PathArg = REPOSITORY_ROOT) -> Path:
@@ -61,7 +67,7 @@ def build_command(installation: PathArg, battle_id: str | None = None, options: 
     options = options or LaunchOptions()
     executable = str(python_path or find_engine_python())
     command = ([executable, "--engine", str(installation)] if getattr(sys, "frozen", False) else
-               [executable, "-m", "whshr", "engine", str(installation)])
+               [executable, "-c", ENGINE_BOOTSTRAP.format(root=str(REPOSITORY_ROOT)), "engine", str(installation)])
     if battle_id:
         command += ["--battle", battle_id]
     if options.no_battles:
