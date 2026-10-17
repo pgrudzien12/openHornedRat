@@ -73,7 +73,7 @@ With your own copy of the game, you can watch or skip the opening movies, start 
 
 ## Install a package
 
-Download the package for your system from the [latest release](https://github.com/pgrudzien12/openHornedRat/releases/latest). The packages are unsigned, so your system may ask you to confirm before installing. You also need your own legally owned game files. When the launcher first opens, select the original game's `WARFB` directory if it is not found automatically. If you only have GOG's Windows installer on Linux or macOS, see [Get the game files](#get-the-game-files).
+Download the package for your system from the [latest release](https://github.com/pgrudzien12/openHornedRat/releases/latest). The packages are unsigned, so your system may ask you to confirm before installing. You also need your own legally owned game files. When the launcher first opens, select the original game's `WARFB` directory (for the Steam edition, the game's own folder under `steamapps/common`) if it is not found automatically. If you only have GOG's Windows installer on Linux or macOS, see [Get the game files](#get-the-game-files).
 
 **Upgrading:** install the newer package the same way, over the old one (on Linux, `apt install` or `dnf install` the newer file; replace an AppImage file). Saves, settings, logs and unpacked game files live outside the installation and are kept, though saves may not carry over between engine versions. The launcher shows its version under the title and tells you, in red under the portrait, when a newer release is out; click that line to open the download page. Set `OHR_NO_UPDATE_CHECK=1` to turn the check off.
 
@@ -122,7 +122,7 @@ The launcher starts the bundled engine when you select **Start game**. On Window
 
 ## Get the game files
 
-The engine needs the `WARFB` folder of your own copy of the game. GOG sells it as a DRM-free Windows installer (`setup_warhammer_shadow_of_the_horned_rat_*.exe`); download it from your GOG library under **Offline backup game installers**.
+The engine needs the `WARFB` folder of your own copy of the game. If you own the Steam edition, install it with Steam: its folder `steamapps/common/Warhammer Shadow of the Horned Rat` plays the role of `WARFB` and is found automatically. GOG sells it as a DRM-free Windows installer (`setup_warhammer_shadow_of_the_horned_rat_*.exe`); download it from your GOG library under **Offline backup game installers**.
 
 The steps below were tested with GOG's `setup_warhammer_shadow_of_the_horned_rat_1.0_gog_v5_(90032).exe`, a single file with no extra parts. Other GOG builds of the installer should work the same way, since innoextract reads every Inno Setup version, but they have not been tried. If your download comes with extra `setup_*.bin` files, keep them in the same folder as the `.exe`; older GOG installers of this kind may also need `unrar`.
 
@@ -219,7 +219,7 @@ The `state.player_army` field identifies which source the automated session used
 ### You need
 
 - Python 3 and a system capable of creating an OpenGL 3.3 window.
-- A legal local copy of *Warhammer: Shadow of the Horned Rat*. The GOG v1.0 release is the version we actively test. The 1995 CD edition may work; the Steam/SNEG re-release has not yet been verified.
+- A legal local copy of *Warhammer: Shadow of the Horned Rat*. The GOG v1.0 release is the version we actively test. The Steam/SNEG "Classic" re-release also works: its files load and its battles start, but it has not had a full campaign playthrough yet. The 1995 CD edition may work.
 - A checkout of this repository.
 
 The project never ships original game files. Point the engine at the `WARFB` directory in your own installation.
@@ -271,7 +271,7 @@ The **Options** button opens audio levels for Music, Dialogue, and Sound Effects
 
 This repository contains no original game files and never will. *Warhammer* and *Shadow of the Horned Rat* are trademarks of their respective owners. Open Horned Rat is a non-commercial fan project and is not affiliated with Games Workshop, Mindscape, GOG, or SNEG. See [LEGAL.md](LEGAL.md) for details.
 
-You can buy a compatible copy from [GOG.com](https://www.gog.com/en/game/warhammer_shadow_of_the_horned_rat). We have not yet verified the [Steam/SNEG re-release](https://store.steampowered.com/app/4280870/Warhammer_Shadow_of_the_Horned_Rat_Classic/).
+You can buy a compatible copy from [GOG.com](https://www.gog.com/en/game/warhammer_shadow_of_the_horned_rat). The [Steam/SNEG re-release](https://store.steampowered.com/app/4280870/Warhammer_Shadow_of_the_Horned_Rat_Classic/) works too, with less testing so far.
 
 ## License
 
