@@ -97,7 +97,9 @@ Effect:
 4. Condition **true**.
 
 When the spawn is triggered, `place` ≠ 1 is never used: the copy then stays where the template is, facing 0.
-🟡 Because the copy may sit in a unit slot after the spawner's, it may run its script in the same tick.
+The copy takes the first never-used unit slot (after every existing unit; removed units keep their slots), and the
+tick only handles the units that were active when it began, so the copy normally first runs in the **next** tick
+(`battle_tick_order.md` §3; 🟡 same-tick run only if a not-yet-reached unit was removed during that tick).
 
 The spawned script (BF015 28 etc.) is `SetInterruptScript n; SetOrder2 64 0; loop { SetWait 5; Wait; Query 18 }`,
 and its interrupt script runs Query 17 on event 0x34 (`script_queries.md` §10).
