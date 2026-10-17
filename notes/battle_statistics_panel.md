@@ -122,7 +122,7 @@ The same panel runs in deployment, and the deployment selection uses the same ru
 
 | Before | Action | After (lines at y 72 / 84 / 96) |
 |---|---|---|
-| select Grudgebringer Cavalry (`Grudgebringer<Cavalry`), unit mode, 16 of 16 | paint | `Grudgebringer` / `Cavalry` / `<BRTXT 200+w>` … `16/16` |
+| select Grudgebringer Cavalry (`Grudgebringer<Cavalry`), unit mode, n of N models | paint | `Grudgebringer` / `Cavalry` / `<BRTXT 200+w>` … `n/N` |
 | select Vannheim's 75th (`Vannheim's_75th`), unit mode | paint | `Vannheim's 75th` / `<BRTXT 200+w>` … `18/18` / — |
 | same unit, leader mode (`Siegfried_Vannheim`) | press the leader head | `Siegfried Vannheim` / (empty) / `<BRTXT 200+leader w>` … `18/18` |
 | the unit loses 2 models | tick of removal | count becomes `16/18` |
