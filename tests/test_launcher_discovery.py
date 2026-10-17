@@ -55,3 +55,48 @@ class DiscoveryTests(unittest.TestCase):
 
         self.assertIn(steam_root, roots)
         self.assertIn(Path("D:\\SteamLibrary"), roots)
+
+    def _install_game(self, relative: str) -> Path:
+        game = self.root / relative
+        (game / "FILE" / "BINARY").mkdir(parents=True)
+        (game / "REMOTE" / "BINARY").mkdir(parents=True)
+        return game
+
+    def test_given_a_game_in_a_typical_location_when_discovering_from_home_then_it_is_found(self):
+        gog_folder = "Warhammer - Shadow of the Horned Rat/WARFB"
+        layouts = {
+            "GOG folder in home": ("linux", f"GOG Games/{gog_folder}"),
+            "Proton prefix of snap Steam": (
+                "linux", f"snap/steam/common/.local/share/Steam/steamapps/compatdata/123/pfx/drive_c/GOG Games/{gog_folder}"),
+            "Proton prefix with GOG Galaxy": (
+                "linux", f".local/share/Steam/steamapps/compatdata/9/pfx/drive_c/Program Files (x86)/GOG Galaxy/Games/{gog_folder}"),
+            "Flatpak Steam library": (
+                "linux", ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/Horned Rat"),
+            "default Wine prefix": ("linux", f".wine/drive_c/GOG Games/{gog_folder}"),
+            "Lutris prefix": ("linux", f"Games/warhammer-horned-rat/drive_c/GOG Games/{gog_folder}"),
+            "Bottles bottle": ("linux", f".local/share/bottles/bottles/Games/drive_c/GOG Games/{gog_folder}"),
+            "Heroic install": ("linux", f"Games/Heroic/{gog_folder}"),
+            "macOS Steam library": ("darwin", "Library/Application Support/Steam/steamapps/common/Horned Rat"),
+        }
+        for name, (platform, relative) in layouts.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as home:
+                self.root = Path(home)
+                game = self._install_game(relative)
+
+                found = discovery.discover_installations(home=self.root, platform=platform)
+
+                self.assertEqual(found, [game])
+
+    def test_given_a_steam_root_reachable_through_a_symlink_when_discovering_then_the_game_is_listed_once(self):
+        game = self._install_game(".local/share/Steam/steamapps/common/Horned Rat")
+        (self.root / ".steam").mkdir()
+        (self.root / ".steam" / "steam").symlink_to(self.root / ".local/share/Steam")
+
+        found = discovery.discover_installations(home=self.root, platform="linux")
+
+        self.assertEqual(found, [game])
+
+    def test_given_a_game_folder_without_the_game_data_when_discovering_then_nothing_is_found(self):
+        (self.root / "GOG Games" / "Warhammer - Shadow of the Horned Rat" / "WARFB" / "FILE").mkdir(parents=True)
+
+        self.assertEqual(discovery.discover_installations(home=self.root, platform="linux"), [])
