@@ -1823,7 +1823,7 @@ class ScriptInterpreter:
         unit.braced = False
         unit.braced_target = None
         unit.target_x = unit.target_y = None
-        unit.waypoints.clear()
+        unit.clear_route()
         unit.turn_order_key = None
         unit.model_positions()
         for model in unit.melee_models:
@@ -1902,7 +1902,7 @@ class ScriptInterpreter:
         A unit starting from rest snaps 90/180 degrees at its first movement update, toward the first plan's heading
         (the steer heading if that plan already steers round something), not the raw goal; a unit already moving
         does not snap (notes/attack_order_flow.md 3, notes/close_point_move.md 2)."""
-        unit.waypoints.clear()
+        unit.clear_route()
         unit.attack_target = None
         unit.charge_started_target = None
         unit.turn_order_key = None
@@ -1968,7 +1968,7 @@ class ScriptInterpreter:
         if self._fold(goal - unit.direction) <= 16 or unit.routing or unit.anchored:
             return state.pc + 1
         unit.target_x = unit.target_y = None
-        unit.waypoints.clear()
+        unit.clear_route()
         unit.attack_target = None
         self.battle.begin_script_turn(unit, goal)
         state.cond_flags = True
@@ -2539,7 +2539,7 @@ class ScriptInterpreter:
                     self.react(unit_id, FEAR_THE_BEAST_REACTION)
                     regiment.target_x = regiment.target_y = None
                     regiment.attack_target = None
-                    regiment.waypoints.clear()
+                    regiment.clear_route()
                     self.battle.reform_to_ranks(regiment, regiment.ranks)
                     return state.pc + 1
                 regiment.attack_target = target_id
@@ -2556,7 +2556,7 @@ class ScriptInterpreter:
         regiment.route_pause_ticks = 0
         regiment.free_charging = False
         regiment.target_x = regiment.target_y = None
-        regiment.waypoints.clear()
+        regiment.clear_route()
         regiment.avoid_target = None
         regiment.route_side, regiment.route_planned_for = 0, None
         regiment.route_follows_unit = False
@@ -3350,7 +3350,7 @@ class ScriptInterpreter:
         facing = int(unit.direction)
         unit.target_x = unit.x + int(_trunc_sin(facing) * reach / 256)
         unit.target_y = unit.y + int(_trunc_cos(facing) * reach / 256)
-        unit.waypoints = []
+        unit.clear_route()
         unit.attack_target = unit.charge_started_target = None
         unit.free_charging = True
         # A charge is a straight run (notes/attack_order_flow.md 1): no route pause, and no steering or route plan

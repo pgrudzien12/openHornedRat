@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import pygame
 
-from .. import magic, spell_effects
+from .. import magic, spell_effects, steering
 from ..battlefield import Battlefield, SpriteFrame, SpriteSheet
 from ..portrait_popup import overlay_frames
 from ..rules import Side
@@ -49,6 +49,21 @@ def select_regiment_hit(hits: Sequence["Regiment"], selected: str | None) -> str
     others = hits[:-1]
     pool = [regiment for regiment in others if regiment.side == Side.PLAYER] or others
     return pool[0].identifier if pool else top.identifier
+
+
+def route_marker_frames(regiment: "Regiment") -> list[tuple[tuple[float, float], int, int]]:
+    """The focused regiment's minimap route markers (notes/move_routes.md 4): per clicked stop, next first, its
+    point, number-label frame and marker frame. None for an allied or enemy regiment, or one that is inactive,
+    charging, in close combat, broken or pursuing."""
+    if (regiment.side != Side.PLAYER or not regiment.active or regiment.charging or regiment.in_melee
+            or regiment.routing or regiment.pursuing):
+        return []
+    markers: list[tuple[tuple[float, float], int, int]] = []
+    for number, (stop, following) in enumerate(regiment.route_markers()[:9], start=1):
+        frame = (ROUTE_END_FRAME if following is None
+                 else ROUTE_ARROW_BASE + (steering.bearing(stop, following) + 32) // 64 % 8)
+        markers.append((stop, ROUTE_LABEL_BASE + number, frame))
+    return markers
 
 
 def order_target_hit(hits: Sequence["Regiment"], acting: "Regiment | None") -> str | None:
@@ -181,10 +196,12 @@ MINIMAP_BOOK_POS, MINIMAP_BOOK_FRAMES, MINIMAP_BOOK_SIZE = (162, 242), (80, 81),
 # appear left to right in the documented mode order 0-3.
 MARKER_MODES = (0, 1, 2, 3)
 DEPLOYMENT_ZONE_FRAME = 160
-# Numbered waypoint dots for a queued multi-stop order; whshr.engine.Regiment has only one
-# target_x/target_y (no queue), so only WAYPOINT_END_FRAME is ever drawn today.
-WAYPOINT_FRAMES = tuple(range(161, 170))
-WAYPOINT_END_FRAME = 159
+# Route markers (notes/move_routes.md 4): stop n's number label is ICONS 160 + n, its top-left 3 px left of and 12 px
+# above the stop; centred on the stop, a red arrow 119 + k toward the next stop (k = 0 up, 45 degrees clockwise per
+# step) or the red end dot on the last stop of an open route.
+ROUTE_LABEL_BASE, ROUTE_LABEL_OFFSET = 160, (-3, -12)
+ROUTE_ARROW_BASE = 119
+ROUTE_END_FRAME = 159
 CAMERA_MARKER_FRAMES = tuple(range(170, 178))
 CAMERA_TARGET_FRAME = 178  # small "x", the ICONS frame right after the 8 camera-marker frames
 # Regiment dot base frame per (fighting-or-charging, side); add the 0-7 facing index. Broken adds
@@ -874,15 +891,7 @@ class Hud:
             self._draw_map(self._icon(DEPLOYMENT_ZONE_FRAME), x - 4, y - 4, 8, 8)
         if self.battle is not None:
             if regiment is not None and self.selected is not None:
-                waypoints = list(regiment.waypoints)
-                if not waypoints and regiment.target_x is not None and regiment.target_y is not None:
-                    waypoints = [(regiment.target_x, regiment.target_y)]
-                for index, waypoint in enumerate(waypoints):
-                    frame = WAYPOINT_END_FRAME if index == len(waypoints) - 1 else WAYPOINT_FRAMES[min(index, 8)]
-                    quad = self._icon(frame)
-                    if quad:
-                        px, py = self._world_to_map_pixel(*waypoint)
-                        self._draw_map(quad, px - quad.size[0] // 2, py - quad.size[1] // 2)
+                self._draw_route_markers(regiment)
             for member in self._minimap_regiments():
                 self._draw_regiment_marker(member)
             if regiment is not None and regiment.active:
@@ -891,6 +900,16 @@ class Hud:
             self._draw_map(self._icon(frames[0]), x, y, *MINIMAP_TAB_SIZE)
         self._draw_map(self._icon(MINIMAP_BOOK_FRAMES[0]), MINIMAP_BOOK_POS[0], MINIMAP_BOOK_POS[1],
                        *MINIMAP_BOOK_SIZE)
+
+    def _draw_route_markers(self, regiment: "Regiment") -> None:
+        for (x, y), label, frame in route_marker_frames(regiment):
+            px, py = self._world_to_map_pixel(x, y)
+            quad = self._icon(label)
+            if quad:
+                self._draw_map(quad, px + ROUTE_LABEL_OFFSET[0], py + ROUTE_LABEL_OFFSET[1])
+            quad = self._icon(frame)
+            if quad:
+                self._draw_map(quad, px - quad.size[0] // 2, py - quad.size[1] // 2)
 
     def _draw_regiment_marker(self, regiment: "Regiment") -> None:
         px, py = self._world_to_map_pixel(regiment.x, regiment.y)

@@ -381,17 +381,15 @@ class DeploymentLifecycleTests(unittest.TestCase):
         self.assertFalse(regiment.visible_to_player)
         self.assertEqual(battle.regiment_at(*battle.formation_centre(regiment), player_only=False), "enemy")
 
-    def test_given_route_when_appending_near_endpoints_or_more_than_nine_then_extra_destinations_are_ignored(self):
+    def test_given_route_when_appending_past_nine_stops_then_extra_destinations_are_refused(self):
+        # notes/move_routes.md 3: the near-point rules and loops are covered in tests.test_move_routes.
         battle = Battle.from_script(source(1))
-        battle.append_waypoint("player0", 100, 100)
-        battle.append_waypoint("player0", 200, 100)
-        battle.append_waypoint("player0", 110, 100)
-        battle.append_waypoint("player0", 210, 100)
-        self.assertEqual(battle.regiments["player0"].waypoints, [(100, 100), (200, 100)])
-        for x in range(300, 1100, 100):
-            battle.append_waypoint("player0", x, 100)
-        self.assertEqual(len(battle.regiments["player0"].waypoints), 9)
-        self.assertEqual(battle.regiments["player0"].waypoints[-1], (900, 100))
+        battle.order_move("player0", 900, 100)
+        for x in range(800, 0, -100):
+            self.assertTrue(battle.append_waypoint("player0", x, 900))
+        self.assertFalse(battle.append_waypoint("player0", 50, 500))
+        self.assertEqual(len(battle.regiments["player0"].route_stops), 9)
+        self.assertEqual(battle.regiments["player0"].route_stops[-1], (100, 900))
 
     def test_given_prepared_route_when_direct_drag_begins_then_it_is_cleared(self):
         battle = Battle.from_script(source(1))
