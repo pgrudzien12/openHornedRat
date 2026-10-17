@@ -119,6 +119,9 @@ class UnitScriptState:
     interrupt_script: int | None = None  # set by SetInterruptScript; called by CallInterruptScript
     pending_switch: int | None = None  # set by SwitchScript; applied after event handling
     pending_switch_high: bool = False  # the pending switch came from IfSwitchScriptHigh (restarts even the running script)
+    rout_allowed: bool = False  # RoutAllowed passed in this run and no switch has followed it yet
+    pending_flight: bool = False  # the pending switch is a flight (recorded after a passing RoutAllowed); PROVISIONAL,
+    # notes/tick_order_divergence.md 3: no later switch of the same run replaces it
 
     # Unit state (flags set by SetUnitFlags, SetCondFlags, etc.)
     unit_flags: int = 0  # primary unit flag bits (game_rules.md)
@@ -635,6 +638,7 @@ class ScriptInterpreter:
 
         # Clear current event at end of tick
         state.current_event = Event()
+        state.rout_allowed = state.pending_flight = False
 
         return state
 
@@ -810,9 +814,13 @@ class ScriptInterpreter:
             return
         if state.pending_switch_high and state.cond_bits & SWITCH_PENDING and not high:
             return  # a pending IfSwitchScriptHigh switch is locked (notes/script_grid_events.md 1)
+        if state.pending_flight and state.cond_bits & SWITCH_PENDING:
+            return  # PROVISIONAL: a pending flight stands (notes/tick_order_divergence.md 3)
         if override or state.pending_switch is None:
             state.pending_switch = script
             state.pending_switch_high = high
+            state.pending_flight = state.rout_allowed
+        state.rout_allowed = False
         state.cond_bits |= SWITCH_PENDING
 
     @staticmethod
@@ -822,6 +830,7 @@ class ScriptInterpreter:
         switch = state.pending_switch if state.cond_bits & SWITCH_PENDING else None
         state.pending_switch = None
         state.pending_switch_high = False
+        state.pending_flight = state.rout_allowed = False
         state.cond_bits &= ~SWITCH_PENDING
         return switch
 
@@ -3232,12 +3241,14 @@ class ScriptInterpreter:
             rng: random.Random) -> int | None:
         """RoutAllowed: test whether this unit may currently rout (game_rules.md opcode 0xC8).
 
-        A read-only check: true unless the regiment already routed/fled or carries CantBreak
-        (the same guard whshr.combat._break_test applies before calling start_rout).
+        A check: true unless the regiment already routed/fled or carries CantBreak (the same guard
+        whshr.combat._break_test applies before calling start_rout). A pass marks the next switch of this run as the
+        unit's flight (PROVISIONAL, notes/tick_order_divergence.md 3).
         """
         regiment = self.battle.regiments.get(unit_id)
         if regiment and regiment.active and not regiment.routing and "CantBreak" not in regiment.psychology:
             state.cond_flags = 1
+            state.rout_allowed = True
         else:
             state.cond_flags = 0
         return state.pc + 1

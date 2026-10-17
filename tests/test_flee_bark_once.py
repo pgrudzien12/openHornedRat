@@ -16,9 +16,12 @@ def flee_arm(code, react):
 
 SCRIPTS = {
     100: [word('Wait'), behaviour.END],
-    101: [word('PushPC'), word('GetEvent'), *flee_arm(12, 4), *flee_arm(13, 6), behaviour.LABEL,
+    101: [word('PushPC'), word('GetEvent'), *flee_arm(12, 4), *flee_arm(13, 6),
+          word('CaseEvent'), 10, word('SwitchScript'), 165, word('Break'), behaviour.BREAK_LABEL,
+          word('CaseEvent'), 21, word('RoutAllowed'), word('Break'), behaviour.BREAK_LABEL, behaviour.LABEL,
           word('ConsumeEvent'), word('LoopIfTrue'), word('ReturnInterrupt'), behaviour.END],
     162: [word('FleeFromTarget'), word('Yield'), word('Wait'), behaviour.END],
+    165: [word('PushPC'), word('Yield'), word('Loop'), behaviour.END],
 }
 
 
@@ -82,6 +85,45 @@ class FleeShoutTests(unittest.TestCase):
         self.assertTrue(self.unit.routing)
         self.assertEqual(self.shouts(), [6])
         self.assertFalse([event for event in self.state.event_queue if event.code == 0x0D])
+
+
+    def test_given_flight_then_engagement_in_one_pass_then_the_flight_stands(self):
+        # The BF026 order of our phased tick (notes/tick_order_divergence.md 3): the flee event is handled before
+        # the "engaged" event whose SwitchScript 165 would otherwise replace the switch to 162.
+        self.queue(0x0D, 0x0A)
+        self.run_unit(0)
+        self.assertEqual(self.shouts(), [6])
+        self.assertTrue(self.unit.routing)
+        self.assertEqual(self.state.script_id, 162)
+
+    def test_given_engagement_then_flight_in_one_pass_then_the_flight_replaces_the_melee_script(self):
+        self.queue(0x0A, 0x0D)
+        self.run_unit(0)
+        self.assertTrue(self.unit.routing)
+        self.assertEqual(self.state.script_id, 162)
+
+    def test_given_no_flight_then_engagement_switches_to_melee(self):
+        self.queue(0x0A)
+        self.run_unit(0)
+        self.assertFalse(self.unit.routing)
+        self.assertEqual(self.state.script_id, 165)
+
+    def test_given_cant_break_unit_then_engagement_is_not_blocked(self):
+        self.unit.psychology = {'CantBreak'}
+        self.queue(0x0D, 0x0A)
+        self.run_unit(0)
+        self.assertFalse(self.unit.routing)
+        self.assertEqual(self.state.script_id, 165)
+
+    def test_given_rout_check_without_a_switch_in_an_earlier_run_then_a_later_switch_is_ordinary(self):
+        self.queue(0x15)
+        self.run_unit(0)
+        self.queue(0x0A)
+        self.run_unit(1)
+        self.assertEqual(self.state.script_id, 165)
+        self.queue(0x0D)
+        self.run_unit(2)
+        self.assertEqual(self.state.script_id, 162)
 
 
 if __name__ == '__main__':
