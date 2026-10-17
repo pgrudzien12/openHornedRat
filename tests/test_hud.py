@@ -114,7 +114,7 @@ class PanelStateTests(unittest.TestCase):
         self.assertNotIn("toggle_a", dict(hud._fixed_button_rects()))
         self.assertNotIn("toggle_b", dict(hud._fixed_button_rects()))
 
-    def test_leader_profile_and_selection_reset(self):
+    def test_leader_profile_and_the_choice_kept_across_selections(self):
         regiment = Regiment("player", "Troops", 0, 0, 0, Side.PLAYER,
                             models=10, has_leader=True, portrait="leader",
                             move=4, ws=3, bs=2, strength=3, toughness=3, wounds=1,
@@ -128,9 +128,12 @@ class PanelStateTests(unittest.TestCase):
         self.assertEqual(hud.statistics(regiment), (5, 5, 4, 4, 4, 2, 5, 2, 8))
         hud.set_selected("player")
         self.assertTrue(hud.leader_mode)
+        # notes/battle_statistics_panel.md "Which mode is shown": the choice survives selection changes.
         hud.set_selected(None)
-        self.assertFalse(hud.leader_mode)
+        self.assertTrue(hud.leader_mode)
         self.assertNotIn("toggle_b", dict(hud._fixed_button_rects()))
+        hud.set_selected("player")
+        self.assertEqual(hud.statistics(regiment), (5, 5, 4, 4, 4, 2, 5, 2, 8))
 
     def test_stats_art_switches_banner_to_portrait(self):
         regiment = Regiment("player", "Troops", 0, 0, 0, Side.PLAYER,
@@ -147,7 +150,7 @@ class PanelStateTests(unittest.TestCase):
         hud.press("toggle_b")
         hud._draw_statistics(regiment)
         hud._sheet.assert_called_with("leader")
-        hud._draw_panel.assert_called_with("art", 369, 68, 72, 104)
+        hud._draw_panel.assert_called_with("art", 368, 67, 72, 104)
         hud.item_list_open = True
         hud._draw_panel.reset_mock()
         hud._draw_statistics(regiment)
@@ -2017,3 +2020,47 @@ class OrderTargetHitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnitInfoTextTests(unittest.TestCase):
+    """notes/battle_statistics_panel.md "Unit-information text block": lines, weapon and count per mode."""
+
+    TEXTS = {203: "Lance", 207: "Sword"}
+
+    def regiment(self, raw="Grudgebringer<Cavalry", leader="Morgan_Bernhardt", **kwargs):
+        from whshr.engine import name_lines
+        options = dict(models=8, orgsize=10, name_lines=name_lines(raw), leader_name_lines=name_lines(leader),
+                       weapon_name=3, leader_weapon_name=7, has_leader=True, portrait="leader")
+        options.update(kwargs)
+        return Regiment("unit", raw, 0, 0, 0, Side.PLAYER, **options)
+
+    def test_unit_mode_with_a_line_break_puts_the_weapon_and_count_on_the_third_line(self):
+        info = hud_module.unit_info_text(self.regiment(), False, self.TEXTS)
+        self.assertEqual(info, hud_module.UnitInfoText(("Grudgebringer", "Cavalry", "Lance"), "8/10", 2))
+
+    def test_unit_mode_without_a_line_break_uses_two_lines(self):
+        info = hud_module.unit_info_text(self.regiment("Vannheim's_75th"), False, self.TEXTS)
+        self.assertEqual(info, hud_module.UnitInfoText(("Vannheim's 75th", "Lance", ""), "8/10", 1))
+
+    def test_leader_mode_shows_the_leader_weapon_on_the_third_line_and_the_unit_count(self):
+        info = hud_module.unit_info_text(self.regiment(), True, self.TEXTS)
+        self.assertEqual(info, hud_module.UnitInfoText(("Morgan Bernhardt", "", "Sword"), "8/10", 2))
+
+    def test_a_weapon_id_without_a_string_leaves_only_the_count(self):
+        info = hud_module.unit_info_text(self.regiment(weapon_name=40), False, self.TEXTS)
+        self.assertEqual((info.lines[2], info.count), ("", "8/10"))
+
+    def test_nothing_selected_shows_no_text(self):
+        self.assertEqual(hud_module.unit_info_text(None, False, self.TEXTS),
+                         hud_module.UnitInfoText(("", "", ""), None, 0))
+
+    def test_an_enemy_unit_is_shown_in_unit_mode_and_the_choice_returns_for_the_friendly_unit(self):
+        friend = self.regiment()
+        enemy = Regiment("enemy", "Orcs", 0, 0, 0, Side.ENEMY, models=10, has_leader=True, portrait="boss")
+        hud = _hud(regiments=[friend, enemy], selected="unit")
+        hud.leader_mode = True
+        self.assertTrue(hud._shows_leader_stats(friend))
+        hud.set_selected("enemy")
+        self.assertFalse(hud._shows_leader_stats(enemy))
+        hud.set_selected("unit")
+        self.assertTrue(hud._shows_leader_stats(friend))

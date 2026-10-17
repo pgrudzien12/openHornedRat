@@ -38,6 +38,7 @@ from ..battlefield import Battlefield, SpriteSheet
 from ..scenes import SceneEvent
 from .cursors import GameCursors
 from .battle_text import display_text, fill_message, reaction_text
+from .bitmap_font import BitmapFont
 from .battle_sound import BattleSounds
 from .battle_music import BattleMusic
 from .ranged_sound import MissileSounds
@@ -329,6 +330,9 @@ class BattleView(SceneView[BattleScene]):
 
         self.hud = Hud(self.gpu, field)
         self.hud.bind_battle(scene.battle)
+        hud_font = getattr(scene, "hud_font", None)
+        self.hud.text_font = BitmapFont(hud_font) if hud_font is not None else None
+        self.hud.weapon_texts = getattr(scene, "weapon_texts", {})
 
         installation = self.options.get("installation")
         loaded_packets = scene.field.script.get("load", {}).get("loadsfx", ())
@@ -1469,12 +1473,7 @@ class BattleView(SceneView[BattleScene]):
         end = max(0, len(log_list) - self.log_scroll)
         self.hud.set_log(log_list[max(0, end - 4):end])
         sel = self.scene.selected_id
-        if sel is not None and sel in self.scene.battle.regiments:
-            reg = self.scene.battle.regiments[sel]
-            initial: dict[str, int] = getattr(self.scene, "initial_models", {})
-            self.hud.set_unit_info(reg.name, reg.hud_class, reg.models, initial.get(sel))
-        else:
-            self.hud.set_unit_info("", None, None, None)
+        self.hud.set_unit_info(self.scene.battle.regiments.get(sel) if sel is not None else None)
         self.hud.draw(width, height, self.camera)
 
     def release(self) -> None:

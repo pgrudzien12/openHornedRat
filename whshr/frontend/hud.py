@@ -17,7 +17,7 @@ orders the engine can actually carry out.
 
 import math
 from dataclasses import dataclass
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import pygame
@@ -26,7 +26,7 @@ from .. import magic, spell_effects
 from ..battlefield import Battlefield, SpriteFrame, SpriteSheet
 from ..portrait_popup import overlay_frames
 from ..rules import Side
-from .battle_text import item_name, spell_name
+from .battle_text import display_text, item_name, spell_name
 from .gpu import Gpu, ScreenQuad
 
 if TYPE_CHECKING:
@@ -223,8 +223,10 @@ ACTIVATED_ITEMS = frozenset({"ItemBannerOfWrath", "ItemGrudgeBringer", "ItemPoti
 # Battle log panel: 4-line scrollable message area, left of the scroll arrows (panel-native coords).
 # Scroll arrows are at (424, 9) and (424, 34); readout ends at ~200; log fills the space between.
 LOG_RECT = (200, 8, 223, 51)
-# Unit info panel: below the log, left of the toggle buttons at (337, 66).
-UNIT_INFO_RECT = (204, 71, 128, 36)
+# Unit-information text block, left of the head toggle (notes/battle_statistics_panel.md "Unit-information text
+# block"): 129x36, three 12-pixel lines; the weapon name is BRTXT 200 + s_weponame.
+UNIT_INFO_RECT = (204, 71, 129, 36)
+WEAPON_NAME_TEXT_BASE = 200
 # notes/battle_hud_armour.md §§1–2: native top-left crop, excluding two right columns.
 ARMOUR_RECT = (204, 116, 42, 51)
 ARMOUR_FRAMES = (218, 219, 220, 221, 222, 223, 223, 223,
@@ -237,10 +239,36 @@ STATS_GRID_POS = (250, 112)
 STAT_CELL_ORIGIN = (STATS_GRID_POS[0] + 5, STATS_GRID_POS[1] + 4)
 STAT_CELL_PITCH = (38, 19)
 
-HUD_CLASS_NAMES: dict[str, str] = {
-    "inf": "Infantry", "arch": "Archers", "art": "Artillery",
-    "wiz": "Wizard", "mon": "Monster",
-}
+
+
+@dataclass(frozen=True)
+class UnitInfoText:
+    """What the unit-information block shows: three lines, and the count on the weapon line."""
+
+    lines: tuple[str, str, str]
+    count: str | None
+    count_line: int
+
+
+def unit_info_text(regiment: "Regiment | None", leader: bool, texts: "Mapping[int, str]") -> UnitInfoText:
+    """The block's lines (notes/battle_statistics_panel.md "Unit-information text block"). Unit mode: the unit name
+    (one line, or two at its '<') and the troop weapon on the next line. Leader mode: the leader name (one or two
+    lines) and the leader's weapon always on the third line. The count, current/organisational models of the unit
+    in both modes, sits right on the weapon line; a weapon id with no string leaves only the count."""
+    if regiment is None:
+        return UnitInfoText(("", "", ""), None, 0)
+    if leader:
+        names = regiment.leader_name_lines or ((regiment.leader_name or regiment.name),)
+        weapon, weapon_line = regiment.leader_weapon_name, 2
+    else:
+        names = regiment.name_lines or (regiment.name,)
+        weapon, weapon_line = regiment.weapon_name, len(regiment.name_lines or (regiment.name,))
+    weapon_text = "" if weapon is None else display_text(texts.get(WEAPON_NAME_TEXT_BASE + weapon, ""))
+    lines = [*names[:2], "", "", ""][:3]
+    lines[weapon_line] = weapon_text
+    count = f"{regiment.models}/{regiment.orgsize or regiment.models}"
+    return UnitInfoText((lines[0], lines[1], lines[2]), count, weapon_line)
+
 
 BLACK = (0, 0, 0)
 
@@ -347,6 +375,8 @@ class Hud:
         self._marker_order: list[str] = []
         self._log_panel: Any = None
         self._unit_info_panel: Any = None
+        self.text_font: Any = None  # the battle's PCTEXTA font, set by the view when the installation provides it
+        self.weapon_texts: Mapping[int, str] = {}  # BRTXT strings, by id
         self._stat_labels: list[Any] = []
         self._armour_quads: dict[int, ScreenQuad] = {}
 
@@ -459,8 +489,7 @@ class Hud:
         """Select a regiment and rebuild only its portrait/ornament art when it changes."""
         if regiment_id == self.selected:
             return
-        self.selected = regiment_id
-        self.leader_mode = False
+        self.selected = regiment_id  # the unit/leader choice is kept across selections (battle_statistics_panel.md)
         self.list_kind = None
         self.panel_set = "idle"
         self.pending_order = None
@@ -664,18 +693,13 @@ class Hud:
             self._log_panel = self.gpu.battle_log((LOG_RECT[2], LOG_RECT[3]), background=(0, 0, 0, 0))
         self._log_panel.set_entries(entries)
 
-    def set_unit_info(self, name: str | None, unit_class: str | None, models: int | None,
-                      max_models: int | None) -> None:
-        """Render selected unit name, class and casualty count into the info panel."""
+    def set_unit_info(self, regiment: "Regiment | None") -> None:
+        """Paint the selected unit's names, weapon and count into the unit-information block."""
         if self._unit_info_panel is None:
-            self._unit_info_panel = self.gpu.unit_info((UNIT_INFO_RECT[2], UNIT_INFO_RECT[3]), background=(0, 0, 0, 0))
-        class_name = HUD_CLASS_NAMES.get(unit_class or "", unit_class or "")
-        regiment = self._regiment(self.selected)
-        if regiment is not None and self._shows_leader_stats(regiment):
-            name = regiment.leader_name or regiment.name
-            class_name = ""
-            models = max_models = None
-        self._unit_info_panel.set_info(name, class_name, models, max_models)
+            self._unit_info_panel = self.gpu.unit_info((UNIT_INFO_RECT[2], UNIT_INFO_RECT[3]), font=self.text_font)
+        leader = regiment is not None and self._shows_leader_stats(regiment)
+        info = unit_info_text(regiment, leader, self.weapon_texts)
+        self._unit_info_panel.set_info(info.lines, info.count, info.count_line)
 
     # ------------------------------------------------------------------ minimap
 
@@ -1050,7 +1074,7 @@ class Hud:
         sheet = self._sheet(regiment.portrait if self._shows_leader_stats(regiment) else regiment.banner)
         if sheet is not None and sheet.frames:
             quad = self._sheet_frame_quad(sheet.frames[0])
-            self._draw_panel(quad, 369, 68, 72, 104)
+            self._draw_panel(quad, 368, 67, 72, 104)  # battle_statistics_panel.md: the panel geometry
 
     def _draw_fixed_buttons(self) -> None:
         for name, (pos, frames, size) in FIXED_BUTTONS.items():

@@ -266,38 +266,33 @@ class BattleLogPanel(ScreenQuad):
 
 
 class UnitInfoPanel(ScreenQuad):
-    """Selected unit name, class and casualty readout in the HUD panel."""
+    """The unit-information text block (notes/battle_statistics_panel.md "Unit-information text block"): up to three
+    left-aligned lines on a 12-pixel pitch in a text rectangle inset 2 px left and 1 px down, clipped at its right
+    edge, and the model count right-aligned to that edge on the weapon line. Transparent; black text."""
 
-    def __init__(self, gpu: "Gpu", size: Size, bold_font: Font, normal_font: Font,
-                 color: Rgb = (0, 0, 0), background: Rgba | None = (0, 0, 0, 140)) -> None:
+    INSET_X, INSET_Y, PITCH = 2, 1, 12
+
+    def __init__(self, gpu: "Gpu", size: Size, font: Font, color: Rgb = (0, 0, 0)) -> None:
         super().__init__(gpu, size)
-        self.bold_font = bold_font
-        self.normal_font = normal_font
+        self.font = font
         self.color = color
-        self.background = background
         self._info: tuple[Any, ...] | None = None
 
-    def set_info(self, name: str | None, unit_class: str | None, models: int | None, max_models: int | None) -> None:
-        info = (name, unit_class, models, max_models)
+    def set_info(self, lines: Sequence[str], count: str | None = None, count_line: int = 0) -> None:
+        info = (tuple(lines), count, count_line)
         if info == self._info:
             return
         self._info = info
         surface = pygame.Surface(self.size, pygame.SRCALPHA)
-        if self.background:
-            surface.fill(self.background)
-        w, h = self.size
-        if name:
-            name_surf = self.normal_font.render(name, True, self.color)
-            if name_surf.get_width() > w:
-                name_surf = pygame.transform.smoothscale(name_surf, (w, name_surf.get_height()))
-            surface.blit(name_surf, (0, 0))
-        if unit_class:
-            class_surf = self.normal_font.render(unit_class, True, self.color)
-            surface.blit(class_surf, (0, h - class_surf.get_height()))
-        if models is not None and max_models is not None:
-            cas = f"{models}/{max_models}"
-            cas_surf = self.normal_font.render(cas, True, self.color)
-            surface.blit(cas_surf, (w - cas_surf.get_width(), h - cas_surf.get_height()))
+        width = self.size[0] - self.INSET_X
+        for index, line in enumerate(lines):
+            if line:
+                rendered = self.font.render(line, False, self.color)
+                surface.blit(rendered, (self.INSET_X, self.INSET_Y + index * self.PITCH),
+                             pygame.Rect(0, 0, width, self.PITCH))
+        if count:
+            rendered = self.font.render(count, False, self.color)
+            surface.blit(rendered, (self.size[0] - rendered.get_width(), self.INSET_Y + count_line * self.PITCH))
         self.write(pygame.image.tobytes(surface, "RGBA"))
 
 
@@ -322,5 +317,5 @@ class Gpu:
     def battle_log(self, size: Size, **options: Any) -> BattleLogPanel:
         return BattleLogPanel(self, size, self.battle_log_font_bold, self.battle_log_font, **options)
 
-    def unit_info(self, size: Size, **options: Any) -> UnitInfoPanel:
-        return UnitInfoPanel(self, size, self.battle_log_font_bold, self.battle_log_font, **options)
+    def unit_info(self, size: Size, font: Font | None = None, **options: Any) -> UnitInfoPanel:
+        return UnitInfoPanel(self, size, font or self.battle_log_font, **options)
