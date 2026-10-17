@@ -45,6 +45,7 @@ class Theme:
         self.body_font = tkfont.Font(root, family=family, size=10)
         self.button_font = tkfont.Font(root, family=family, size=12, weight="bold")
         self.small_button_font = tkfont.Font(root, family=family, size=10, weight="bold")
+        self.speech_font = tkfont.Font(root, family=family, size=15, weight="bold")
         self.mono_font = tkfont.Font(root, family="TkFixedFont", size=9)
         self._images: dict[str, tk.PhotoImage | None] = {}
         self._root = root

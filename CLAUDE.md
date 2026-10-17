@@ -110,7 +110,8 @@ whshr/             - unified package and CLI: python3 -m whshr check|extract|cat
                      reuse), gog_installer.py (unpacks WARFB from GOG's setup_*.exe with innoextract on
                      Linux/macOS), battles.py (lists playable battles), engine_launch.py (locates the engine's
                      own .venv interpreter and starts `whshr engine` as a subprocess), gui.py (tkinter UI),
-                     theme.py (colours, fonts, image buttons, arrow scrollbar), art/ (project-made PNGs, built by
+                     reaction.py (poking the portrait's face types the caravan's reaction line, read from the
+                     installation), theme.py (colours, fonts, image buttons, arrow scrollbar), art/ (project-made PNGs, built by
                      tools/launcher_art/build_art.py, which needs Pillow; none of it comes from the game)
 tests/             - BDD-style unittest scenarios (docs/testing.md): run them with `./test.sh` (optionally a module,
                      e.g. `./test.sh tests.test_combat`). **Always use the project's `.venv`** (test.sh does): pygame-ce/zengl
