@@ -58,7 +58,7 @@ def check(installation: str | PathLike[str]) -> bool:
         ("fonts", lambda: legacy.module("fon_parse").check(game.binary_dirs())),
         ("cutscene containers", lambda: si.cmd_check(str(game.remote_dir("BINARY", "ANIM")))),
         ("cutscene side files", lambda: legacy.module("scene_dump").check_all(str(game.root))),
-        ("MIDI", lambda: audio.midi_main(["--check", str(game.binary_dir("MUSIC"))])),
+        ("MIDI", lambda: audio.midi_main(["--check", str(game.music_dir())])),
         ("SoundFont", lambda: audio.parse_sf2(
             game.binary_file("SOUND", "WARINTR3.SBK")
         )),

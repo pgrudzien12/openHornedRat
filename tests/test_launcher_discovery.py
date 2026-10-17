@@ -25,6 +25,21 @@ class DiscoveryTests(unittest.TestCase):
 
         self.assertTrue(discovery.looks_like_installation(self.root))
 
+    def test_given_the_steam_editions_merged_layout_when_checked_then_it_looks_like_an_installation(self):
+        self._write("FILE/BINARY/STANDARD.PAL")
+        self._write("FILE/BINARY/ANIM/Intro.SI")
+
+        self.assertTrue(discovery.looks_like_installation(self.root))
+
+    def test_given_the_steam_edition_in_its_library_when_discovering_from_home_then_its_game_root_is_found(self):
+        game = self.root / ".local/share/Steam/steamapps/common/Warhammer Shadow of the Horned Rat"
+        self._write(f"{game.relative_to(self.root)}/FILE/BINARY/STANDARD.PAL")
+        self._write(f"{game.relative_to(self.root)}/FILE/BINARY/ANIM/Intro.SI")
+
+        found = discovery.discover_installations(home=self.root, platform="linux", environ={})
+
+        self.assertEqual(found, [game])
+
     def test_given_directory_missing_remote_binary_when_checked_then_it_does_not_look_like_an_installation(self):
         self._write("FILE/BINARY/STANDARD.PAL")
 

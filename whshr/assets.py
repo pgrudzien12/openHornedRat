@@ -43,8 +43,10 @@ class AssetLocator:
 
     def validate(self) -> None:
         """Validate the roots required by the initial catalog without decoding game data."""
-        required = (("FILE",), ("FILE", "SCRIPT"), ("FILE", "BINARY"), ("REMOTE", "BINARY", "ANIM"))
+        required = (("FILE",), ("FILE", "SCRIPT"), ("FILE", "BINARY"))
         missing = ["/".join(parts) for parts in required if self.installation.find(*parts) is None]
+        if self.installation.remote_find("BINARY", "ANIM") is None:  # REMOTE/, or FILE/ in the Steam edition
+            missing.append("REMOTE/BINARY/ANIM")
         if missing:
             raise FileNotFoundError(f"incomplete WARFB installation; missing: {', '.join(missing)}")
 

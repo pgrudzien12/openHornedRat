@@ -18,6 +18,7 @@ from ..app_icon import ENGINE_WINDOW_ICON_SIZE, WINDOW_CLASS, icon_path  # noqa:
 from ..assets import AssetId  # noqa: E402
 from ..audio_settings import audio_settings  # noqa: E402
 from ..difficulty import difficulty_setting  # noqa: E402
+from ..music_source import music_source_setting  # noqa: E402
 from ..battle_scene import BattleScene  # noqa: E402
 from .. import campaign_log as campaign_log_module  # noqa: E402
 from ..campaign_scenes import MainMenuScene, MovieScene  # noqa: E402
@@ -147,6 +148,7 @@ def run(installation: str | PathLike[str], size: tuple[int, int] = (1280, 800),
     context = scene_context(installation, save_dir=save_dir, no_battle=no_battle, debug=debug)
     audio_settings.configure(context.save_dir)
     difficulty_setting.configure(context.save_dir)
+    music_source_setting.configure(context.save_dir)
     context.battle_log_dir = log_dir
     context.battle_seed = seed
     campaign_log: campaign_log_module.CampaignLogger | None = None

@@ -30,12 +30,16 @@ from whshr.user_dirs import data_dir
 
 
 def looks_like_installation(path: str | os.PathLike[str]) -> bool:
-    """True if ``path`` has the FILE/BINARY and REMOTE/BINARY layout a WARFB directory needs."""
+    """True if ``path`` has the FILE/BINARY and REMOTE/BINARY layout a WARFB directory needs.
+
+    The Steam edition merges REMOTE into FILE, so there its films (FILE/BINARY/ANIM) stand in for REMOTE/BINARY.
+    """
     try:
         game = Installation(path)
     except FileNotFoundError:
         return False
-    return game.find("FILE", "BINARY") is not None and game.find("REMOTE", "BINARY") is not None
+    has_remote = game.find("REMOTE", "BINARY") is not None or game.find("FILE", "BINARY", "ANIM") is not None
+    return game.find("FILE", "BINARY") is not None and has_remote
 
 
 def _steam_library_roots(steam_root: Path) -> list[Path]:

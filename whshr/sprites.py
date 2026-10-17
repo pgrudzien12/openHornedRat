@@ -9,18 +9,34 @@ from .image import load_rgb_palette, write_png
 
 
 def unzero(seg: bytes) -> tuple[bytes, int]:
-    """Zero RLE: 00 NN = NN zero bytes, 00 00 = end, any other byte = literal."""
+    """Zero RLE: 00 NN = NN zero bytes, 00 00 = end, any other byte = literal.
+
+    Repairs the Steam edition's damaged long gaps (notes/steam_edition.md §3.3): the encoder writes a gap longer
+    than 255 bytes as ``00 FF`` pairs followed by the remainder and never puts two zero runs in a row otherwise, so a
+    run shorter than 255 directly followed by another run (not by the end marker) counts as 255. Data that stops
+    without an end marker ends the frame there.
+    """
     out, i = bytearray(), 0
-    while True:
+    while i < len(seg):
         if seg[i] == 0:
+            if i + 1 >= len(seg):
+                break
             n = seg[i + 1]
             i += 2
             if n == 0:
                 return bytes(out), i
+            if n < 255 and i + 1 < len(seg) and seg[i] == 0 and seg[i + 1] != 0:
+                n = 255
             out += bytes(n)
         else:
             out.append(seg[i])
             i += 1
+    return bytes(out), i
+
+
+def fit_packed(packed: bytes, size: int) -> bytes:
+    """Pad a short unpacked frame with transparent zero bytes, or drop the excess (notes/steam_edition.md §3.3)."""
+    return packed[:size] + bytes(max(0, size - len(packed)))
 
 
 def colormap_indices(recs: Sequence[Sequence[int]]) -> list[int | None]:
@@ -46,9 +62,9 @@ def decode_frame(bop: bytes, rec: Sequence[int], seg_end: int, colormaps: Sequen
     _, _, width, height, offset, flags = rec[:6]
     kind, segment = flags & 0x0F, bop[offset:seg_end]
     if kind == 1:
-        return list(segment[:width * height])
+        return list(fit_packed(segment, width * height))
     bytes_per_row = (width + 1) // 2
-    packed = unzero(segment)[0] if kind == 4 else segment[:bytes_per_row * height]
+    packed = fit_packed(unzero(segment)[0] if kind == 4 else segment, bytes_per_row * height)
     cmap_index = flags >> 4 if map_index is None else map_index
     cmap = colormaps[cmap_index] if cmap_index < len(colormaps) else None
     pixels: list[int] = []

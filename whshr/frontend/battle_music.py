@@ -3,6 +3,8 @@
 import pygame
 
 from ..audio_settings import audio_settings
+from ..music_source import music_track
+from . import music_player
 from ..paths import Installation
 
 COMPLETION_INTERVAL = 2.5  # report §2: completion is polled independently of simulation ticks
@@ -26,11 +28,12 @@ class BattleMusic:
             if pygame.mixer.get_init() is None:
                 pygame.mixer.init()
             # Replacement precedes asset lookup: a missing battle tune must not leave campaign music playing.
+            music_player.forget()
             pygame.mixer.music.stop()
             pygame.mixer.music.unload()
             if installation is None:
                 return
-            path = installation.binary_file("MUSIC", "BATTLE.MID")
+            path = music_track(installation, "BATTLE")
             pygame.mixer.music.load(str(path))
             self.loaded = True
         except (OSError, pygame.error):
