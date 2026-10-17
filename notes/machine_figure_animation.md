@@ -61,11 +61,11 @@ action 1 (stand), which clears the lock. Consequences:
   it expires, even mid-shot.
 - Because the posted fire event happens part-way through, a machine that is hit mid-shot still launches.
 
-> Side note for the maintainers (outside this question, worth a re-check of `game_rules.md` / `script_animation_sound.md`):
-> the **standard archer shoot program does not lock** the figure at all (a new request interrupts it), whereas the
-> wizard cast pose and all machine shots lock with *drop* semantics. The public text currently says shoot/cast
-> requests are *queued*. Queuing is used by the rout pause and by death only. 🟡 Open: not yet folded into those
-> notes; it will be settled in a separate check.
+> Settled (#344, `script_animation_sound.md` §0.5): the **standard archer shoot program does not lock** the figure (a
+> new request interrupts it), while the wizard cast pose and all machine shots lock with *drop* semantics. Queuing
+> is used only by the timed charge/rout pause (and machine wrecks). Death is not a queue: a dying figure takes
+> requests until it collapses, and a corpse drops them. `game_rules.md` and `script_animation_sound.md` §0.1 are
+> corrected.
 
 ### 0.4 Drawn facing
 
