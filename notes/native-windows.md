@@ -244,7 +244,7 @@ Mouse only (🟡 no keyboard handling). No timeout. Destroying the window discar
 ### 4.8 Engine status and deviations
 The engine opens a customized Options page from the main menu, caravan, and panel 9. It uses the original
 `MoreOptionScreen` backdrop and button art, with three controls: Music, Dialogue, and Sound Effects. Each cycles
-through Off, 25%, 50%, 75%, and 100% (default). OK atomically writes `options.json` in the engine's save directory;
+through Off, 25%, 50%, 75%, and 100%; a new player starts every channel at 25% (the engine's default, not the original's). OK atomically writes `options.json` in the engine's save directory;
 Cancel discards the edits. The original six rendering controls and FM/GM choice are not exposed because they do not
 map to working engine features. The original registry value is not read or written.
 

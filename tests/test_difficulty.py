@@ -28,31 +28,36 @@ class LevelTests(unittest.TestCase):
         self.assertEqual(SERGEANT.reinforcements(1), 1)  # 1.4, rounded half up
         self.assertEqual(SERGEANT.reinforcements(4), 6)  # 5.6
 
-    def test_given_a_saved_level_then_it_survives_reconfiguring_and_a_bad_file_means_commander(self):
+    def test_given_a_new_player_then_soldier_until_a_saved_level_and_a_bad_file_means_soldier(self):
         with tempfile.TemporaryDirectory() as directory:
             difficulty_setting.configure(directory)
-            self.assertIs(difficulty.current(), COMMANDER)
-            difficulty_setting.save(SOLDIER)
-            difficulty_setting.configure(directory)
             self.assertIs(difficulty.current(), SOLDIER)
+            difficulty_setting.save(COMMANDER)
+            difficulty_setting.configure(directory)
+            self.assertIs(difficulty.current(), COMMANDER)
             (Path(directory) / "difficulty.json").write_text('{"difficulty": "nightmare"}')
             difficulty_setting.configure(directory)
-            self.assertIs(difficulty.current(), COMMANDER)
+            self.assertIs(difficulty.current(), SOLDIER)
+
+    def test_given_no_save_directory_then_the_original_rules_apply(self):
+        difficulty_setting.configure(None)
+
+        self.assertIs(difficulty.current(), COMMANDER)
 
     def test_given_the_options_window_then_ok_saves_the_cycled_level_and_cancel_drops_it(self):
         with tempfile.TemporaryDirectory() as directory:
             context = mock.Mock(save_dir=Path(directory))
             scene = OptionsScene(Scene())
             scene.enter(context)
-            scene.handle(("options:cycle", "difficulty"), context)  # Commander wraps round to Soldier
-            self.assertIs(scene.difficulty, SOLDIER)
+            scene.handle(("options:cycle", "difficulty"), context)  # a new player's Soldier -> Sergeant
+            self.assertIs(scene.difficulty, SERGEANT)
             scene.handle("options:ok", context)
-            self.assertEqual(json.loads((Path(directory) / "difficulty.json").read_text()), {"difficulty": "soldier"})
+            self.assertEqual(json.loads((Path(directory) / "difficulty.json").read_text()), {"difficulty": "sergeant"})
             scene = OptionsScene(Scene())
             scene.enter(context)
             scene.handle(("options:cycle", "difficulty"), context)
             scene.handle("options:cancel", context)
-            self.assertIs(difficulty.current(), SOLDIER)
+            self.assertIs(difficulty.current(), SERGEANT)
 
 
 class CampaignTests(unittest.TestCase):
