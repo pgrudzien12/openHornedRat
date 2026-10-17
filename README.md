@@ -18,9 +18,42 @@ Campaign games take hours, so early feedback is incredibly valuable. Please try 
 - whether it starts on your system and which version of the original game you used;
 - where the campaign flow, controls, visuals, audio, or battle rules feel wrong;
 - what happened immediately before a crash, freeze, or broken screen; and
-- the battle log from `logs/` if one was created.
+- the battle log, if one was created (see [Report a bug](#report-a-bug) for where to find it).
 
-Please [open an issue](https://github.com/pgrudzien12/openHornedRat/issues) for a problem you found, we apprechiate it!
+Please [open an issue](https://github.com/pgrudzien12/openHornedRat/issues) for a problem you found, we appreciate it!
+
+## Report a bug
+
+1. Check the [open issues](https://github.com/pgrudzien12/openHornedRat/issues) in case it is already known; if so, add what you saw there.
+2. Otherwise [open a new issue](https://github.com/pgrudzien12/openHornedRat/issues/new/choose) with the bug report template and fill in:
+   - what happened, and what you expected instead;
+   - the steps that lead to it, starting with how you launched the game (launcher, package, or a command from source);
+   - your operating system, the Open Horned Rat version or package file name, and your edition of the original game (GOG v1.0, CD-ROM, Steam/SNEG);
+   - for a crash, the error text if a window or terminal showed one.
+3. Attach the logs from the session where it happened (below), plus a screenshot or a short recording if it helps.
+
+Please do not attach original game files or anything extracted from them. Logs and screenshots are fine.
+
+### Where to find the logs
+
+Every battle writes its own log, and each run of the engine writes a campaign log. They are plain text files in a `logs` folder:
+
+| How you run it | Logs folder |
+|---|---|
+| Windows package | `%APPDATA%\ohr\logs` (paste it into the File Explorer address bar) |
+| Linux or macOS package | `~/.ohr/logs` (a hidden folder in your home directory) |
+| From source | `logs/` in your checkout |
+
+Each file name includes its date and time, so take the newest ones from around when the problem happened:
+
+| File | What it records |
+|---|---|
+| `battle-YYYYmmdd-HHMMSS-<battle>.jsonl` | one battle, from deployment to the result; the most useful file for battle bugs, since it lets us replay the battle exactly |
+| `campaign-YYYYmmdd-HHMMSS.jsonl` | one run of the engine: the screens you passed through, campaign events and battle results |
+| `skirmish-…-<battle>-….log` | one close combat in detail (written during battles) |
+| `capture-…-<battle>-<unit>-t<tick>.log` | the figure state of one regiment, written when you press **F2** with it selected in battle; useful when figures misbehave |
+
+If GitHub refuses a `.jsonl` file, zip the logs (or rename them to end in `.txt`) and attach that instead.
 
 ## What you can play today
 
