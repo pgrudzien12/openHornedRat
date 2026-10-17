@@ -77,26 +77,37 @@ class DiscoveryTests(unittest.TestCase):
             "Bottles bottle": ("linux", f".local/share/bottles/bottles/Games/drive_c/GOG Games/{gog_folder}"),
             "Heroic install": ("linux", f"Games/Heroic/{gog_folder}"),
             "macOS Steam library": ("darwin", "Library/Application Support/Steam/steamapps/common/Horned Rat"),
+            "unpacked by the launcher on Linux": ("linux", ".local/share/ohr/game/WARFB"),
+            "unpacked by the launcher on macOS": ("darwin", "Library/Application Support/ohr/game/WARFB"),
         }
         for name, (platform, relative) in layouts.items():
             with self.subTest(name), tempfile.TemporaryDirectory() as home:
                 self.root = Path(home)
                 game = self._install_game(relative)
 
-                found = discovery.discover_installations(home=self.root, platform=platform)
+                found = discovery.discover_installations(home=self.root, platform=platform, environ={})
 
                 self.assertEqual(found, [game])
+
+    def test_given_xdg_data_home_when_discovering_then_the_game_unpacked_there_is_found_first(self):
+        unpacked = self._install_game("data/ohr/game/WARFB")
+        gog = self._install_game("GOG Games/Warhammer - Shadow of the Horned Rat/WARFB")
+
+        found = discovery.discover_installations(home=self.root, platform="linux",
+                                                 environ={"XDG_DATA_HOME": str(self.root / "data")})
+
+        self.assertEqual(found, [unpacked, gog])
 
     def test_given_a_steam_root_reachable_through_a_symlink_when_discovering_then_the_game_is_listed_once(self):
         game = self._install_game(".local/share/Steam/steamapps/common/Horned Rat")
         (self.root / ".steam").mkdir()
         (self.root / ".steam" / "steam").symlink_to(self.root / ".local/share/Steam")
 
-        found = discovery.discover_installations(home=self.root, platform="linux")
+        found = discovery.discover_installations(home=self.root, platform="linux", environ={})
 
         self.assertEqual(found, [game])
 
     def test_given_a_game_folder_without_the_game_data_when_discovering_then_nothing_is_found(self):
         (self.root / "GOG Games" / "Warhammer - Shadow of the Horned Rat" / "WARFB" / "FILE").mkdir(parents=True)
 
-        self.assertEqual(discovery.discover_installations(home=self.root, platform="linux"), [])
+        self.assertEqual(discovery.discover_installations(home=self.root, platform="linux", environ={}), [])

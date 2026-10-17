@@ -5,8 +5,6 @@
 
 **What it is not:** it is not a game, and it is not a standalone or replacement copy of one. It contains no original game content, and it does nothing without your own legally owned copy of the original, from which it reads every asset at runtime. It is also not the original executable, and it does not run that executable.
 
-> **Early playtest builds are available, but there is no stable release yet.** The installers have passed automated builds but have not been tested on players' machines. The first stable packaged release is targeted for **the end of October 2026**.
-
 ## Join the discussion
 
 Questions, playtest reports, or just want to talk about the game? Join the community in [GitHub Discussions](https://github.com/pgrudzien12/openHornedRat/discussions).
@@ -20,13 +18,47 @@ Campaign games take hours, so early feedback is incredibly valuable. Please try 
 - whether it starts on your system and which version of the original game you used;
 - where the campaign flow, controls, visuals, audio, or battle rules feel wrong;
 - what happened immediately before a crash, freeze, or broken screen; and
-- the battle log from `logs/` if one was created.
+- the battle log, if one was created (see [Report a bug](#report-a-bug) for where to find it).
 
-Please [open an issue](https://github.com/pgrudzien12/openHornedRat/issues) for a problem you found, we apprechiate it!
+Please [open an issue](https://github.com/pgrudzien12/openHornedRat/issues) for a problem you found, we appreciate it!
+
+## Report a bug
+
+1. Check the [open issues](https://github.com/pgrudzien12/openHornedRat/issues) in case it is already known; if so, add what you saw there.
+2. Otherwise [open a new issue](https://github.com/pgrudzien12/openHornedRat/issues/new/choose) with the bug report template and fill in:
+   - what happened, and what you expected instead;
+   - the steps that lead to it, starting with how you launched the game (launcher, package, or a command from source);
+   - your operating system, the Open Horned Rat version or package file name, and your edition of the original game (GOG v1.0, CD-ROM, Steam/SNEG);
+   - for a crash, the error text if a window or terminal showed one.
+3. Attach the logs from the session where it happened (below), plus a screenshot or a short recording if it helps.
+
+Please do not attach original game files or anything extracted from them. Logs and screenshots are fine.
+
+### Where to find the logs
+
+Every battle writes its own log, and each run of the engine writes a campaign log. They are plain text files in a `logs` folder:
+
+| How you run it | Logs folder |
+|---|---|
+| Windows package | `%APPDATA%\ohr\logs` (paste it into the File Explorer address bar) |
+| Linux package | `~/.local/share/ohr/logs` (a hidden folder in your home directory; `$XDG_DATA_HOME/ohr/logs` if you set `XDG_DATA_HOME`) |
+| macOS package | `~/Library/Application Support/ohr/logs` (in Finder: **Go → Go to Folder…**) |
+| From source | `logs/` in your checkout |
+
+Each file name includes its date and time, so take the newest ones from around when the problem happened:
+
+| File | What it records |
+|---|---|
+| `battle-YYYYmmdd-HHMMSS-<battle>.jsonl` | one battle, from deployment to the result; the most useful file for battle bugs, since it lets us replay the battle exactly |
+| `campaign-YYYYmmdd-HHMMSS.jsonl` | one run of the engine: the screens you passed through, campaign events and battle results |
+| `skirmish-…-<battle>-….log` | one close combat in detail (written during battles) |
+| `capture-…-<battle>-<unit>-t<tick>.log` | the figure state of one regiment, written when you press **F2** with it selected in battle; useful when figures misbehave |
+
+If GitHub refuses a `.jsonl` file, zip the logs (or rename them to end in `.txt`) and attach that instead.
 
 ## What you can play today
 
-With your own copy of the game, you can watch or skip the opening movies, start a campaign, use the caravan and mission screens, and enter battles. You can deploy regiments and give movement, attack, and firing orders. Battles produce results and return to the campaign flow. A campaign can currently reach Nuln, about halfway through the game. This is still a development prototype: expect some rough edges in battles and later campaign missions, and a full campaign has not been played through to the end.
+With your own copy of the game, you can watch or skip the opening movies, start a campaign, use the caravan and mission screens, and enter battles. You can deploy regiments and give movement, attack, and firing orders. Battles produce results and return to the campaign flow. The campaign is playable to the end. This is still a development prototype: expect some rough edges and bugs along the way, in battles and in later campaign missions.
 
 | Area | What to expect |
 |---|---|
@@ -34,14 +66,14 @@ With your own copy of the game, you can watch or skip the opening movies, start 
 | ✅ Opening and menu | Prologue, intro movie, main menu, and mission briefings. |
 | ✅ Campaign screens | Caravan, army records, troop selection, reinforcements, and mission selection are in place; minor bugs may remain. |
 | ✅ Saving and loading | Manual save slots and a loadable automatic slot work during a playthrough. Saves use the engine's own directory (never your game installation), are incompatible with the original game's saves, and may not work across engine versions. |
-| 🟡 Battles | Deployment, movement, charges, ranged attacks, morale and routing, magic, enemy AI, and victory or defeat results are in place. Most battle rules have been recreated with substantial effort to match the original experience; mission scripts also drive battles, though rough edges remain. |
-| 🟡 Campaign progress | You can reach Nuln, about halfway through the campaign; the remainder has not been verified. |
+| ✅ Battles | Deployment, movement, charges, ranged attacks, morale and routing, magic, enemy AI, and victory or defeat results are in place. Most battle rules have been recreated with substantial effort to match the original experience; mission scripts also drive battles, though rough edges remain. |
+| ✅ Campaign progress | The campaign is playable to the end, though some bugs may still turn up along the way. |
 | ✅ Audio and presentation | Opening movies, speech, music, and effects are mostly done. The Options screen saves separate volume levels for music, dialogue, and effects; minor gaps may remain. |
-| 🟡 Packaged downloads | Windows, Debian, RPM, AppImage, and Apple Silicon macOS installers are built and available as prereleases. Installation and play have not yet been tested on players' machines; there is no stable release. |
+| ✅ Packaged downloads | Windows, Debian, RPM, AppImage, and Apple Silicon macOS installers are built and available as prereleases. Installation and play have not yet been tested on players' machines; there is no stable release. |
 
 ## Install a playtest package
 
-Download the most recent package for your system from [GitHub Releases](https://github.com/pgrudzien12/openHornedRat/releases). Windows, Debian, RPM, and AppImage packages appear in **daily** prereleases; the Apple Silicon macOS package appears in **weekly** prereleases. A prerelease contains the formats rebuilt that day, so you may need to look at an earlier one for your system. These packages are unsigned and have not yet had a full installation and play test. You also need your own legally owned game files. When the launcher first opens, select the original game's `WARFB` directory if it is not found automatically. On Linux and macOS, where GOG's Windows installer cannot run, **Unpack...** extracts the game from GOG's `setup_*.exe` into the engine's own data directory instead; it needs the open-source [innoextract](https://constexpr.org/innoextract/) tool (`sudo apt install innoextract`, `sudo dnf install innoextract` or `brew install innoextract`).
+Download the most recent package for your system from [GitHub Releases](https://github.com/pgrudzien12/openHornedRat/releases). Windows, Debian, RPM, and AppImage packages appear in **daily** prereleases; the Apple Silicon macOS package appears in **weekly** prereleases. A prerelease contains the formats rebuilt that day, so you may need to look at an earlier one for your system. These packages are unsigned and have not yet had a full installation and play test. You also need your own legally owned game files. When the launcher first opens, select the original game's `WARFB` directory if it is not found automatically. If you only have GOG's Windows installer on Linux or macOS, see [Get the game files](#get-the-game-files).
 
 ### Windows (64-bit)
 
@@ -83,6 +115,100 @@ Later, run the same AppImage file again. If your system cannot run AppImages thr
 Download `ohr-engine-*-macos-arm64.pkg` from the weekly prerelease and open it with Installer. After installation, open **Open Horned Rat** from Applications. The package is unsigned and not notarized, so macOS may ask you to approve it before installation. An Intel Mac package is not available yet.
 
 The launcher starts the bundled engine when you select **Start game**. On Windows and Linux, you can also run the engine directly from a terminal with `ohr-engine --engine /path/to/WARFB`; on macOS, `/usr/local/bin/ohr-engine /path/to/WARFB` is the engine command. Original game files, launcher settings, and saves are outside the package; uninstalling does not remove them.
+
+## Get the game files
+
+The engine needs the `WARFB` folder of your own copy of the game. GOG sells it as a DRM-free Windows installer (`setup_warhammer_shadow_of_the_horned_rat_*.exe`); download it from your GOG library under **Offline backup game installers**.
+
+The steps below were tested with GOG's `setup_warhammer_shadow_of_the_horned_rat_1.0_gog_v5_(90032).exe`, a single file with no extra parts. Other GOG builds of the installer should work the same way, since innoextract reads every Inno Setup version, but they have not been tried. If your download comes with extra `setup_*.bin` files, keep them in the same folder as the `.exe`; older GOG installers of this kind may also need `unrar`.
+
+### Windows
+
+Run the GOG installer. The default location, `C:\GOG Games\Warhammer - Shadow of the Horned Rat\WARFB`, is found automatically.
+
+### Linux and macOS: from the launcher
+
+Install [innoextract](https://constexpr.org/innoextract/):
+
+| System | Command |
+|---|---|
+| Debian, Ubuntu | `sudo apt install innoextract` |
+| Fedora, RPM-based | `sudo dnf install innoextract` |
+| Arch | `sudo pacman -S innoextract` |
+| macOS (Homebrew) | `brew install innoextract` |
+
+In the launcher, choose **Change...** if an installation is already selected, then **Unpack...** next to *Only have GOG's setup_\*.exe installer?*, and pick the installer. The launcher unpacks the `WARFB` folder (about 330 MB) into the engine's own data directory, then validates it and remembers the path.
+
+### Linux and macOS: from a terminal
+
+The same thing by hand. Unpack into the engine's data directory so the launcher finds the game automatically:
+
+```sh
+# Linux (or $XDG_DATA_HOME/ohr/game if you set XDG_DATA_HOME)
+mkdir -p ~/.local/share/ohr/game
+innoextract --gog --include WARFB -d ~/.local/share/ohr/game setup_warhammer_shadow_of_the_horned_rat_*.exe
+
+# macOS
+mkdir -p ~/Library/Application\ Support/ohr/game
+innoextract --gog --include WARFB -d ~/Library/Application\ Support/ohr/game setup_warhammer_shadow_of_the_horned_rat_*.exe
+```
+
+innoextract does not create a missing output folder, hence the `mkdir -p`. The game is then in `.../ohr/game/WARFB`. Any other target folder works too; select its `WARFB` folder in the launcher, or pass it to the engine.
+
+### Linux and macOS: through Wine or Proton
+
+You can also run the GOG installer with Wine, or as a non-Steam game through Proton. The launcher looks for `GOG Games` inside `~/.wine`, Steam's Proton prefixes, Bottles and Lutris prefixes, and in Heroic's `~/Games/Heroic`.
+
+## Battle controls
+
+| Action | Control |
+|---|---|
+| Select a regiment | Left-click it |
+| Move, attack, or fire | Select a player regiment, click the matching command button, then click a destination or target |
+| Direct move or attack | With a player regiment selected, right-click the ground or an enemy regiment |
+| Deselect | Escape |
+| Pan camera | Arrow keys, WASD, or right-drag |
+| Rotate camera | Q/E or middle-drag |
+| Tilt camera | Page Up / Page Down |
+| Zoom | Mouse wheel |
+| Reset camera | Home |
+
+Every battle writes a log ([where to find it](#where-to-find-the-logs)). Attach the relevant log to a bug report when possible; it helps us reproduce deterministic battle behaviour. You can begin directly in the first battle for a quick test with `--battle BF001`.
+
+## Automated battle captures
+
+These tools need a source checkout; see [Run it from source](#run-it-from-source) below.
+
+`battle-auto` keeps one hidden battle open and accepts one JSON command per line on stdin. It returns
+one JSON response per command on stdout. It uses the same battle scene and GPU view as the normal
+engine and advances one 100 ms simulation update per requested tick. For example:
+
+```sh
+.venv/bin/python -m whshr battle-auto /path/to/WARFB --battle BF001
+{"op":"state"}
+{"op":"capture","path":"samples/bf001-start.png"}
+{"op":"order","event":["start_battle"]}
+{"op":"order","event":["select","Grudgebringer<Infantry"]}
+{"op":"order","event":["attack","Clanrat_Warriors"]}
+{"op":"step","ticks":20}
+{"op":"capture","path":"samples/bf001-20.png"}
+```
+
+The `state` response lists each regiment's side, position, figures, ranks, and orders. `camera`
+accepts `{"op":"camera","values":[225,45,120]}` (yaw, pitch, distance); `target` accepts
+`{"op":"target","point":[500,500]}` in battlefield coordinates. Closing stdin ends the session.
+The automated camera is for captures; battle rules use the same camera-independent state as
+`battle-replay`, so camera changes do not alter the recorded simulation. Captures and battle logs
+contain derived game data and belong in ignored local directories.
+
+For a repeatable example pilot, run `.venv/bin/python -m scripts.auto_play_battle --ticks 200`. It reads
+the launcher-configured installation, orders active player regiments toward their nearest visible enemy,
+and writes frames, a battle log, and final state under ignored `samples/auto-play/`.
+
+Direct `--battle` entry reads the battle's own `loadmerc` `.MRC` file. It supplies the player
+units in file order and their initial figures and ranks. A battle reached through a running campaign
+instead receives the selected campaign marching army, preserving its current roster and marching order.
+The `state.player_army` field identifies which source the automated session used.
 
 ## Run it from source
 
@@ -136,55 +262,6 @@ The window opens with the prologue and intro. Any key or click skips the intro; 
 
 The **Options** button opens audio levels for Music, Dialogue, and Sound Effects. Each cycles through Off, 25%,
 50%, 75%, and 100%; OK saves the levels in the engine's save directory, and Cancel discards the edits.
-
-### Battle controls
-
-| Action | Control |
-|---|---|
-| Select a regiment | Left-click it |
-| Move, attack, or fire | Select a player regiment, click the matching command button, then click a destination or target |
-| Direct move or attack | With a player regiment selected, right-click the ground or an enemy regiment |
-| Deselect | Escape |
-| Pan camera | Arrow keys, WASD, or right-drag |
-| Rotate camera | Q/E or middle-drag |
-| Tilt camera | Page Up / Page Down |
-| Zoom | Mouse wheel |
-| Reset camera | Home |
-
-Battle sessions create a JSON Lines log in `logs/` by default. Attach the relevant log to a bug report when possible; it helps us reproduce deterministic battle behaviour. You can begin directly in the first battle for a quick test with `--battle BF001`.
-
-### Automated battle captures
-
-`battle-auto` keeps one hidden battle open and accepts one JSON command per line on stdin. It returns
-one JSON response per command on stdout. It uses the same battle scene and GPU view as the normal
-engine and advances one 100 ms simulation update per requested tick. For example:
-
-```sh
-.venv/bin/python -m whshr battle-auto /path/to/WARFB --battle BF001
-{"op":"state"}
-{"op":"capture","path":"samples/bf001-start.png"}
-{"op":"order","event":["start_battle"]}
-{"op":"order","event":["select","Grudgebringer<Infantry"]}
-{"op":"order","event":["attack","Clanrat_Warriors"]}
-{"op":"step","ticks":20}
-{"op":"capture","path":"samples/bf001-20.png"}
-```
-
-The `state` response lists each regiment's side, position, figures, ranks, and orders. `camera`
-accepts `{"op":"camera","values":[225,45,120]}` (yaw, pitch, distance); `target` accepts
-`{"op":"target","point":[500,500]}` in battlefield coordinates. Closing stdin ends the session.
-The automated camera is for captures; battle rules use the same camera-independent state as
-`battle-replay`, so camera changes do not alter the recorded simulation. Captures and battle logs
-contain derived game data and belong in ignored local directories.
-
-For a repeatable example pilot, run `.venv/bin/python -m scripts.auto_play_battle --ticks 200`. It reads
-the launcher-configured installation, orders active player regiments toward their nearest visible enemy,
-and writes frames, a battle log, and final state under ignored `samples/auto-play/`.
-
-Direct `--battle` entry reads the battle's own `loadmerc` `.MRC` file. It supplies the player
-units in file order and their initial figures and ranks. A battle reached through a running campaign
-instead receives the selected campaign marching army, preserving its current roster and marching order.
-The `state.player_army` field identifies which source the automated session used.
 
 ## Original game required
 
