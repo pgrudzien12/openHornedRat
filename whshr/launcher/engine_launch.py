@@ -53,7 +53,6 @@ class LaunchOptions:
 
     no_battles: bool = False
     trace: bool = False
-    skip_intro: bool = False
 
 
 def build_command(installation: PathArg, battle_id: str | None = None, options: LaunchOptions | None = None,
@@ -65,8 +64,6 @@ def build_command(installation: PathArg, battle_id: str | None = None, options: 
                [executable, "-m", "whshr", "engine", str(installation)])
     if battle_id:
         command += ["--battle", battle_id]
-    if options.skip_intro:
-        command.append("--skip-intro")
     if options.no_battles:
         command.append("--no-battle")
     return command

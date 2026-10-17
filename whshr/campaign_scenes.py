@@ -66,7 +66,7 @@ class MovieScene(Scene):
     A film with narration captions (whshr.cutscene.narration_text) first shows them as a text-only page
     (``phase`` "narration", notes/cutscene_narration.md 4.1): it stays up for 9.9 s or until "continue" (the
     view sends it for Enter or a left press over the film area), and the film's clock does not run before that.
-    "skip" during the page ends the whole cutscene (``--skip-intro``). During the film (notes/cutscene_narration.md
+    "skip" during the page ends the whole cutscene. During the film (notes/cutscene_narration.md
     4.2, 4.3) a skip before the film's Fade marker cuts at once; after it, the subtitles are cleared and the film
     fades out (``phase`` "skip_fade") before the cutscene ends; a second skip then ends it at once. ``level`` is
     the film's volume/brightness percentage, the AnimDone fade-out and the skip fade combined; the film's event
