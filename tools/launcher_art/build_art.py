@@ -25,6 +25,9 @@ HEADER_WIDTH = 360
 FOOTER_WIDTH = 280
 ARROW_SIZE = 30
 BUTTON_SIZES = {"wide": (300, 56), "small": (128, 40)}
+# The rust panel's middle, as a fraction of a button's height (the spikes and cloth below it make the
+# image taller than the plate); keep in sync with theme.py's BUTTON_TEXT_CENTRE.
+PLATE_CENTRE = 0.37
 PRESSED_BRIGHTNESS = 0.6
 HOVER_BRIGHTNESS = 1.18
 
@@ -120,7 +123,7 @@ def plate_button(top_bar: Image.Image, size: tuple[int, int]) -> Image.Image:
     ys = np.arange(size[1], dtype=np.float32)
     ramp = cap.width * 0.6
     across = np.clip(np.minimum(xs - cap.width * 0.5, size[0] - cap.width * 0.5 - xs) / ramp, 0.0, 1.0)
-    down = np.clip(1.0 - np.abs(ys - size[1] * 0.5) / (size[1] * 0.3), 0.0, 1.0) ** 0.7
+    down = np.clip(1.0 - np.abs(ys - size[1] * PLATE_CENTRE) / (size[1] * 0.24), 0.0, 1.0) ** 0.7
     darkness = 125.0 * down[:, None] * across[None, :]
     shade = Image.new("RGBA", size, (0, 0, 0, 0))
     shade.putalpha(Image.fromarray(darkness.astype(np.uint8)))

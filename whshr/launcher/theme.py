@@ -26,6 +26,10 @@ SELECTION = "#3d5a1c"
 THUMB = "#7a5530"
 THUMB_ACTIVE = "#a8763f"
 
+# Text sits on the middle of the button's rust panel, which is above the image's middle because spikes and
+# cloth hang below it; keep in sync with tools/launcher_art/build_art.py's PLATE_CENTRE.
+BUTTON_TEXT_CENTRE = 0.37
+
 SERIF_PREFERENCE = ("Cinzel", "Trajan Pro", "Palatino Linotype", "Book Antiqua", "Georgia",
                     "DejaVu Serif", "Liberation Serif", "Times New Roman", "Times")
 
@@ -112,8 +116,9 @@ class ImageButton(tk.Canvas):
             self._plate = self.create_rectangle(2, 2, width - 2, height - 2, fill=PANEL, outline=PANEL_EDGE,
                                                 width=2)
         font = theme.button_font if size == "wide" else theme.small_button_font
-        self._shadow = self.create_text(width // 2 + 1, height // 2 + 1, text=text, font=font, fill="#000000")
-        self._text = self.create_text(width // 2, height // 2, text=text, font=font, fill=TEXT)
+        self._text_y = round(height * BUTTON_TEXT_CENTRE) if self._normal is not None else height // 2
+        self._shadow = self.create_text(width // 2 + 1, self._text_y + 1, text=text, font=font, fill="#000000")
+        self._text = self.create_text(width // 2, self._text_y, text=text, font=font, fill=TEXT)
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
         self.bind("<ButtonPress-1>", self._on_press)
@@ -139,9 +144,9 @@ class ImageButton(tk.Canvas):
         colour = TEXT_DISABLED if not self._enabled else ACCENT if self._inside else TEXT
         self.itemconfigure(self._text, fill=colour)
         offset = 1 if pressed else 0
-        width, height = int(self["width"]), int(self["height"])
-        self.coords(self._text, width // 2 + offset, height // 2 + offset)
-        self.coords(self._shadow, width // 2 + 1 + offset, height // 2 + 1 + offset)
+        width = int(self["width"])
+        self.coords(self._text, width // 2 + offset, self._text_y + offset)
+        self.coords(self._shadow, width // 2 + 1 + offset, self._text_y + 1 + offset)
 
     def _on_enter(self, _event: tk.Event) -> None:
         self._inside = True
