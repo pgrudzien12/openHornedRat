@@ -78,9 +78,8 @@ class ThirdPartyNoticesTests(unittest.TestCase):
         self.assertIn(pinned.group(1), NOTICES, "update the audit when pygame-ce is bumped")
 
     def test_given_each_package_workflow_then_its_python_matches_the_audited_license_version(self):
-        audited = re.search(r"\[CPython ([\d.]+) `LICENSE`\]", NOTICES)
-        self.assertIsNotNone(audited)
-        assert audited is not None
+        audited = set(re.findall(r"\[CPython ([\d.]+) `LICENSE`\]", NOTICES))
+        self.assertTrue(audited)
         for workflow in PACKAGE_WORKFLOWS:
             text = workflow.read_text(encoding="utf-8")
             versions = re.findall(
@@ -90,7 +89,8 @@ class ThirdPartyNoticesTests(unittest.TestCase):
             configured = [next(value for value in match if value) for match in versions]
             with self.subTest(workflow=workflow.name):
                 self.assertTrue(configured, "package workflow must select a Python runtime")
-                self.assertEqual(configured, [audited.group(1)] * len(configured))
+                self.assertEqual(len(set(configured)), 1, "one Python version per package")
+                self.assertIn(configured[0], audited, "audit the license of every bundled CPython")
 
     def test_given_each_package_recipe_then_it_installs_every_license_text_the_notices_rely_on(self):
         for recipe in INSTALL_STEPS:
