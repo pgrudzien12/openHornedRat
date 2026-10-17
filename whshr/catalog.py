@@ -109,7 +109,7 @@ def build(installation: Installation | str | PathLike[str]) -> AssetCatalog:
             AssetId("vanilla", "battle", path.stem.casefold()), "battle", "file",
             f"SCRIPT/{path.name}", "battle-script", source_fingerprint(path),
         ))
-    for path in _files(game.find("REMOTE", "BINARY", "ANIM"), ".si"):
+    for path in _files(game.remote_find("BINARY", "ANIM"), ".si"):
         stem = path.stem.casefold()
         fingerprint = source_fingerprint(path)
         records.append(AssetRecord(
