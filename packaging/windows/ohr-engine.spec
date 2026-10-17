@@ -23,6 +23,8 @@ datas = [
     for path in (REPO_ROOT / "scripts").rglob("*.py")
     if "__pycache__" not in path.parts
 ]
+# The launcher's own art (whshr/launcher/theme.py loads it next to the module).
+datas += [(str(path), "whshr/launcher/art") for path in (REPO_ROOT / "whshr" / "launcher" / "art").glob("*.png")]
 
 a = Analysis(
     [str(REPO_ROOT / "packaging" / "entrypoint.py")],

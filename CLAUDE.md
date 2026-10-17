@@ -108,7 +108,9 @@ whshr/             - unified package and CLI: python3 -m whshr check|extract|cat
                      discovery.py (finds an installation across GOG/Steam/Proton default locations),
                      config.py (persists the recognized path), validate.py (quick + full `whshr check`
                      reuse), battles.py (lists playable battles), engine_launch.py (locates the engine's
-                     own .venv interpreter and starts `whshr engine` as a subprocess), gui.py (tkinter UI)
+                     own .venv interpreter and starts `whshr engine` as a subprocess), gui.py (tkinter UI),
+                     theme.py (colours, fonts, image buttons, arrow scrollbar), art/ (project-made PNGs, built by
+                     tools/launcher_art/build_art.py, which needs Pillow; none of it comes from the game)
 tests/             - BDD-style unittest scenarios (docs/testing.md): run them with `./test.sh` (optionally a module,
                      e.g. `./test.sh tests.test_combat`). **Always use the project's `.venv`** (test.sh does): pygame-ce/zengl
                      are only installed there, and the system `python3` reports spurious import errors
