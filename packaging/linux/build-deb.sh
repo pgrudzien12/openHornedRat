@@ -43,6 +43,7 @@ Priority: optional
 Architecture: $architecture
 Maintainer: Open Horned Rat project <noreply@github.com>
 Depends: libc6 (>= 2.36), libgl1, libx11-6
+Recommends: innoextract
 Description: Open Horned Rat launcher and engine for Shadow of the Horned Rat
  An open-source engine for a legally owned copy of Warhammer: Shadow of the
  Horned Rat. Original game files are not included.

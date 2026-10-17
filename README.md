@@ -41,7 +41,7 @@ With your own copy of the game, you can watch or skip the opening movies, start 
 
 ## Install a playtest package
 
-Download the most recent package for your system from [GitHub Releases](https://github.com/pgrudzien12/openHornedRat/releases). Windows, Debian, RPM, and AppImage packages appear in **daily** prereleases; the Apple Silicon macOS package appears in **weekly** prereleases. A prerelease contains the formats rebuilt that day, so you may need to look at an earlier one for your system. These packages are unsigned and have not yet had a full installation and play test. You also need your own legally owned game files. When the launcher first opens, select the original game's `WARFB` directory if it is not found automatically.
+Download the most recent package for your system from [GitHub Releases](https://github.com/pgrudzien12/openHornedRat/releases). Windows, Debian, RPM, and AppImage packages appear in **daily** prereleases; the Apple Silicon macOS package appears in **weekly** prereleases. A prerelease contains the formats rebuilt that day, so you may need to look at an earlier one for your system. These packages are unsigned and have not yet had a full installation and play test. You also need your own legally owned game files. When the launcher first opens, select the original game's `WARFB` directory if it is not found automatically. On Linux and macOS, where GOG's Windows installer cannot run, **Unpack...** extracts the game from GOG's `setup_*.exe` into the engine's own data directory instead; it needs the open-source [innoextract](https://constexpr.org/innoextract/) tool (`sudo apt install innoextract`, `sudo dnf install innoextract` or `brew install innoextract`).
 
 ### Windows (64-bit)
 

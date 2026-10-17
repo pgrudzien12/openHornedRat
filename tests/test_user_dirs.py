@@ -2,7 +2,7 @@
 import unittest
 from pathlib import Path
 
-from whshr.user_dirs import default_save_dir, resolve_save_dir
+from whshr.user_dirs import default_game_dir, default_save_dir, resolve_save_dir
 
 HOME = Path("/home/tester")
 
@@ -25,6 +25,15 @@ class DefaultSaveDirTests(unittest.TestCase):
 
     def test_given_macos_then_application_support(self):
         self.assertEqual(default_save_dir({}, "darwin", HOME), HOME / "Library/Application Support/ohr/saves")
+
+
+class DefaultGameDirTests(unittest.TestCase):
+    def test_given_each_platform_then_unpacked_game_files_sit_beside_the_saves(self):
+        for platform, environ in (("linux", {"XDG_DATA_HOME": "/data"}), ("win32", {"APPDATA": "C:/Roam"}),
+                                  ("darwin", {})):
+            with self.subTest(platform):
+                self.assertEqual(default_game_dir(environ, platform, HOME),
+                                 default_save_dir(environ, platform, HOME).parent / "game")
 
 
 class ResolveSaveDirTests(unittest.TestCase):
