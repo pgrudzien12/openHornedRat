@@ -299,7 +299,6 @@ class LaunchScreen(tk.Frame):
         self._theme = theme
         self._installation_path = installation_path
 
-        self._no_battles = tk.BooleanVar(value=False)
         self._trace = tk.BooleanVar(value=True)
 
         header = theme.frame(self)
@@ -312,14 +311,10 @@ class LaunchScreen(tk.Frame):
         ImageButton(self, theme, "Start a battle...", self._choose_battle).pack(pady=(6, 0))
 
         theme.label(self, "Options", heading=True).pack(anchor="w", pady=(16, 4))
-        for text, variable in (("No battles (every battle settles as an instant win)", self._no_battles),
-                               ("Trace mission scripts (WHSHR_TRACE_SCRIPTS=1)", self._trace)):
-            theme.check(self, text, variable).pack(anchor="w", pady=(2, 0))
+        theme.check(self, "Trace mission scripts (WHSHR_TRACE_SCRIPTS=1)", self._trace).pack(anchor="w", pady=(2, 0))
 
     def options(self) -> engine_launch.LaunchOptions:
-        return engine_launch.LaunchOptions(
-            no_battles=self._no_battles.get(), trace=self._trace.get(),
-        )
+        return engine_launch.LaunchOptions(trace=self._trace.get())
 
     def _start_game(self) -> None:
         launch_with_checks(self._installation_path, None, self.options())

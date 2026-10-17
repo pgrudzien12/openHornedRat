@@ -63,13 +63,10 @@ class BuildCommandTests(unittest.TestCase):
 
         self.assertEqual(command, ["py", "-c", BOOTSTRAP, "engine", "/game"])
 
-    def test_given_a_battle_and_all_options_when_building_the_command_then_every_flag_is_present(self):
-        options = engine_launch.LaunchOptions(no_battles=True, trace=True)
+    def test_given_a_battle_when_building_the_command_then_the_battle_flag_is_present(self):
+        command = engine_launch.build_command("/game", "BF001", python_path="py")
 
-        command = engine_launch.build_command("/game", "BF001", options, python_path="py")
-
-        self.assertEqual(command, ["py", "-c", BOOTSTRAP, "engine", "/game", "--battle", "BF001",
-                                   "--no-battle"])
+        self.assertEqual(command, ["py", "-c", BOOTSTRAP, "engine", "/game", "--battle", "BF001"])
 
     def test_given_a_source_checkout_when_the_command_runs_elsewhere_without_pythonpath_then_whshr_starts(self):
         # The VS Code debugger's subprocess hook drops both the working directory and PYTHONPATH from the
