@@ -4,15 +4,17 @@ from pathlib import Path
 from os import PathLike
 
 
-# Folders the Steam "Classic" edition moved, relative to BINARY: original location -> where it lives there
-# (notes/installation_layouts.md).
-MOVED_BINARY_FOLDERS = {("MUSIC",): ("MUSIC", "MIDI")}
+# Folders the Steam "Classic" edition moved, relative to BINARY: original location -> where its files live there
+# (notes/steam_edition.md §7: General MIDI tracks in MUSIC/MIDI/GEN, FM tracks in MUSIC/MIDI).
+MOVED_BINARY_FOLDERS: dict[tuple[str, ...], tuple[tuple[str, ...], ...]] = {
+    ("MUSIC",): (("MUSIC", "MIDI", "GEN"), ("MUSIC", "MIDI")),
+}
 
 
 class Installation:
     """A WARFB directory with UPDATE/BINARY taking precedence over FILE/BINARY.
 
-    Two layouts are supported (notes/installation_layouts.md): the GOG/CD one, with ``FILE/``, ``REMOTE/`` (films and
+    Two layouts are supported (notes/steam_edition.md): the GOG/CD one, with ``FILE/``, ``REMOTE/`` (films and
     speech) and ``UPDATE/`` (patched data), and the Steam "Classic" edition's, which merges all three into ``FILE/`` and
     keeps the MIDI music one folder deeper (:data:`MOVED_BINARY_FOLDERS`). Lookups below try the original location
     first, so a GOG installation resolves exactly as before.
@@ -60,8 +62,8 @@ class Installation:
         return path
 
     def music_dir(self) -> Path:
-        """The folder holding the MIDI music: BINARY/MUSIC, or BINARY/MUSIC/MIDI in the Steam edition."""
-        for parts in (("MUSIC", "MIDI"), ("MUSIC",)):
+        """The folder holding the General MIDI music: BINARY/MUSIC, or BINARY/MUSIC/MIDI/GEN in the Steam edition."""
+        for parts in (("MUSIC",), *MOVED_BINARY_FOLDERS[("MUSIC",)]):
             try:
                 folder = self.binary_dir(*parts)
             except FileNotFoundError:
@@ -77,14 +79,15 @@ class Installation:
     def binary_dir(self, *parts: str) -> Path:
         """Resolve a path below the preferred BINARY tree (then where a known layout moved it)."""
         candidates = [parts]
-        for original, moved in MOVED_BINARY_FOLDERS.items():
+        for original, alternatives in MOVED_BINARY_FOLDERS.items():
             if parts[:len(original)] == original and len(parts) > len(original):
-                candidates.append(moved + parts[len(original):])
+                candidates.extend(moved + parts[len(original):] for moved in alternatives)
         for candidate in candidates:
             for binary in self.binary_dirs():
                 path: Path | None = binary
                 for part in candidate:
-                    path = self._child(path, part) if path is not None else None
+                    assert path is not None
+                    path = self._child(path, part)
                     if path is None:
                         break
                 if path is not None:

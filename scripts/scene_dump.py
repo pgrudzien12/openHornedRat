@@ -49,7 +49,7 @@ def find_ci(directory, name):
 
 def game_dir(warfb, *parts):
     """The directory ``warfb/<parts>``, matched case-insensitively. The Steam edition merges REMOTE into FILE
-    (notes/installation_layouts.md), so a REMOTE path missing there is looked up under FILE."""
+    (notes/steam_edition.md), so a REMOTE path missing there is looked up under FILE."""
     try:
         return _game_dir(warfb, *parts)
     except SceneError:
