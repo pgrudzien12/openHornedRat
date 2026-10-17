@@ -2409,8 +2409,6 @@ class Battle:
             # A snapshot: SpawnUnit may add units while scripts run (they start next tick).
             for unit_id, state in list(self.event_bus.unit_states.items()):
                 self.interpreter.run(unit_id, state, self.update_count - 1, self.rng)
-            if self.phase == "battle":
-                self.interpreter.raise_charge_events()
         for regiment in self.regiments.values():
             state = self.event_bus.unit_states.get(regiment.identifier)
             if (self.phase == "battle" and regiment.waypoints
