@@ -4,6 +4,9 @@
 Rather than guessing the exact install folder name (fragile across releases/languages), this
 scans a list of platform-typical parent directories and structurally validates what is inside:
 
+- the engine's own data directory, where the launcher's **Unpack...** (and the README's manual
+  ``innoextract`` command) puts a game unpacked from GOG's installer: ``.../ohr/game/WARFB``
+  (:func:`whshr.user_dirs.default_game_dir`);
 - GOG: ``C:/GOG Games`` and GOG Galaxy's ``Games`` folder on Windows, ``~/GOG Games`` elsewhere,
   ``/Applications`` on macOS;
 - Steam: every library of every Steam installation found (native, snap and Flatpak on Linux,
@@ -19,9 +22,11 @@ one in a ``WARFB`` subdirectory (GOG installs to ``Warhammer - Shadow of the Hor
 import os
 import re
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from whshr.paths import Installation
+from whshr.user_dirs import data_dir
 
 
 def looks_like_installation(path: str | os.PathLike[str]) -> bool:
@@ -74,14 +79,17 @@ def _subdirectories(path: Path) -> list[Path]:
         return []
 
 
-def candidate_parents(home: Path | None = None, platform: str | None = None) -> list[Path]:
+def candidate_parents(home: Path | None = None, platform: str | None = None,
+                      environ: Mapping[str, str] | None = None) -> list[Path]:
     """Parent directories whose immediate subdirectories are worth checking for an installation.
 
-    ``home`` and ``platform`` default to the current user's home directory and ``sys.platform``.
+    ``home``, ``platform`` and ``environ`` default to the current user's home directory, ``sys.platform``
+    and ``os.environ``.
     """
     home = Path.home() if home is None else home
     platform = sys.platform if platform is None else platform
-    parents: list[Path] = []
+    # First, so a copy unpacked by the launcher is the one preselected.
+    parents: list[Path] = [data_dir(environ, platform, home)]
     if platform == "win32":
         parents.append(Path("C:/GOG Games"))
         parents.append(Path(os.environ.get("PROGRAMFILES(X86)", "C:/Program Files (x86)")) / "GOG Galaxy/Games")
@@ -104,11 +112,12 @@ def candidate_parents(home: Path | None = None, platform: str | None = None) -> 
     return [p for p in parents if p.is_dir()]
 
 
-def discover_installations(home: Path | None = None, platform: str | None = None) -> list[Path]:
+def discover_installations(home: Path | None = None, platform: str | None = None,
+                           environ: Mapping[str, str] | None = None) -> list[Path]:
     """Returns every structurally valid installation found under the candidate parents, once each."""
     found: list[Path] = []
     seen: set[Path] = set()
-    for parent in candidate_parents(home, platform):
+    for parent in candidate_parents(home, platform, environ):
         for child in _subdirectories(parent):
             inner = [grandchild for grandchild in _subdirectories(child) if grandchild.name.upper() == "WARFB"]
             for candidate in (child, *inner):

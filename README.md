@@ -41,7 +41,7 @@ With your own copy of the game, you can watch or skip the opening movies, start 
 
 ## Install a playtest package
 
-Download the most recent package for your system from [GitHub Releases](https://github.com/pgrudzien12/openHornedRat/releases). Windows, Debian, RPM, and AppImage packages appear in **daily** prereleases; the Apple Silicon macOS package appears in **weekly** prereleases. A prerelease contains the formats rebuilt that day, so you may need to look at an earlier one for your system. These packages are unsigned and have not yet had a full installation and play test. You also need your own legally owned game files. When the launcher first opens, select the original game's `WARFB` directory if it is not found automatically. On Linux and macOS, where GOG's Windows installer cannot run, **Unpack...** extracts the game from GOG's `setup_*.exe` into the engine's own data directory instead; it needs the open-source [innoextract](https://constexpr.org/innoextract/) tool (`sudo apt install innoextract`, `sudo dnf install innoextract` or `brew install innoextract`).
+Download the most recent package for your system from [GitHub Releases](https://github.com/pgrudzien12/openHornedRat/releases). Windows, Debian, RPM, and AppImage packages appear in **daily** prereleases; the Apple Silicon macOS package appears in **weekly** prereleases. A prerelease contains the formats rebuilt that day, so you may need to look at an earlier one for your system. These packages are unsigned and have not yet had a full installation and play test. You also need your own legally owned game files. When the launcher first opens, select the original game's `WARFB` directory if it is not found automatically. If you only have GOG's Windows installer on Linux or macOS, see [Get the game files](#get-the-game-files).
 
 ### Windows (64-bit)
 
@@ -83,6 +83,49 @@ Later, run the same AppImage file again. If your system cannot run AppImages thr
 Download `ohr-engine-*-macos-arm64.pkg` from the weekly prerelease and open it with Installer. After installation, open **Open Horned Rat** from Applications. The package is unsigned and not notarized, so macOS may ask you to approve it before installation. An Intel Mac package is not available yet.
 
 The launcher starts the bundled engine when you select **Start game**. On Windows and Linux, you can also run the engine directly from a terminal with `ohr-engine --engine /path/to/WARFB`; on macOS, `/usr/local/bin/ohr-engine /path/to/WARFB` is the engine command. Original game files, launcher settings, and saves are outside the package; uninstalling does not remove them.
+
+## Get the game files
+
+The engine needs the `WARFB` folder of your own copy of the game. GOG sells it as a DRM-free Windows installer (`setup_warhammer_shadow_of_the_horned_rat_*.exe`); download it from your GOG library under **Offline backup game installers**.
+
+The steps below were tested with GOG's `setup_warhammer_shadow_of_the_horned_rat_1.0_gog_v5_(90032).exe`, a single file with no extra parts. Other GOG builds of the installer should work the same way, since innoextract reads every Inno Setup version, but they have not been tried. If your download comes with extra `setup_*.bin` files, keep them in the same folder as the `.exe`; older GOG installers of this kind may also need `unrar`.
+
+### Windows
+
+Run the GOG installer. The default location, `C:\GOG Games\Warhammer - Shadow of the Horned Rat\WARFB`, is found automatically.
+
+### Linux and macOS: from the launcher
+
+Install [innoextract](https://constexpr.org/innoextract/):
+
+| System | Command |
+|---|---|
+| Debian, Ubuntu | `sudo apt install innoextract` |
+| Fedora, RPM-based | `sudo dnf install innoextract` |
+| Arch | `sudo pacman -S innoextract` |
+| macOS (Homebrew) | `brew install innoextract` |
+
+In the launcher, choose **Change...** if an installation is already selected, then **Unpack...** next to *Only have GOG's setup_\*.exe installer?*, and pick the installer. The launcher unpacks the `WARFB` folder (about 330 MB) into the engine's own data directory, then validates it and remembers the path.
+
+### Linux and macOS: from a terminal
+
+The same thing by hand. Unpack into the engine's data directory so the launcher finds the game automatically:
+
+```sh
+# Linux (or $XDG_DATA_HOME/ohr/game if you set XDG_DATA_HOME)
+mkdir -p ~/.local/share/ohr/game
+innoextract --gog --include WARFB -d ~/.local/share/ohr/game setup_warhammer_shadow_of_the_horned_rat_*.exe
+
+# macOS
+mkdir -p ~/Library/Application\ Support/ohr/game
+innoextract --gog --include WARFB -d ~/Library/Application\ Support/ohr/game setup_warhammer_shadow_of_the_horned_rat_*.exe
+```
+
+innoextract does not create a missing output folder, hence the `mkdir -p`. The game is then in `.../ohr/game/WARFB`. Any other target folder works too; select its `WARFB` folder in the launcher, or pass it to the engine.
+
+### Linux and macOS: through Wine or Proton
+
+You can also run the GOG installer with Wine, or as a non-Steam game through Proton. The launcher looks for `GOG Games` inside `~/.wine`, Steam's Proton prefixes, Bottles and Lutris prefixes, and in Heroic's `~/Games/Heroic`.
 
 ## Run it from source
 
