@@ -24,7 +24,9 @@ The nine characteristics sit on small parchment cells. These come from **ICONS f
 118×60 3×3 grid, and not from the ICONS 98 background, which has only the bare plate under them.
 Drawn at panel-local (250,112), the frame's border lines up with that plate. Its cells are
 32×13, the first at frame-local (5,4), with columns 38 pixels apart and rows 19 apart. Each
-value is drawn one pixel inside its cell, starting at panel-local (256,117). The engine also
+cell's name and value are text drawn into a rectangle inset 2 px from the cell, with the first at
+panel-local (257,118). The earlier "one pixel inside, (256,117)" was an estimate; see
+"Characteristic cells" below. The engine also
 draws the empty grid when nothing is selected, next to the blank armour tile. That is an
 engine choice: the original's empty-selection panel has not been observed.
 
@@ -133,3 +135,73 @@ The same panel runs in deployment, and the deployment selection uses the same ru
 
 Note: the art box (banner/portrait) is 72×104 at (368,67) from the panel geometry. The section above measured
 (369,68) from the screenshot. 🟡 Use (368,67).
+
+## Characteristic cells ✅ (static; 🟡 no capture of the running original)
+
+Answers how the nine cells are drawn. Coordinates are frame-local to ICONS 211 (add (250,112) for panel-local, as
+above).
+
+### Two views of the same window
+
+The grid window has two views:
+
+- **Grid view:** ICONS 211, the cell names and the values.
+- **Badge view:** the matching piece of the ICONS 98 plate with one small badge centred on it (`ICONS` 89–93), and
+  **no characteristics**.
+
+Selection decides which view is shown:
+
+- **Own or allied regiment:** the player's chosen view. A click on the window toggles it 🟡 (the input message was
+  not identified). The choice is remembered across selections.
+- **Enemy regiment:** always the badge view. **The original never shows an enemy's characteristics.** The player's
+  choice is saved first and comes back when an own regiment is selected again.
+- **No selection:** the view resets to the grid and the cells show **names only, no values** 🟡 (whether the window
+  is visible then was not checked).
+
+The badge index is `(v mod 32) × 4 / 31`, truncated (0–4 → frames 89–93), where *v* is the regiment's
+`s_pntval` setstats value 🟡. The field was identified by position only; its meaning as a badge is not established.
+
+### Grid view text
+
+- **Font:** `PCTEXTA.FON` (face "WarhammerA", 12 px), the same as the unit-information block. Transparent background.
+  No painter sets a colour, so the text is **black** 🟡 (the default; same reasoning as the information block).
+- **Names are text, not art.** `GMTXT` strings 32000–32008 hold the nine abbreviations M, WS, BS, S, T, W, I, A,
+  Ld, in grid order. ICONS 211 has no lettering.
+- **One rectangle per cell**, 28×11, inset 2 px left, 2 px top and 2 px right of the 32×13 cell. Lefts are
+  x = 7, 45, 83; tops are y = 6, 25, 44. Right edges (exclusive) are x = 35, 73, 111. Text outside the rectangle
+  is clipped.
+- **The name** is drawn left-aligned at the rectangle's top-left.
+- **The value** is drawn **right-aligned** in the same rectangle, at the same top. It ends at the right edge, so
+  its left x = right edge − text width and moves with the width. Glyph ink sits on rows 0–8 of the 12 px line, so
+  nothing is lost to the 11 px clip.
+- **Value text:** plain decimal (`%d`) with no padding or leading zero. **A value of 0 is drawn as "-".**
+- **Which values:**
+  - *Unit view:* the troop's M, WS, BS, S, T, W, I, A, Ld (`setstats` tokens 21–29) as stored at paint time.
+  - *Leader view:* the leader block's nine values. While the regiment's **Potion of Strength** is active, S shows
+    +3 (`battlefield_items.md`).
+- **No change markers.** No colour, marker or highlight shows a modified value. Spells, Fight harder and mounts
+  change nothing in the display except through the stored values.
+- **Repaint:** with the information block (same refresh triggers as above).
+
+PCTEXTA advance widths (px): M 11, WS 19, BS 13, S 6, T 7, W 13, I 3, A 9, Ld 13, "-" 6; digits 0 = 8, 1 = 6,
+2 = 8, 3 = 7, 4 = 6, 5 = 8, 6 = 7, 7 = 6, 8 = 7, 9 = 7. A name and a two-digit value can touch. In the shipped
+battle and army files, two-digit values occur only for M (9–20), BS 20, T 10, W 10, I 20 and Ld 10, and WS never
+reaches 10. "BS" + "20" is 29 px in a 28 px rectangle, so they overlap by 1 px; the original has the same overlap.
+
+| Cell | Value | Name drawn at x | Value string | Value x (frame-local) | Panel-local value x |
+|---|---|---|---|---|---|
+| M (col 1, row 1) | 4 | 7 | `4` | 35 − 6 = 29 | 279 |
+| M | 20 | 7 | `20` | 35 − 16 = 19 | 269 |
+| WS (col 2, row 1) | 3 | 45 | `3` | 73 − 7 = 66 | 316 |
+| WS | 0 | 45 | `-` | 73 − 6 = 67 | 317 |
+| BS (col 3, row 1) | 20 | 83 | `20` | 111 − 16 = 95 (overlaps "BS" by 1 px) | 345 |
+| S, leader with active Potion (col 1, row 2), stored 4 | 7 | 7 | `7` | 35 − 6 = 29 | 279 |
+| Ld (col 3, row 3) | 10 | 83 | `10` | 111 − 14 = 97 | 347 |
+| any, no selection | — | name only | (none) | — | — |
+
+Rows are at y = 6 / 25 / 44 frame-local (panel-local 118 / 137 / 156).
+
+**Engine change:** your current "WS  10" in one left-aligned string is wrong. Draw the name on the left and the
+value right-aligned in the 28×11 rectangle, in PCTEXTA, with "-" for 0. Show the badge view, not the grid, for
+enemies.
+
