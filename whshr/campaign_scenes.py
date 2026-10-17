@@ -1,7 +1,7 @@
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownLambdaType=false
 """Initial campaign scenes backed by the original-install asset catalog."""
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .assets import AssetId
 from .battle_scene import BattleScene
@@ -23,6 +23,9 @@ from .scenes import Quit, Scene, SceneAssets, SceneEvent, SceneManifest, Transit
 from .si import load_si, walk_objects
 from .roster_book import BookModel
 from .troop_selection import TroopSelection
+
+if TYPE_CHECKING:
+    from .debrief_scene import DebriefScene
 
 INTRO_CUTSCENE = AssetId("vanilla", "cutscene", "a1")
 INTRO_MEDIA = AssetId("vanilla", "cutscene", "a1-media")
@@ -567,9 +570,13 @@ class ArmyRecordsScene(Scene):
     campaign state.
     """
 
-    def __init__(self, parent: "TroopSelectionScene | GlueScene", whoami: int, model: BookModel | None = None) -> None:
+    def __init__(self, parent: "TroopSelectionScene | GlueScene | DebriefScene", whoami: int,
+                 model: BookModel | None = None, *, view_only: bool = False) -> None:
         self.parent = parent
         self.whoami = whoami
+        # The debrief troop page's book (notes/builtin_widgets.md 2.1, open mode 3): no Hire/Fire, no Abort and no
+        # reinforcement sub-window; Done closes without writing anything.
+        self.view_only = view_only
         if model is None:
             if not isinstance(parent, TroopSelectionScene):
                 raise ValueError("a caravan book needs its own roster model")
@@ -579,7 +586,7 @@ class ArmyRecordsScene(Scene):
 
     @property
     def glue_scene(self) -> GlueScene:
-        return self.parent.glue_scene if isinstance(self.parent, TroopSelectionScene) else self.parent
+        return self.parent if isinstance(self.parent, GlueScene) else self.parent.glue_scene
 
     @property
     def campaign(self) -> CampaignState | None:
@@ -594,6 +601,10 @@ class ArmyRecordsScene(Scene):
         return self.company_ids.index(self.whoami)
 
     def handle(self, event: SceneEvent, context: SceneAssets) -> Transition | Quit | None:
+        if self.view_only and event == "book:done":
+            return Transition(self.parent, "roster book closed")
+        if self.view_only and event in ("book:abort", "book:hire-fire", "reinf:up", "reinf:down", "reinf:take"):
+            return None
         if event == "book:done":
             if self.campaign is not None:
                 self.campaign.apply_army_book(self.model)

@@ -234,7 +234,7 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
         """The reinforcement sub-window shown over the book while the regiment has an offer
         (notes/builtin_widgets.md §2.4). Geometry is the documented native layout."""
         ledger = self.scene.model.ledger
-        if not ledger.has_offer(regiment.whoami):
+        if self.scene.view_only or not ledger.has_offer(regiment.whoami):
             return
         x0, y0 = REINF_ORIGIN
         h = self.body_font.font.height
@@ -272,6 +272,8 @@ class ArmyRecordsView(NativeScreenView[ArmyRecordsScene]):
 
     def _buttons(self, regiment: Regiment) -> None:
         for action, x, art, label_id in BUTTONS:
+            if self.scene.view_only and action in ("book:hire-fire", "book:abort"):
+                continue  # the debrief's view-only book has neither (notes/builtin_widgets.md 2.1)
             if action == "book:stat-info":
                 label_id = 322 if self.info else 321
             elif action == "book:hire-fire":

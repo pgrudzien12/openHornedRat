@@ -1232,7 +1232,7 @@ No pictures.
 - Column headers, font 2, y = 50: `BKTXT 404` (kills) x = 345, `BKTXT 405` (dead) x = 405, `BKTXT 406` (wounded) x = 465, `BKTXT 412` (experience) x = 530.
 - Row i (0..5): `y_i = 50 + H + 4*H*i` (= 62, 110, 158, 206, 254, 302), same row routine as P0/P1 (`notes/troop_selection.md` §3.2-§3.3) with x = 45, style 0 (no scroll strip, **no ring mark**): name line at (105, y_i) formatted
   `<name> <models> (<original size>)` (models = current + routed, original = `s_orgsize`); weapon/armour line at (105, y_i + H) `<BRTXT 200+weapon>/<BRTXT 100+armour>`; rank icon `Skull<n>` (`n` from `s_pntval`, formula in that note)
-  centred on (65, y_i + 12); banner sprite at (80, y_i). Name/line colour: grey (127,127,127) if the unit's `hired` flag is 0, red if destroyed (models 0, or artillery with < 2), else black. 🟡 numbers are black except in the odd not-hired + destroyed case.
+  centred on (65, y_i + 12); banner sprite at (80, y_i). Name/line colour: grey (127,127,127) if the unit's `hired` flag is 0, red if destroyed (models + routed = 0, or artillery with models + routed < 2), else black; numbers are black except in the not-hired + destroyed case (grey). Full table: §9.13.4.
 - Numbers, plain decimal (`%d`), no unit suffix, font 2, at y_i, left-aligned: x = 345 kills (`s_kills`); x = 405 dead and x = 465 wounded with `lost = s_calualties - s_routed`, `wounded = lost * dead% / 100` (option `dead`, default 65),
   `dead = lost - wounded` (integer division; `notes/campaign.md` §3.3); x = 530 experience gained = `s_Exp` (file value) minus the roster's experience-at-start of that `whoami` **before** the doubling of §9.9.1 (a "2x Experience" mission still shows the single value).
 - Below the last row of the page, at `y = 50 + 4*H*rowsOnPage`, x = 345: `BKTXT 611` (wounded could not be recovered) when objective `Z` is present and met. No other footer.
@@ -1312,9 +1312,12 @@ Status: ✅ pages P2/P3/P4, the evaluator table (41 rows, 8 kinds) with its text
 `whshr/debrief_rules.py` (evaluators, text programs), `whshr/debrief_screen.py` (pure page model and drawing lists), `whshr/debrief_scene.py` + `whshr/frontend/debrief_view.py` (scene and painter), `whshr/debrief.py` and `whshr/debrief_rewards.py`
 (Done: payment, armour rewards, doubled experience, promotions), `whshr/payments.py` (cash programs and their step list for P4). A battle now ends in the debrief screen (mode 2 with `playgamewithdebrief`, mode 6 otherwise; a glue-started battle goes straight into it, the plain "Victory!/Defeat" `ResultScene` remains only for standalone battles);
 `debrief:`/`debriefwithsummary:` open modes 4/7. `testmission:` runs the same evaluator (and the last mission's status bits). No-battle mode keeps skipping the screen.
-Deviations and gaps (all reported in the campaign log `debrief` row as *skipped*): the engine measures no objective itself, so a played battle's records are derived from its outcome (`payments.played_results`: a win is the flawless result, a loss meets `Z`);
-kills and experience are credited per model in battle (`notes/casualty_bookkeeping.md` §2) and the wounded, healing and disbanding bookkeeping runs before the screen and at Done (§3, `whshr/casualties.py`); routed models rejoin at Done rather than at the next troop selection, and allied NPC regiments (battles with objective G or I) are merged at battle start and written back (`whshr/npc_merge.py`, `notes/allied_npc_merge.md`) but not listed on the troop page;
-wizard promotions require a known Celestial, Bright or Amber spell to identify the college; the `K`/`X` item-pickup line needs an item-name table the engine does not have; Ctrl+click opens no view-only roster book; the end-screen bitmaps and the battle-quit route of §9.9.5 are not implemented (the campaign-over route (b) is: `whshr.casualties.campaign_over_movie`, then the death movie and the main menu, with no debrief, payment or merge); the mode-6 P4 page is unreachable as specified.
+Since then: a played battle's objective records are measured in battle (`whshr/objectives.py`, `notes/battle_end_objectives.md`; outcome-derived records remain only for a battle without a mission);
+the end picture (`GameEndScreen`/`…Success`/`…Failure`, §9.3.1 (b)) is shown between the battle and the death movie or debrief (`whshr.debrief_scene.EndScreenScene`; its hold time is PROVISIONAL, a click or Enter closes it);
+Ctrl+click on a P3 row opens the view-only roster book on the debrief's units (§9.3.5); the `K`/`X` item-pickup line names the item; allied NPCs are listed in battle unit order and credited at Done,
+wizard promotions, the Elder/Hiln lines and the P3 colours follow §9.13.
+Deviations and gaps (reported in the campaign log `debrief` row as *skipped* where they touch the completion): routed models rejoin at Done rather than at the next troop selection; the battle-quit route of §9.9.5 (a) has no trigger
+(the engine has no in-battle quit); the palette after returning from the roster book is not modelled; an allied NPC whose regiment is not in the company is not listed; the mode-6 P4 page is unreachable as specified.
 
 ### 9.11 Test scenarios (BDD; run on several missions)
 1. Given `bf003` won (evaluator n = 2, key `Z`, list A) opened in mode 2, when P2 is drawn, then its first line is `BKTXT 10008` in the heading font at y = 146, the following lines at y = 190 + 12k, and Next leads to P3, then P4; Back on P2 is disabled.
@@ -1328,10 +1331,168 @@ wizard promotions require a known Celestial, Bright or Amber spell to identify t
 
 ### 9.12 Open questions
 - 🟡 End-screen hold time (§9.3.1); whether the end-screen bitmaps' palette is restored to palette 2 before the BOOK palette is set.
-- 🟡 P3 row colours for units whose `hired` flag is 0 (whether the loader sets `hired` for debrief units was not traced).
-- 🟡 Allied NPC units in the P3 table (no filter found).
-- ⬜ Zero-unit edge case (page count 0 draws six rows in the original); ⬜ exact palette shown after returning from the roster book to P3.
+- ✅ P3 row colours for units whose `hired` flag is 0: §9.13.4 (the value comes from `debrief.dbf`; NPCs are written with 0).
+- ✅ Allied NPC units in the P3 table: listed, no filter (§9.13.2).
+- ✅ Zero-unit edge case: §9.13.4. ⬜ Exact palette shown after returning from the roster book to P3.
 - ⬜ Design intent of the unpaid mode-6 balance page (already in `notes/debrief_evaluation.md` §8).
+
+### 9.13 Debrief leftovers (issue #123) ✅ / 🟡
+
+Answers to the four remaining #123 questions. Static findings, cross-checked against the shipped data
+(`MAXARMY.MRC`, `PLAY.MRC`, the `.BTS` files and the `WND.DLL` mission records); none was observed on screen (🟡 where
+that matters). Related: `notes/campaign.md` §1.3 (corrected there too), §2.5, `notes/allied_npc_merge.md` §5–§6.
+
+#### 9.13.1 Wizard promotion: college, choice, price ✅
+
+**Who is a wizard.** The roster's `wizard` field of the unit's `whoami` (whoami 18 Celestial, 19 Bright, 20 Amber).
+Not the unit's class, race, sprite or `.MRC` keys. Every other unit takes the troop track (WS/S/W).
+
+**How many levels.** `levels = floor(new / 1000) − floor(old / 1000)` with `old` = the roster's experience at
+mission start and `new` = `s_Exp` after the "2x" doubling. 999 → 1000 is one level; 1000 → 1999 is none; 1900 → 3100
+is two.
+
+**Each level, in order:**
+1. If the wizard already knows 5 or more spells: no spell. Otherwise it learns one spell (below).
+2. Price per model +15, **only if the current price per model is not 0** (same rule as the troop +5). Celestial (18)
+   and Amber (20) have price 0 and stay free; Bright (19) starts at 50.
+3. `s_pntval` +7.
+
+Steps 2 and 3 run on **every** level, including the ones where no spell is learned. Nothing else changes: no
+profile stat, no power or pool change (power is battle-only), no item.
+
+**College.** Walk the wizard's spell list in its current order. The first spell that belongs to a college decides:
+
+| College | Spell codes (`notes/game_rules.md` spell table) |
+|---|---|
+| Celestial | 1 Wind Blast, 2 Azure Blades, 3 Storm of Shemtek, 4 Sapphire Arch, 5 Lightning |
+| Bright | 6 Piercing Bolts of Burning, 7 Burning Head, 8 Conflagration of Doom, 9 Flamestorm, 10 Fireball |
+| Amber | 11 Flying Bower, 12 Tangling Thorn, 13 Hunting Spear, 14 Curse of Anraheir, 15 Flock of Doom |
+
+Spells outside the three colleges are **skipped**, not decisive: Dispel Magic (code 16), the Waaagh spells (17–21) and
+the Skaven spells (22–25). This matters in shipped data: every wizard's list **starts with Dispel Magic**
+(`MAXARMY.MRC`: 18 = Dispel, Wind Blast, Lightning, Azure Blades; 19 = Dispel, Piercing Bolts, Fireball; 20 = Dispel,
+Curse, Hunting Spear), so "the first known spell" read literally would be Dispel. A list that mixes colleges takes
+the college of the first college spell in list order.
+
+**Choice.** Draw one of the college's 5 spells uniformly at random; if the wizard already knows it, draw again; stop
+at the first unknown one. The result is uniform over the college spells the wizard does not know. It cannot loop
+forever in practice: a wizard with fewer than 5 spells always has an unknown spell in its college.
+
+**After learning.** The new spell is added to the list and the list is re-sorted by casting cost, highest first.
+Spells with equal cost keep their previous relative order (stable sort). Costs are those of `notes/game_rules.md`
+(e.g. Storm of Shemtek 3, Wind Blast 2, Sapphire Arch 2, Dispel Magic 1, Lightning 1, Azure Blades 1). The new list
+order also decides the college at the next level, and it is the order the spells appear in the battle list.
+
+**No college spell.** A wizard whose list has no spell with code 1–15 (no spells, only Dispel, or only Waaagh/Skaven
+spells) has no college. The original has no fallback for this case: the promotion step fails (undefined behaviour,
+most likely a crash). It cannot happen with shipped data (every wizard starts with two or three college spells).
+**Engine recommendation:** learn nothing, log a diagnostic, but still apply the price and `s_pntval` steps, as the
+"5 spells already" case does. Your current skip is fine if it keeps those two steps.
+
+Vectors (price = current price per model; `rng` = the uniform draw):
+
+| Before | Action | After |
+|---|---|---|
+| whoami 18, spells [Dispel, Wind Blast, Lightning, Azure Blades], price 0, `s_pntval` p, exp 900 → 1100 | Done | learns Storm of Shemtek or Sapphire Arch (½ each). Storm: list [Storm, Wind Blast, Dispel, Lightning, Azure Blades]; Arch: [Wind Blast, Sapphire Arch, Dispel, Lightning, Azure Blades]. Price 0, `s_pntval` p+7 |
+| same wizard, exp 1900 → 3100 | Done | level 1 learns as above (5 spells); level 2 learns nothing. Price 0, `s_pntval` p+14 |
+| whoami 19, [Dispel, Piercing Bolts, Fireball], price 50, exp 2950 → 3000 | Done | learns Burning Head, Conflagration or Flamestorm (⅓ each), list sorted by cost; price 65; `s_pntval` +7 |
+| whoami 19, 5 spells, price 65, exp 3999 → 4000 | Done | no spell; price 80; `s_pntval` +7 |
+| whoami 20, [Dispel, Curse, Hunting Spear], exp 0 → 2100 (mission with "2x", gained 1050 shown on P3) | Done | 2 levels: two different spells from Flying Bower, Tangling Thorn, Flock of Doom; price stays 0; `s_pntval` +14 |
+| whoami 18 edited to [Dispel] only | Done, one level | original: undefined (no college). Engine: no spell, diagnostic, price/`s_pntval` steps still applied |
+| whoami 19 edited to [Dispel, Wind Blast, Fireball] | Done, one level | college = Celestial (Wind Blast is the first college spell); learns one of Azure Blades, Storm, Arch, Lightning |
+
+#### 9.13.2 Allied NPC regiments on P3 and at Done ✅ (data) / 🟡 (screen)
+
+- **Listed: yes.** P3 lists every unit of `debrief.dbf`, in file order, with no filter (page *k*, row *i* is unit
+  `6k + i` of the file). Allied NPCs are present in the file only in battles with objective G or I defined and only
+  with whoami < 50 (`notes/allied_npc_merge.md` §5). So they appear **interleaved** with the player's regiments in
+  battle unit order (surviving section first, then Dead or Routed), not appended after them.
+- **Colour.** Rows follow §9.13.4. The `hired` value written for an NPC is the battle script's, and every
+  whoami < 50 NPC in the shipped G/I battles (BF015, BF017, BF026, BF029, BF030, BF031, BF042) has `hired=0`. So their
+  rows are **grey**, or **red** when destroyed.
+- **Numbers.** Same as any row: kills = file `s_kills`; dead/wounded from the file's casualties and routed; experience
+  gained = file `s_Exp` minus the roster's experience at start **for that whoami** (`allied_npc_merge.md` §5 explains
+  why the G and I starting points differ).
+- **Done.** Everything at Done is keyed by whoami and makes no player/NPC distinction:
+  - "2x" doubling: yes.
+  - Promotions: yes. The troop or wizard track follows that whoami's roster entry, and the price bump goes to that
+    whoami's roster price.
+  - Roster experience-at-start: updated to the new `s_Exp`.
+  - Armour reward: given to the **first** unit in the file with the named whoami. This is moot in shipped data: the
+    only armour program (Rat Trap `bf041`, objectives Z and A) is not a G/I battle.
+  - Merge, heal and disband: `allied_npc_merge.md` §5. What reaches the company depends on whether that whoami is in
+    `ARMY.MRC`.
+
+| Before | Action | After |
+|---|---|---|
+| BF015 won, file (illustrative order): [Grudgebringer Cavalry, merged Black Avengers (whoami 4, hired 0, 15 models), Grudgebringer Infantry] | open P3 | row 1 Cavalry (black), row 2 Black Avengers (**grey**), row 3 Infantry (black) |
+| same, Black Avengers wiped out (written under Dead or Routed, 0 models) | open P3 | Black Avengers row **red**, numbers black (see §9.13.4) |
+| NPC whoami 4 crosses 2000 XP | Done | +1 WS (unit and leader) on the debrief record, roster 4 price +5 if not 0, `s_pntval` +7 |
+
+#### 9.13.3 "High Elder not rescued" and "Hiln killed" ✅
+
+Both lines are **unconditional**. Each prints its label and subtracts **rate A** every time the mission's cash
+program runs, whatever the battle outcome. They read no objective record and no unit state. The "condition" is
+only in the label. The program still only runs where a balance sheet runs: the P4 page, and the payment at Done in
+modes 2, 4 and 7 (also when the window is skipped, §9.3.1a). `Total Final Payment` clamps the total at 0.
+
+| Mission record | `cash` line | Program |
+|---|---|---|
+| Rescue `bf032` (`MISSIONLWINDOW`) | `13,0,500,1000,0,A` | Completion, High Elder not rescued (−A), ·, Final |
+| Rescue `bf032` (`MISSIONL3WINDOW`) | `13,0,500,500,0,A` | same |
+| Sven Carlsson `bf001` (`MISSIONBP03WINDOW`, `MISSIONBP23WINDOW`) | `14,0,1500,200,0,A` | Completion, Hiln killed (−A), ·, Final |
+
+Completion pays when the required letter A (all enemy regiments counted at start are dead or gone,
+`notes/debrief_evaluation.md` §2.2) has success 1.
+
+| Before | Action | P4 lines | Final / coffers change |
+|---|---|---|---|
+| `bf032`, rates 500/1000, A met | Done (mode 2) | Completion 500; High Elder not rescued −1000; blank; Total Final Payment 0 | +0 |
+| `bf032`, rates 500/1000, A failed | Done | Completion 0; −1000; Final 0 | +0 |
+| `bf032`, rates 500/500, A met | Done | Completion 500; −500; Final 0 | +0 |
+| `bf001`, A met | Done | Completion 1500; Hiln killed −200; Final 1300 | +1300 |
+| `bf001`, A failed (defeat: no window, §9.3.1a) | completion runs without a window | (not shown) | +0 (−200 clamped) |
+
+So in the original Rescue never pays and Sven Carlsson always loses 200. Whether that was intended (a placeholder
+that was never given a condition) is unknown. Reproduce it as data-driven behaviour: run the opcodes as
+unconditional `−A`, without a special case per mission.
+
+#### 9.13.4 P3 row colours and the zero-unit case ✅ (logic) / 🟡 (screen)
+
+**Destroyed** = `models + routed == 0`, or the whoami's roster `artillery` field is set and `models + routed < 2`.
+(Corrects §9.3.4, which said "models 0": routed models count as present.)
+
+| `hired` | destroyed | name + weapon/armour lines | four numbers | skull, banner |
+|---|---|---|---|---|
+| on | no | black | black | unchanged (bitmaps) |
+| on | yes | **red** (255,0,0) | black | unchanged |
+| off | no | **grey** (127,127,127) | black | unchanged |
+| off | yes | **red** | **grey** | unchanged |
+
+The last row is a side effect: after a row is drawn, the numbers use the colour that was current just before the
+row's final colour change. Reproducing it is optional, and it only shows on a destroyed NPC row (§9.13.2). `hired`
+is the value in `debrief.dbf` (`set:hired=` per unit). Player regiments are written with 1 (they come from
+`ARMY.MRC`); NPCs keep their script's value. The Z footer (`BKTXT 611`) and the column headers are always black.
+
+**Zero units** (`debrief.dbf` with no unit; not reachable after a shipped battle, since the player's regiments are
+always written, dead ones under Dead or Routed):
+
+- `pages = (0 + 5) / 6 = 0`.
+- P3 does **not** draw zero rows. It draws **six** rows, all of them the list's first entry, which here is no real
+  unit (stale or empty data: undefined in the original). The `BKTXT 611` footer, when Z is met, goes below six rows
+  (y = 50 + 24·H).
+- Buttons, mode 2: on P3, Next is enabled and leads to P4, and Back leads to P2. Back on P4 returns to P3 with page
+  index −1, which again draws six rows; Next from there leads to P4.
+- Buttons, mode 6: on P3, Next is **disabled** (0 < pages − 1 is false). Back goes to P2. Done works on every page.
+- **Engine recommendation:** draw no rows and put the footer at y = 50. Keep the button rules computed with
+  pages = 0: mode 2 Next on P3 → P4; mode 6 Next disabled on P3.
+
+| Before | Action | After |
+|---|---|---|
+| mode 2, 0 units | Next on P2 | P3, unit page 0; Next enabled, Back enabled |
+| same | Next | P4 |
+| same, on P4 | Back | P3 (page −1 in the original; engine: the single empty page) |
+| mode 6, 0 units | Next on P2 | P3; Next disabled; Back enabled; Done enabled |
 
 ## 10. Roster book (Army Records) ✅
 

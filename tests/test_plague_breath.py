@@ -173,11 +173,12 @@ class FellingPines(unittest.TestCase):
         self.assertEqual(buildings.PINE_TYPES, objectives.TREE_TYPES)
         self.assertEqual(len(buildings.PINE_TYPES), 18)
 
-    def test_objective_q_still_counts_felled_trees_as_standing_pieces(self):
+    def test_a_felled_tree_no_longer_counts_as_standing_for_objective_q(self):
         b = battle(*PINES)
         before = objectives.standing_trees(b)
-        b.fell_pines(1200, 1200)
-        self.assertEqual((before, objectives.standing_trees(b)), (3, 3))
+        felled = b.fell_pines(1200, 1200)
+        self.assertEqual((before, objectives.standing_trees(b)), (3, 3 - len(felled)))
+        self.assertGreater(len(felled), 0)
 
 
 def triangle(x):

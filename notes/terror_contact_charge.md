@@ -193,6 +193,186 @@ is ignored; 164 `LeaveSharedGrid` (grid freed, so no 0x30 ever comes) → re-for
 - **Charge path.** Check that the Cavalry's charge was a `ChargeForward`. A `ChargeTarget` charge at a terror causer
   is refused at its start in the original.
 
+## 8. "Flee the abomination!" twice (issue #343)
+
+Prompted by a BF026 replay in which the Grudgebringer Cavalry, charged by the Wyvern, shouted `React 6` on two
+consecutive ticks and routed on the second. **In the original the unit is already broken by the end of the tick in
+which it handles its first 0x0D**, so a later 0x0D is refused silently. No fear test remembers a failure: what
+stops the second shout is the timing of the rout, nothing else.
+
+### 8.1 Shared state
+
+- **The handler drains the whole queue in one pass.** The player and AI event handlers (101, 103, …) end with
+  `ConsumeEvent; LoopIfTrue` back to `GetEvent`, then `ReturnInterrupt` (`unit_script_control.md` §1, §4).
+  `ConsumeEvent` sets the condition to "queue not empty". So every event queued before the pass, **and every event
+  queued during it** (e.g. the 0x0D from `FearWhenCharged`), is handled in the same pass. LIFO order:
+  `unit_script_control.md` §1.
+- **Nothing rout-related happens in the 0x0D/0x0C arm itself.** In library 153/155 the arms are
+  `RoutAllowed; If; React 6 (or 4); SwitchScript 162; EndIf`. `React` only shows text, speech and portrait.
+  `SwitchScript` only records a pending switch. The unit stays unbroken for the rest of the handler pass. A second
+  0x0D handled **in the same pass** passes `RoutAllowed` again and shouts again (§8.4).
+- **`ReturnInterrupt` applies the pending switch and keeps running.** With a switch pending (and not refused), the
+  unit leaves the handler straight into the new script **at its first instruction, in the same script run**. It does
+  not first return to the interrupted script, and it does not wait for the next tick. Script 162 starts with
+  `FleeFromTarget`, so the rout starts there and then: the unit is broken, leaves its grid, its footprint becomes
+  routing and 0x0F goes to the enemy side (`game_rules.md`, rout start). It then reaches 162's `Yield`.
+  (`unit_script_control.md` §1 says "applied at the end of the tick or at `ReturnInterrupt`". This section adds that
+  in the `ReturnInterrupt` case the new script also **runs on** in the same tick.)
+- **Per-unit tick order** (`game_rules.md`, unit tick): script (events first) → formation → movement → collision
+  pass → models. The rout therefore starts **before** the unit's own collision pass of that tick. The contact fear
+  test is skipped for a broken mover, so that pass queues no new 0x0D.
+- **`RoutAllowed` on a broken unit is false and silent** (no shout; only `CantBreak` gives `React 7`). A 0x0D or
+  0x0C handled on a later tick does nothing.
+- **Other units' collision passes never queue 0x0D to this unit.** The contact fear test belongs to the mover only.
+  When the Wyvern is the mover, it is the Wyvern that is tested, and the Cavalry causes no fear (§1).
+
+### 8.2 Answers
+
+1. **What stops the second shout:**
+   - The rout starts in the same tick as the first 0x0D handler, through `ReturnInterrupt` → 162 →
+     `FleeFromTarget`.
+   - By the next tick the unit is broken, and `RoutAllowed` refuses silently.
+   - No fear test checks for a "pending flight". `FearWhenCharged` and the contact test only refuse for a broken
+     unit (and the contact test while fear-passed is on).
+   - The pending-switch state is not read by `RoutAllowed` or by the arm.
+2. **When 162 makes the unit broken:** the same tick, inside the same script run as the handler, before the
+   unit's formation, movement and collision steps. At handler time (between `React 6` and `ReturnInterrupt`) only the
+   pending switch to 162 exists. Fear-passed stays off, and the current target is the one the fear test wrote.
+3. **Does the original ever show the shout twice?** Yes, but only **within one handler pass** (the same tick), never
+   on two consecutive ticks. It needs two 0x0D in the queue before `ReturnInterrupt`. Example: the unit's own contact
+   test queued 0x0D on tick t, and before its run on t+1 a terror causer starts a charge at it (0x07, whose
+   `FearWhenCharged` queues a second 0x0D). The queue is then [0x07, 0x0D] (lists are written head first). Both 0x0D are handled in one pass and both shout. Effects: the text is printed
+   twice; the speech cue is not restarted while it is still playing; the portrait shows once
+   (`react_portrait.md` §2, "one portrait at a time"). 🟡 Not observed on screen, and rare in play.
+4. **0x0C ("Retreat!", `React 4`):** the same rule, same arm shape, same `RoutAllowed`, same 162. Several 0x0C in one
+   pass shout once each (e.g. two panic tests failed by one volley). A 0x0C together with a 0x0D gives "Retreat!"
+   and "Flee the abomination!" in the same pass. After the pass the unit is broken, and later 0x0C are silent.
+
+### 8.3 Difference from the implementer's model
+
+The engine applies the switch at `ReturnInterrupt` (or at the end of the tick) but runs 162 only on the **next**
+tick. The unit then stays unbroken for one tick. In that tick:
+
+- its own collision pass re-runs the contact fear test (not broken, fear-passed off) and queues a second 0x0D;
+- the next tick's handler shouts again before 162 runs.
+
+Fix: when `ReturnInterrupt` applies a pending switch, start the new script at instruction 0 and **continue
+interpreting in the same run**, until the new script yields or waits. Do this before formation, movement and the
+collision pass. No extra "flight pending" state is needed, and adding one would hide the original's same-pass double
+shout (§8.2 item 3). Handler 101/103 open with `ClearCondFlags 8`, so a switch that was pending before the handler
+started is dropped at handler entry. Only switches recorded during the pass are applied.
+
+### 8.4 Test vectors
+
+C = Grudgebringer Cavalry (player, handler 101 → 153), W = Wyvern (causes terror), C not `CantBreak`, fear-passed
+off.
+
+| Before | Action | After |
+|---|---|---|
+| C idle, queue [0x07 (W charging)] | C's run, tick t | 0x07: `FearWhenCharged` → target W, **0x0D queued**, pending 161; loop: 0x0D → `RoutAllowed` true → **"Flee the abomination!" (1)**, pending 162; queue empty → `ReturnInterrupt` → 162 → `FleeFromTarget`: **C broken**, 0x0F to W's side; `Yield` |
+| (same tick) C broken, overlapping W | C's collision pass, tick t | no fear test (broken mover), no 0x0D |
+| W charging, overlapping C | W's collision pass | W is the tested mover; C causes no fear → no 0x0D to C |
+| C broken, queue [0x0D] (left over) | C's run, tick t+1 | `RoutAllowed` false, **no shout**; C keeps fleeing (162 loop) |
+| C on a Move order overlaps a stationary W | C's collision pass, tick t | C.target W, queue [0x0B, 0x0D] (0x0B at the head) |
+| C queue [0x0B, 0x0D] | C's run, tick t+1 | 0x0B: ordinary newcomer engagement (§3); 0x0D: **one shout**; 162 → broken, same tick |
+| C queue [0x07 (W), 0x0D (own contact test)] | C's run | 0x07 → `FearWhenCharged` queues 0x0D (head) → shout (1); then the old 0x0D → `RoutAllowed` still true → **shout (2)**, same pass; then rout. Text ×2, speech once if the cue is still playing, one portrait 🟡 |
+| C queue [0x0C, 0x0C] (two failed panic tests) | C's run | "Retreat!" ×2 in the same pass; 162 → broken |
+| C queue [0x0C, 0x0D] (0x0C at the head) | C's run | "Retreat!", then "Flee the abomination!"; 162 → broken |
+| C `CantBreak`, queue [0x0D] | C's run | `React 7`, no switch from this arm, not broken; a later 0x0D gives `React 7` again |
+| C broken, 0x0C queued later | C's run | silent |
+
+### 8.5 Follow-up: event order at contact (the engine trace of BF026, update 2526)
+
+The engine trace handled C's events in this order (head first):
+
+1. 0x07 (W) → `FearWhenCharged` → 0x0D;
+2. 0x0D → shout, pending 162;
+3. 0x0B (the reciprocal from W's collision pass) → `Query 8` engages C;
+4. 0x0A → `SwitchScript 165`, which replaces 162.
+
+The pass ends with C unbroken and in melee on 165. C's own collision pass then queues a new 0x0D, which shouts again
+on the next tick. In the original this order cannot arise. Each step below would behave the same if that order did
+happen; the difference is the order itself.
+
+**Where 0x07 is sent.** 0x07 is only ever sent during a **script step** (the sender's, or for `ReactToThreat` the
+receiver's own), never from movement or from a collision pass. The senders are:
+
+| Sender's script step | Condition | Target's later `FearWhenCharged` |
+|---|---|---|
+| `ChargeTarget` starts a charge (`game_rules.md` "Fear and terror", situation 2) | charge accepted | sender charging → fear/terror test runs |
+| `ReactToThreat` (the **reacting unit's own** script step, AI handler on event 3): the threat is charging this unit | the unit is not charging, pursuing, broken or braced, and not in melee | the unit queues 0x07 **to itself**, source = the threat (charging) → test runs in the same pass |
+| the contact handler (`Query 8`, while the sender handles **its own** 0x0B): sender charging (or pursuing) and the touched enemy is **not** its target → the charge is redirected to the touched enemy (0x1A to the old target) | — | sender charging → test runs |
+| the contact handler: sender not charging, not in melee, **no target**, not broken → sender's target := touched enemy ("first contact", `game_rules.md` "Engagement") | no engagement yet | sender **not** charging → `FearWhenCharged` does nothing (condition false, no test) |
+
+A charger that touches **its own target** engages; it sends no 0x07.
+
+**Why the order cannot arise.**
+1. Within one unit's run, the steps are script → movement → collision pass. So a 0x07 and a reciprocal 0x0B from
+   the same sender's run reach C with the **0x0B newer**. LIFO then hands C the 0x0B **first**.
+2. Every unit runs once per tick, and C's handler drains its whole queue (§8.1). C therefore always runs between W's
+   collision pass and W's next script step. W's reciprocal 0x0B is gone before W's next 0x07 can be queued.
+3. Hence, in C's pass, an engagement from W's 0x0B (and its 0x0A → 165) comes **before** the 0x0D that W's 0x07
+   produces. The switch recorded last is 162.
+4. A 0x0D from C's **own** collision pass is queued just before that pass's own 0x0B. It lies **under** its 0x0B and
+   is handled after any engagement that 0x0B makes. 162 is again recorded last.
+
+Here, "each step would behave the same" means:
+
+- `Query 8` is not refused because a switch is pending.
+- 0x0A's `SwitchScript 165` does replace a pending 162: the `SwitchScript` family does not lock, and only
+  `IfSwitchScriptHigh` does (`unit_script_control.md` §1).
+- `RoutAllowed` does not look at the pending switch.
+
+Two edge cases could still put a fresh 0x0D above an engaging 0x0B. Both are 🟡 rare and not constructed in shipped
+data:
+
+- two fear causers in the same tick: W (any monster) touches C, then a **second** terror or fear causer X starts
+  a charge at C before C runs;
+- an AI unit whose handler meets event 3 (`ReactToThreat`) above an older 0x0B: the self-queued 0x07 → 0x0D →
+  162 comes first, then the older 0x0B engages and its 0x0A → 165 replaces 162.
+
+**The contact fear test while in melee (question C).** The test in the collision pass has **no** guard for "in
+melee", "already engaged with this enemy" or "same grid", and no first-contact latch. When C's collision pass runs
+with C overlapping a terror causer, and C is not broken with fear-passed off, the test refuses again, sets the target
+and queues 0x0D, every time. The pass, however, runs only while C's **re-check** state is on (`fanatic_collisions.md`;
+`game_rules.md` unit tick).
+
+- A unit in melee does not translate, so its own movement does not arm re-check.
+- Another unit's pass arms the touched unit's re-check only if that mover is **not** in melee.
+- So in a settled melee the test does not repeat every tick. It repeats when something re-arms re-check: a
+  moving unit's pass touching C, a turn or footprint change, a push, the contact handler's first-contact and
+  redirect branches.
+- In practice none of this matters, because C is broken by the end of the pass that handles the first 0x0D (§8.1).
+
+**Answer to question D.** In the original, this BF026 situation does **not** shout on two consecutive ticks. C routs
+in the tick in which it first handles the fear 0x0D. That tick can carry **two** shouts in one pass, when both a
+0x07-derived 0x0D and its own pass's 0x0D are queued (trace below). The engine needs two rules:
+
+- (a) send 0x07 only from the sender's script step (`ChargeTarget`, `ReactToThreat`, contact handling of the
+  sender's own 0x0B). Never send it from movement or from the collision pass.
+- (b) the collision pass queues its 0x0D **before** its 0x0B.
+
+With both, the switch to 162 is always recorded after any 0x0A of the same pass.
+
+Original order, the BF026 shape. W = Wyvern, charging with no target (e.g. `ChargeForward`) or with another target.
+Unit order W before C. C idle, fear-passed off. Lists are written **head first**.
+
+| Before | Action | After |
+|---|---|---|
+| tick t: W overlaps C | W's collision pass | 0x0B to W; reciprocal 0x0B to C; C re-check on. C queue [0x0B] |
+| C queue [0x0B], C no target | C's run, tick t | 0x0B → `Query 8`, first contact: C.target := W, 0x07 to **W** (W's `FearWhenCharged` later does nothing: C is not charging). C not engaged |
+| C overlapping W, re-check on | C's collision pass, tick t | fear test refused (terror): C.target W, **0x0D**; then contact: 0x0B to C (no reciprocal: W is a monster). C queue [0x0B, 0x0D] |
+| W queue [0x0B, 0x07(C)] | W's run, tick t+1 | 0x0B → `Query 8`: W charging, C is not its target → redirect: W.target := C, **0x07 to C**. 0x07 → nothing. W's pass: 0x0B to W, reciprocal 0x0B to C. C queue [0x0B(W), 0x07(W), 0x0B(own), 0x0D(own)] |
+| that queue | C's run, tick t+1 | 0x0B(W): C.target = W → engagement, C in melee, 0x0A → `SwitchScript 165`. 0x07: W charging → terror, C in melee → 0x0D queued (condition false, no 161). 0x0D → **shout 1**, 162 replaces 165. 0x0B(own): already on the grid, nothing. 0x0D(own) → `RoutAllowed` still true → **shout 2** (same pass), 162. `ReturnInterrupt` → 162 → **C broken** |
+| C broken | C's collision pass, tick t+1 | no fear test |
+| C broken, any later 0x0D/0x0C | later ticks | silent |
+
+| Before | Action | After |
+|---|---|---|
+| (engine order, impossible in the original) C queue [0x07(W), 0x0D, 0x0B(W)] | C's run | 0x07 → 0x0D (head), shout, 162; 0x0D → shout, 162; 0x0B → engage, 0x0A → 165 **replaces 162**; ends on 165, unbroken. This is the reported bug; fix the send order, not the switch rules |
+| C in melee with W, not broken, fear-passed off, re-check on | C's collision pass | refused again: 0x0D queued (no latch, no in-melee guard) |
+| same, re-check off | tick | no pass, no 0x0D |
+
 ## 🟡 Uncertainties
 
 - Whether a cast already in its animation finishes when 0x30 switches a busy-casting causer to 163 (§2).

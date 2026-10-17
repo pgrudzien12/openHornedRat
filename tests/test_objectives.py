@@ -310,6 +310,16 @@ class FinalPassTests(unittest.TestCase):
         self.assertEqual(battle.objectives.get("C").result(), (True, (80, 2, 100, 2)))
         self.assertEqual(battle.objectives.get("Q").result(), (True, (60, 2, 100, 2)))
 
+    def test_a_felled_tree_lowers_the_standing_share_of_q(self):
+        # Engine choice (whshr.objectives.standing_trees): Q's total is taken at load, a felled pine is not standing.
+        scenery = [{"name": "Pine"}, {"name": "SnwTriPineLrg"}]
+        battle = make([["A", 0, 0], ["Q", 60, 0]], regiment("p", Side.PLAYER), regiment("e", Side.ENEMY, 0),
+                      scenery=scenery)
+        at_boundary(battle)
+        battle.ruined.add("tree:1")
+        battle.leave()
+        self.assertEqual(battle.objectives.get("Q").result(), (False, (60, 2, 50, 1)))
+
     def test_fled_peasants_count_as_saved(self):
         peasants = regiment("v", Side.NEUTRAL, 12, race=6)
         battle = make([["A", 0, 0], ["B", 80, 0]], regiment("p", Side.PLAYER), regiment("e", Side.ENEMY, 0),

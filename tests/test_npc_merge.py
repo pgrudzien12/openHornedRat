@@ -194,6 +194,24 @@ class OutcomeMappingTests(unittest.TestCase):
         self.assertEqual(sorted(campaign.battle_outcome), [3, 15])  # not cleared by a length mismatch
         self.assertEqual((campaign.battle_outcome[15].models, campaign.battle_outcome[15].casualties), (1, 1))
 
+    def test_the_troop_page_rows_follow_the_battle_unit_order_with_the_dead_or_routed_last(self):
+        # notes/native-windows.md 9.13.2: allied NPCs are interleaved in unit order, not appended
+        from unittest.mock import patch
+
+        scene = self.scene([["G", 1, 4]], [unit("NPC_Avengers", 4, 28, NPC_SIDE)],
+                           [unit("Infantry", 3, 16), unit("Cavalry", 2, 12)],
+                           company={4: company_unit(4, 20, "Black Avengers", 150)})
+        scene.battle.regiments["Infantry"].models = 0
+        campaign = SimpleNamespace(company=(), ordered_march_units=(3, 2), mission_cash=None)
+        scene.glue_scene = SimpleNamespace(campaign=campaign)
+
+        with patch("whshr.battle_scene.casualties.after_battle"):
+            scene._store_played_results()
+
+        order = list(scene.battle.regiments)
+        survivors = sorted([(4, True, "NPC_Avengers"), (2, False, "Cavalry")], key=lambda row: order.index(row[2]))
+        self.assertEqual(campaign.debrief_rows, (*((w, npc) for w, npc, _ in survivors), (3, False)))
+
     def test_given_a_side_change_during_the_battle_then_the_final_side_decides_who_is_written(self):
         scene = self.scene([["G", 1, 4]], [unit("NPC_Avengers", 4, 28, NPC_SIDE), unit("Rebel", 5, 10, 0x80)], [],
                            company={4: company_unit(4, 20, "Black Avengers", 150)})

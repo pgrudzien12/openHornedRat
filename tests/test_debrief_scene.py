@@ -207,22 +207,23 @@ class RewardTests(unittest.TestCase):
                 [wizard], [unit(whoami=5, experience=1200, experience_start=900)], 1, False)
 
         promoted = company[0]
-        self.assertEqual(script.unit_view(promoted.raw)["spells"],
-                         ["GeneralDispel", "BrightFireball", "BrightPiercingBoltsOfBurning"])
+        self.assertEqual(script.unit_view(promoted.raw)["spells"],  # re-sorted by casting cost, highest first
+                         ["BrightPiercingBoltsOfBurning", "GeneralDispel", "BrightFireball"])
         self.assertEqual((promoted.experience, promoted.points, promoted.row.base_price), (1200, 7, 35))
         self.assertEqual(promoted.profile, wizard.profile)
         self.assertIn("Regiment5: learned BrightPiercingBoltsOfBurning", applied)
         self.assertEqual(skipped, [])
 
-    def test_wizard_crossing_multiple_thresholds_learns_until_five_spell_limit(self):
+    def test_wizard_crossing_multiple_thresholds_learns_until_five_spells_and_keeps_gaining_price_and_worth(self):
         wizard = self.make(wizard=True, spells=("GeneralDispel", "AmberFlyingBower", "AmberTanglingThorn"))
         with patch("whshr.debrief_rewards.random.choice", side_effect=lambda candidates: candidates[0]):
-            promoted, _, _ = debrief_rewards.promote(wizard, 900, 3900)
+            promoted, applied, _ = debrief_rewards.promote(wizard, 900, 3900)
 
         self.assertEqual(script.unit_view(promoted.raw)["spells"],
-                         ["GeneralDispel", "AmberFlyingBower", "AmberTanglingThorn",
-                          "AmberHuntingSpear", "AmberCurseOfAnraheir"])
-        self.assertEqual((promoted.points, promoted.row.base_price), (14, 50))
+                         ["AmberTanglingThorn", "AmberCurseOfAnraheir", "AmberHuntingSpear",
+                          "GeneralDispel", "AmberFlyingBower"])
+        self.assertEqual(len(applied), 2)  # the third level finds five spells known
+        self.assertEqual((promoted.points, promoted.row.base_price), (21, 20 + 3 * 15))
 
     def test_a_free_wizard_learning_a_spell_stays_free(self):
         wizard = self.make(wizard=True, spells=("GeneralDispel", "AmberFlyingBower"))
@@ -232,14 +233,49 @@ class RewardTests(unittest.TestCase):
 
         self.assertEqual((promoted.points, promoted.row.base_price), (14, 0))
 
-    def test_wizard_without_a_known_college_does_not_gain_an_unrelated_spell(self):
+    def test_wizard_without_a_known_college_learns_nothing_but_still_gains_price_and_worth(self):
         wizard = self.make(wizard=True, spells=("GeneralDispel",))
 
         promoted, applied, skipped = debrief_rewards.promote(wizard, 900, 1100)
 
-        self.assertEqual(promoted, wizard)
+        self.assertEqual(script.unit_view(promoted.raw)["spells"], ["GeneralDispel"])
+        self.assertEqual((promoted.points, promoted.row.base_price), (7, 35))
         self.assertEqual(applied, [])
         self.assertIn("no known spell college", skipped[0])
+
+    def test_the_college_is_that_of_the_first_college_spell_in_list_order(self):
+        # notes/native-windows.md 9.13.1: Dispel Magic is skipped; a mixed list takes the first college spell's college
+        wizard = self.make(wizard=True, spells=("GeneralDispel", "CelestialWindBlast", "BrightFireball"))
+        with patch("whshr.debrief_rewards.random.choice", side_effect=lambda candidates: candidates[0]) as choice:
+            debrief_rewards.promote(wizard, 900, 1100)
+
+        self.assertEqual(choice.call_args.args[0], [2, 3, 4, 5])  # the unknown Celestial spells
+
+    def test_a_learned_spell_takes_its_place_by_casting_cost_keeping_equal_costs_in_order(self):
+        # notes/native-windows.md 9.13.1, first vector: Storm of Shemtek (cost 3) or Sapphire Arch (cost 2)
+        spells = ("GeneralDispel", "CelestialWindBlast", "CelestialLightning", "CelestialAzureBlades")
+        for code, expected in ((3, ["CelestialStormOfShemtek", "CelestialWindBlast", "GeneralDispel",
+                                    "CelestialLightning", "CelestialAzureBlades"]),
+                               (4, ["CelestialWindBlast", "CelestialSapphireArch", "GeneralDispel",
+                                    "CelestialLightning", "CelestialAzureBlades"])):
+            with self.subTest(code=code):
+                wizard = self.make(wizard=True, spells=spells)
+                wizard = replace(wizard, row=replace(wizard.row, base_price=0))
+                with patch("whshr.debrief_rewards.random.choice", return_value=code):
+                    promoted, _, _ = debrief_rewards.promote(wizard, 900, 1100)
+
+                self.assertEqual(script.unit_view(promoted.raw)["spells"], expected)
+                self.assertEqual((promoted.points, promoted.row.base_price), (7, 0))
+
+    def test_a_wizard_with_five_spells_learns_nothing_but_gains_price_and_worth(self):
+        spells = ("GeneralDispel", "BrightFireball", "BrightBurningHead", "BrightFlamestorm", "BrightPiercingBoltsOfBurning")
+        wizard = self.make(wizard=True, spells=spells)
+        wizard = replace(wizard, row=replace(wizard.row, base_price=65))
+
+        promoted, applied, skipped = debrief_rewards.promote(wizard, 3999, 4000)
+
+        self.assertEqual(script.unit_view(promoted.raw)["spells"], list(spells))
+        self.assertEqual((promoted.points, promoted.row.base_price, applied, skipped), (7, 80, [], []))
 
     def test_given_an_armour_program_then_a_listed_regiment_with_models_gains_one_armour_on_troops_and_leader(self):
         company, applied, _ = debrief_rewards.apply_rewards(
@@ -295,3 +331,41 @@ class FoundItemNameTests(unittest.TestCase):
         scene._string = lambda table, text_id, *arguments: ""
 
         self.assertIsNone(scene._item_name(39))
+
+
+class AlliedNpcRowTests(unittest.TestCase):
+    """notes/native-windows.md 9.13.2: the allied NPCs of a G or I battle are troop-page rows like any regiment."""
+
+    def setUp(self):
+        from whshr.debrief_screen import UnitOutcome
+
+        self.campaign = campaign_with(BF003_WON, terms=CashTerms(0))
+        self.campaign.company = (regiment(2), regiment(4, models=20), regiment(3))
+        self.campaign.march_units, self.campaign.march_order = {2, 3}, (2, 3)
+        self.campaign.battle_outcome = {2: UnitOutcome(10, 0, 0), 3: UnitOutcome(0, 0, 10),
+                                        4: UnitOutcome(15, 0, 5, kills=3, experience_gained=1500)}
+        self.campaign.debrief_rows = ((2, False), (4, True), (3, False))
+
+    def test_given_a_battle_with_an_allied_npc_then_it_is_listed_in_row_order_and_not_hired(self):
+        from whshr.debrief import report_for
+
+        units = report_for(self.campaign).units
+
+        self.assertEqual([(unit.whoami, unit.hired) for unit in units], [(2, True), (4, False), (3, True)])
+        self.assertEqual(units[1].gained, 1500)
+
+    def test_given_an_allied_npc_then_done_credits_its_experience_to_its_company_regiment(self):
+        from whshr.debrief import report_for
+
+        company, applied, _ = debrief_rewards.apply_rewards(self.campaign.company, report_for(self.campaign).units, 1,
+                                                            False)
+
+        self.assertEqual(company[1].experience, 1500)
+        self.assertIn("Regiment4: +1500 experience", applied)
+
+    def test_given_no_recorded_rows_then_the_marching_regiments_are_listed_in_march_order(self):
+        from whshr.debrief import report_for
+
+        self.campaign.debrief_rows = ()
+
+        self.assertEqual([unit.whoami for unit in report_for(self.campaign).units], [2, 3])

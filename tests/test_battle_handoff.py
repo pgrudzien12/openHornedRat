@@ -128,6 +128,7 @@ class BattleHandoffTests(unittest.TestCase):
             if regiment.side != Side.PLAYER:
                 regiment.models = 0
         self.machine.update(BATTLE_TICK_SECONDS)
+        self.machine.handle("dismiss")  # the end picture (notes/native-windows.md 9.3.1)
 
     def _play_and_win_first_mission(self):
         self._open_mission("missionawindow.0")
@@ -255,6 +256,7 @@ class SkippedDebriefTests(BattleHandoffTests):
                 regiment.models = 0
         self.machine.update(BATTLE_TICK_SECONDS)
         self.assertNotIsInstance(self.machine.active, ResultScene)
+        self.machine.handle("dismiss")  # the end picture (notes/native-windows.md 9.3.1)
 
         self.machine.update(0.1)  # the debrief has nothing to show: its completion runs at once
 

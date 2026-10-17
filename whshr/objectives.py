@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from .battle_events import BattleEvent
+from .buildings import TREE_PREFIX
 from .campaign_runtime import ObjectiveResult
 from .rules import Side
 
@@ -326,8 +327,11 @@ def building_count(battle: Battle) -> int:
 
 
 def standing_trees(battle: Battle) -> int:
-    """Q's tree pieces (section 5). Nothing knocks a tree down in this engine (not traced in the original)."""
-    return sum(1 for name in battle.scenery_names if name in TREE_TYPES)
+    """Q's standing tree pieces (section 5): the pine furniture pieces not felled (by the Plague Monks' breath,
+    notes/spell_plague_monk_breath_visuals.md 4.2). Engine choice: Q's total (`v2`) is taken at load, so a felled tree
+    lowers the standing share; whether the original also drops it from the total is not established."""
+    return sum(1 for index, name in enumerate(battle.scenery_names)
+               if name in TREE_TYPES and f"{TREE_PREFIX}{index}" not in battle.ruined)
 
 
 def _side(battle: Battle, side: Side) -> list[Regiment]:

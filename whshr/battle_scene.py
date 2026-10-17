@@ -448,6 +448,7 @@ class BattleScene(Scene):
         campaign.company = tuple(roster.with_items(record, battle_items[record.whoami])
                                  if record.whoami in battle_items else record for record in campaign.company)
         marching = [whoami for whoami in marching if whoami not in self.battle.swapped_regiments]  # objective I
+        campaign.debrief_rows = ()
         if len(player) != len(marching):
             campaign.battle_outcome = {}
             casualties.after_battle(campaign)
@@ -458,11 +459,32 @@ class BattleScene(Scene):
             dead = max(0, self.initial_models[identifier] - regiment.models)
             outcomes[whoami] = UnitOutcome(regiment.models - routed, routed, dead + routed, regiment.kills,
                                            regiment.experience_gained)
-        outcomes.update(self._npc_outcomes())
+        npc_outcomes = self._npc_outcomes()
+        outcomes.update(npc_outcomes)
         campaign.battle_outcome = outcomes
+        campaign.debrief_rows = self._debrief_rows(
+            [(identifier, whoami, False) for whoami, (identifier, _) in zip(marching, player)]
+            + [(identifier, whoami, True) for identifier, whoami in self.battle.npc_regiments.items()
+               if whoami in npc_outcomes])
         campaign.campaign_over_movie = casualties.campaign_over_movie(campaign)
         if campaign.campaign_over_movie is None:  # a lost campaign merges and pays nothing
             casualties.after_battle(campaign)  # wounded bookkeeping before the debrief screen
+
+    def _debrief_rows(self, written: list[tuple[str, int, bool]]) -> tuple[tuple[int, bool], ...]:
+        """The written regiments ``(identifier, whoami, allied NPC)`` as the troop page lists them: in the battle's unit
+        order, the survivors first, then those destroyed or fled (notes/native-windows.md 9.13.2, the two sections of
+        the battle result, notes/allied_npc_merge.md section 6)."""
+        order = {identifier: index for index, identifier in enumerate(self.battle.regiments)}
+
+        def key(entry: tuple[str, int, bool]) -> tuple[bool, int]:
+            regiment = self.battle.regiments[entry[0]]
+            return regiment.fled or regiment.models == 0, order[entry[0]]
+
+        rows: list[tuple[int, bool]] = []
+        for _, whoami, npc in sorted(written, key=key):
+            if all(whoami != listed for listed, _ in rows):
+                rows.append((whoami, npc))
+        return tuple(rows)
 
     def _npc_outcomes(self) -> dict[int, UnitOutcome]:
         """What the allied NPC regiments (side at the battle's end) of a G or I battle came out with, written like player regiments
