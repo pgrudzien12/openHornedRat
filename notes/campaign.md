@@ -11,7 +11,7 @@ end-of-mission payment rest on the rules as documented and on arithmetic (sectio
 
 | Question | Status | Answer in one paragraph |
 |---|---|---|
-| 1. Experience and upgrades | ✅ | Kills give `s_Exp` = victim's `s_pntval`. At the debriefing the game applies one-time promotions at 2000 (+1 WS), 4000 (+1 S) and 6000 XP (+1 W) to troops and leader alike (the BS/I alternative for missile troops is never used). Wizards learn one random spell of their college per 1000 XP (up to 5 spells). Each promotion adds +7 `s_pntval` and +5 (wizard +15) to the price per model. "2x Experience" (5021) doubles the XP gained in that mission (`cash` type 15). "+1 Armour" (5022) is a reward for seven named regiments, used only by `cash` type 11 (Rat Trap). |
+| 1. Experience and upgrades | ✅ | Kills give `s_Exp` = victim's `s_pntval`. At the debriefing the game applies one-time promotions at 2000 (+1 WS), 4000 (+1 S) and 6000 XP (+1 W) to troops and leader alike (the BS/I alternative for missile troops is never used). Wizards learn one random spell of their college per 1000 XP (up to 5 spells). Each promotion adds +7 `s_pntval` and +5 (wizard +15) to the price per model when that price is not 0. "2x Experience" (5021) doubles the XP gained in that mission (`cash` type 15). "+1 Armour" (5022) is a reward for seven named regiments, used only by `cash` type 11 (Rat Trap). |
 | 2. Economy | ✅ | Coffers start at 500. Each `cash` type is a balance-sheet program (19 opcode lists); the labels are `BKTXT` 5000–5024/5040–5042 and the amounts come from the `cash` line (initial, completion, rate A, rate B, required letters) and the `Result:` values in `debrief.dbf`. The initial payment is credited when troop selection is confirmed. Every regiment deployed costs price-per-model × models, and every hired regiment left behind costs 10 % of that ("Retainer"). Prices are static per regiment ×200 % (`cost` option). Worked check: 500 + 100 − 320 = 280, as in `savegame.5`. |
 | 3. Troops and items | ✅ / 🟡 | `whoami` is the persistent regiment id (0–37, name `BKTXT 300+id`, index into the roster table). `PLAY.MRC` holds all regiments; `unitjoinmission` copies one into `ARMY.MRC`/`MARCH.MRC`, `unitleavemission` removes it. `addtroop` adds reinforcements that the player takes in the caravan. Routed models always return; of the killed models 65 % are wounded and come back a mission later, 35 % die. A regiment below 20 % strength is disbanded unless it is the commander's or a story regiment. No rule awards magic items between battles; items move with their regiments 🟡. |
 | 4. Files | ✅ | `savegame.N` (slots 0–5, slot 5 = `autosave`) is a RIFF `WHSV` file: `SHDR` header (description, battle, window, coffers, glue status, stack counts), `STAX` (glue interpreter stacks), three book-page flag lists, `RMYI` (39 × 52-byte regiment roster: flags, experience baseline, reinforcements, prices, wounded), verbatim copies of `ARMY.MRC`, `PLAY.MRC`, `MARCH.MRC` and `debrief.dbf`, and `MISS` (current mission and `cash` line). A stdlib reader validates both real saves. |
@@ -124,7 +124,7 @@ restored, so it carries the campaign state of every regiment that is not in the 
 | `+0x1C` | experience at the start of the mission | 0 | baseline for the doubled-experience reward and the troop book's "Experience" column (`s_Exp − baseline`); set to `s_Exp` after each debrief |
 | `+0x20` | reinforcements available | 0 | glue `addtroop:<whoami>=<n>` adds `n` (token `0x62`); the Reinforcements window moves them into the unit; unused reinforcements are cleared when the caravan is left |
 | `+0x24` | base price per model (gold crowns) | full table in "Static roster table" below | scaled once by the campaign `cost` percentage |
-| `+0x28` | current price per model | 0 | set to `+0x24` for a new campaign; +5 per troop promotion, +15 per wizard level |
+| `+0x28` | current price per model | 0 | set to `+0x24` for a new campaign; +5 per troop promotion, +15 per wizard level (only while the price is not 0) |
 | `+0x2C` | wounded in the last battle | 0 | set after each battle (section 3.3) |
 | `+0x30` | wounded returning to the ranks | 0 | receives `+0x2C` at the next debrief, then is added to the unit's size |
 
@@ -161,7 +161,7 @@ Price = base price per model (`+0x24`). All other fields are 0 in the static ima
 | | | | | | | | | 34–37 | 0 | 0 | 0 | 0 | 0 | 0 |
 
 Price 0 means "not sold per model": the non-hireable story regiments, and hireable whoami 6, 7, 20, 32 (wizards
-18 and 20 and these have no base price; the wizard rows gain +15 per level from 0). Whoami 19 is the only
+18 and 20 and these have no base price; promotions add only to a non-zero price, so they stay free). Whoami 19 is the only
 priced wizard (50). The table's terminator is record 38 (all `-1`).
 
 ### 4.6 `MISS`: current mission record ✅
@@ -235,17 +235,19 @@ and the leader's copy.
 | troops, `roster.wizard == 0` | 2000 | **+1 WS** | price per model +5 (if not 0), `s_pntval` +7 |
 | | 4000 | **+1 S** | same |
 | | 6000 | **+1 W** | same (a developer message says "5000") |
-| wizard, `roster.wizard != 0` | every 1000 (each multiple crossed) | learns one new spell, if it knows fewer than 5 | price per model +15 (engine: if not 0), `s_pntval` +7 |
+| wizard, `roster.wizard != 0` | every 1000 (each multiple crossed) | learns one new spell, if it knows fewer than 5 | price per model +15 (if not 0), `s_pntval` +7 — both also when no spell is learned |
 
 - The game contains an alternative for missile troops (+1 BS instead of WS, +1 I instead of S), but it is never
   selected, so every troop type gets WS and S. ✅
   The engine deliberately uses +1 BS instead of +1 WS at 2000 XP for ranged regiments; their 4000 XP promotion
   remains +1 S.
-- The engine also keeps a free wizard free (the Amber and the other free college wizard serve without pay): the +15
-  price per model applies only to a wizard whose price is not 0, as for troops.
-- The spell promotion picks one of three college spell lists according to the college of the spells the wizard
-  already knows, then draws random spells from it until it finds one the wizard does not know yet
-  (`Unit gaining new spell (%d)`).
+- A free wizard stays free (the Amber and the Celestial wizard serve without pay): the +15 price per model applies
+  only to a wizard whose price is not 0, exactly as for troops. (Corrected: an earlier version said the original
+  adds +15 unconditionally; it does not. `notes/native-windows.md` §9.13.1.)
+- The spell promotion takes the college of the **first college spell in the wizard's list** (Dispel and other
+  non-college spells are skipped), then draws uniformly from that college's five spells until it hits one the wizard
+  does not know yet (`Unit gaining new spell (%d)`); afterwards the spell list is re-sorted by casting cost, highest
+  first. Full rule, edge cases and vectors: `notes/native-windows.md` §9.13.1.
 - There is no separate leader progression: leaders gain the same +1 as their unit. There is no Ld, BS, T, I, A
   or M improvement and no promotion above 6000 XP.
 - `s_pntval` +7 per promotion also makes the unit worth more experience to the enemy.
@@ -385,8 +387,9 @@ line, called v18/v1C/v20/v24 below), and the bonus counter.
 | `0x54` | 5024 Dwarfs rescued payment | `+A × B.v24` |
 
 `X.vNN` = value at offset `NN` of objective `X`. `BKTXT 5018` "Dwarves rescued bonus" is never used.
-Opcodes `0x41`/`0x42` are unconditional, so the programs that use them (13, 14) include them
-only because the mission's objective structure makes the line apply 🟡.
+Opcodes `0x41`/`0x42` are unconditional ✅: they read no objective record and no unit state, and charge rate A
+every time the program runs, whatever happened in the battle. Consequences and vectors: `notes/native-windows.md`
+§9.13.3 (Rescue `bf032` never pays more than 0; Sven Carlsson `bf001` pays at most 1300).
 
 | Type | Program | Missions (`cash` line) |
 |---|---|---|
