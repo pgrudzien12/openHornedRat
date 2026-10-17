@@ -250,6 +250,12 @@ class Regiment:
     flight: "flight_rules.FlightState | None" = None  # a flying sprite set's state (`flight_state`)
     falling: list["flight_rules.FallingFlier"] = field(default_factory=list["flight_rules.FallingFlier"])
     waypoints: list[Point] = field(default_factory=list[Point])
+    # The player's clicked stops still ahead, next first (notes/move_routes.md 3-4); `waypoints` also holds the
+    # route finder's detour points, which are neither counted nor drawn.
+    route_stops: list[Point] = field(default_factory=list[Point])
+    # A closed patrol loop (notes/move_routes.md 3): per stop, next first, the leg leading into it (detours, then
+    # the stop). Empty for an open route.
+    patrol_legs: list[tuple[Point, list[Point]]] = field(default_factory=list[tuple[Point, list[Point]]])
     route_follows_unit: bool = False
     # The current point move was ordered while the unit was already moving: it gets no move-start snap
     # (notes/close_point_move.md 2, notes/attack_order_flow.md 3).
@@ -645,6 +651,34 @@ class Regiment:
     @property
     def moving(self) -> bool:
         return self.target_x is not None
+
+    def clear_route(self) -> None:
+        """Drop the rest of the route: waypoints, clicked stops and any patrol loop."""
+        self.waypoints.clear()
+        self.route_stops.clear()
+        self.patrol_legs.clear()
+
+    def route_path(self) -> list[Point]:
+        """The points still ahead, in order: the current destination, then the waypoints after it."""
+        head = [] if self.target_x is None or self.target_y is None else [(self.target_x, self.target_y)]
+        if head and self.waypoints and self.waypoints[0] == head[0]:
+            head = []
+        return head + self.waypoints
+
+    def live_route_stops(self) -> list[Point]:
+        """The clicked stops that are still on the route path (a script or order that rewrote the path without
+        clearing the stops leaves none)."""
+        path = self.route_path()
+        return [stop for stop in self.route_stops if stop in path]
+
+    def route_markers(self) -> list[tuple[Point, Point | None]]:
+        """Minimap route markers (notes/move_routes.md 4): each live stop, next first, with the stop its arrow points
+        at, or None for the end dot on the last stop of an open route. A loop's last stop points back at the first."""
+        stops = self.live_route_stops()
+        following: list[Point | None] = [*stops[1:], None]
+        if stops and self.patrol_legs:
+            following[-1] = stops[0]
+        return list(zip(stops, following))
 
     @property
     def mount_profile(self) -> dict[str, int] | None:
@@ -1372,7 +1406,7 @@ class Battle:
         regiment.target_x = regiment.target_y = None
         regiment.attack_target = regiment.charge_started_target = None
         regiment.turn_order_key = regiment.turn_mode = None
-        regiment.waypoints.clear()
+        regiment.clear_route()
         self._begin_reform(regiment, regiment.ranks)
         self.deployment_drag = deployment.Drag(identifier, (x - centre[0], y - centre[1]), centre)
 
@@ -1463,7 +1497,9 @@ class Battle:
     def prepare_deployment_move(self, identifier: str) -> None:
         regiment = self.regiments[identifier]
         if regiment.side == Side.PLAYER and regiment.hud_class in {"inf", "arch", "wiz", "mon"}:
+            # The deployment Move button halts first, so a new chain starts from an empty route (notes/move_routes.md 2).
             regiment.target_x = regiment.target_y = None
+            regiment.clear_route()
             regiment.attack_target = None
             regiment.turn_order_key = regiment.turn_mode = None
             self._begin_reform(regiment, regiment.ranks)
@@ -1527,7 +1563,7 @@ class Battle:
         regiment.braced_target = None
         regiment.attack_target = regiment.charge_started_target = None
         regiment.target_x = regiment.target_y = None
-        regiment.waypoints.clear()
+        regiment.clear_route()
         combat.leave_grid(self, regiment)
         self.reform_to_ranks(regiment, regiment.script_ranks)
 
@@ -1723,8 +1759,15 @@ class Battle:
             raise ValueError("not a player caster")
         return spell_effects.cancel_owned(self, identifier, code) > 0
 
-    def append_waypoint(self, identifier: str, x: float, y: float) -> None:
-        """Ctrl Move targeting: retain up to nine manual destinations (§3)."""
+    def append_waypoint(self, identifier: str, x: float, y: float) -> bool:
+        """Ctrl-click in Append targeting: add a stop to the route (notes/move_routes.md 3). Returns whether Append
+        targeting stays on; a refusal or a closed patrol loop ends it.
+
+        With no route ahead nothing happens in battle; in deployment the click becomes a plain go-to-point. Nine stops
+        is the limit. A click nearer than 17 to the last stop is refused; one nearer than 16 to the first (next) stop
+        closes the route into a patrol loop. Otherwise the leg to the click is planned and appended, detours first.
+        Distances are truncated to whole units. Not modelled: the route finder here always returns a leg, so the
+        "leg cannot be planned" refusal never happens."""
         regiment = self.regiments[identifier]
         if regiment.side != Side.PLAYER or not regiment.active or regiment.routing or regiment.anchored:
             raise ValueError("regiment cannot receive a move order")
@@ -1732,12 +1775,50 @@ class Battle:
             raise ValueError("destination is outside the battlefield")
         if self.phase == "deployment" and regiment.hud_class not in {"inf", "arch", "wiz", "mon"}:
             raise ValueError("this class has no deployment Move control")
-        if len(regiment.waypoints) >= 9:
+        stops = regiment.live_route_stops()
+        if not stops or regiment.patrol_legs:
+            if self.phase == "deployment":
+                self.order_move(identifier, x, y)
+            return True
+        if len(stops) >= 9:
+            return False
+        point = (float(x), float(y))
+        last, first = stops[-1], stops[0]
+        if math.trunc(math.hypot(point[0] - last[0], point[1] - last[1])) < 17:
+            return False
+        if math.trunc(math.hypot(point[0] - first[0], point[1] - first[1])) < 16:
+            self._close_patrol_loop(regiment, stops)
+            return False
+        regiment.waypoints.extend(navigation.point_route(last, point, self.navigation_boundaries))
+        regiment.route_stops = [*stops, point]
+        return True
+
+    def _close_patrol_loop(self, regiment: Regiment, stops: list[Point]) -> None:
+        """Close the route into a loop back to its first stop (notes/move_routes.md 3). Each stop keeps the leg that
+        leads into it; the first stop's leg is the closing one from the last stop, so the detours of the first
+        approach are dropped once passed."""
+        path = regiment.route_path()
+        legs: list[tuple[Point, list[Point]]] = [
+            (stops[0], navigation.point_route(stops[-1], stops[0], self.navigation_boundaries))]
+        start = path.index(stops[0]) + 1
+        for stop in stops[1:]:
+            end = path.index(stop, start) + 1
+            legs.append((stop, path[start:end]))
+            start = end
+        regiment.route_stops = list(stops)
+        regiment.patrol_legs = legs
+
+    def _reach_route_point(self, regiment: Regiment, point: tuple[float | None, float | None]) -> None:
+        """A route point was reached: a clicked stop leaves the stop list; on a patrol loop it goes to the back, its
+        leg appended to the waypoints again (notes/move_routes.md 3)."""
+        if not regiment.route_stops or regiment.route_stops[0] != point:
             return
-        if regiment.waypoints and any(math.hypot(x - px, y - py) < 17
-                                      for px, py in (regiment.waypoints[0], regiment.waypoints[-1])):
-            return
-        regiment.waypoints.append((float(x), float(y)))
+        stop = regiment.route_stops.pop(0)
+        if regiment.patrol_legs and regiment.patrol_legs[0][0] == stop:
+            leg = regiment.patrol_legs.pop(0)
+            regiment.patrol_legs.append(leg)
+            regiment.route_stops.append(stop)
+            regiment.waypoints.extend(leg[1])
 
     def _hold_while_reforming(self, regiment: Regiment, order: tuple[Any, ...]) -> bool:
         """Hold a player order while the regiment re-forms (notes/reform_while_moving.md 4): it becomes the
@@ -1782,14 +1863,17 @@ class Battle:
         if self.phase == "deployment":
             if regiment.hud_class not in {"inf", "arch", "wiz", "mon"}:
                 raise ValueError("this class has no deployment Move control")
-            regiment.waypoints.clear()
+            # A prepared route: waypoints only, picked up at battle start (notes/move_routes.md 2).
+            regiment.clear_route()
             regiment.target_x = regiment.target_y = None
             if math.hypot(x - regiment.x, y - regiment.y) >= 17:
-                self.append_waypoint(identifier, x, y)
+                goal = (float(x), float(y))
+                regiment.waypoints = navigation.point_route((regiment.x, regiment.y), goal, self.navigation_boundaries)
+                regiment.route_stops = [goal]
             return
         if self._hold_while_reforming(regiment, ("order_move", x, y)):
             return
-        regiment.waypoints.clear()
+        regiment.clear_route()
         regiment.clear_shooting()
         regiment.attack_target = None
         regiment.charge_started_target = None
@@ -1797,11 +1881,13 @@ class Battle:
         regiment.turn_order_key = None
         regiment.route_follows_unit = False
         self.set_point_route(regiment, (float(x), float(y)))
+        regiment.route_stops = [(float(x), float(y))]
         self._order_applied_restart(regiment)
 
     def set_point_route(self, regiment: Regiment, goal: Point) -> None:
         regiment.ordered_while_moving = regiment.moving
         points = navigation.point_route((regiment.x, regiment.y), goal, self.navigation_boundaries)
+        regiment.clear_route()
         regiment.target_x, regiment.target_y = points[0]
         regiment.waypoints = points[1:]
         regiment.avoid_target = None
@@ -1876,7 +1962,7 @@ class Battle:
         angle = regiment.direction * math.tau / formation.FULL_TURN
         regiment.target_x = regiment.x + int(math.sin(angle) * reach)
         regiment.target_y = regiment.y + int(math.cos(angle) * reach)
-        regiment.waypoints.clear()
+        regiment.clear_route()
         regiment.attack_target = regiment.charge_started_target = None
         regiment.free_charging = True
         # A charge is a straight run (notes/attack_order_flow.md 1): no route pause, and no steering or route plan
@@ -1907,7 +1993,7 @@ class Battle:
         regiment.free_charging = False
         regiment.turn_order_key = None
         regiment.route_speed = 0.0
-        regiment.waypoints.clear()
+        regiment.clear_route()
         regiment.route_follows_unit = False
         regiment.clear_shooting()
         if self.interpreter is not None:  # notes/player_missile_orders.md 1.1: a running fire loop ends next pass
@@ -1948,7 +2034,7 @@ class Battle:
         else:
             raise ValueError("Fire needs a target or point")
         unit.target_x = unit.target_y = None
-        unit.waypoints.clear()
+        unit.clear_route()
         unit.turn_order_key = None
         unit.clear_shooting()
         if self.interpreter is not None and not script:
@@ -2187,6 +2273,7 @@ class Battle:
         goal = (regiment.direction - 128) % 512
         self._plan_turn_order(regiment, goal)
         regiment.target_x = regiment.target_y = None
+        regiment.clear_route()  # a turn replaces the route (notes/move_routes.md 5)
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
         regiment.route_speed = 0.0
@@ -2200,6 +2287,7 @@ class Battle:
         goal = (regiment.direction + 128) % 512
         self._plan_turn_order(regiment, goal)
         regiment.target_x = regiment.target_y = None
+        regiment.clear_route()  # a turn replaces the route (notes/move_routes.md 5)
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
         regiment.route_speed = 0.0
@@ -2213,6 +2301,7 @@ class Battle:
         goal = (regiment.direction + 256) % 512
         self._plan_turn_order(regiment, goal)
         regiment.target_x = regiment.target_y = None
+        regiment.clear_route()  # a turn replaces the route (notes/move_routes.md 5)
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
         regiment.route_speed = 0.0
@@ -2231,6 +2320,7 @@ class Battle:
         goal = round(math.atan2(dx, dy) * 512 / math.tau) % 512
         self._plan_turn_order(regiment, goal)
         regiment.target_x = regiment.target_y = None
+        regiment.clear_route()  # a turn replaces the route (notes/move_routes.md 5)
         regiment.attack_target = None
         regiment.turn_order_key = ("turn", goal)
         regiment.route_speed = 0.0
@@ -2674,7 +2764,7 @@ class Battle:
         regiment.x, regiment.y, regiment.direction, regiment.positions = snapshot
         if not charging:
             regiment.target_x = regiment.target_y = None
-            regiment.waypoints = []
+            regiment.clear_route()
             regiment.turn_order_key = regiment.turn_mode = None
             self.reform_to_ranks(regiment, regiment.ranks)
         return False
@@ -2795,7 +2885,7 @@ class Battle:
         if steering_target is None:
             regiment.route_speed = 0.0
             regiment.target_x = regiment.target_y = None
-            regiment.waypoints.clear()
+            regiment.clear_route()
             regiment.attack_target = regiment.charge_started_target = None
             regiment.free_charging = False
             regiment.avoid_target = None
@@ -2874,7 +2964,7 @@ class Battle:
         if steering_target is None:
             regiment.route_speed = 0.0
             regiment.target_x = regiment.target_y = None
-            regiment.waypoints.clear()
+            regiment.clear_route()
             regiment.avoid_target = None
             regiment.route_side, regiment.route_planned_for = 0, None
             return False
@@ -2923,6 +3013,7 @@ class Battle:
                 # destination at the head of the list; a planned route keeps only the legs still to come.
                 if regiment.waypoints and regiment.waypoints[0] == current:
                     regiment.waypoints.pop(0)
+                self._reach_route_point(regiment, current)
                 regiment.route_speed = 0.0
                 regiment.turn_mode = None
                 if regiment.waypoints:
@@ -3905,7 +3996,7 @@ class Battle:
         regiment.pursuit_budget = regiment.pursuit_point = None
         regiment.attack_target = regiment.charge_started_target = None
         regiment.target_x = regiment.target_y = None
-        regiment.waypoints.clear()
+        regiment.clear_route()
         self.reform_to_ranks(regiment, regiment.ranks, walk_back=True)  # as Rally (notes/reform_while_moving.md 6)
 
     def place_at(self, regiment: Regiment, x: float, y: float, direction: int) -> None:
@@ -3920,7 +4011,7 @@ class Battle:
         regiment.reforming = False
         regiment.reform_slots = []
         regiment.target_x = regiment.target_y = None
-        regiment.waypoints.clear()
+        regiment.clear_route()
         rest = regiment.rest_action()
         for model in regiment.melee_models:
             model.at_rest = True
@@ -4161,7 +4252,7 @@ class Battle:
         regiment.assaulting_building = building.identifier
         regiment.attack_target = regiment.charge_started_target = None
         regiment.target_x = regiment.target_y = None
-        regiment.waypoints.clear()
+        regiment.clear_route()
         self.events.append(BattleEvent(f"{regiment.name} storms the {building.name}!", "building_assault",
                                        regiment=regiment.identifier, building=building.identifier))
 
@@ -4171,7 +4262,7 @@ class Battle:
         if regiment.attack_target is None and regiment.free_charging:
             regiment.free_charging = False
             regiment.target_x = regiment.target_y = None
-            regiment.waypoints.clear()
+            regiment.clear_route()
             regiment.turn_order_key = regiment.turn_mode = None
             self.events.append(BattleEvent(f"{regiment.name}'s charge ends at the {building.name}.", "charge_end",
                                            regiment=regiment.identifier))

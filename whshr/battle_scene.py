@@ -47,6 +47,9 @@ class BattleScene(Scene):
         self.player_army = player_army
         self.clock = FixedStepClock(BATTLE_TICK_SECONDS, max_steps=1)
         self.selected_id: str | None = None  # identifier of the player regiment currently selected, if any
+        # Set when an added route stop was refused or closed a loop, which ends Append targeting
+        # (notes/move_routes.md 3); the view clears it when it leaves that mode.
+        self.append_ended = False
         self.log_dir = log_dir
         self.seed = seed
         self.logger: battle_log.BattleLogger | None = None
@@ -247,9 +250,10 @@ class BattleScene(Scene):
         elif kind == "append_waypoint":
             if self.selected_id is not None:
                 try:
-                    self.battle.append_waypoint(self.selected_id, *args)
+                    if not self.battle.append_waypoint(self.selected_id, *args):
+                        self.append_ended = True
                 except ValueError:
-                    pass
+                    self.append_ended = True
         elif kind == "begin_drag":
             identifier, x, y = args
             try:

@@ -1321,7 +1321,7 @@ def _entangle(battle: Battle, effect: Effect) -> None:
                 and _centre_d(unit, *effect.aim) < THORN_RADIUS):
             if not unit.routing and not unit.pursuing:
                 unit.target_x = unit.target_y = None
-                unit.waypoints = []
+                unit.clear_route()
                 unit.attack_target = None
             unit.held = True
 

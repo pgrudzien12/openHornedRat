@@ -1081,13 +1081,28 @@ class BattleViewHudInputTests(unittest.TestCase):
         self.assertEqual(view.events(SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(100, 100))),
                          (("select", "enemy"),))
 
-    def test_given_move_targeting_then_ctrl_appends_and_plain_click_replaces_and_ends_targeting(self):
+    def test_given_move_targeting_when_ctrl_clicking_then_the_first_replaces_and_the_rest_append(self):
+        # notes/move_routes.md 2: Ctrl in Move sends a go-to-point and switches to Append; Ctrl in Append adds a stop.
         view = self._deployment_view()
         view.order_mode = "move"
         down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(300, 300), mod=pygame.KMOD_CTRL)
-        self.assertEqual(view.events(down), (("append_waypoint", 300.0, 300.0),))
-        self.assertEqual(view.order_mode, "move")
-        down.mod = 0
+        self.assertEqual(view.events(down), (("move_to", 300.0, 300.0),))
+        self.assertEqual(view.order_mode, "append")
+        down.pos = (500, 300)
+        self.assertEqual(view.events(down), (("append_waypoint", 500.0, 300.0),))
+        self.assertEqual(view.order_mode, "append")
+
+    def test_given_append_targeting_when_plain_clicking_then_nothing_is_added_and_targeting_ends(self):
+        view = self._deployment_view()
+        view.order_mode = "append"
+        down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(300, 300), mod=0)
+        self.assertEqual(view.events(down), ())
+        self.assertIsNone(view.order_mode)
+
+    def test_given_move_targeting_when_plain_clicking_then_the_route_is_replaced_and_targeting_ends(self):
+        view = self._deployment_view()
+        view.order_mode = "move"
+        down = SimpleNamespace(type=pygame.MOUSEBUTTONDOWN, button=1, pos=(300, 300), mod=0)
         self.assertEqual(view.events(down), (("move_to", 300.0, 300.0),))
         self.assertIsNone(view.order_mode)
 

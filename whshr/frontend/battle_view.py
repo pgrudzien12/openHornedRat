@@ -423,7 +423,7 @@ class BattleView(SceneView[BattleScene]):
             if (self.hud.minimap_position(event.pos) is not None
                     or self.hud.minimap_regiment_at(event.pos) is not None):
                 control = self._control_held(event)
-                return self._minimap_click(event.pos, append=deploying and control, repeat_item=control)
+                return self._minimap_click(event.pos, append=control, repeat_item=control)
             action = self.hud.hit_test(event.pos)
             if action is not None:
                 self.hud.set_pressed(action)
@@ -484,7 +484,7 @@ class BattleView(SceneView[BattleScene]):
             if self.hud.occupies(event.pos):
                 return ()
             control = self._control_held(event)
-            return self._ground_click(event.pos, append=deploying and control, repeat_item=control)
+            return self._ground_click(event.pos, append=control, repeat_item=control)
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             pressed = self.hud.pressed
             self.hud.set_pressed(None)
@@ -716,8 +716,8 @@ class BattleView(SceneView[BattleScene]):
             if self.scene.battle.phase == "deployment":
                 return self._deployment_press(regiment_id, (x, y), pixel, "main")
             return (("select", regiment_id),) if regiment_id is not None else ()
-        if append and self.order_mode == "move":
-            return (("append_waypoint", *ground_point),) if ground_point is not None else ()
+        if (route := self._route_click(ground_point, append)) is not None:
+            return route
         if (self.order_mode.startswith("item:") and repeat_item
                 and self.scene.battle.event_bus.power.player >= 1):
             return (("item_target", self.order_mode[5:], *target_point),)
@@ -897,8 +897,8 @@ class BattleView(SceneView[BattleScene]):
         target_id = self.hud.minimap_target_at(pixel)
         if (world is None and target_id is None) or self.scene.selected_id is None:
             return ()
-        if append and self.order_mode == "move":
-            return (("append_waypoint", *world),) if world is not None else ()
+        if (route := self._route_click(world, append)) is not None:
+            return route
         if (self.order_mode.startswith("item:") and repeat_item and world is not None
                 and self.scene.battle.event_bus.power.player >= 1):
             return (("item_target", self.order_mode[5:], *world),)
@@ -928,6 +928,29 @@ class BattleView(SceneView[BattleScene]):
         if mode.startswith("item:") and world is not None:
             return (("item_target", mode[5:], *world),)
         return ()
+
+    def _route_click(self, point: Sequence[float] | None, control: bool) -> Sequence[SceneEvent] | None:
+        """Move and Append targeting (notes/move_routes.md 2), Ctrl read at the click. In Move a Ctrl-click replaces
+        the route and switches to Append; in Append a Ctrl-click adds a stop and a plain click only ends targeting.
+        None: not a route click (a plain Move click goes on as an ordinary order)."""
+        if self.order_mode == "append":
+            if control:
+                return (("append_waypoint", point[0], point[1]),) if point is not None else ()
+            self._end_route_targeting()
+            return ()
+        if self.order_mode == "move" and control:
+            if point is None:
+                return ()
+            self.order_mode = "append"
+            self.scene.append_ended = False
+            return (("move_to", point[0], point[1]),)
+        return None
+
+    def _end_route_targeting(self) -> None:
+        self.order_mode = None
+        self.scene.append_ended = False
+        self._set_cursor("default")
+        self.hud.order_completed()
 
     def _log_cannot(self, order: str) -> None:
         # notes/game_rules.md's "Feedback" documents no tooltips/hover highlight and a click sound
@@ -959,6 +982,8 @@ class BattleView(SceneView[BattleScene]):
             battle_sounds.set_paused(self.scene.battle.paused)
         control = bool(pygame.key.get_mods() & pygame.KMOD_CTRL)
         self.scene.battle.ctrl_held = control
+        if self.order_mode == "append" and getattr(self.scene, "append_ended", False):
+            self._end_route_targeting()  # a refused stop or a closed loop (notes/move_routes.md 3)
         keys = pygame.key.get_pressed()
         right = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
         forward = (keys[pygame.K_UP] or keys[pygame.K_w]) - (keys[pygame.K_DOWN] or keys[pygame.K_s])
