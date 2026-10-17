@@ -708,8 +708,10 @@ fleeing all use action 3.
 2. **The offset is chosen once, and only on a change of action.** Re-issuing the action a model is already
    playing does nothing — the script is only reset when the action id actually changes. So the phase
    offsets a unit picks up when it starts marching persist for the whole march, and a unit that walks,
-   stops and walks again re-rolls them. A model that is mid one-shot animation cannot be interrupted: the
-   new action is queued and applied when the one-shot finishes, which desynchronises it further.
+   stops and walks again re-rolls them. An ordinary shoot pose **is** interrupted by any new request (the
+   shot is abandoned, and a shooter interrupted before its fire event posts nothing). The cast pose, machine shots and
+   corpses **drop** requests. Only a figure in its timed charge/rout pause **queues** the request until the pause ends,
+   which desynchronises it further (`script_animation_sound.md` §0.5).
 3. **Uneven frame holds inside the loop.** The loops are not `0,1,2,3` at a flat rate — infantry hold
    phases for 2 ticks each (`0,0,1,1,2,2,3,3`), the stand loop is lopsided (`0,0,0,1,1,2,2,2,3,3`), and
    the fight loop visits phases out of order and unevenly (`0,0,1,2,3,3,1,1,3,0,2,2`). Combined with the
@@ -736,7 +738,8 @@ fleeing all use action 3.
    block, so they shuffle at idle pace. Wagons of a caravan alternate between two looks in pairs. No soldier
    family uses these. 🟡 Why slaves use the 216 block rather than 120 is worth one visual check.
 5. **Staggered collapse.** A model whose wounds run out does **not** fall immediately. It is marked dying and
-   keeps playing its current animation until the delay `d` has elapsed, then switches to action 6; the collapse
+   keeps playing its current animation (requests still apply: a dying figure is not locked) until the delay `d` has
+   elapsed, then switches to action 6; the collapse
    comes exactly `d` ticks after the lethal wound (a delay of 1 means the next tick):
 
    ```
@@ -756,8 +759,8 @@ fleeing all use action 3.
 target each tick: it turns by at most **32/512 of a turn (22.5°) per tick**, i.e. one of the eight sprite
 directions per tick. Which target it turns towards depends on the action: a model playing *stand still*,
 *weapon ready* or *shoot* faces **the unit's facing**, while a walking or fighting model faces **its own
-heading** — its direction of travel or its opponent. A dead or one-shot-locked model's facing is frozen
-where it was. The exception is RollingStock (wagons), whose models snap their drawn facing instantly with
+heading** — its direction of travel or its opponent. A dead model's or a paused model's (timed charge/rout pause) facing is
+frozen where it was; a casting or machine-shooting figure turns to the unit's facing. The exception is RollingStock (wagons), whose models snap their drawn facing instantly with
 no slew.
 
 **The shooting fire event** is posted by the script, not by the combat code. The shoot script is: set the

@@ -40,10 +40,10 @@ a model keeps playing the action it was given until something requests another o
 
 | model state | result |
 |---|---|
-| the model is **frozen** (e.g. a wizard channelling Storm of Shemtek) | request dropped |
+| the model is under a **dropping lock** (cast pose, machine shot, Storm channelling, corpse; §0.5) | request dropped |
 | the model is already playing that action | nothing (no restart, no new random entry) |
-| the model is in an **uninterruptible one-shot** (shoot/cast pose, death) | request **queued** as the model's own pending request; applied when the one-shot ends |
-| otherwise | the model switches to the action at the start of its program (random entry rolled as in `game_rules.md`) |
+| the model is under a **queuing lock** (timed pause at a charge or rout start, `ResetModelAnimations`; machine wreck) | request **queued** as the model's own pending request; applied when the lock ends |
+| otherwise, **including the ordinary shoot pose and a dying model** | the model switches at once to the action at the start of its program (random entry rolled as in `game_rules.md`); the old program is abandoned |
 
 The game itself writes the broadcast only **on state changes**, not every tick. Its main writers are:
 
@@ -89,6 +89,86 @@ exactly the volley rule of `game_rules.md`; `PlayLeaderAnimation` is the same ru
 
 The request is cleared (all three to 0) by `ClearAnimationRequest` and by a successful `IfAnimationDone` (§2.4). It
 is **not** cleared when the countdown reaches 0 by itself; the event code and divisor stay but are inert.
+
+### 0.5 Request locks: interruptible, dropping and queuing figures ✅ (issue #344)
+
+This section settles the conflict between `machine_figure_animation.md` §0.3's side note and the "queued" wording
+formerly found in §0.1 and in `game_rules.md` "Figure animation". **The side note was right.**
+
+Applying a request (§0.1) checks the figure's state, in this order:
+
+| Figure state | Request result |
+|---|---|
+| **dropping lock** | dropped. Any pending request of its own is cleared as well. |
+| already playing that action | nothing (no restart, no new random entry). Exception: the Gyrocopter's stand, fight and weapon-ready programs allow a restart. |
+| **queuing lock** | stored as the figure's own pending request (latest wins); re-tried at each model update until the lock ends |
+| otherwise | **interrupt at once**: the new action's program starts from its beginning, with a fresh random entry. The rest of the old program is abandoned (no event step, no automatic return to stand). |
+
+**Which programs lock.** The lock belongs to the program being played, so it depends on the figure's sprite set
+(its animation family). Wizards do not share the infantry table.
+
+| Program | Families | Lock while it runs |
+|---|---|---|
+| **shoot pose (7)** of every troop family: men, dwarfs, elves, orcs, goblins, skaven, cavalry, mercenaries | 40 families | **none**: interruptible |
+| **cast pose (7)**: the shoot-pose frames with the same random entry and event-step timing as the shoot pose (the spell launches at the event step), then 2 more ticks and stand | Bright, Celestial and Amber Wizard sets, Grey Seer, Goblin Shaman | **dropping**, from entry until the pose hands over to stand |
+| Wyvern cast pose (7): the same, but 5 ticks after the event step, then idle (2) while airborne, else stand | Wyvern (its rider's spells) | **dropping** |
+| channelling: when the spell is Storm of Shemtek (Celestial and Amber sets: a held frame) or Fists of Gork (Goblin Shaman: a 4-frame loop), the pose does not end after the event step | Celestial and Amber Wizard sets, Goblin Shaman | **dropping**, until something forces a new program (death, or the effect's end; `spell_channelled_effects.md`) |
+| **machine shot (7)** | Mortar, both Cannons, Volley Gun, Doom Diver catapult, Rock Lobber | **dropping** (`machine_figure_animation.md` §0.3) |
+| monster attack (7) run by an effect | Dragon (both sets), Warpfire Thrower | **dropping** |
+| Squig hop (the walk program with an event step) | Squig Hoppers | **dropping** |
+| Doom Wheel and Gyrocopter "7", Sheep | — | none (no event step) |
+| **dead (6)** | every troop family | **dropping** (a corpse ignores everything) |
+| dead (6), war machines | machine families | queuing (a wreck stores requests that never apply) |
+
+| Other state | Lock |
+|---|---|
+| **timed pause** (charge start, rout start for figures at rest, `ResetModelAnimations`; `bf003_playtest_fireball_grid_pursuit.md`, `flight_figure_movement.md`) | **queuing**, until the pause runs out. The pending request then applies at the next model update. |
+| **dying** (lethal wound taken, collapse delay running; `game_rules.md` staggered collapse) | **none**. Requests still apply while it waits. When the delay ends, every lock and the pending request are cleared and *dead* is forced. |
+
+**Queuing exists only for the timed pause and for machine wrecks.** No shoot pose, cast pose or machine shot queues.
+
+**Drawn facing.** A figure under the **queuing** lock (paused, or dead) keeps its drawn facing. The cast pose, the
+machine shot and the shoot pose turn the figure towards the unit's facing (`game_rules.md` "Drawn facing").
+
+**Consequences for a volley** (the event step and countdown rule are in §0.3 and `game_rules.md`):
+
+- A shooter interrupted **before** its event step never posts. The countdown then stops above 0. The posts that are
+  lost are always the **last** ones of the volley, since a post happens when the remaining count becomes divisible
+  by the divisor.
+- Nothing waits for the missing arrivals. Once no figure of the unit is still in action 7, `IfAnimationDone 7`
+  clears the request and the shooting script moves on (§2.4). The reload was stamped when the volley was ordered,
+  so it still runs.
+- A shooter interrupted **after** its event step loses nothing: its event was already posted, and posted events
+  always launch.
+- A caster is never interrupted, so the cast event always posts, unless the figure dies first and collapses before
+  its event step.
+
+**What interrupts a volley in play** (§0.1 writers):
+
+- the unit being contacted: pairing asks 4, an unpaired figure in melee asks 5;
+- a move or turn order, a snap or a re-form: broadcast 2, then 3 for each figure that walks;
+- the rout: the pause, then 3;
+- a scripted `SetActionState`;
+- the halt that ends a move or wait: the rest action, 5 when the unit has a target, else 1.
+
+A halt in the same script step as `PlayUnitAnimation` does not interrupt, because the later broadcast write in that
+tick wins. A repeated request for 7 during the pose is a no-op: the next volley's broadcast does not restart a
+figure still in its pose, so that figure contributes no arrival to the new volley.
+
+| Before | Action | After |
+|---|---|---|
+| crossbowman in the shoot pose, 1 tick in (event step not reached), skip 0 | unit charged: pairing asks 4 | fight program starts at once with a fresh random entry; **no** fire post from this figure |
+| same, after its event step | 4 | fight starts at once; its arrow was already posted and launches |
+| volley N = 10, divisor 4; one figure interrupted before its step, nine arrive | — | remaining count 10 → 1: posts at 8 and 4 → **2** missiles (not 3). `IfAnimationDone 7` clears the request once no figure is in 7 |
+| volley N = 4, one figure interrupted, three arrive | — | 4 → 1: **no** post at all, no missile |
+| crossbowman in the shoot pose | broadcast 7 again (a new `PlayUnitAnimation`) | nothing: the pose continues; this figure gives the new volley no arrival |
+| Bright Wizard in the cast pose | its own walk request (3) or broadcast 2 | dropped. The figure keeps the pose and is moved by the formation code with that pose; it turns to the unit's facing. 🟡 whether a later walk request comes depends on the next state change |
+| Bright Wizard in the cast pose, pose ends | — | hands over to stand (1); the next request applies normally |
+| Celestial Wizard casting Storm of Shemtek, after the event step | any request | dropped while channelling |
+| figure in a rout pause (queuing) | 3, then 4 | 4 stored (latest wins); applied when the pause ends |
+| dying figure (delay running) | 3 | applied: it walks until it collapses |
+| dying figure, delay ends | — | locks and pending request cleared, *dead* forced; later requests dropped |
+| mortar crew figure mid-shot | pairing asks 4 | dropped; the shot finishes, then stand |
 
 ### 0.4 The unit's two **sound handles**
 
