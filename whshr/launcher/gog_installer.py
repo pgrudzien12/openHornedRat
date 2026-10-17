@@ -16,6 +16,7 @@ from os import PathLike
 from pathlib import Path
 
 from whshr.launcher.discovery import looks_like_installation
+from whshr.launcher.external import external_environment
 
 INNOEXTRACT = "innoextract"
 GAME_FOLDER = "WARFB"
@@ -60,7 +61,8 @@ def install_hint(platform: str | None = None) -> str:
 def _run(command: list[str], on_line: Callable[[str], None] | None = None) -> list[str]:
     """Runs ``command``; returns the last output lines, raising ExtractionFailed on a non-zero exit."""
     tail: deque[str] = deque(maxlen=12)
-    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    # A system innoextract must not load the packaged launcher's bundled libraries (whshr.launcher.external).
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=external_environment(),
                           encoding="utf-8", errors="replace") as process:
         assert process.stdout is not None
         for line in process.stdout:

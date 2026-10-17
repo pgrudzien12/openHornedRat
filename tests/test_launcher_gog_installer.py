@@ -7,6 +7,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from whshr.launcher import gog_installer
 
@@ -16,6 +17,10 @@ FAKE_INNOEXTRACT = textwrap.dedent('''\
     import os, sys
     from pathlib import Path
     args = sys.argv[1:]
+    bundled = os.environ.get("FAKE_INNOEXTRACT_BUNDLED_LIBS")
+    if bundled and bundled in os.environ.get("LD_LIBRARY_PATH", ""):
+        print("libstdc++.so.6: version not found")  # what a system innoextract does with the bundle's libraries
+        sys.exit(1)
     if os.environ.get("FAKE_INNOEXTRACT_FAIL"):
         print("Not a supported Inno Setup installer!")
         sys.exit(1)
@@ -69,6 +74,15 @@ class GogInstallerTests(unittest.TestCase):
         self.assertEqual(game, self.root / "game" / "WARFB")
         self.assertEqual(progress, [(1, 3), (2, 3), (3, 3)])
         self.assertFalse((self.root / "game" / "app").exists(), "the empty folder copy is cleaned up")
+
+    def test_given_a_packaged_launcher_when_unpacking_then_innoextract_does_not_see_the_bundled_libraries(self):
+        os.environ["LD_LIBRARY_PATH"] = os.environ["FAKE_INNOEXTRACT_BUNDLED_LIBS"] = "/opt/ohr-engine/_internal"
+        os.environ.pop("LD_LIBRARY_PATH_ORIG", None)
+
+        with mock.patch.object(sys, "frozen", True, create=True):
+            game = gog_installer.extract(self.innoextract, self.installer, self.root / "game")
+
+        self.assertEqual(game, self.root / "game" / "WARFB")
 
     def test_given_innoextract_fails_when_unpacking_then_the_error_carries_its_output(self):
         os.environ["FAKE_INNOEXTRACT_FAIL"] = "1"
