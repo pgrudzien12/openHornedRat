@@ -12,19 +12,24 @@ from pathlib import Path
 from . import legacy
 from . import audio, battle2d, battle3d, battle_replay, behaviour, campaign, catalog, engine, glue_spec, pbx, rules, si, viewer_web
 from .paths import Installation
-from .user_dirs import resolve_save_dir
+from .user_dirs import data_dir, resolve_save_dir
 
-# Battle logs and saves default to the git-ignored logs//saves/ of this checkout, wherever the
-# engine is started from. Saves never go into the original installation (GEI7e): the engine keeps
-# its own save directory, not the original's SAVE/.
-#
-# A frozen install (packaging/windows) has no checkout to default into, and its own install
-# directory is read-only bundled data that the uninstaller removes - user saves must live
-# outside it. Use the same per-user app-data folder epic #88 plans for its config file.
-_FROZEN = getattr(sys, "frozen", False)
-_USER_DATA = Path(os.environ.get("APPDATA", str(Path.home()))) / "ohr" if sys.platform == "win32" else Path.home() / ".ohr"
-_STATE_ROOT = _USER_DATA if _FROZEN else Path(__file__).resolve().parents[1]
-REPOSITORY_LOGS = _STATE_ROOT / "logs"
+CHECKOUT_LOGS = Path(__file__).resolve().parents[1] / "logs"
+
+
+def default_log_dir(frozen: bool | None = None) -> Path:
+    """Where battle and campaign logs go unless ``--battle-log``/``--campaign-log`` say otherwise.
+
+    From a source checkout: its git-ignored ``logs/``, wherever the engine is started from. A frozen
+    install has no checkout, and its own directory is read-only bundled data that the uninstaller
+    removes, so it uses ``logs/`` in the per-user data directory, beside the saves and any game unpacked
+    by the launcher (``whshr.user_dirs``). Saves never go into the original installation (GEI7e).
+    """
+    frozen = getattr(sys, "frozen", False) if frozen is None else frozen
+    return data_dir() / "logs" if frozen else CHECKOUT_LOGS
+
+
+LOG_HELP = "(default: logs/ in a source checkout, else logs/ in the per-user data directory)"
 
 
 def _check(name: str, callback: Callable[[], object]) -> bool:
@@ -117,7 +122,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     auto_parser.add_argument("--width", type=int, default=1280)
     auto_parser.add_argument("--height", type=int, default=800)
     auto_parser.add_argument("--seed", type=int, default=engine.DEFAULT_SEED)
-    auto_parser.add_argument("--battle-log", type=Path, default=REPOSITORY_LOGS)
+    auto_parser.add_argument("--battle-log", type=Path, default=default_log_dir())
     auto_parser.add_argument("--no-battle-log", action="store_true")
     auto_parser.add_argument("--camera", type=float, nargs=3, metavar=("YAW", "PITCH", "DISTANCE"))
     engine_parser.add_argument("installation", type=Path, nargs="?", default=None, help="WARFB installation directory")
@@ -136,11 +141,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                                help="fixed seconds per frame instead of wall-clock time (reproducible captures)")
     engine_parser.add_argument("--profile-frames", action="store_true",
                                help="print per-window frame timing summaries when leaving glue screens or exiting")
-    engine_parser.add_argument("--battle-log", type=Path, default=REPOSITORY_LOGS,
-                               help="directory for JSON Lines battle logs (default: logs/)")
+    engine_parser.add_argument("--battle-log", type=Path, default=default_log_dir(),
+                               help=f"directory for JSON Lines battle logs {LOG_HELP}")
     engine_parser.add_argument("--no-battle-log", action="store_true", help="disable battle logging")
-    engine_parser.add_argument("--campaign-log", type=Path, default=REPOSITORY_LOGS,
-                               help="directory for the JSON Lines campaign session log (default: logs/)")
+    engine_parser.add_argument("--campaign-log", type=Path, default=default_log_dir(),
+                               help=f"directory for the JSON Lines campaign session log {LOG_HELP}")
     engine_parser.add_argument("--no-campaign-log", action="store_true", help="disable campaign session logging")
     engine_parser.add_argument("--seed", type=int, default=engine.DEFAULT_SEED,
                                help=f"battle RNG seed (default: {engine.DEFAULT_SEED})")

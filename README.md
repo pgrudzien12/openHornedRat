@@ -41,7 +41,8 @@ Every battle writes its own log, and each run of the engine writes a campaign lo
 | How you run it | Logs folder |
 |---|---|
 | Windows package | `%APPDATA%\ohr\logs` (paste it into the File Explorer address bar) |
-| Linux or macOS package | `~/.ohr/logs` (a hidden folder in your home directory) |
+| Linux package | `~/.local/share/ohr/logs` (a hidden folder in your home directory; `$XDG_DATA_HOME/ohr/logs` if you set `XDG_DATA_HOME`) |
+| macOS package | `~/Library/Application Support/ohr/logs` (in Finder: **Go → Go to Folder…**) |
 | From source | `logs/` in your checkout |
 
 Each file name includes its date and time, so take the newest ones from around when the problem happened:
@@ -172,7 +173,7 @@ You can also run the GOG installer with Wine, or as a non-Steam game through Pro
 | Zoom | Mouse wheel |
 | Reset camera | Home |
 
-Battle sessions create a JSON Lines log in `logs/` by default. Attach the relevant log to a bug report when possible; it helps us reproduce deterministic battle behaviour. You can begin directly in the first battle for a quick test with `--battle BF001`.
+Every battle writes a log ([where to find it](#where-to-find-the-logs)). Attach the relevant log to a bug report when possible; it helps us reproduce deterministic battle behaviour. You can begin directly in the first battle for a quick test with `--battle BF001`.
 
 ## Automated battle captures
 
