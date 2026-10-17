@@ -187,12 +187,16 @@ placement or facing change: both half-distance steps truncate to zero.
 - The deployment **Move** button and map orders also allow move/waypoint planning. This is
   distinct from direct dragging. Waypoints can be prepared for execution after battle starts;
   do not interpret every Move-button click as a teleport into the placement zone.
-  Choose Move, then Ctrl-click successive destinations to append waypoints; an ordinary
-  click replaces the route/ends append targeting. Ctrl here is route planning, while Ctrl
+  Choose Move, then Ctrl-click successive destinations: the first Ctrl-click starts a new
+  route, later ones append stops. A plain click in Move targeting replaces the route with
+  one destination; a plain click *after* Ctrl-clicks adds nothing and only ends targeting
+  (corrected; [move_routes.md](move_routes.md) §2). Ctrl here is route planning, while Ctrl
   during a direct drag is rotation. Shift is not the waypoint modifier. The manual route
-  limit is nine destinations, subject to the ordinary near-point and detour limits.
-  Selecting a regiment by direct map press starts a halt/re-form and clears its previous
-  route; previous/next HUD selection does not have that same route-clearing side effect.
+  limit is nine stops; a click near the last stop is refused and a click near the first
+  closes a patrol loop (move_routes.md §3). Pressing the deployment Move button halts the
+  regiment and clears its route first. Selecting a regiment by direct map or minimap press
+  starts a halt/re-form and clears its previous route, even when the mouse does not move;
+  previous/next HUD selection does not have that same route-clearing side effect.
 
 The minimap shares map selection/order handling with the main view, and shows deployment
 boundary markers. Deployment-specific icons and layout are in §8; the shared HUD layout is
