@@ -1202,7 +1202,7 @@ variants are documented in [deployment.md §3–4](deployment.md#3-player-intera
 
 | Order | Button (icon) | Effect |
 |---|---|---|
-| 1 / 2 | Move (boots) + click / Ctrl-click | go to point / add waypoint; queued while busy |
+| 1 / 2 | Move (boots) + click / Ctrl-click | go to point / add stop (first Ctrl-click starts a new route; nine stops; loops; [move_routes.md](move_routes.md)); queued while busy |
 | 3 | Attack (crossed swords) + click | event 0x04: approach and attack a unit (not `CantMelee`) or building |
 | 0x0B–0x0E | face point, turn left/right 90°, about face | facing ∓0x80 / +0x100 (increasing facing = clockwise) |
 | 0x0F / 0x10 | ranks up / down | re-form with ±1 rank |
@@ -1342,8 +1342,8 @@ by an offset that is clamped to the map (right mouse drag pans). Four 44×20 tab
 (110, 264) (frames 72/73, 74/75, 76/77, 78/79) and a 40×40 book at (162, 242) (frames 80/81) sit on the decoration. The tabs select
 one of four marker display modes: 0 every unit has banner and dot; 1 selected units banner and dot, others dot; 2 friendly
 banner and dot, enemy dot; 3 friendly dots during normal play (tab-to-mode icon order 🟡).
-Drawing order: plan map, the selected unit's waypoints (numbered
-dots 161–169, end marker 159), all regiments, the selected regiment again, the camera marker (frames 170–177, 8 orientations).
+Drawing order: plan map, the focused unit's route stops (number labels 161–169, each stop an arrow 119–126 toward
+the next stop or the end dot 159; detour points are not drawn — [move_routes.md](move_routes.md) §4), all regiments, the selected regiment again, the camera marker (frames 170–177, 8 orientations).
 A regiment is an 8×8 dot centred on its position (fighting/charging base 119 friendly, 111 enemy; normal 135 / 127;
 broken 151 / 143; plus one of 8 facing frames) and, if the mode allows, its banner frame anchored 8 px left and 24 px above
 the point. Hidden enemy units are skipped; friendly units are not omitted merely because `hidden:` is set (see [deployment.md §1.3](deployment.md#13-hidden-friendly-regiments-display-and-picking)). **A left click on the minimap is handled exactly like a click in the 3D view**: with
