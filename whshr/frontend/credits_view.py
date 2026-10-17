@@ -11,7 +11,7 @@ from typing import Any
 import pygame
 
 from ..credits_scene import COLUMN_TOP, LINE_INDENT, TITLE_Y, TUNE, CreditsScene
-from ..audio_settings import audio_settings
+from . import music_player
 from ..scenes import SceneEvent
 from .bitmap_font import BitmapFont
 from .dialog_view import DialogView
@@ -39,13 +39,12 @@ class CreditsView(DialogView[CreditsScene]):
         if not self.mixer_ok or installation is None or self.scene.tune != TUNE:
             return
         try:
-            pygame.mixer.music.load(str(installation.binary_file("MUSIC", f"{TUNE}.MID")))
-            pygame.mixer.music.set_volume(audio_settings.volume("music"))
-            pygame.mixer.music.play(loops=-1)
+            music_player.play_looping(installation, TUNE)
         except (FileNotFoundError, AttributeError, pygame.error):
             pass
 
     def _stop_tune(self) -> None:
+        music_player.forget()
         if self.mixer_ok:
             try:
                 pygame.mixer.music.stop()

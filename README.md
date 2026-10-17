@@ -219,7 +219,7 @@ The `state.player_army` field identifies which source the automated session used
 ### You need
 
 - Python 3 and a system capable of creating an OpenGL 3.3 window.
-- A legal local copy of *Warhammer: Shadow of the Horned Rat*. The GOG v1.0 release is the version we actively test. The Steam/SNEG "Classic" re-release also works: its files load and its battles start, but it has not had a full campaign playthrough yet. The 1995 CD edition may work.
+- A legal local copy of *Warhammer: Shadow of the Horned Rat*. The GOG v1.0 release is the version we actively test. The Steam/SNEG "Classic" re-release also works: its files load and its battles start, and Options can switch the music to its MP3 recordings (*Music type*: MIDI, MP3 or CD), but it has not had a full campaign playthrough yet. The 1995 CD edition may work.
 - A checkout of this repository.
 
 The project never ships original game files. Point the engine at the `WARFB` directory in your own installation.

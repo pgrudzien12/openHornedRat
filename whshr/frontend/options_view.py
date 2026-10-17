@@ -1,4 +1,4 @@
-"""Original Options backdrop with engine audio level controls."""
+"""Original Options backdrop with engine audio level controls (and, with MP3 music, the music source)."""
 
 from collections.abc import Sequence
 from typing import Any
@@ -11,12 +11,16 @@ from ..options_scene import OptionsScene
 from ..scenes import SceneEvent
 from .dialog_view import DialogView
 from .gpu import Gpu
+from . import music_player
 
 WHITE = (255, 255, 255)
 BUTTON_SIZE = (41, 41)
 ROWS = tuple((name, 203, 106 + index * 54) for index, name in enumerate((*CHANNELS, "difficulty")))
+# Right-hand column, label to the right of the button like "Cancel"; shown only on an installation with MP3 music.
+RIGHT_ROWS = (("music_source", 397, 106),)
+CYCLED = (*CHANNELS, "difficulty", "music_source")
 EXITS = (("options:ok", 203, 335), ("options:cancel", 397, 335))
-LABELS = {"music": "Music", "dialogue": "Dialogue", "effects": "Sound Effects", "difficulty": "Difficulty"}
+LABELS = {"music": "Music", "dialogue": "Dialogue", "effects": "Sound Effects", "difficulty": "Difficulty", "music_source": "Music type"}
 
 
 class OptionsView(DialogView[OptionsScene]):
@@ -39,7 +43,8 @@ class OptionsView(DialogView[OptionsScene]):
         self.labels.append((label, (x, y + (41 - self.font.font.height) // 2)))
 
     def refresh(self) -> None:
-        state = (tuple(self.scene.values.items()), self.scene.difficulty, self.pressed, self.scene.error)
+        state = (tuple(self.scene.values.items()), self.scene.difficulty, self.scene.music_source, self.scene.mp3_music,
+                 self.pressed, self.scene.error)
         if state == self.drawn:
             return
         self.drawn = state
@@ -53,6 +58,10 @@ class OptionsView(DialogView[OptionsScene]):
                 value = self.scene.values[name]
                 text = 'Off' if value == 0 else f'{value}%'
             self._label(f"{LABELS[name]}: {text}", 0, y, 190, "right")
+            self.buttons.append((pygame.Rect(x, y, *BUTTON_SIZE), name))
+        for name, x, y in RIGHT_ROWS if self.scene.mp3_music else ():
+            self._bitmap("OptionButtonDown" if self.pressed == name else "OptionButtonUp", (x, y))
+            self._label(f"{LABELS[name]}: {self.scene.music_source.label}", x + BUTTON_SIZE[0] + 8, y, 190, "left")
             self.buttons.append((pygame.Rect(x, y, *BUTTON_SIZE), name))
         for action, x, y in EXITS:
             self._bitmap("OptionButtonDown" if self.pressed == action else "OptionButtonUp", (x, y))
@@ -76,7 +85,7 @@ class OptionsView(DialogView[OptionsScene]):
             self.refresh()
             if pressed is not None and pressed == self._action_at(event.pos):
                 self._click_cue(3)
-                return (("options:cycle", pressed),) if pressed in (*CHANNELS, "difficulty") else (pressed,)
+                return (("options:cycle", pressed),) if pressed in CYCLED else (pressed,)
         return ()
 
     def release(self) -> None:
@@ -85,4 +94,5 @@ class OptionsView(DialogView[OptionsScene]):
                 pygame.mixer.music.set_volume(audio_settings.volume("music"))
             except pygame.error:
                 pass
+            music_player.follow_source_change()
         super().release()

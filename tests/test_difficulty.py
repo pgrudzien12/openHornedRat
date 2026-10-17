@@ -46,7 +46,7 @@ class LevelTests(unittest.TestCase):
 
     def test_given_the_options_window_then_ok_saves_the_cycled_level_and_cancel_drops_it(self):
         with tempfile.TemporaryDirectory() as directory:
-            context = mock.Mock(save_dir=Path(directory))
+            context = mock.Mock(save_dir=Path(directory), **{"glue_content.return_value.installation": None})
             scene = OptionsScene(Scene())
             scene.enter(context)
             scene.handle(("options:cycle", "difficulty"), context)  # a new player's Soldier -> Sergeant
