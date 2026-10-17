@@ -314,12 +314,13 @@ def _roll_model_attacks(attacker: "Regiment", defender: "Regiment", rng: random.
     defending_leader = defender_model is not None and defender.leader_model(defender_model)
     defending_toughness = defender.model_toughness(defender_model) if defender_model is not None else defender.toughness
     defending_armour = defender.model_armour(defender_model) if defender_model is not None else defender.armour
-    defending_ws = (defender.leader_ws if defending_leader and defender.leader_ws is not None else defender.ws)
+    defending_ws = ((defender.leader_ws if defending_leader and defender.leader_ws is not None else defender.ws)
+                    + defender.skill_bonus)
     base_attacks = attacker.leader_attacks if leader and attacker.leader_attacks is not None else attacker.attacks
     attacks = max(1, base_attacks) if attacks is None else attacks
     if leader and defending_leader and "ItemParryingBlade" in defender.items:
         attacks = max(0, attacks - 1)
-    base_ws = attacker.leader_ws if leader and attacker.leader_ws is not None else attacker.ws
+    base_ws = (attacker.leader_ws if leader and attacker.leader_ws is not None else attacker.ws) + attacker.skill_bonus
     weapon_skill = base_ws if ws is None else ws
     if leader:
         weapon_skill += int("ItemGrudgeBringer" in attacker.items) + int("ItemBannerOfMight" in attacker.items)

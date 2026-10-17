@@ -17,7 +17,7 @@ Deviations, all invisible in prices, "destroyed" and the disband test because th
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from . import roster
+from . import difficulty, roster
 from .debrief_screen import DEFAULT_DEAD_PERCENT, UnitOutcome
 
 if TYPE_CHECKING:
@@ -119,7 +119,12 @@ def heal_and_disband(campaign: "CampaignState") -> tuple[list[str], list[str]]:
     are added, but past the original size the regiment is set to full strength and the excess, routed models
     included, is lost.  A regiment then below ``max(1, 20 % of its original size)`` is disbanded unless it is the
     commander's or a ``keep`` regiment.  This battle's wounded (``wounded_last``) are not counted by the test
-    (report 3.10).  ``returning`` is cleared for everyone at the end."""
+    (report 3.10).  ``returning`` is cleared for everyone at the end.
+
+    Engine difficulty (whshr.difficulty, Soldier): a regiment the test would disband is kept when it has wounded,
+    of this battle or rejoining now. Kept for this battle's wounded, it sits out the next battle
+    (``CampaignState.sitting_out``) even if reinforced, as though its leader were among them."""
+    keep_wounded = difficulty.current().wounded_keep
     healed: list[str] = []
     disbanded: list[str] = []
     updated: list[roster.Regiment] = []
@@ -139,6 +144,12 @@ def heal_and_disband(campaign: "CampaignState") -> tuple[list[str], list[str]]:
         present = size + routed
         if (present < max(1, regiment.orgsize * DISBAND_PERCENT // 100) and regiment.whoami != COMMANDER
                 and not regiment.row.keep):
+            pending = campaign.wounded_last.get(regiment.whoami, 0)
+            if keep_wounded and (pending or returning):
+                if pending:
+                    campaign.sitting_out.add(regiment.whoami)
+                updated.append(roster.with_models(regiment, present) if present != regiment.models else regiment)
+                continue
             disbanded.append(regiment.name)
             campaign.march_units.discard(regiment.whoami)
             continue

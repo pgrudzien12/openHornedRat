@@ -1810,15 +1810,16 @@ def dispel_choice(battle: Battle, wizard: Regiment, sees: Callable[[Regiment, Re
 
 # ===== The wind (B 7) =====
 
-def wind(current: int, rng: random.Random) -> int:
-    """Wind(cur): 0 -> R mod 8; 1-3 -> cur + R mod 4; >= 4 -> cur - 4 + R mod 8; then clamped to 1..8."""
+def wind(current: int, rng: random.Random, maximum: int = magic.MAX_POWER) -> int:
+    """Wind(cur): 0 -> R mod 8; 1-3 -> cur + R mod 4; >= 4 -> cur - 4 + R mod 8; then clamped to 1..8 (to 1..maximum
+    for a player pool raised by an easier engine difficulty level, whshr.difficulty)."""
     if current == 0:
         new = rng.randrange(8)
     elif current < 4:
         new = current + rng.randrange(4)
     else:
         new = current - 4 + rng.randrange(8)
-    return max(1, min(magic.MAX_POWER, new))
+    return max(1, min(maximum, new))
 
 
 def blow_wind(battle: Battle) -> None:
@@ -1827,7 +1828,7 @@ def blow_wind(battle: Battle) -> None:
     if battle.tick_count <= 0 or battle.tick_count % WIND_TICKS:
         return
     power = battle.event_bus.power
-    power.player = wind(power.player, battle.rng)
+    power.player = wind(power.player, battle.rng, power.player_max)
     for unit in battle.regiments.values():
         unit.used_items.difference_update({"ItemBannerOfWrath", "ItemGrudgeBringer"})
     power.enemy = wind(power.enemy, battle.rng)

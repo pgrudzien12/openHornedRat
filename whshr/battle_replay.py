@@ -11,6 +11,7 @@ import json
 from os import PathLike
 from typing import Any
 
+from . import difficulty
 from .assets import AssetId
 from .battle_scene import BATTLE_TICK_SECONDS, BattleScene
 from .game import scene_context
@@ -107,7 +108,8 @@ def replay(installation: Installation | PathArg, log_path: PathArg, until: int |
     context.debug = True
     scene = BattleScene(battle_id, log_dir=None, seed=header["seed"], player_army=header.get("player_army"),
                         npc_company=({int(key): unit for key, unit in header["npc_company"].items()}
-                                     if header.get("npc_company") else None))
+                                     if header.get("npc_company") else None),
+                        difficulty_level=difficulty.BY_NAME.get(header.get("difficulty", ""), difficulty.COMMANDER))
     scene.enter(context)
 
     orders_by_tick: dict[int, list[tuple[Any, ...]]] = {}

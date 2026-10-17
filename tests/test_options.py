@@ -105,6 +105,10 @@ class OptionsInputTests(unittest.TestCase):
                          (("options:cycle", "music"),))
         self.assertEqual(view.events(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)),
                          ("options:cancel",))
+        view._action_at = lambda position: "difficulty"
+        view.events(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=(10, 10)))
+        self.assertEqual(view.events(pygame.event.Event(pygame.MOUSEBUTTONUP, button=1, pos=(10, 10))),
+                         (("options:cycle", "difficulty"),))
 
 
 if __name__ == "__main__":

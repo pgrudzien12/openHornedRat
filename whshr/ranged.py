@@ -324,7 +324,7 @@ def _create_projectile(battle: Battle, unit: Regiment, code: int, weapon: Weapon
     spread = (8 * first_die if code in ARTILLERY else 8)
     if _scenery_between(battle, unit, aim):
         spread += 8
-    scatter_max = 10 - min(unit.bs, 10)
+    scatter_max = 10 - min(unit.bs + unit.skill_bonus, 10)
     offsets = [battle.rng.randint(0, scatter_max) * battle.rng.choice((-1, 1))
                * spread * distance / weapon.reach for _ in range(2)]
     radius = battle.rng.randint(24, 48) if code in {5, 11} else weapon.radius
@@ -371,7 +371,7 @@ def drop_bomb(battle: Battle, unit: Regiment) -> str:
             # deviation: its destroyed misfire is a lost shot.
             _message(battle, unit, 2019)
         return "misfire"
-    span = 11 - min(unit.bs, 10)
+    span = 11 - min(unit.bs + unit.skill_bonus, 10)
     offsets: list[int] = []
     for _ in range(2):
         size = rng.randrange(span)

@@ -95,6 +95,7 @@ def campaign_to_dict(campaign: "CampaignState") -> dict[str, Any]:
         "master_prices": {str(regiment.whoami): regiment.row.base_price for regiment in campaign.master},
         "wounded_last": {str(whoami): count for whoami, count in campaign.wounded_last.items()},
         "returning": {str(whoami): count for whoami, count in campaign.returning.items()},
+        "sitting_out": sorted(campaign.sitting_out),
         "released_missions": [_ref(mission) for mission in sorted(campaign.released_missions)],
     }
 
@@ -135,6 +136,7 @@ def restore_campaign(campaign: "CampaignState", data: Mapping[str, Any], *, repa
             "mission_paid": bool(data.get("mission_paid", False)),
             "wounded_last": {int(whoami): int(count) for whoami, count in data.get("wounded_last", {}).items()},
             "returning": {int(whoami): int(count) for whoami, count in data.get("returning", {}).items()},
+            "sitting_out": {int(whoami) for whoami in data.get("sitting_out", [])},
             "released_missions": ({_unref(item) for item in data["released_missions"]}
                                   if "released_missions" in data else None),
         }
