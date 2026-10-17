@@ -194,6 +194,19 @@ class NodeManningReadinessTests(SeamTestCase):
         self.assertEqual(set(poses), {machine})  # no crewman takes the shoot pose
         self.assertEqual(set(gun.fire_post_positions), {gun.positions[machine]})
 
+    def test_a_shooter_interrupted_before_its_event_step_loses_the_last_post_of_the_volley(self):
+        # notes/script_animation_sound.md 0.5: N = 10, divisor 4, nine arrivals -> posts at 8 and 4 only.
+        archers = shooter("archers", 0, 0, models=10)
+        self.make(archers)
+        archers.model_positions()
+        archers.volley_countdown = 10
+        self.battle._step_animations(archers)  # every figure enters the shoot pose; none is at its event step yet
+        for _ in range(12):
+            archers.melee_models[0].own_request = animation.FIGHT  # e.g. paired by a charger
+            self.battle._step_animations(archers)
+        self.assertEqual(archers.fire_posts, 2)
+        self.assertEqual(archers.melee_models[0].action, animation.FIGHT)
+
     def test_a_special_shooter_without_a_leader_still_fires_from_the_first_model(self):
         dragon = shooter("drake", 0, 0, models=3, cls="inf", unit_class=1)
         dragon.shooting_code = 14  # a special shot (innate weapon) from a non-artillery unit

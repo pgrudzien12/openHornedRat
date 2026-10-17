@@ -71,7 +71,8 @@ class ActionScript:
     `variant_groups` holds ints they are first-frame numbers within the sprite file rather than names.
     `locks_facing` freezes the drawn facing while the script plays (the corpse script). War-machine scripts
     (notes/machine_figure_animation.md 0.3-0.4) set `faces_unit` (the figure always turns to the unit's facing, even
-    while fighting or walking), `drops_requests` (a request arriving during the one-shot is dropped, not queued)
+    while fighting or walking), `drops_requests` (a request arriving during the one-shot is dropped; one-shots without
+    it are interrupted at once, notes/script_animation_sound.md 0.5)
     and, on the dead script, `keeps_facing` (the wreck keeps the facing it had instead of a random one). A group may
     be a first-frame number in the sprite file instead of a name.
     """
@@ -113,6 +114,15 @@ STANDARD_INFANTRY: ActionTable = {
     SHOOT: ActionScript("shoot", sequence=(0, 1, 2, 3), random_entry=4, hold_ticks=3, next_action=STAND,
                          fire_at=4, skip_ahead=True),
 }
+
+# Casters (notes/script_animation_sound.md 0.5): the wizard sets have their own action 7, the cast pose. It plays the
+# shoot pose's frames with the same random entry and event step (the spell launches there), then 2 more ticks and
+# stand, and it drops every request from entry to the hand-over. The Wyvern's cast pose runs 5 ticks after the event
+# step (the flight layer then turns its stand into idle while airborne, notes/airborne_units.md A3.1). The rest of
+# these tables is the standard one: PROVISIONAL, only action 7 is documented as different.
+# Not modelled: the held channelling pose of Storm of Shemtek and Fists of Gork (it drops requests until forced).
+CASTER: ActionTable = {**STANDARD_INFANTRY, SHOOT: replace(STANDARD_INFANTRY[SHOOT], drops_requests=True)}
+WYVERN: ActionTable = {**STANDARD_INFANTRY, SHOOT: replace(STANDARD_INFANTRY[SHOOT], hold_ticks=6, drops_requests=True)}
 
 # Per-model costume families (game_rules.md mechanism 4). Groups are first-frame numbers in the sprite
 # file. Peasants: three costumes V = stagger % 3, stand/idle/fight/weapon-ready group 120 + 32V, walk
@@ -310,7 +320,8 @@ FAMILY_TABLES: dict[str, ActionTable] = {"standard_infantry": STANDARD_INFANTRY,
                  "mesh_dragon": MESH_DRAGON, "wagons": WAGONS, "carts": CARTS, "gun": GUN, "volley": VOLLEY,
                  "thrower": THROWER, "mortar": MORTAR, "gyrocopter": GYROCOPTER,
                  "doom_diver_crew": DOOM_DIVER_CREW, "limbered_mortar": LIMBERED_MORTAR,
-                 "limbered_gun": LIMBERED_GUN, "doomwheel": DOOMWHEEL, "warpfire": WARPFIRE}
+                 "limbered_gun": LIMBERED_GUN, "doomwheel": DOOMWHEEL, "warpfire": WARPFIRE,
+                 "caster": CASTER, "wyvern": WYVERN}
 # Script sprite resource names (casefolded) that select a decoded family; anything else is standard.
 SPRITE_FAMILIES = {"meshdragon": "mesh_dragon", "peasant": "peasants", "peasants": "peasants",
                    "ratslave": "slaves", "slave": "slaves",
@@ -324,7 +335,10 @@ SPRITE_FAMILIES = {"meshdragon": "mesh_dragon", "peasant": "peasants", "peasants
                    "ddcatplt": "thrower", "mortar": "mortar",
                    "gyrocopt": "gyrocopter", "gyrocopter": "gyrocopter",
                    "doomwheel": "doomwheel", "dwheel": "doomwheel",
-                   "warpfire": "warpfire", "warpfirethrower": "warpfire"}
+                   "warpfire": "warpfire", "warpfirethrower": "warpfire",
+                   # Wizard sets with their own cast pose (notes/script_animation_sound.md 0.5).
+                   "brightwizard": "caster", "celestialwizard": "caster", "amberwizard": "caster",
+                   "greyseer": "caster", "goblinshamen": "caster", "wyvern": "wyvern"}
 WAGON_CLASS = 7  # s_race class RollingStock
 DEFAULT_FAMILY = "standard_infantry"
 
@@ -566,30 +580,35 @@ def _enter(model: "ModelState", table: ActionTable, action: int, rng: random.Ran
 
 
 def step(model: "ModelState", requested_action: int, rng: random.Random,
-         family: str = DEFAULT_FAMILY) -> tuple[str | int, int]:
+         family: str = DEFAULT_FAMILY, paused: bool = False, rest: bool = False) -> tuple[str | int, int]:
     """Advance one model's action program by one battle tick; returns `current(model, family)`.
 
-    `model` carries `action`/`action_pc`/`action_entry`/`pending_action` (whshr.engine.ModelState).
-    Re-issuing the action id the model already plays is a no-op (the random offset persists until the
-    id actually changes). A different request while a one-shot script is running cannot interrupt it:
-    it is queued in `pending_action` (the latest request wins) and applied when the one-shot finishes,
-    in place of the script's own `next_action`. A genuine change draws a fresh random entry/choice and
-    restarts the program counter at 0.
+    `model` carries `action`/`action_pc`/`action_entry`/`pending_action` (whshr.engine.ModelState). A request is
+    checked in this order (notes/script_animation_sound.md 0.5): a running one-shot that drops requests (a cast pose,
+    a machine shot) drops it and the pending request too; the action already playing is a no-op (the random offset
+    persists); a model under the queuing lock (`paused`: its timed pause) stores it as its pending request, latest
+    wins, applied once the pause is over; otherwise the new action starts at once from the start of its program with a
+    fresh random entry, abandoning the rest of the old one, a standard shoot pose included (its fire event then never
+    posts).
+
+    `rest` marks the engine's per-tick rest action (`Regiment.rest_action`), which the original writes only on a
+    state change: it does not interrupt a running one-shot, which hands over to its own next action instead.
+    PROVISIONAL engine adaptation of the original's request-on-change model (script_animation_sound.md 0.1).
     """
     table = family_table(family)
-    if requested_action == model.action:
+    if not paused and model.pending_action is not None:
+        requested_action, model.pending_action, rest = model.pending_action, None, False
+    if one_shot_running(model, family) and table[model.action].drops_requests:
         model.pending_action = None
-    elif one_shot_running(model, family):
-        if not table[model.action].drops_requests:
-            model.pending_action = requested_action
-    else:
+    elif requested_action == model.action:
+        pass
+    elif paused:
+        model.pending_action = requested_action
+    elif not (rest and one_shot_running(model, family)):
         _enter(model, table, requested_action, rng)
-        model.pending_action = None
     active = table[model.action]
     if not one_shot_running(model, family) and active.next_action is not None:
-        target = model.pending_action if model.pending_action is not None else active.next_action
-        model.pending_action = None
-        _enter(model, table, target, rng)
+        _enter(model, table, active.next_action, rng)
         active = table[model.action]
     phase = _phase_at(active, model.action_pc, model.action_entry)
     # The fire event is posted by the script itself, four steps into the shoot program counting the

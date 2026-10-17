@@ -230,23 +230,85 @@ class BattleAnimationWiringTests(unittest.TestCase):
         self.assertEqual(regiment.melee_models, [])
 
 
-class QueuedActionTests(unittest.TestCase):
-    """game_rules.md mechanism 2: the offset persists until the action id changes; a one-shot is not interrupted."""
+class RequestLockTests(unittest.TestCase):
+    """notes/script_animation_sound.md 0.5: the standard shoot pose is interrupted at once, a cast pose or machine shot
+    drops requests, the timed pause queues them (latest wins); the offset persists until the action id changes."""
 
-    def test_given_a_model_mid_shoot_when_walk_is_requested_then_it_finishes_shooting_before_walking(self):
-        model, rng = ModelState(), random.Random(3)
-        animation.step(model, animation.SHOOT, rng)
+    def shooting(self, family=animation.DEFAULT_FAMILY, seed=3):
+        model, rng = ModelState(), random.Random(seed)
+        animation.step(model, animation.SHOOT, rng, family)
+        return model, rng
 
-        for _ in range(3):
-            animation.step(model, animation.WALK, rng)
-
-        self.assertEqual(model.action, animation.SHOOT)
-        self.assertEqual(model.pending_action, animation.WALK)
-
+    def test_given_a_shooter_before_its_event_step_when_charged_then_it_fights_at_once_and_never_posts(self):
+        model, rng = self.shooting()
+        animation.step(model, animation.FIGHT, rng)
+        self.assertEqual(model.action, animation.FIGHT)
+        posts = []
         for _ in range(10):
-            animation.step(model, animation.WALK, rng)
+            animation.step(model, animation.FIGHT, rng)
+            posts.append(model.fire_event)
+        self.assertFalse(any(posts))
 
+    def test_given_a_shooter_when_walk_is_requested_then_the_pose_is_abandoned(self):
+        model, rng = self.shooting()
+        animation.step(model, animation.WALK, rng)
+        self.assertEqual((model.action, model.action_pc), (animation.WALK, 1))
+        self.assertIsNone(model.pending_action)
+
+    def test_given_a_shooter_when_shoot_is_requested_again_then_the_pose_continues(self):
+        model, rng = self.shooting()
+        animation.step(model, animation.SHOOT, rng)
+        self.assertEqual((model.action, model.action_pc), (animation.SHOOT, 2))
+
+    def test_given_a_shooter_when_only_the_rest_action_is_derived_then_the_pose_plays_to_its_end(self):
+        model, rng = self.shooting()
+        actions, fired = [], False
+        for _ in range(8):
+            animation.step(model, animation.WEAPON_READY, rng, rest=True)
+            actions.append(model.action)
+            fired = fired or model.fire_event
+        self.assertTrue(fired)
+        self.assertEqual(actions[0], animation.SHOOT)
+        self.assertEqual(actions[-1], animation.WEAPON_READY)
+
+    def test_given_a_wizard_in_the_cast_pose_when_walk_is_requested_then_it_is_dropped_until_the_hand_over(self):
+        model, rng = self.shooting("caster")
+        fired = False
+        while animation.one_shot_running(model, "caster"):
+            animation.step(model, animation.WALK, rng, "caster")
+            fired = fired or model.fire_event
+            if animation.one_shot_running(model, "caster"):
+                self.assertEqual(model.action, animation.SHOOT)
+                self.assertIsNone(model.pending_action)
+        self.assertTrue(fired)
+        animation.step(model, animation.WALK, rng, "caster")
         self.assertEqual(model.action, animation.WALK)
+
+    def test_wizard_sets_select_the_caster_family_and_the_wyvern_its_own(self):
+        for sprite in ("BrightWizard", "CelestialWizard", "AmberWizard", "GreySeer", "GoblinShamen"):
+            self.assertEqual(animation.family_for(sprite), "caster")
+        self.assertEqual(animation.family_for("Wyvern"), "wyvern")
+
+    def test_given_the_wyvern_cast_pose_then_it_runs_five_ticks_after_the_event_step(self):
+        model, rng = ModelState(), random.Random(1)
+        animation._enter(model, animation.WYVERN, animation.SHOOT, rng)
+        model.action_entry = 0
+        ticks_after = None
+        while model.action == animation.SHOOT:
+            animation.step(model, animation.WALK, rng, "wyvern")
+            if model.fire_event:
+                ticks_after = 0
+            elif ticks_after is not None and model.action == animation.SHOOT:
+                ticks_after += 1
+        self.assertEqual(ticks_after, 5)
+
+    def test_given_a_paused_model_then_requests_are_stored_latest_wins_and_applied_after_the_pause(self):
+        model, rng = ModelState(), random.Random(4)
+        animation.step(model, animation.WALK, rng, paused=True)
+        animation.step(model, animation.FIGHT, rng, paused=True)
+        self.assertEqual((model.action, model.pending_action), (animation.STAND, animation.FIGHT))
+        animation.step(model, animation.WALK, rng)
+        self.assertEqual(model.action, animation.FIGHT)
         self.assertIsNone(model.pending_action)
 
     def test_given_a_walking_model_when_walk_is_reissued_then_its_entry_offset_persists(self):

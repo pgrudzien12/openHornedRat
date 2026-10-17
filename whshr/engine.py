@@ -161,7 +161,7 @@ class ModelState:
     action: int = animation.STAND  # current action id, whshr.animation (game_rules.md "Figure animation")
     action_pc: int = 0  # ticks elapsed since the action's program counter was last reset
     action_entry: int = 0  # random entry/choice drawn on that reset, whshr.animation.step
-    pending_action: int | None = None  # action queued behind a running one-shot script
+    pending_action: int | None = None  # request stored under the queuing lock (the timed pause), latest wins
     drawn_facing: float | None = None  # facing (0-511) the sprite direction is drawn from; None until first set
     breath_sector: int = 1  # MeshDragon: left/forward/right sector, bf014_dragon_rendering.md §3
     height_above_ground: float = 0.0  # mesh-model translation in script units
@@ -185,6 +185,11 @@ class ModelState:
     # anchor, in world axes, instead of its slot; re-rolled when `flee_reaim_ticks` (counted down by the walk) is 0.
     flee_offset: tuple[int, int] | None = None
     flee_reaim_ticks: int = 0
+
+    @property
+    def paused(self) -> bool:
+        """The timed pause is running: the figure's queuing lock (notes/script_animation_sound.md 0.5)."""
+        return self.freeze_ticks > 0 or self.rout_pause_ticks > 0
 
     def start_pause(self, ticks: int, rout: bool = False) -> None:
         """Set the model's timed pause, replacing whatever was left of an older one (bf003_playtest 8.1)."""
@@ -3471,6 +3476,7 @@ class Battle:
         # A war machine's volley is the machine (leader) model alone; other special shooters use the first model.
         shooter_index = regiment.leader_model_index if regiment.hud_class == "art" else 0
         for model_index, model in enumerate(regiment.melee_models):
+            rest = False
             if model.own_request:
                 requested, model.own_request = model.own_request, 0
             elif regiment.script_action:
@@ -3486,9 +3492,9 @@ class Battle:
             elif not model.at_rest:
                 requested = animation.WALK
             else:
-                requested = regiment.rest_action()
+                requested, rest = regiment.rest_action(), True
             family = regiment.model_family(model)
-            animation.step(model, requested, self.rng, family)
+            animation.step(model, requested, self.rng, family, paused=model.paused, rest=rest)
             if model_index == 0 and (flight := regiment.flight_state()) is not None:
                 # notes/airborne_units.md A3: the (single) figure's action drives take-off and landing.
                 flight.take_request(flight_rules.flight_request(
@@ -3534,8 +3540,8 @@ class Battle:
             regiment.fire_post_positions.append((regiment.x, regiment.y))
 
     def _slew_drawn_facing(self, regiment: Regiment, model: ModelState, wagon: bool = False) -> None:
-        if animation.family_table(regiment.model_family(model))[model.action].locks_facing:
-            return
+        if animation.family_table(regiment.model_family(model))[model.action].locks_facing or model.paused:
+            return  # a figure under the queuing lock keeps its drawn facing (notes/script_animation_sound.md 0.5)
         target = self._drawn_facing_target(regiment, model)
         model.drawn_facing = target if wagon else animation.slew_facing(model.drawn_facing, target)
 
