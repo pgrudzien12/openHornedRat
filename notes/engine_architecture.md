@@ -609,7 +609,7 @@ memory of what seemed to happen.
 **Format.** One JSON object per line, UTF-8, each carrying `type` and `tick` (the `header` is always
 line 1, `tick` 0). Record types:
 
-- `header`: `format_version`, `battle_asset` (`AssetId` string, e.g. `vanilla:battle/bf001`), `bts_path`
+- `header`: `format_version`, `engine_version` (the running engine's version, informational), `battle_asset` (`AssetId` string, e.g. `vanilla:battle/bf001`), `bts_path`
   (the script's own basename), `seed`, `width`/`height`, `started_at` (wall-clock UTC, the *only*
   wall-clock value in the log -- never read by the simulation, informational only), and `regiments`: one
   row per regiment with `id`, `name`, `side`, `sprite_resource`/`sprite_base` (the script's troop sprite
@@ -715,7 +715,7 @@ battle log it never raises: no directory / an unwritable one disables it silentl
 consecutive row is dropped. It only observes (scene machine transitions, scene asset access, `GlueScene`
 runtime calls), so behaviour is the same with it off. Row types:
 
-- `session_start` (options: no-battle mode, save dir, glue program, battle shortcut, seed, battle log dir),
+- `session_start` (`engine_version`, the running engine's version, informational; options: no-battle mode, save dir, glue program, battle shortcut, seed, battle log dir),
   `session_end` (`reason`, frames, final scene), `quit`.
 - `scene_change` (`from`, `to`, `reason`, written before the switch), `battle_start` (`battle`, `battle_log`:
   path of that battle's own log), `battle_result` (same fields plus `result`).

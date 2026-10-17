@@ -25,8 +25,13 @@ case "$arch" in
 esac
 
 # Apple package receipts require a numeric version. Keep the full source version
-# in the release asset name, including the commit suffix for weekly builds.
-receipt_version=$(printf '%s\n' "$version" | sed -E 's/^([0-9]+(\.[0-9]+)*).*/\1/')
+# in the release asset name. A build between releases (X.Y.Z+gitN.SHA) gets the
+# commit count as a fourth component (X.Y.Z.N) so it upgrades the release and the
+# builds before it; a release (X.Y.Z, or X.Y.Z-rc1) keeps just X.Y.Z.
+# Two plain sed calls: BSD sed on macOS reads a label after "t" to the end of the line.
+receipt_base=$(printf '%s\n' "$version" | sed -E 's/^([0-9]+(\.[0-9]+)*).*/\1/')
+receipt_commits=$(printf '%s\n' "$version" | sed -nE 's/^[0-9]+(\.[0-9]+)*\+git([0-9]+)\..*/\2/p')
+receipt_version="$receipt_base${receipt_commits:+.$receipt_commits}"
 case "$receipt_version" in
     *[!0-9.]*|"") echo "invalid receipt version: $version" >&2; exit 2 ;;
 esac

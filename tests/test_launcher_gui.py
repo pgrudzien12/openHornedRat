@@ -30,6 +30,13 @@ def widgets(parent: tk.Misc):
         yield from widgets(child)
 
 
+def destroy(root: tk.Tk) -> None:
+    """Closes a test window after cancelling its timers, so none fires into the destroyed window."""
+    for job in root.tk.splitlist(root.tk.call("after", "info")):
+        root.tk.call("after", "cancel", job)  # Tcl-level: the widget still owns and deletes its callback
+    root.destroy()
+
+
 def press(root: tk.Misc, label: str) -> None:
     """Clicks the launcher button showing ``label``."""
     button = next(widget for widget in widgets(root) if isinstance(widget, ImageButton)
@@ -53,7 +60,7 @@ class ChangeInstallationTests(unittest.TestCase):
         self.root.update()
 
     def tearDown(self):
-        self.root.destroy()
+        destroy(self.root)
         self.temp.cleanup()
 
     def test_given_a_recognized_installation_when_change_is_pressed_then_its_path_is_already_filled_in(self):
@@ -102,7 +109,7 @@ class UnpackInstallerTests(unittest.TestCase):
         self.root.update()
 
     def tearDown(self):
-        self.root.destroy()
+        destroy(self.root)
         self.environ.stop()
         self.temp.cleanup()
 

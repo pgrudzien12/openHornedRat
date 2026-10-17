@@ -28,15 +28,20 @@ def load_reaction_text(installation: str | PathLike[str]) -> str | None:
 
 
 class ReactionLine:
-    """One reaction being typed: :meth:`advance` returns the visible text, then None once it has cleared."""
+    """One line being typed: :meth:`advance` returns the visible text, then None once it has cleared.
 
-    def __init__(self, text: str) -> None:
+    ``hold_ms`` is how long the finished line stays; None keeps it until it is replaced (the launcher's update
+    notice uses the same typing for its own line).
+    """
+
+    def __init__(self, text: str, hold_ms: float | None = HOLD_MILLISECONDS) -> None:
         self.text = text
+        self.hold_ms = hold_ms
         self.elapsed_ms = 0.0
 
     def advance(self, milliseconds: float) -> str | None:
         self.elapsed_ms += milliseconds
         typing_ms = len(self.text) * CHAR_MILLISECONDS
-        if self.elapsed_ms >= typing_ms + HOLD_MILLISECONDS:
+        if self.hold_ms is not None and self.elapsed_ms >= typing_ms + self.hold_ms:
             return None
         return self.text[:min(len(self.text), int(self.elapsed_ms // CHAR_MILLISECONDS))]

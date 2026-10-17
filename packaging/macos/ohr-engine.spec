@@ -3,6 +3,17 @@
 from pathlib import Path
 
 REPO_ROOT = Path(SPECPATH).resolve().parents[1]
+
+# The engine reports this version (whshr/_build_version.py is generated, untracked). Package workflows pass
+# OHR_VERSION; a local build asks git. whshr/version.py is loaded by path so the whshr package is not imported.
+import importlib.util
+import os
+
+_spec = importlib.util.spec_from_file_location("_ohr_version", REPO_ROOT / "whshr" / "version.py")
+_version_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_version_module)
+BUILD_VERSION = os.environ.get("OHR_VERSION") or _version_module.from_git(REPO_ROOT) or _version_module.UNKNOWN
+(REPO_ROOT / "whshr" / "_build_version.py").write_text("VERSION = %r\n" % BUILD_VERSION, encoding="utf-8")
 datas = [
     (str(path), str(Path("scripts") / path.relative_to(REPO_ROOT / "scripts").parent))
     for path in (REPO_ROOT / "scripts").rglob("*.py")
@@ -16,7 +27,7 @@ a = Analysis(
     pathex=[str(REPO_ROOT)],
     binaries=[],
     datas=datas,
-    hiddenimports=["_zengl"],
+    hiddenimports=["_zengl", "whshr._build_version"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

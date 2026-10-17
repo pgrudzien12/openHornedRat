@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
 from .battle_events import BattleEvent
+from .version import version
 
 if TYPE_CHECKING:
     from .engine import Battle
@@ -100,6 +101,7 @@ class BattleLogger:
                      npc_company: Mapping[Any, Any] | None = None, difficulty: str = "commander") -> None:
         self._write({
             "type": "header", "tick": 0, "format_version": FORMAT_VERSION,
+            "engine_version": version(),  # informational (bug reports); never read by the simulation or replay
             "battle_asset": battle_asset, "bts_path": bts_path, "seed": seed,
             "width": width, "height": height,
             "started_at": datetime.now(timezone.utc).isoformat(),  # wall clock: never read by the simulation

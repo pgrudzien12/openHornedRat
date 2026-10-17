@@ -64,7 +64,8 @@ jobs:
             echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
           else
             checkout_ref="$(git rev-parse HEAD)"
-            echo "version=0.0.0~dev+${GITHUB_SHA:0:8}" >> "$GITHUB_OUTPUT"
+            version=$(python3 whshr/version.py)
+            echo "version=$version" >> "$GITHUB_OUTPUT"
             echo "release_tag=" >> "$GITHUB_OUTPUT"
           fi
           source_hash=$(git ls-tree -r "$checkout_ref" -- packaging/linux/ohr-engine.spec packaging/linux/build-rpm.sh packaging/linux/ohr-engine.rpm.spec packaging/linux/ohr-engine-launch packaging/linux/ohr-engine.desktop packaging/entrypoint.py packaging/THIRD_PARTY_NOTICES.md packaging/licenses requirements-engine.txt whshr scripts LICENSE LEGAL.md .github/workflows/rpm-package.yml | sha256sum | cut -d' ' -f1)
@@ -107,6 +108,8 @@ jobs:
 
       - name: Freeze engine
         run: /tmp/ohr-build-venv/bin/pyinstaller packaging/linux/ohr-engine.spec --distpath dist --workpath build/pyinstaller --noconfirm
+        env:
+          OHR_VERSION: ${{ needs.plan.outputs.version }}
 
       - name: Smoke-test frozen engine
         shell: bash

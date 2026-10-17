@@ -18,6 +18,8 @@ from os import PathLike
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
+from .version import version
+
 if TYPE_CHECKING:
     from .campaign_state import CampaignState
     from .glue_runtime import GlueRuntime
@@ -91,7 +93,7 @@ class CampaignLogger:
 
     # -- session -----------------------------------------------------------------------------
     def session_start(self, **options: Any) -> None:
-        self.write("session_start", format_version=FORMAT_VERSION, options=options)
+        self.write("session_start", format_version=FORMAT_VERSION, engine_version=version(), options=options)
 
     def session_end(self, reason: str, **fields: Any) -> None:
         self.write("session_end", reason=reason, **fields)

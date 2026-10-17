@@ -13,6 +13,7 @@ from . import legacy
 from . import audio, battle2d, battle3d, battle_replay, behaviour, campaign, catalog, engine, glue_spec, pbx, rules, si, viewer_web
 from .paths import Installation
 from .user_dirs import data_dir, resolve_save_dir
+from .version import version
 
 CHECKOUT_LOGS = Path(__file__).resolve().parents[1] / "logs"
 
@@ -102,6 +103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         prog="whshr",
         description="Tools for a locally installed copy of Warhammer: Shadow of the Horned Rat.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {version()}")
     commands = parser.add_subparsers(dest="command", required=True)
     check_parser = commands.add_parser("check", help="run all structural regression checks")
     check_parser.add_argument("installation", type=Path, help="WARFB installation directory")
