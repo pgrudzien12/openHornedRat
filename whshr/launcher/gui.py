@@ -35,7 +35,7 @@ COLUMN_WIDTH = 480  # the right-hand column: screens plus padding
 VALIDATING_INTERVAL_MS = 400  # how often the "Validating..." dots advance
 # The rat's face on the launcher's own portrait art (art/portrait.png pixels): poking it shows the reaction line.
 FACE_BOX = (100, 65, 345, 255)
-REACTION_MARGIN = 24  # the reaction line sits this far from the portrait's left and bottom edges
+REACTION_MARGIN = 24  # the reaction line is centred, this far above the portrait's bottom edge and clear of its sides
 REACTION_TICK_MS = 25
 PATH_CHARS = 54  # the launch screen shows only the tail of the installation path
 
@@ -376,7 +376,7 @@ class LauncherApp:
         width, height = image.width(), image.height()
         canvas = tk.Canvas(self.root, width=width, height=height, bg=BACKGROUND, highlightthickness=0, bd=0)
         canvas.create_image(0, 0, image=image, anchor="nw")
-        x, y, wrap = REACTION_MARGIN, height - REACTION_MARGIN, width - 2 * REACTION_MARGIN
+        x, y, wrap = width // 2, height - REACTION_MARGIN, width - 2 * REACTION_MARGIN
         self._reaction_items = (
             canvas.create_text(x + 2, y + 2, anchor="sw", text="", fill="#000000", width=wrap,
                                font=self.theme.speech_font),
@@ -415,6 +415,15 @@ class LauncherApp:
             return
         self._reaction = reaction.ReactionLine(text)
         self._reaction_clock = time.monotonic()
+        # Centre the finished line, then type it from its left end, so the text does not drift while it grows.
+        width = int(self.portrait["width"]) if self.portrait is not None else 0
+        line = min(self.theme.speech_font.measure(text), width - 2 * REACTION_MARGIN)
+        left = (width - line) // 2
+        if self.portrait is not None:
+            shadow, front = self._reaction_items
+            bottom = int(self.portrait["height"]) - REACTION_MARGIN
+            self.portrait.coords(shadow, left + 2, bottom + 2)
+            self.portrait.coords(front, left, bottom)
         self._tick_reaction()
 
     def _tick_reaction(self) -> None:
