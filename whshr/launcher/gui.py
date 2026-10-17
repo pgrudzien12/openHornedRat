@@ -28,6 +28,7 @@ CheckResult = tuple[bool, list[str], str]  # (passed, report lines, checked path
 
 COLUMN_WIDTH = 480  # the right-hand column: screens plus padding
 WRAP_WIDTH = 420  # long discovered paths wrap inside the column instead of widening the window
+VALIDATING_INTERVAL_MS = 400  # how often the "Validating..." dots advance
 PATH_CHARS = 54  # the launch screen shows only the tail of the installation path
 
 
@@ -66,6 +67,11 @@ class InstallScreen(tk.Frame):
 
         self._continue_button = ImageButton(self, theme, "Validate & continue", self._validate)
         self._continue_button.pack(pady=(10, 0))
+        # Fixed width with the text pinned left, so the growing dots do not shift "Validating".
+        self._status = tk.Label(self, text="", bg=BACKGROUND, fg=ACCENT, font=theme.heading_font, anchor="w",
+                                width=len(validating_text(2)) + 1)
+        self._status.pack()
+        self._validating_step: int | None = None
 
         log_frame, self._log = scrolled(self, theme, lambda holder: tk.Text(
             holder, height=8, state="disabled", wrap="word", font=theme.mono_font, **theme.panel_options()))
@@ -99,8 +105,18 @@ class InstallScreen(tk.Frame):
         self._log.delete("1.0", "end")
         self._log.configure(state="disabled")
         self._log_line(f"Checking {path} ...")
+        self._validating_step = 0
+        self._animate_validating()
         threading.Thread(target=self._run_full_check, args=(path,), daemon=True).start()
         self.after(100, self._poll_check_result)
+
+    def _animate_validating(self) -> None:
+        if self._validating_step is None:
+            self._status.configure(text="")
+            return
+        self._status.configure(text=validating_text(self._validating_step))
+        self._validating_step += 1
+        self.after(VALIDATING_INTERVAL_MS, self._animate_validating)
 
     def _run_full_check(self, path: str) -> None:
         try:
@@ -116,6 +132,8 @@ class InstallScreen(tk.Frame):
         except queue.Empty:
             self.after(100, self._poll_check_result)
             return
+        self._validating_step = None
+        self._status.configure(text="")
         for line in lines:
             self._log_line(line)
         self._continue_button.set_enabled(True)
@@ -124,6 +142,11 @@ class InstallScreen(tk.Frame):
             self._on_validated(path)
         else:
             self._log_line("Some checks failed; see above.")
+
+
+def validating_text(step: int) -> str:
+    """The busy message at animation ``step``: "Validating" with one, two, then three dots, repeating."""
+    return "Validating" + "." * (step % 3 + 1)
 
 
 def shorten_path(path: PathArg, limit: int = PATH_CHARS) -> str:
