@@ -2,7 +2,9 @@
 """Tkinter launcher UI: recognize an installation, then start the game or a battle.
 
 Two screens swapped inside one window: :class:`InstallScreen` (auto-discovery, manual override,
-and validation) and :class:`LaunchScreen` (start buttons and an options tab; battles are chosen in a dialog). Validation and battle
+and validation) and :class:`LaunchScreen` (start buttons and options; battles are chosen in a dialog).
+The window shows the launcher portrait on the left and the screens in a decorated column on the right
+(look and widgets: :mod:`whshr.launcher.theme`). Validation and battle
 enumeration run on a background thread so the window stays responsive; results are marshalled
 back to the main thread through a queue polled with ``Tk.after``.
 """
@@ -13,49 +15,56 @@ import tkinter as tk
 from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
 
 from whshr.launcher import config as config_module
 from whshr.launcher import discovery, engine_launch, validate
+from whshr.launcher.theme import ACCENT, BACKGROUND, TEXT, ImageButton, Theme, scrolled
 from whshr.launcher.battles import list_battles
 from whshr.paths import Installation
 
 PathArg = str | PathLike[str]
 CheckResult = tuple[bool, list[str], str]  # (passed, report lines, checked path)
 
+COLUMN_WIDTH = 480  # the right-hand column: screens plus padding
+WRAP_WIDTH = 420  # long discovered paths wrap inside the column instead of widening the window
+PATH_CHARS = 54  # the launch screen shows only the tail of the installation path
 
-class InstallScreen(ttk.Frame):
+
+class InstallScreen(tk.Frame):
     """Lets the user pick an installation path (discovered or manual) and validates it."""
 
-    def __init__(self, parent: tk.Misc, on_validated: Callable[[str], None]) -> None:
-        super().__init__(parent)
+    def __init__(self, parent: tk.Misc, theme: Theme, on_validated: Callable[[str], None]) -> None:
+        super().__init__(parent, bg=BACKGROUND)
         self.pack(fill="both", expand=True)
         self._on_validated = on_validated
         self._queue: queue.Queue[CheckResult] = queue.Queue()
         self._candidates = discovery.discover_installations()
 
-        ttk.Label(self, text="Game installation", font=("", 12, "bold")).pack(anchor="w")
+        theme.label(self, "Game installation", heading=True).pack(anchor="w")
 
         self._selected = tk.StringVar(value=str(self._candidates[0]) if self._candidates else "")
         if self._candidates:
-            ttk.Label(self, text="Found automatically:").pack(anchor="w", pady=(8, 0))
+            theme.label(self, "Found automatically:", muted=True).pack(anchor="w", pady=(6, 0))
             for candidate in self._candidates:
-                ttk.Radiobutton(self, text=str(candidate), variable=self._selected,
-                                value=str(candidate)).pack(anchor="w")
+                radio = theme.radio(self, str(candidate), self._selected, str(candidate))
+                radio.configure(wraplength=WRAP_WIDTH, justify="left")
+                radio.pack(anchor="w", fill="x")
         else:
-            ttk.Label(self, text="No installation found automatically.").pack(anchor="w", pady=(8, 0))
+            theme.label(self, "No installation found automatically.", muted=True).pack(anchor="w", pady=(6, 0))
 
-        browse_row = ttk.Frame(self)
+        browse_row = theme.frame(self)
         browse_row.pack(fill="x", pady=(8, 0))
-        self._path_entry = ttk.Entry(browse_row, textvariable=self._selected)
-        self._path_entry.pack(side="left", fill="x", expand=True)
-        ttk.Button(browse_row, text="Browse...", command=self._browse).pack(side="left", padx=(6, 0))
+        self._path_entry = theme.entry(browse_row, self._selected)
+        self._path_entry.pack(side="left", fill="x", expand=True, ipady=4)
+        ImageButton(browse_row, theme, "Browse...", self._browse, size="small").pack(side="left", padx=(8, 0))
 
-        self._continue_button = ttk.Button(self, text="Validate & continue", command=self._validate)
-        self._continue_button.pack(anchor="w", pady=(10, 0))
+        self._continue_button = ImageButton(self, theme, "Validate & continue", self._validate)
+        self._continue_button.pack(pady=(10, 0))
 
-        self._log = tk.Text(self, height=12, state="disabled")
-        self._log.pack(fill="both", expand=True, pady=(10, 0))
+        log_frame, self._log = scrolled(self, theme, lambda holder: tk.Text(
+            holder, height=8, state="disabled", wrap="word", font=theme.mono_font, **theme.panel_options()))
+        log_frame.pack(fill="both", expand=True, pady=(10, 0))
 
     def _browse(self) -> None:
         chosen = filedialog.askdirectory(title="Select the WARFB installation directory")
@@ -80,7 +89,7 @@ class InstallScreen(ttk.Frame):
                 "(missing FILE/BINARY or REMOTE/BINARY).",
             )
             return
-        self._continue_button.configure(state="disabled")
+        self._continue_button.set_enabled(False)
         self._log.configure(state="normal")
         self._log.delete("1.0", "end")
         self._log.configure(state="disabled")
@@ -104,12 +113,18 @@ class InstallScreen(ttk.Frame):
             return
         for line in lines:
             self._log_line(line)
-        self._continue_button.configure(state="normal")
+        self._continue_button.set_enabled(True)
         if passed:
             self._log_line("Installation looks good.")
             self._on_validated(path)
         else:
             self._log_line("Some checks failed; see above.")
+
+
+def shorten_path(path: PathArg, limit: int = PATH_CHARS) -> str:
+    """The path as text, cut to its last ``limit`` characters behind an ellipsis when longer."""
+    text = str(path)
+    return text if len(text) <= limit else "\u2026" + text[-(limit - 1):]
 
 
 def launch_with_checks(installation_path: PathArg, battle_id: str | None,
@@ -129,24 +144,26 @@ def launch_with_checks(installation_path: PathArg, battle_id: str | None,
 class BattleDialog(tk.Toplevel):
     """Modal list of the installation's battles; launches the chosen one."""
 
-    def __init__(self, parent: tk.Misc, installation_path: PathArg,
+    def __init__(self, parent: tk.Misc, theme: Theme, installation_path: PathArg,
                  get_options: Callable[[], engine_launch.LaunchOptions]) -> None:
-        super().__init__(parent)
+        super().__init__(parent, bg=BACKGROUND, padx=16, pady=12)
         self.title("Start a battle")
         self.transient(parent.winfo_toplevel())
         self._installation_path = installation_path
         self._get_options = get_options
 
+        theme.label(self, "Choose a battle", heading=True).pack(anchor="w")
         self._battles = list_battles(Installation(installation_path))
-        self._list = tk.Listbox(self, height=15)
+        list_frame, self._list = scrolled(self, theme, lambda holder: tk.Listbox(
+            holder, height=15, width=32, activestyle="none", font=theme.body_font, **theme.panel_options()))
         for battle in self._battles:
             label = battle.id if not battle.map else f"{battle.id}  ({battle.map})"
             self._list.insert("end", label)
-        self._list.pack(fill="both", expand=True, padx=12, pady=(12, 0))
+        list_frame.pack(fill="both", expand=True, pady=(8, 0))
         if self._battles:
             self._list.selection_set(0)
         self._list.bind("<Double-Button-1>", lambda _event: self._launch())
-        ttk.Button(self, text="Launch battle", command=self._launch).pack(anchor="w", padx=12, pady=12)
+        ImageButton(self, theme, "Launch battle", self._launch).pack(pady=(12, 0))
 
     def _launch(self) -> None:
         selection = self._list.curselection()
@@ -156,40 +173,34 @@ class BattleDialog(tk.Toplevel):
         launch_with_checks(self._installation_path, self._battles[selection[0]].id, self._get_options())
 
 
-class LaunchScreen(ttk.Frame):
-    """Two tabs: start buttons (normal game / a chosen battle) and checkbox options for both."""
+class LaunchScreen(tk.Frame):
+    """Start buttons (normal game / a chosen battle) above checkbox options for both."""
 
-    def __init__(self, parent: tk.Misc, installation_path: PathArg,
+    def __init__(self, parent: tk.Misc, theme: Theme, installation_path: PathArg,
                  on_change_installation: Callable[[], None]) -> None:
-        super().__init__(parent)
+        super().__init__(parent, bg=BACKGROUND)
         self.pack(fill="both", expand=True)
+        self._theme = theme
         self._installation_path = installation_path
 
         self._no_battles = tk.BooleanVar(value=False)
         self._trace = tk.BooleanVar(value=True)
         self._skip_intro = tk.BooleanVar(value=False)
 
-        header = ttk.Frame(self)
+        header = theme.frame(self)
         header.pack(fill="x")
-        ttk.Label(header, text=f"Installation: {installation_path}").pack(side="left")
-        ttk.Button(header, text="Change...", command=on_change_installation).pack(side="right")
+        ImageButton(header, theme, "Change...", on_change_installation, size="small").pack(side="right")
+        theme.label(header, "Installation", heading=True).pack(side="left", anchor="s")
+        theme.label(self, shorten_path(installation_path), muted=True).pack(anchor="w")
 
-        notebook = ttk.Notebook(self)
-        notebook.pack(fill="both", expand=True, pady=(10, 0))
-        start_tab = ttk.Frame(notebook, padding=12)
-        options_tab = ttk.Frame(notebook, padding=12)
-        notebook.add(start_tab, text="Start")
-        notebook.add(options_tab, text="Options")
+        ImageButton(self, theme, "Start game", self._start_game).pack(pady=(12, 0))
+        ImageButton(self, theme, "Start a battle...", self._choose_battle).pack(pady=(6, 0))
 
-        ttk.Button(start_tab, text="Start game", command=self._start_game).pack(fill="x")
-        ttk.Button(start_tab, text="Start a battle...", command=self._choose_battle).pack(fill="x", pady=(8, 0))
-
-        ttk.Checkbutton(options_tab, text="No battles (every battle settles as an instant win)",
-                        variable=self._no_battles).pack(anchor="w")
-        ttk.Checkbutton(options_tab, text="Trace mission scripts (WHSHR_TRACE_SCRIPTS=1)",
-                        variable=self._trace).pack(anchor="w", pady=(6, 0))
-        ttk.Checkbutton(options_tab, text="Skip intro (start in the main menu)",
-                        variable=self._skip_intro).pack(anchor="w", pady=(6, 0))
+        theme.label(self, "Options", heading=True).pack(anchor="w", pady=(16, 4))
+        for text, variable in (("No battles (every battle settles as an instant win)", self._no_battles),
+                               ("Trace mission scripts (WHSHR_TRACE_SCRIPTS=1)", self._trace),
+                               ("Skip intro (start in the main menu)", self._skip_intro)):
+            theme.check(self, text, variable).pack(anchor="w", pady=(2, 0))
 
     def options(self) -> engine_launch.LaunchOptions:
         return engine_launch.LaunchOptions(
@@ -200,7 +211,7 @@ class LaunchScreen(ttk.Frame):
         launch_with_checks(self._installation_path, None, self.options())
 
     def _choose_battle(self) -> None:
-        BattleDialog(self, self._installation_path, self.options)
+        BattleDialog(self, self._theme, self._installation_path, self.options)
 
 
 class LauncherApp:
@@ -211,9 +222,33 @@ class LauncherApp:
         self._config_path = config_path
         self.config = config_module.load_config(config_path)
         root.title("Open Horned Rat Launcher")
-        self._container = ttk.Frame(root, padding=12)
-        self._container.pack(fill="both", expand=True)
+        root.configure(bg=BACKGROUND)
+        self.theme = Theme(root)
+        self._build_frame()
         self._show_initial_screen()
+
+    def _build_frame(self) -> None:
+        """Portrait on the left; header, title, the current screen and footer in a column on the right."""
+        theme = self.theme
+        portrait = theme.image("portrait")
+        if portrait is not None:
+            tk.Label(self.root, image=portrait, bg=BACKGROUND, bd=0).pack(side="left", anchor="n")
+            # A fixed size keeps the portrait filling the window height on every screen.
+            self.root.geometry(f"{portrait.width() + COLUMN_WIDTH}x{portrait.height()}")
+            self.root.minsize(portrait.width() + COLUMN_WIDTH, portrait.height())
+        column = theme.frame(self.root, padx=20, pady=10)
+        column.pack(side="left", fill="both", expand=True)
+        header = theme.image("header")
+        if header is not None:
+            tk.Label(column, image=header, bg=BACKGROUND, bd=0).pack()
+        tk.Label(column, text="Open Horned Rat", bg=BACKGROUND, fg=TEXT,
+                 font=theme.title_font).pack(pady=(4, 0))
+        tk.Label(column, text="Launcher", bg=BACKGROUND, fg=ACCENT, font=theme.body_font).pack()
+        footer = theme.image("footer")
+        if footer is not None:
+            tk.Label(column, image=footer, bg=BACKGROUND, bd=0).pack(side="bottom", pady=(4, 0))
+        self._container = theme.frame(column, pady=8)
+        self._container.pack(fill="both", expand=True)
 
     def _clear(self) -> None:
         for child in self._container.winfo_children():
@@ -228,7 +263,7 @@ class LauncherApp:
 
     def _show_install_screen(self) -> None:
         self._clear()
-        InstallScreen(self._container, on_validated=self._on_installation_chosen)
+        InstallScreen(self._container, self.theme, on_validated=self._on_installation_chosen)
 
     def _on_installation_chosen(self, path: PathArg) -> None:
         self.config.installation_path = str(path)
@@ -237,7 +272,7 @@ class LauncherApp:
 
     def _show_launch_screen(self, path: PathArg) -> None:
         self._clear()
-        LaunchScreen(self._container, Path(path), on_change_installation=self._show_install_screen)
+        LaunchScreen(self._container, self.theme, Path(path), on_change_installation=self._show_install_screen)
 
 
 def main() -> None:
