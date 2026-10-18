@@ -372,10 +372,22 @@ class Battlefield:
         vertices: array[float] = array("f")
         for piece in self.building_pieces:
             mesh = piece.ruin if piece.identifier in gone and piece.ruin is not None else piece.intact
-            vertex, normal = scenery_transform(piece.item, piece.ground)
-            bake_mesh(mesh, self.ground_texture_count, self.scenery_texture_count, vertex, normal, self.ambient,
-                      self.light, vertices)
+            _bake_piece(self, piece, mesh, vertices)
         return vertices
+
+    def building_capacity(self) -> int:
+        """Floats enough for every mix of intact and ruined pieces: each piece at its larger mesh. All-intact or
+        all-ruined is not enough when one piece's ruin is the larger mesh and another's intact one is."""
+        total = 0
+        for piece in self.building_pieces:
+            sizes = []
+            for mesh in (piece.intact, piece.ruin):
+                if mesh is not None:
+                    baked: array[float] = array("f")
+                    _bake_piece(self, piece, mesh, baked)
+                    sizes.append(len(baked))
+            total += max(sizes)
+        return total
 
     @property
     def width(self) -> int:
@@ -391,6 +403,12 @@ class Battlefield:
 
     def sprite_sheet(self, resource: str | None) -> SpriteSheet | None:
         return self.sheets.get((resource or "").casefold())
+
+
+def _bake_piece(field: Battlefield, piece: BuildingPiece, mesh: Mesh, vertices: array[float]) -> None:
+    vertex, normal = scenery_transform(piece.item, piece.ground)
+    bake_mesh(mesh, field.ground_texture_count, field.scenery_texture_count, vertex, normal, field.ambient,
+              field.light, vertices)
 
 
 def script_units(script: Mapping[str, Any]) -> list[dict[str, Any]]:
