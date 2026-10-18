@@ -2401,9 +2401,12 @@ against buildings, saves, magical, flags, messages. For every map object at dist
 ### Artillery misfire ✅
 
 Before every artillery shot: D6; on 1–5 nothing happens and the result becomes the die *d* used for the
-scatter. On a **6** a second D6 is rolled: on **1** the machine explodes: every crewman takes a wound on an
-even `rand`, and if any crew survive they take a Leadership test or rout (`GMTXT 2018` "The %s has misfired
-and been destroyed."). On 2–6 the shot is lost (`GMTXT 2019` "The %s has misfired."). The warpfire thrower
+scatter. On a **6** a second D6 is rolled: on **1** the machine explodes: the machine figure is killed (no kill
+credit), then every roster model, the machine first, takes a wound on an **odd** `rand` (corrected: earlier text said
+even), and if any model survives the unit takes one Leadership test; a failure only queues event 0x0C, which the
+artillery handlers ignore while the crew is still Artillery, so the explosion itself never routs the crew
+(`GMTXT 2018` "The %s has misfired and been destroyed."; full sequence and the later conversion to Infantry:
+`artillery_machine_loss.md`). On 2–6 the shot is lost (`GMTXT 2019` "The %s has misfired."). The warpfire thrower
 never misfires.
 
 ### Special weapons ✅
