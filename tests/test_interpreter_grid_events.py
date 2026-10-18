@@ -146,6 +146,38 @@ class ChargeForwardTests(GridTestCase):
         self.charge_forward([self.square("bnd_SIGHTEDGE", 500, 500, 600, 600)])
         self.assertTrue(self.state.cond_flags)
 
+    def test_halt_and_reform_ends_a_straight_ahead_charge(self):
+        self.charge_forward([])
+        self.assertTrue(self.a.free_charging)
+        self.interp.op_HaltAndReform(self.state, None, [], "A", 0, None)
+        self.assertEqual((self.a.target_x, self.a.free_charging, self.a.charging), (None, False, False))
+
+
+class StraightAheadChargeRunTests(unittest.TestCase):
+    """notes/movement_formation.md 3.6: the straight-ahead charge ends at its one waypoint."""
+
+    def run_charge(self, point):
+        unit = Regiment("A", "A", 0, 0, 384, Side.PLAYER, models=10, ranks=2)  # facing -X
+        battle = Battle(2000, 2000, [unit], seed=1995)
+        unit.x, unit.y = 1000, 1000
+        unit.target_x, unit.target_y = 1000 + point[0], 1000 + point[1]
+        unit.free_charging = True
+        for ticks in range(1, 400):
+            battle.tick()
+            if not unit.free_charging:
+                return unit, ticks
+        self.fail(f"the charge never ended; the unit is at ({unit.x:.0f}, {unit.y:.0f})")
+
+    def test_given_the_point_straight_ahead_then_the_run_stops_on_it(self):
+        unit, _ = self.run_charge((-132, 0))
+        self.assertEqual((round(unit.x), round(unit.y)), (868, 1000))
+
+    def test_given_the_point_just_beside_the_rounded_heading_then_the_run_still_stops_there(self):
+        unit, ticks = self.run_charge((-211, 0.6))  # the rounded heading passes just beside the point
+        self.assertAlmostEqual(unit.x, 789, delta=3)
+        self.assertIsNone(unit.target_x)
+        self.assertLess(ticks, 200)  # 123 for this infantry block; a runaway never ends
+
 
 class CheckCollisionsTests(GridTestCase):
     def test_nothing_touching_is_false(self):

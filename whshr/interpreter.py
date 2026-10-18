@@ -3077,12 +3077,15 @@ class ScriptInterpreter:
 
     def op_HaltAndReform(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str, tick_count: int,
             rng: random.Random) -> int | None:
-        """HaltAndReform: stop movement and reform in place."""
+        """HaltAndReform: stop movement and reform in place. A halted unit is no longer on a straight-ahead charge run
+        either (notes/movement_formation.md 1.3: the halt ends the movement), so that ends too; a stale run would keep
+        the unit "charging" and make it drop Attack orders."""
         regiment = self.battle.regiments.get(unit_id)
         if regiment:
             regiment.target_x = None
             regiment.target_y = None
             regiment.attack_target = None
+            regiment.free_charging = False
         return state.pc + 1
 
     def op_ReformBlock(self, state: UnitScriptState, operand: int | None, script_words: Words, unit_id: str,
