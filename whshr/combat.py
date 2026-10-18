@@ -187,13 +187,7 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
     victims = sorted({index for index in indices if 0 <= index < len(positions)}, reverse=True)
     if not victims:
         return 0
-    leader_killed = regiment.leader_uid is not None and any(
-        regiment.melee_models[index].uid == regiment.leader_uid for index in victims)
-    if regiment.hud_class == "art" and leader_killed:
-        regiment.machine_alive = False
-        regiment.clear_anchor()
-        regiment.shooting_mode = regiment.shooting_target = None
-        regiment.volley_countdown = None
+    leader_removed_now = False  # the leader's death sequence starts in this call (no collapse delay)
     grid = _grid_of(battle, regiment)
     # notes/airborne_units.md A5: tested once, at the first death tick; a flier killed in the air falls instead.
     in_the_air = regiment.flight if regiment.flight is not None and regiment.flight.airborne else None
@@ -207,7 +201,9 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
             model.credit = killer
         pay_credit(battle, regiment, model)
         delay = animation.collapse_delay_ticks(model.stagger, regiment.in_melee, death_kind)
+        is_leader = regiment.leader_uid is not None and model.uid == regiment.leader_uid
         if in_the_air is not None:
+            leader_removed_now = leader_removed_now or is_leader
             immediate_checks.append(len(regiment.positions) + len(regiment.dying))
             regiment.falling.append(flight.FallingFlier(
                 *positions[index], battle.rng.randrange(animation.FULL_TURN), in_the_air.elevation,
@@ -218,6 +214,7 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
                 body=regiment.model_body_class(model), burns=regiment.model_burns_on(model, death_kind)))
         else:
             # Its death sequence starts now: the casualty check counts it and the models still collapsing.
+            leader_removed_now = leader_removed_now or is_leader
             immediate_checks.append(len(regiment.positions) + len(regiment.dying))
             animation.step(model, animation.DEAD, battle.rng, regiment.model_family(model))
             regiment.corpses.append(animation.corpse_of(regiment, model, *positions[index], battle.rng))
@@ -234,8 +231,8 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
     regiment.models -= len(victims)
     for before in immediate_checks:
         casualty_panic(battle, regiment, before)
-    if leader_killed:
-        battle.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x17), route="self")
+    if leader_removed_now:
+        leader_left_roster(battle, regiment)
     _unpair_dead(battle, regiment, dead_opponents)
     sprite = (regiment.sprite or "").casefold()
     if death_kind not in (animation.DEATH_FIRE, animation.DEATH_WARPFIRE):
@@ -247,6 +244,21 @@ def kill_models(regiment: "Regiment", indices: Iterable[int], battle: "Battle",
         elif "giant" in sprite:
             battle.death_blasts.append((battle.tick_count, "giant", *positions[victims[-1]]))
     return len(victims)
+
+
+def leader_left_roster(battle: "Battle", regiment: "Regiment") -> None:
+    """The leader model's death sequence has started (a dying leader leaves when its collapse delay ends): event 0x17
+    "leader killed" to the unit, after that removal's own casualty test, so it lies above that test's 0x0C
+    (notes/artillery_machine_loss.md 0, 1; game_rules.md events). For a war machine the machine is now gone: it
+    cannot shoot, and its anchor clears. With scripts the 0x17 handler also clears the anchor and turns the crew into
+    Infantry; the anchor is cleared here as well so that a battle without scripts frees the crew too (a tick early).
+    """
+    if regiment.is_artillery:
+        regiment.machine_alive = False
+        regiment.clear_anchor()
+        regiment.shooting_mode = regiment.shooting_target = None
+        regiment.volley_countdown = None
+    battle.event_bus.queue_event(regiment.identifier, interpreter.Event(code=0x17), route="self")
 
 
 def _grid_of(battle: "Battle", regiment: "Regiment") -> battle_grid.BattleGrid | None:

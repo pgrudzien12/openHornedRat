@@ -440,21 +440,39 @@ def launch_shot(battle: Battle, unit: Regiment, origin: tuple[float, float], aim
 
 
 def _destroy_machine(battle: Battle, unit: Regiment) -> None:
+    """The misfire's "destroyed" result, after its two dice (notes/artillery_machine_loss.md 1): the machine figure is
+    killed first (slain outright, nobody credited) and stays in the unit until its 1-tick collapse ends; the anchor
+    clears; one draw per model in roster order, the machine first, wounds a model on an odd draw (the machine's
+    draw changes nothing); then, if a crew model survives, one Leadership test, which fails while the Ld-0 machine is
+    still in the roster and so asks for a rout (event 0x0C, the unit's handler decides). The flight never starts
+    here. The machine leaving the unit, "leader killed" and the crew's conversion follow at the end of the collapse
+    (`combat.leader_left_roster`).
+
+    PROVISIONAL: a war machine loaded without a leader block (its machine is just the first slot) loses the machine
+    at once, as no figure is marked as the machine."""
     from . import combat
-    unit.machine_alive = False
-    unit.clear_anchor()
-    unit.shooting_mode = unit.shooting_target = None
-    unit.volley_countdown = None
     unit.model_positions()
+    machine = unit.living_leader_index if unit.leader_uid is not None else None
+    if machine is not None:
+        model = unit.melee_models[machine]
+        model.wounds_taken = unit.model_wounds(model)
+        combat.kill_models(unit, [machine], battle, animation.DEATH_MISSILE, clear_credit=True)
+    else:
+        unit.machine_alive = False
+        unit.shooting_mode = unit.shooting_target = None
+        unit.volley_countdown = None
+    unit.clear_anchor()
+    if machine is not None:
+        battle.rng.randrange(2)  # the machine's own draw
     victims = []
     for index, model in enumerate(unit.melee_models):
-        if battle.rng.randrange(2) == 0:
+        if battle.rng.randrange(2) == 1:
             model.wounds_taken += 1
-            if model.wounds_taken >= unit.wounds:
+            if model.wounds_taken >= unit.model_wounds(model):
                 victims.append(index)
     combat.kill_models(unit, victims, battle, animation.DEATH_MISSILE, clear_credit=True)  # misfire: nobody
-    if unit.active and not combat.leadership_test(unit.effective_leadership, battle.rng):
-        combat.start_rout(unit, battle)
+    if unit.active and unit.models > 0 and not combat.leadership_test(unit.effective_leadership, battle.rng):
+        combat.request_rout(battle, unit)
 
 
 def _visual(code: int) -> str:
@@ -563,8 +581,8 @@ def _damage_unit(battle: Battle, unit: Regiment, projectile: Projectile,
                  direct: bool, margin_picks: int = 0, death_kind: int = animation.DEATH_MISSILE,
                  quiet: bool = False) -> None:
     from . import combat
-    if not unit.active:
-        return
+    if not unit.active or unit.models <= 0:
+        return  # a wiped-out unit whose last models are still collapsing has nobody left to hit
     unit.model_positions()
     size_before = unit.models + len(unit.dying)  # models still collapsing are still in the unit (panic_tests.md 0)
     building = unit.unit_class in {8, 9}

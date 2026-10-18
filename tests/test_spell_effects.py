@@ -212,7 +212,11 @@ class ActivatedItemTests(unittest.TestCase):
         combat.kill_models(bearer, [bearer.living_leader_index], battle)
         self.assertIsNone(bearer.living_leader_index)
         self.assertEqual(bearer.leader_uid, old_uid)
-        self.assertTrue(any(event.code == 0x17 for event in battle.event_bus.unit_states["G"].event_queue))
+        queue = battle.event_bus.unit_states["G"].event_queue
+        self.assertFalse(any(event.code == 0x17 for event in queue))  # still collapsing: not yet out of the unit
+        for _ in range(80):
+            battle._step_dying(bearer)
+        self.assertTrue(any(event.code == 0x17 for event in queue))  # notes/artillery_machine_loss.md 0
         battle._begin_reform(bearer, 2)
         self.assertIsNone(bearer.living_leader_index)
         with self.assertRaises(ValueError):

@@ -2636,7 +2636,7 @@ class ScriptInterpreter:
 
     def _manned(self, unit: "Regiment") -> bool:
         """Artillery class with its machine and at least 2 models (notes/script_shooting.md 0)."""
-        return (unit.unit_class == 4 or unit.hud_class == "art") and unit.machine_alive and unit.models >= 2
+        return unit.is_artillery and unit.machine_alive and unit.models >= 2
 
     def op_IfArtilleryManned(self, state: UnitScriptState, operand: int | None, script_words: Words,
             unit_id: str, tick_count: int, rng: random.Random) -> int | None:
@@ -4496,7 +4496,7 @@ class ScriptInterpreter:
             if operand:
                 self._battle_message(unit_id, 2003)
             return state.pc + 2
-        if unit.unit_class == 4 or unit.hud_class == "art":
+        if unit.is_artillery:  # Infantry once the crew's "leader killed" handler has run (artillery_machine_loss.md 3)
             if not unit.machine_alive:
                 self._battle_message(unit_id, 2015)
                 return state.pc + 2
