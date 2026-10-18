@@ -502,10 +502,31 @@ class Regiment:
 
     @property
     def base_leadership(self) -> int:
-        """Use a living leader's nonzero Ld, else the regiment's Ld (game_rules.md 3)."""
+        """Use a living leader's nonzero Ld, else the regiment's Ld (game_rules.md 3). A war machine is its crew's
+        leader and first model, with Ld 0 in every shipped file, so while the machine is still in the roster (alive,
+        or dying until its death sequence starts) the crew's Ld is 0 and every test fails (notes/panic_tests.md 0,
+        notes/artillery_machine_loss.md 0). PROVISIONAL: other units with an Ld-0 leader keep the regiment's Ld, as
+        the leader's place in their roster is not established."""
         if self.leader_leadership and self.living_leader_index is not None:
             return self.leader_leadership
+        if self.is_artillery and self.leader_leadership == 0 and self.machine_in_roster:
+            return 0
         return self.leadership
+
+    @property
+    def is_artillery(self) -> bool:
+        """Class Artillery: the s_race class while the unit has one (a script's SetClass changes it), else the HUD
+        class (notes/artillery_machine_loss.md 0: a crew stays Artillery until its "leader killed" handler runs)."""
+        return self.unit_class == 4 if self.unit_class is not None else self.hud_class == "art"
+
+    @property
+    def machine_in_roster(self) -> bool:
+        """The war machine (the leader model) is still part of the unit: alive, or killed but still collapsing
+        (notes/artillery_machine_loss.md 0). It leaves when its death sequence starts."""
+        if self.leader_uid is None:
+            return self.machine_alive
+        return (self.living_leader_index is not None
+                or any(dying.model.uid == self.leader_uid for dying in self.dying))
 
     @property
     def living_leader_index(self) -> int | None:
@@ -3508,6 +3529,8 @@ class Battle:
             # and the models still collapsing.
             combat.casualty_panic(self, regiment, regiment.models + len(regiment.dying))
             regiment.dying.remove(dying)
+            if regiment.leader_uid is not None and dying.model.uid == regiment.leader_uid:
+                combat.leader_left_roster(self, regiment)
             self.birds.record_death(dying.x, dying.y)  # killed: its death sequence starts (notes/battle_birds.md 0)
             if dying.burns:
                 # Fire/warpfire kills leave the roster's animation and burn as a free figure first.
