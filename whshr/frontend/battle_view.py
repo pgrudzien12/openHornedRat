@@ -1098,9 +1098,8 @@ class BattleView(SceneView[BattleScene]):
 
     @staticmethod
     def _building_capacity(field: Battlefield) -> int:
-        """Bytes for every building piece at its larger mesh (intact or ruin)."""
-        everything = field.building_vertices(piece.identifier for piece in field.building_pieces)
-        return 4 * max(len(everything), len(field.building_vertices(())))
+        """Bytes for every building piece at its larger mesh (intact or ruin), whichever of them are ruined."""
+        return 4 * field.building_capacity()
 
     def _refresh_buildings(self) -> None:
         """Re-bake the building pieces when the set of ruined ones changes (notes/building_ruins.md 2, 3)."""

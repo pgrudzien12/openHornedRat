@@ -135,6 +135,21 @@ class DrawingTests(unittest.TestCase):
         self.assertNotEqual(intact, ruin)
         self.assertIsInstance(ruin, array)
 
+    def test_the_building_buffer_holds_any_mix_of_intact_and_ruined_pieces(self):
+        def mesh(triangles):
+            return {"verts": [0, 0, 0, 1, 0, 0, 0, 1, 0], "uv": [0, 0] * 3, "normals": [0, 1, 0],
+                    "faces": [((0, 1, 2), (0, 0, 0))] * triangles, "ftex": [0] * triangles}
+
+        grows = battlefield.BuildingPiece("building:0", {"x": 0, "y": 0, "dir": 0}, 0.0, mesh(1), mesh(3))
+        shrinks = battlefield.BuildingPiece("building:1", {"x": 0, "y": 0, "dir": 0}, 0.0, mesh(4), mesh(1))
+        field = SimpleNamespace(building_pieces=[grows, shrinks], ground_texture_count=0, scenery_texture_count=1,
+                                ambient=battlefield.DEFAULT_AMBIENT, light=battlefield.DEFAULT_LIGHT)
+        capacity = battlefield.Battlefield.building_capacity(field)
+        mixes = [(), {"building:0"}, {"building:1"}, {"building:0", "building:1"}]
+        sizes = [len(battlefield.Battlefield.building_vertices(field, ruined)) for ruined in mixes]
+        self.assertEqual(capacity, max(sizes))  # only building:0 ruined is the largest mix
+        self.assertGreater(capacity, max(sizes[0], sizes[3]))
+
     def test_the_ruin_is_record_plus_59_of_a_building_record_whatever_its_name(self):
         furniture = [{"name": f"F{i}", "file": f"M{i}", "flags": 5} for i in range(146)]
         furniture[57] = {"name": "BlackWoodShack", "file": "SHACK2", "flags": 24}
