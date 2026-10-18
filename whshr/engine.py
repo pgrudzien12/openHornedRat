@@ -2950,13 +2950,24 @@ class Battle:
         if step <= 0:
             regiment.route_speed = 0.0
             return mode is not None
-        if arrive and steering_target == target and distance <= step and abs(self._turn_delta(regiment.direction, goal)) <= 10:
-            regiment.route_speed = distance
-            regiment.x, regiment.y = target
+        angle = regiment.direction * math.tau / formation.FULL_TURN
+        # The run follows a rounded heading, so it can pass its point a unit or so to the side; up close the bearing
+        # to the point then swings far off the heading. Arrival is therefore also "no more than this step ahead along
+        # the heading" (reached or passed), else the run would never end (notes/movement_formation.md 3.6: the
+        # straight-ahead charge ends at its one waypoint).
+        ahead = dx * math.sin(angle) + dy * math.cos(angle)
+        if arrive and steering_target == target and (
+                distance <= step and abs(self._turn_delta(regiment.direction, goal)) <= 10 or ahead <= step):
+            if distance <= step:
+                regiment.route_speed = distance
+                regiment.x, regiment.y = target
+            else:  # pushed aside on the way: finish level with the point instead of jumping onto it
+                regiment.route_speed = max(0.0, ahead)
+                regiment.x += math.sin(angle) * regiment.route_speed
+                regiment.y += math.cos(angle) * regiment.route_speed
             regiment.target_x = regiment.target_y = None
             regiment.free_charging = False
             return False
-        angle = regiment.direction * math.tau / formation.FULL_TURN
         regiment.route_speed = min(step, distance)
         regiment.x += math.sin(angle) * min(step, distance)
         regiment.y += math.cos(angle) * min(step, distance)
